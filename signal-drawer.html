@@ -1370,7 +1370,7 @@
     }
 
     function renderDashboard() {
-      const articles = filteredArticles(state.articles).filter(article => !state.articleState.hidden[article.id]);
+      const articles = onlyRecentArticles(filteredArticles(state.articles)).filter(article => !state.articleState.hidden[article.id]);
       els.articles.innerHTML = articles.length ? articles.map(article => articleCard(article)).join("") : dashboardEmptyHtml();
       bindArticleButtons(els.articles);
       const showAllButton = els.articles.querySelector("[data-show-all]");
@@ -1384,14 +1384,19 @@
 
     function dashboardEmptyHtml() {
       const fetchedCount = state.articles.length;
+      const recentCount = onlyRecentArticles(state.articles).length;
       const hiddenCount = Object.keys(state.articleState.hidden).length;
-      const matchedCount = state.articles.filter(article => article.matchedTerms.length).length;
+      const matchedCount = onlyRecentArticles(state.articles).filter(article => article.matchedTerms.length).length;
       const filtersActive = Boolean(els.searchInput.value.trim() || els.sourceFilter.value || els.termFilter.value);
+
+      if (fetchedCount && !recentCount) {
+        return emptyHtml("No articles from the last 7 days.", `${fetchedCount} cached article(s) are older than the current display window.`);
+      }
 
       if (fetchedCount && !els.showAllToggle.checked && !matchedCount) {
         return `
           <div class="empty">
-            <strong>${fetchedCount} articles fetched, 0 matched your enabled terms.</strong>
+            <strong>${recentCount} recent articles fetched, 0 matched your enabled terms.</strong>
             <div>That is why the Dashboard is blank. Enable broader terms in Admin, or inspect the raw fetched feed items.</div>
             <div class="card-actions" style="justify-content:center">
               <button class="btn primary" data-show-all>Show all fetched articles</button>
@@ -1489,15 +1494,23 @@
       return list;
     }
 
+    function onlyRecentArticles(articles) {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      return articles.filter(article => {
+        const published = toTime(article.publishedAt);
+        return published && published >= cutoff;
+      });
+    }
+
     function renderSaved() {
-      const saved = Object.values(state.articleState.saved).sort((a, b) => toTime(b.savedAt || b.publishedAt) - toTime(a.savedAt || a.publishedAt));
-      els.savedList.innerHTML = saved.length ? saved.map(article => articleCard(article, "saved")).join("") : emptyHtml("No saved signals yet.", "Save useful articles from the Dashboard.");
+      const saved = onlyRecentArticles(Object.values(state.articleState.saved)).sort((a, b) => toTime(b.savedAt || b.publishedAt) - toTime(a.savedAt || a.publishedAt));
+      els.savedList.innerHTML = saved.length ? saved.map(article => articleCard(article, "saved")).join("") : emptyHtml("No saved signals from the last 7 days.", "Saved articles older than 7 days are kept locally but hidden from this list.");
       bindArticleButtons(els.savedList);
     }
 
     function renderHidden() {
-      const hidden = Object.values(state.articleState.hidden).sort((a, b) => toTime(b.hiddenAt || b.publishedAt) - toTime(a.hiddenAt || a.publishedAt));
-      els.hiddenList.innerHTML = hidden.length ? hidden.map(article => articleCard(article, "hidden")).join("") : emptyHtml("No hidden static.", "Hide low-value articles from the Dashboard.");
+      const hidden = onlyRecentArticles(Object.values(state.articleState.hidden)).sort((a, b) => toTime(b.hiddenAt || b.publishedAt) - toTime(a.hiddenAt || a.publishedAt));
+      els.hiddenList.innerHTML = hidden.length ? hidden.map(article => articleCard(article, "hidden")).join("") : emptyHtml("No hidden static from the last 7 days.", "Hidden articles older than 7 days are kept locally but hidden from this list.");
       bindArticleButtons(els.hiddenList);
     }
 
