@@ -690,7 +690,7 @@
                 <input id="cacheTtl" type="number" min="1" step="1" />
               </div>
               <div>
-                <label for="proxyTemplate">Proxy URL template</label>
+                <label for="proxyTemplate">Proxy URL templates, one per line</label>
                 <textarea id="proxyTemplate"></textarea>
               </div>
               <label class="checkline">
@@ -788,7 +788,7 @@
       ],
       settings: {
         cacheTtlMinutes: 30,
-        proxyTemplate: "https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}",
+        proxyTemplate: "https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}\nhttps://corsproxy.io/?${encodeURIComponent(feedUrl)}\nhttps://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(feedUrl)}",
         directFetch: false,
         maxArticlesPerSource: 25,
         fetchConcurrency: 3,
@@ -854,12 +854,23 @@
     init();
 
     function init() {
+      migrateSettings();
       applyTheme();
       bindEvents();
       hydrateAdmin();
       hydrateFilters();
       loadDashboard();
       renderAll();
+    }
+
+    function migrateSettings() {
+      const defaultProxy = DEFAULT_CONFIG.settings.proxyTemplate;
+      if (!state.settings.proxyTemplate || state.settings.proxyTemplate === "https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}") {
+        state.settings.proxyTemplate = defaultProxy;
+      }
+      state.settings.fetchConcurrency = state.settings.fetchConcurrency || DEFAULT_CONFIG.settings.fetchConcurrency;
+      state.settings.fetchTimeoutSeconds = state.settings.fetchTimeoutSeconds || DEFAULT_CONFIG.settings.fetchTimeoutSeconds;
+      writeJson(STORAGE_KEYS.settings, state.settings);
     }
 
     function bindEvents() {
@@ -998,6 +1009,7 @@
         contentType: "",
         responseLength: 0,
         responseSnippet: "",
+        attempts: [],
         rssItemCount: 0,
         atomEntryCount: 0,
         parsedCount: 0,
@@ -1010,6 +1022,8 @@
 
       try {
         const fetchResult = await fetchFeed(source.url);
+        diagnostic.attempts = fetchResult.attempts;
+        diagnostic.requestUrl = fetchResult.url;
         const xmlText = fetchResult.text;
         diagnostic.httpStatus = fetchResult.status;
         diagnostic.contentType = fetchResult.contentType;
@@ -1038,6 +1052,8 @@
           diagnostic.timedOut = true;
           diagnostic.error = `Timed out after ${Number(state.settings.fetchTimeoutSeconds || 25)}s`;
         }
+        if (error.attempts) diagnostic.attempts = error.attempts;
+        if (error.requestUrl) diagnostic.requestUrl = error.requestUrl;
         if (error.httpStatus) diagnostic.httpStatus = error.httpStatus;
         if (error.contentType) diagnostic.contentType = error.contentType;
         if (error.responseText) {
@@ -1051,7 +1067,40 @@
     }
 
     async function fetchFeed(feedUrl) {
-      const url = state.settings.directFetch ? feedUrl : buildProxyUrl(feedUrl);
+      const urls = state.settings.directFetch ? [feedUrl] : buildProxyUrls(feedUrl);
+      const attempts = [];
+      let lastError = null;
+
+      for (const url of urls) {
+        try {
+          const result = await fetchFeedUrl(url);
+          attempts.push({ url, ok: true, status: result.status, contentType: result.contentType, length: result.text.length, error: "" });
+          return { ...result, url, attempts };
+        } catch (error) {
+          const attempt = {
+            url,
+            ok: false,
+            status: error.httpStatus || null,
+            contentType: error.contentType || "",
+            length: error.responseText ? error.responseText.length : 0,
+            error: error.name === "AbortError" ? `Timed out after ${Number(state.settings.fetchTimeoutSeconds || 25)}s` : (error.message || String(error))
+          };
+          attempts.push(attempt);
+          lastError = error;
+        }
+      }
+
+      const error = new Error(lastError?.message || "All fetch attempts failed.");
+      error.name = lastError?.name || "FetchError";
+      error.httpStatus = lastError?.httpStatus;
+      error.contentType = lastError?.contentType;
+      error.responseText = lastError?.responseText;
+      error.attempts = attempts;
+      error.requestUrl = attempts[attempts.length - 1]?.url || urls[0] || feedUrl;
+      throw error;
+    }
+
+    async function fetchFeedUrl(url) {
       const controller = new AbortController();
       const timeoutMs = Number(state.settings.fetchTimeoutSeconds || 25) * 1000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -1069,18 +1118,25 @@
           error.responseText = text;
           throw error;
         }
-        return {
-          text,
-          status: response.status,
-          contentType: response.headers.get("content-type") || ""
-        };
+        return { text, status: response.status, contentType: response.headers.get("content-type") || "" };
       } finally {
         clearTimeout(timeout);
       }
     }
 
     function buildProxyUrl(feedUrl) {
-      const template = state.settings.proxyTemplate || DEFAULT_CONFIG.settings.proxyTemplate;
+      return buildProxyUrls(feedUrl)[0];
+    }
+
+    function buildProxyUrls(feedUrl) {
+      const templates = String(state.settings.proxyTemplate || DEFAULT_CONFIG.settings.proxyTemplate)
+        .split(/\n+/)
+        .map(template => template.trim())
+        .filter(Boolean);
+      return templates.map(template => renderProxyTemplate(template, feedUrl));
+    }
+
+    function renderProxyTemplate(template, feedUrl) {
       try {
         return Function("feedUrl", "return `" + template.replaceAll("`", "\\`") + "`;")(feedUrl);
       } catch {
@@ -1268,7 +1324,7 @@
           <span class="pill">${diagnostics.fetchedBeforeDedupe} before dedupe</span>
           <span class="pill">${diagnostics.fetchedAfterDedupe} after dedupe</span>
         </div>
-        <div class="meta">Started ${formatDate(diagnostics.startedAt)}. Proxy template: <code>${escapeHtml(diagnostics.proxyTemplate || "none")}</code></div>
+        <div class="meta">Started ${formatDate(diagnostics.startedAt)}. Proxy templates are tried top-to-bottom from Admin.</div>
         <div class="debug-list">
           ${diagnostics.sources.map(debugSourceHtml).join("")}
         </div>
@@ -1294,9 +1350,21 @@
             <div><strong>Parsed / returned / matched</strong><br>${escapeHtml(source.parsedCount)} / ${escapeHtml(source.returnedCount)} / ${escapeHtml(source.matchedCount)}</div>
             ${source.error ? `<div><strong>Error</strong><br><span class="pill bad">${escapeHtml(source.error)}</span></div>` : ""}
           </div>
+          ${source.attempts?.length ? `<pre>${escapeHtml(formatAttempts(source.attempts))}</pre>` : ""}
           ${source.responseSnippet ? `<pre>${escapeHtml(source.responseSnippet)}</pre>` : ""}
         </div>
       `;
+    }
+
+    function formatAttempts(attempts) {
+      return attempts.map((attempt, index) => {
+        const status = attempt.ok ? "OK" : "FAIL";
+        const http = attempt.status ? ` HTTP ${attempt.status}` : "";
+        const type = attempt.contentType ? ` ${attempt.contentType}` : "";
+        const length = attempt.length ? ` ${attempt.length} chars` : "";
+        const error = attempt.error ? ` ${attempt.error}` : "";
+        return `Attempt ${index + 1}: ${status}${http}${type}${length}${error}\n${attempt.url}`;
+      }).join("\n\n");
     }
 
     function filteredArticles(input) {
