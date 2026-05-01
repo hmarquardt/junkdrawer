@@ -701,6 +701,14 @@
                 <label for="maxPerSource">Max articles per source</label>
                 <input id="maxPerSource" type="number" min="1" step="1" />
               </div>
+              <div>
+                <label for="fetchConcurrency">Fetch concurrency</label>
+                <input id="fetchConcurrency" type="number" min="1" max="8" step="1" />
+              </div>
+              <div>
+                <label for="fetchTimeout">Fetch timeout seconds</label>
+                <input id="fetchTimeout" type="number" min="5" max="120" step="1" />
+              </div>
               <button class="btn primary" id="saveSettingsBtn">Save settings</button>
             </div>
           </div>
@@ -783,6 +791,8 @@
         proxyTemplate: "https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}",
         directFetch: false,
         maxArticlesPerSource: 25,
+        fetchConcurrency: 3,
+        fetchTimeoutSeconds: 25,
         theme: "dark"
       }
     };
@@ -821,6 +831,8 @@
       proxyTemplate: document.getElementById("proxyTemplate"),
       directFetch: document.getElementById("directFetch"),
       maxPerSource: document.getElementById("maxPerSource"),
+      fetchConcurrency: document.getElementById("fetchConcurrency"),
+      fetchTimeout: document.getElementById("fetchTimeout"),
       saveSettingsBtn: document.getElementById("saveSettingsBtn"),
       exportBtn: document.getElementById("exportBtn"),
       resetBtn: document.getElementById("resetBtn"),
@@ -916,6 +928,8 @@
         proxyTemplate: state.settings.proxyTemplate,
         ttlMinutes: state.settings.cacheTtlMinutes,
         maxArticlesPerSource: state.settings.maxArticlesPerSource,
+        fetchConcurrency: state.settings.fetchConcurrency,
+        fetchTimeoutSeconds: state.settings.fetchTimeoutSeconds,
         enabledSourceCount: enabledSources.length,
         fetchedBeforeDedupe: 0,
         fetchedAfterDedupe: 0,
@@ -927,7 +941,7 @@
       els.refreshBtn.textContent = "Refreshing...";
       els.refreshSummary.innerHTML = `<span class="pill">Listening to ${enabledSources.length} source(s)</span>`;
 
-      const results = await Promise.all(enabledSources.map(fetchSource));
+      const results = await runWithConcurrency(enabledSources, fetchSource, Number(state.settings.fetchConcurrency || 3));
       const articles = [];
       const errors = [];
 
@@ -990,6 +1004,7 @@
         returnedCount: 0,
         matchedCount: 0,
         durationMs: 0,
+        timedOut: false,
         error: ""
       };
 
@@ -1019,13 +1034,17 @@
         diagnostic.durationMs = Math.round(performance.now() - startedAt);
         return { ok: true, source, articles: parsed, diagnostic };
       } catch (error) {
+        if (error.name === "AbortError") {
+          diagnostic.timedOut = true;
+          diagnostic.error = `Timed out after ${Number(state.settings.fetchTimeoutSeconds || 25)}s`;
+        }
         if (error.httpStatus) diagnostic.httpStatus = error.httpStatus;
         if (error.contentType) diagnostic.contentType = error.contentType;
         if (error.responseText) {
           diagnostic.responseLength = error.responseText.length;
           diagnostic.responseSnippet = error.responseText.slice(0, 420);
         }
-        diagnostic.error = error.message || String(error);
+        if (!diagnostic.error) diagnostic.error = error.message || String(error);
         diagnostic.durationMs = Math.round(performance.now() - startedAt);
         return { ok: false, source, error: diagnostic.error, articles: [], diagnostic };
       }
@@ -1033,20 +1052,31 @@
 
     async function fetchFeed(feedUrl) {
       const url = state.settings.directFetch ? feedUrl : buildProxyUrl(feedUrl);
-      const response = await fetch(url, { headers: { Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*" } });
-      const text = await response.text();
-      if (!response.ok) {
-        const error = new Error(`HTTP ${response.status}`);
-        error.httpStatus = response.status;
-        error.contentType = response.headers.get("content-type") || "";
-        error.responseText = text;
-        throw error;
+      const controller = new AbortController();
+      const timeoutMs = Number(state.settings.fetchTimeoutSeconds || 25) * 1000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetch(url, {
+          headers: { Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*" },
+          signal: controller.signal
+        });
+        const text = await response.text();
+        if (!response.ok) {
+          const error = new Error(`HTTP ${response.status}`);
+          error.httpStatus = response.status;
+          error.contentType = response.headers.get("content-type") || "";
+          error.responseText = text;
+          throw error;
+        }
+        return {
+          text,
+          status: response.status,
+          contentType: response.headers.get("content-type") || ""
+        };
+      } finally {
+        clearTimeout(timeout);
       }
-      return {
-        text,
-        status: response.status,
-        contentType: response.headers.get("content-type") || ""
-      };
     }
 
     function buildProxyUrl(feedUrl) {
@@ -1056,6 +1086,22 @@
       } catch {
         return `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
       }
+    }
+
+    async function runWithConcurrency(items, worker, limit) {
+      const results = new Array(items.length);
+      let cursor = 0;
+      const workerCount = Math.max(1, Math.min(Number(limit || 3), items.length));
+
+      async function runNext() {
+        const index = cursor++;
+        if (index >= items.length) return;
+        results[index] = await worker(items[index]);
+        await runNext();
+      }
+
+      await Promise.all(Array.from({ length: workerCount }, runNext));
+      return results;
     }
 
     function parseFeedXml(xml, source) {
@@ -1162,8 +1208,44 @@
 
     function renderDashboard() {
       const articles = filteredArticles(state.articles).filter(article => !state.articleState.hidden[article.id]);
-      els.articles.innerHTML = articles.length ? articles.map(article => articleCard(article)).join("") : emptyHtml("No signals in this view.", "Try refreshing, changing filters, or enabling more terms.");
+      els.articles.innerHTML = articles.length ? articles.map(article => articleCard(article)).join("") : dashboardEmptyHtml();
       bindArticleButtons(els.articles);
+      const showAllButton = els.articles.querySelector("[data-show-all]");
+      if (showAllButton) {
+        showAllButton.addEventListener("click", () => {
+          els.showAllToggle.checked = true;
+          renderDashboard();
+        });
+      }
+    }
+
+    function dashboardEmptyHtml() {
+      const fetchedCount = state.articles.length;
+      const hiddenCount = Object.keys(state.articleState.hidden).length;
+      const matchedCount = state.articles.filter(article => article.matchedTerms.length).length;
+      const filtersActive = Boolean(els.searchInput.value.trim() || els.sourceFilter.value || els.termFilter.value);
+
+      if (fetchedCount && !els.showAllToggle.checked && !matchedCount) {
+        return `
+          <div class="empty">
+            <strong>${fetchedCount} articles fetched, 0 matched your enabled terms.</strong>
+            <div>That is why the Dashboard is blank. Enable broader terms in Admin, or inspect the raw fetched feed items.</div>
+            <div class="card-actions" style="justify-content:center">
+              <button class="btn primary" data-show-all>Show all fetched articles</button>
+            </div>
+          </div>
+        `;
+      }
+
+      if (fetchedCount && filtersActive) {
+        return emptyHtml("Fetched articles exist, but filters removed them.", "Clear search/source/term filters or turn on Show all.");
+      }
+
+      if (fetchedCount && hiddenCount) {
+        return emptyHtml("Everything visible is hidden.", "Open the Hidden tab to unhide articles, or clear hidden state.");
+      }
+
+      return emptyHtml("No signals in this view.", "Try refreshing, changing filters, or enabling more terms.");
     }
 
     function renderDebug() {
@@ -1181,6 +1263,8 @@
           <span class="pill ${failCount ? "bad" : ""}">${failCount} failed</span>
           <span class="pill">${escapeHtml(diagnostics.fetchMode)} mode</span>
           <span class="pill">${diagnostics.durationMs}ms total</span>
+          <span class="pill">${escapeHtml(diagnostics.fetchConcurrency || "n/a")} concurrent</span>
+          <span class="pill">${escapeHtml(diagnostics.fetchTimeoutSeconds || "n/a")}s timeout</span>
           <span class="pill">${diagnostics.fetchedBeforeDedupe} before dedupe</span>
           <span class="pill">${diagnostics.fetchedAfterDedupe} after dedupe</span>
         </div>
@@ -1205,6 +1289,7 @@
             <div><strong>HTTP / content type</strong><br>${escapeHtml(source.httpStatus || "none")} / ${escapeHtml(source.contentType || "unknown")}</div>
             <div><strong>Response length</strong><br>${Number(source.responseLength || 0).toLocaleString()} chars</div>
             <div><strong>Duration</strong><br>${escapeHtml(source.durationMs)}ms</div>
+            <div><strong>Timed out</strong><br>${source.timedOut ? "yes" : "no"}</div>
             <div><strong>Raw feed nodes</strong><br>${escapeHtml(source.rssItemCount)} RSS item(s), ${escapeHtml(source.atomEntryCount)} Atom entry(s)</div>
             <div><strong>Parsed / returned / matched</strong><br>${escapeHtml(source.parsedCount)} / ${escapeHtml(source.returnedCount)} / ${escapeHtml(source.matchedCount)}</div>
             ${source.error ? `<div><strong>Error</strong><br><span class="pill bad">${escapeHtml(source.error)}</span></div>` : ""}
@@ -1343,6 +1428,8 @@
       els.proxyTemplate.value = state.settings.proxyTemplate;
       els.directFetch.checked = Boolean(state.settings.directFetch);
       els.maxPerSource.value = state.settings.maxArticlesPerSource;
+      els.fetchConcurrency.value = state.settings.fetchConcurrency || 3;
+      els.fetchTimeout.value = state.settings.fetchTimeoutSeconds || 25;
     }
 
     function renderAdmin() {
@@ -1445,7 +1532,9 @@
         cacheTtlMinutes: Math.max(1, Number(els.cacheTtl.value || 30)),
         proxyTemplate: els.proxyTemplate.value.trim() || DEFAULT_CONFIG.settings.proxyTemplate,
         directFetch: els.directFetch.checked,
-        maxArticlesPerSource: Math.max(1, Number(els.maxPerSource.value || 25))
+        maxArticlesPerSource: Math.max(1, Number(els.maxPerSource.value || 25)),
+        fetchConcurrency: clamp(Number(els.fetchConcurrency.value || 3), 1, 8),
+        fetchTimeoutSeconds: clamp(Number(els.fetchTimeout.value || 25), 5, 120)
       };
       writeJson(STORAGE_KEYS.settings, state.settings);
       toast("Settings saved.");
@@ -1615,6 +1704,10 @@
     function toTime(value) {
       const time = new Date(value || 0).getTime();
       return Number.isFinite(time) ? time : 0;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
     }
 
     function formatDate(value) {
