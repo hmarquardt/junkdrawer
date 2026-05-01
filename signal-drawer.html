@@ -1,0 +1,1390 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signal Drawer</title>
+  <style>
+    :root {
+      --bg: #0c111d;
+      --bg-2: #111827;
+      --panel: rgba(255,255,255,.075);
+      --panel-2: rgba(255,255,255,.11);
+      --line: rgba(255,255,255,.13);
+      --text: #eef4ff;
+      --muted: #a9b4c8;
+      --soft: #7d8aa3;
+      --accent: #2dd4bf;
+      --accent-2: #f59e0b;
+      --danger: #fb7185;
+      --good: #34d399;
+      --shadow: 0 24px 90px rgba(0,0,0,.36);
+      --radius: 22px;
+      color-scheme: dark;
+    }
+
+    [data-theme="light"] {
+      --bg: #f4f0e8;
+      --bg-2: #fff8eb;
+      --panel: rgba(255,255,255,.76);
+      --panel-2: rgba(255,255,255,.92);
+      --line: rgba(24,34,50,.14);
+      --text: #182232;
+      --muted: #5f6c7f;
+      --soft: #7b8798;
+      --shadow: 0 20px 70px rgba(80,62,34,.16);
+      color-scheme: light;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Avenir Next, Avenir, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 10%, rgba(45,212,191,.24), transparent 28rem),
+        radial-gradient(circle at 88% 8%, rgba(245,158,11,.18), transparent 30rem),
+        radial-gradient(circle at 52% 100%, rgba(251,113,133,.16), transparent 34rem),
+        linear-gradient(145deg, var(--bg), var(--bg-2));
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .18;
+      background-image:
+        linear-gradient(rgba(255,255,255,.16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.16) 1px, transparent 1px);
+      background-size: 36px 36px;
+      mask-image: radial-gradient(circle at center, black, transparent 78%);
+    }
+
+    button, input, textarea, select { font: inherit; }
+    a { color: inherit; }
+
+    .app {
+      width: min(1280px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 24px 0 54px;
+      position: relative;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 12px;
+      z-index: 20;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: color-mix(in srgb, var(--bg) 78%, transparent);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      gap: 11px;
+      align-items: center;
+      min-width: 210px;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 15px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #07111c;
+      font-weight: 950;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 19px;
+      line-height: 1;
+      letter-spacing: -.04em;
+    }
+
+    .brand span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      overflow-x: auto;
+      padding: 2px;
+    }
+
+    .tab, .btn {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      min-height: 40px;
+      padding: 0 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--text);
+      background: var(--panel);
+      cursor: pointer;
+      text-decoration: none;
+      font-weight: 800;
+      transition: .16s ease;
+      white-space: nowrap;
+    }
+
+    .tab:hover, .btn:hover { transform: translateY(-1px); background: var(--panel-2); }
+    .tab.active { border-color: rgba(45,212,191,.55); background: rgba(45,212,191,.16); color: var(--accent); }
+    .btn.primary { border-color: transparent; background: linear-gradient(135deg, var(--accent), #38bdf8); color: #06131f; }
+    .btn.danger { border-color: transparent; background: linear-gradient(135deg, var(--danger), #ef4444); color: white; }
+    .btn.good { border-color: rgba(52,211,153,.35); color: var(--good); }
+    .btn.small { min-height: 34px; padding: 0 10px; font-size: 13px; border-radius: 12px; }
+    .btn[disabled] { opacity: .6; cursor: wait; transform: none; }
+
+    .hero {
+      margin: 22px 0;
+      padding: clamp(24px, 4vw, 44px);
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      background: linear-gradient(145deg, var(--panel-2), var(--panel));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -80px;
+      top: -110px;
+      width: 310px;
+      height: 310px;
+      border-radius: 44% 56% 50% 50%;
+      background: conic-gradient(from 45deg, rgba(45,212,191,.42), rgba(245,158,11,.28), rgba(251,113,133,.32), rgba(45,212,191,.42));
+      opacity: .45;
+      filter: blur(5px);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      border: 1px solid rgba(45,212,191,.28);
+      border-radius: 999px;
+      padding: 7px 11px;
+      color: var(--accent);
+      background: rgba(45,212,191,.1);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .hero h2 {
+      margin: 16px 0 10px;
+      max-width: 780px;
+      font-size: clamp(38px, 7vw, 78px);
+      line-height: .9;
+      letter-spacing: -.07em;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 760px;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.55;
+      position: relative;
+      z-index: 1;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(145deg, var(--panel-2), var(--panel));
+      box-shadow: 0 14px 42px rgba(0,0,0,.14);
+      backdrop-filter: blur(16px);
+    }
+
+    .controls {
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1.5fr repeat(3, minmax(150px, .7fr)) auto auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      outline: none;
+      color: var(--text);
+      background: color-mix(in srgb, var(--bg) 64%, transparent);
+      min-height: 42px;
+      padding: 10px 12px;
+    }
+
+    textarea {
+      min-height: 112px;
+      resize: vertical;
+      line-height: 1.45;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: rgba(45,212,191,.6);
+      box-shadow: 0 0 0 4px rgba(45,212,191,.12);
+    }
+
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 7px;
+    }
+
+    .status-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .pill {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 9px;
+      color: var(--muted);
+      background: rgba(255,255,255,.045);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .pill.term { color: var(--accent); border-color: rgba(45,212,191,.28); background: rgba(45,212,191,.09); }
+    .pill.warn { color: var(--accent-2); border-color: rgba(245,158,11,.3); background: rgba(245,158,11,.1); }
+    .pill.bad { color: var(--danger); border-color: rgba(251,113,133,.32); background: rgba(251,113,133,.1); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+      gap: 15px;
+    }
+
+    .article {
+      display: grid;
+      grid-template-columns: 96px 1fr;
+      gap: 14px;
+      padding: 14px;
+      min-height: 172px;
+    }
+
+    .thumb {
+      width: 96px;
+      height: 96px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(45,212,191,.24), transparent 55%),
+        linear-gradient(135deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+      object-fit: cover;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--soft);
+      font-weight: 900;
+    }
+
+    .article h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.18;
+      letter-spacing: -.03em;
+    }
+
+    .desc {
+      margin: 8px 0 10px;
+      color: var(--muted);
+      line-height: 1.42;
+      font-size: 14px;
+    }
+
+    .meta {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      flex-wrap: wrap;
+      color: var(--soft);
+      font-size: 12px;
+    }
+
+    .terms {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 10px 0;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .empty {
+      padding: 46px 18px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.045);
+    }
+
+    .empty strong {
+      display: block;
+      color: var(--text);
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .admin-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .section { padding: 16px; margin-bottom: 16px; }
+    .section h3 { margin: 0 0 13px; letter-spacing: -.03em; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .row:first-of-type { border-top: 0; }
+    .row strong { display: block; }
+    .row small { color: var(--muted); overflow-wrap: anywhere; }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.4fr auto;
+      gap: 10px;
+      align-items: end;
+      margin-top: 12px;
+    }
+
+    .settings-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .checkline {
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      color: var(--muted);
+    }
+
+    .checkline input { width: auto; min-height: auto; }
+
+    .source-status {
+      margin-top: 12px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .help {
+      padding: 20px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .help h3, .help h4 { color: var(--text); margin-bottom: 8px; }
+
+    .help code {
+      padding: 2px 6px;
+      border-radius: 7px;
+      background: rgba(255,255,255,.08);
+      color: var(--accent);
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      max-width: min(440px, calc(100% - 36px));
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px 16px;
+      color: var(--text);
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      box-shadow: var(--shadow);
+      transform: translateY(16px);
+      opacity: 0;
+      pointer-events: none;
+      transition: .2s ease;
+      z-index: 50;
+      backdrop-filter: blur(14px);
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .hidden { display: none !important; }
+
+    @media (max-width: 980px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .tabs { width: 100%; }
+      .control-grid { grid-template-columns: 1fr 1fr; }
+      .admin-grid { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .app { width: min(100% - 18px, 1280px); padding-top: 10px; }
+      .control-grid { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+      .article { grid-template-columns: 1fr; }
+      .thumb { width: 100%; height: 150px; }
+      .brand { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <nav class="topbar">
+      <div class="brand">
+        <div class="logo">SD</div>
+        <div>
+          <h1>Signal Drawer</h1>
+          <span>Personal RSS intelligence shelf</span>
+        </div>
+      </div>
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab" data-tab="saved">Saved</button>
+        <button class="tab" data-tab="hidden">Hidden</button>
+        <button class="tab" data-tab="admin">Admin</button>
+        <button class="tab" data-tab="about">About / Help</button>
+      </div>
+      <button class="btn small" id="themeBtn">Toggle light</button>
+    </nav>
+
+    <section class="hero">
+      <div class="eyebrow">Signal over noise</div>
+      <h2>Your tiny serverless newsroom.</h2>
+      <p>Track RSS feeds, filter by terms, save useful finds, and hide the static. Everything lives in this browser unless you export it.</p>
+    </section>
+
+    <section id="dashboard" class="view">
+      <div class="controls panel">
+        <div class="control-grid">
+          <input id="searchInput" type="search" placeholder="Search title, description, source, or URL..." />
+          <select id="sourceFilter"></select>
+          <select id="termFilter"></select>
+          <select id="sortMode">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+          <label class="checkline" title="Show all fetched articles, even without matched terms">
+            <input id="showAllToggle" type="checkbox" />
+            Show all
+          </label>
+          <button class="btn primary" id="refreshBtn">Refresh</button>
+        </div>
+        <div class="status-row">
+          <span id="lastUpdated">Last updated: never</span>
+          <span id="cacheAge">Cache age: none</span>
+          <span id="refreshSummary"></span>
+        </div>
+      </div>
+      <div id="articles" class="grid"></div>
+    </section>
+
+    <section id="saved" class="view hidden">
+      <div class="section panel">
+        <h3>Saved dispatches</h3>
+        <div id="savedList" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="hidden" class="view hidden">
+      <div class="section panel">
+        <div class="status-row" style="justify-content:space-between;margin-top:0">
+          <h3 style="margin:0">Hidden static</h3>
+          <button class="btn danger" id="clearHiddenBtn">Clear hidden list</button>
+        </div>
+        <div id="hiddenList" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="admin" class="view hidden">
+      <div class="admin-grid">
+        <div>
+          <div class="section panel">
+            <h3>RSS sources</h3>
+            <div id="sourceList"></div>
+            <div class="form-grid">
+              <div>
+                <label for="newSourceName">Name</label>
+                <input id="newSourceName" type="text" placeholder="Example News - Tech" />
+              </div>
+              <div>
+                <label for="newSourceUrl">Feed URL</label>
+                <input id="newSourceUrl" type="text" placeholder="https://example.com/rss.xml" />
+              </div>
+              <button class="btn primary" id="addSourceBtn">Add source</button>
+            </div>
+            <div id="sourceStatus" class="source-status"></div>
+          </div>
+
+          <div class="section panel">
+            <h3>Key terms</h3>
+            <div id="termList"></div>
+            <div class="form-grid" style="grid-template-columns:1fr auto">
+              <div>
+                <label for="newTerm">Term or quoted phrase</label>
+                <input id="newTerm" type="text" placeholder='OpenAI, cybersecurity, "data breach", -sports' />
+              </div>
+              <button class="btn primary" id="addTermBtn">Add term</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="section panel">
+            <h3>Settings</h3>
+            <div class="settings-grid">
+              <div>
+                <label for="cacheTtl">Cache TTL minutes</label>
+                <input id="cacheTtl" type="number" min="1" step="1" />
+              </div>
+              <div>
+                <label for="proxyTemplate">Proxy URL template</label>
+                <textarea id="proxyTemplate"></textarea>
+              </div>
+              <label class="checkline">
+                <input id="directFetch" type="checkbox" />
+                Direct fetch mode instead of proxy
+              </label>
+              <div>
+                <label for="maxPerSource">Max articles per source</label>
+                <input id="maxPerSource" type="number" min="1" step="1" />
+              </div>
+              <button class="btn primary" id="saveSettingsBtn">Save settings</button>
+            </div>
+          </div>
+
+          <div class="section panel">
+            <h3>Import / export</h3>
+            <div class="card-actions">
+              <button class="btn" id="exportBtn">Export JSON</button>
+              <button class="btn danger" id="resetBtn">Reset to seed defaults</button>
+            </div>
+            <label for="importText" style="margin-top:14px">Import JSON</label>
+            <textarea id="importText" placeholder="Paste exported Signal Drawer JSON here"></textarea>
+            <div class="card-actions">
+              <button class="btn primary" id="importBtn">Import pasted JSON</button>
+              <input id="importFile" type="file" accept="application/json,.json" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="about" class="view hidden">
+      <div class="help panel">
+        <h3>About Signal Drawer</h3>
+        <p>Signal Drawer is a personal RSS/topic tracker that runs entirely in your browser. It fetches configured feeds, filters by enabled key terms, caches articles, and lets you save or hide items locally.</p>
+        <h4>Developer notes</h4>
+        <p>This is local-only. Sources, terms, cache, read/saved/hidden state, and settings are stored in <code>localStorage</code>.</p>
+        <p>Feeds may fail because direct browser requests to RSS feeds often hit CORS restrictions. The default proxy is <code>https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}</code>, but it is editable in Admin.</p>
+        <p>A private Cloudflare Worker, Netlify Function, or AWS Lambda proxy is better long-term because public proxies can be slow, unavailable, or rate-limited.</p>
+        <p><code>localStorage</code> is not secure storage. Do not store secrets, private tokens, or sensitive source URLs here.</p>
+        <h4>Term syntax</h4>
+        <p>Use plain terms like <code>OpenAI</code>, quoted phrases like <code>"artificial intelligence"</code>, and excluded terms beginning with minus like <code>-sports</code>. Matching is case-insensitive.</p>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const STORAGE_KEYS = {
+      sources: "signal-drawer:sources",
+      terms: "signal-drawer:terms",
+      cache: "signal-drawer:cache",
+      state: "signal-drawer:article-state",
+      settings: "signal-drawer:settings"
+    };
+
+    const DEFAULT_CONFIG = {
+      sources: [
+        { name: "BBC News - Front Page", url: "http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/front_page/rss.xml", enabled: true },
+        { name: "BBC News - World", url: "http://feeds.bbci.co.uk/news/world/rss.xml", enabled: true },
+        { name: "NPR News", url: "https://feeds.npr.org/1001/rss.xml", enabled: true },
+        { name: "NPR Politics", url: "https://feeds.npr.org/1014/rss.xml", enabled: true },
+        { name: "NPR Technology", url: "https://feeds.npr.org/1019/rss.xml", enabled: true },
+        { name: "The Guardian - World", url: "https://www.theguardian.com/world/rss", enabled: true },
+        { name: "The Guardian - US", url: "https://www.theguardian.com/us-news/rss", enabled: true },
+        { name: "The Guardian - Technology", url: "https://www.theguardian.com/technology/rss", enabled: true },
+        { name: "NYTimes - World", url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", enabled: false },
+        { name: "NYTimes - Technology", url: "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml", enabled: false }
+      ],
+      keyTerms: [
+        { term: "artificial intelligence", enabled: true },
+        { term: "OpenAI", enabled: true },
+        { term: "Anthropic", enabled: true },
+        { term: "Meta", enabled: true },
+        { term: "Google", enabled: true },
+        { term: "crypto", enabled: true },
+        { term: "Bitcoin", enabled: true },
+        { term: "cybersecurity", enabled: true },
+        { term: "data breach", enabled: true },
+        { term: "Indiana", enabled: true },
+        { term: "Ukraine", enabled: false },
+        { term: "China", enabled: false },
+        { term: "election", enabled: false },
+        { term: "Supreme Court", enabled: false },
+        { term: "climate", enabled: false }
+      ],
+      settings: {
+        cacheTtlMinutes: 30,
+        proxyTemplate: "https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}",
+        directFetch: false,
+        maxArticlesPerSource: 25,
+        theme: "dark"
+      }
+    };
+
+    const els = {
+      tabs: document.getElementById("tabs"),
+      views: document.querySelectorAll(".view"),
+      themeBtn: document.getElementById("themeBtn"),
+      searchInput: document.getElementById("searchInput"),
+      sourceFilter: document.getElementById("sourceFilter"),
+      termFilter: document.getElementById("termFilter"),
+      sortMode: document.getElementById("sortMode"),
+      showAllToggle: document.getElementById("showAllToggle"),
+      refreshBtn: document.getElementById("refreshBtn"),
+      lastUpdated: document.getElementById("lastUpdated"),
+      cacheAge: document.getElementById("cacheAge"),
+      refreshSummary: document.getElementById("refreshSummary"),
+      articles: document.getElementById("articles"),
+      savedList: document.getElementById("savedList"),
+      hiddenList: document.getElementById("hiddenList"),
+      clearHiddenBtn: document.getElementById("clearHiddenBtn"),
+      sourceList: document.getElementById("sourceList"),
+      sourceStatus: document.getElementById("sourceStatus"),
+      newSourceName: document.getElementById("newSourceName"),
+      newSourceUrl: document.getElementById("newSourceUrl"),
+      addSourceBtn: document.getElementById("addSourceBtn"),
+      termList: document.getElementById("termList"),
+      newTerm: document.getElementById("newTerm"),
+      addTermBtn: document.getElementById("addTermBtn"),
+      cacheTtl: document.getElementById("cacheTtl"),
+      proxyTemplate: document.getElementById("proxyTemplate"),
+      directFetch: document.getElementById("directFetch"),
+      maxPerSource: document.getElementById("maxPerSource"),
+      saveSettingsBtn: document.getElementById("saveSettingsBtn"),
+      exportBtn: document.getElementById("exportBtn"),
+      resetBtn: document.getElementById("resetBtn"),
+      importText: document.getElementById("importText"),
+      importBtn: document.getElementById("importBtn"),
+      importFile: document.getElementById("importFile"),
+      toast: document.getElementById("toast")
+    };
+
+    let state = {
+      sources: readJson(STORAGE_KEYS.sources, DEFAULT_CONFIG.sources),
+      terms: readJson(STORAGE_KEYS.terms, DEFAULT_CONFIG.keyTerms),
+      settings: readJson(STORAGE_KEYS.settings, DEFAULT_CONFIG.settings),
+      cache: readJson(STORAGE_KEYS.cache, { articles: [], lastFetch: 0, errors: [] }),
+      articleState: readJson(STORAGE_KEYS.state, { saved: {}, hidden: {}, read: {} }),
+      articles: []
+    };
+
+    init();
+
+    function init() {
+      applyTheme();
+      bindEvents();
+      hydrateAdmin();
+      hydrateFilters();
+      loadDashboard();
+      renderAll();
+    }
+
+    function bindEvents() {
+      els.tabs.addEventListener("click", event => {
+        const button = event.target.closest("[data-tab]");
+        if (button) switchTab(button.dataset.tab);
+      });
+
+      [els.searchInput, els.sourceFilter, els.termFilter, els.sortMode, els.showAllToggle].forEach(el => {
+        el.addEventListener("input", renderDashboard);
+        el.addEventListener("change", renderDashboard);
+      });
+
+      els.refreshBtn.addEventListener("click", () => refreshFeeds(true));
+      els.themeBtn.addEventListener("click", toggleTheme);
+      els.clearHiddenBtn.addEventListener("click", clearHidden);
+      els.addSourceBtn.addEventListener("click", addSource);
+      els.addTermBtn.addEventListener("click", addTerm);
+      els.saveSettingsBtn.addEventListener("click", saveSettings);
+      els.exportBtn.addEventListener("click", exportConfig);
+      els.resetBtn.addEventListener("click", resetDefaults);
+      els.importBtn.addEventListener("click", () => importConfigText(els.importText.value));
+      els.importFile.addEventListener("change", importConfigFile);
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.tab === tabName));
+      els.views.forEach(view => view.classList.toggle("hidden", view.id !== tabName));
+      renderAll();
+    }
+
+    async function loadDashboard() {
+      if (isCacheFresh()) {
+        state.articles = state.cache.articles || [];
+        els.refreshSummary.innerHTML = `<span class="pill">Using warm cache</span>`;
+        return;
+      }
+      if (state.cache.articles?.length) {
+        state.articles = state.cache.articles;
+        els.refreshSummary.innerHTML = `<span class="pill warn">Cache stale. Refreshing...</span>`;
+      }
+      await refreshFeeds(false);
+    }
+
+    function isCacheFresh() {
+      const ttlMs = Number(state.settings.cacheTtlMinutes || 30) * 60 * 1000;
+      return state.cache.lastFetch && Date.now() - state.cache.lastFetch < ttlMs;
+    }
+
+    async function refreshFeeds(userInitiated) {
+      const enabledSources = state.sources.filter(source => source.enabled);
+      if (!enabledSources.length) {
+        toast("No enabled sources. The drawer is empty.");
+        return;
+      }
+
+      els.refreshBtn.disabled = true;
+      els.refreshBtn.textContent = "Refreshing...";
+      els.refreshSummary.innerHTML = `<span class="pill">Listening to ${enabledSources.length} source(s)</span>`;
+
+      const results = await Promise.all(enabledSources.map(fetchSource));
+      const articles = [];
+      const errors = [];
+
+      for (const result of results) {
+        if (result.ok) articles.push(...result.articles);
+        else errors.push({ sourceName: result.source.name, sourceUrl: result.source.url, message: result.error });
+      }
+
+      if (articles.length) {
+        const normalized = dedupeArticles(articles).sort((a, b) => toTime(b.publishedAt) - toTime(a.publishedAt));
+        state.cache = { articles: normalized, lastFetch: Date.now(), errors };
+        state.articles = normalized;
+        writeJson(STORAGE_KEYS.cache, state.cache);
+        toast(`Fetched ${normalized.length} article(s).`);
+      } else if (state.cache.articles?.length) {
+        state.articles = state.cache.articles;
+        toast("Refresh failed. Keeping cached articles.");
+      } else {
+        state.articles = [];
+        toast("No articles fetched. Check source errors.");
+      }
+
+      els.refreshBtn.disabled = false;
+      els.refreshBtn.textContent = "Refresh";
+      els.refreshSummary.innerHTML = refreshSummaryHtml(errors, articles.length);
+      hydrateFilters();
+      renderAll();
+
+      if (userInitiated && errors.length) switchTab("dashboard");
+    }
+
+    async function fetchSource(source) {
+      try {
+        const xmlText = await fetchFeed(source.url);
+        const xml = new DOMParser().parseFromString(xmlText, "text/xml");
+        if (xml.querySelector("parsererror")) throw new Error("Feed XML could not be parsed.");
+
+        const parsed = parseFeedXml(xml, source).slice(0, Number(state.settings.maxArticlesPerSource || 25));
+        return { ok: true, source, articles: parsed };
+      } catch (error) {
+        return { ok: false, source, error: error.message || String(error), articles: [] };
+      }
+    }
+
+    async function fetchFeed(feedUrl) {
+      const url = state.settings.directFetch ? feedUrl : buildProxyUrl(feedUrl);
+      const response = await fetch(url, { headers: { Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    }
+
+    function buildProxyUrl(feedUrl) {
+      const template = state.settings.proxyTemplate || DEFAULT_CONFIG.settings.proxyTemplate;
+      try {
+        return Function("feedUrl", "return `" + template.replaceAll("`", "\\`") + "`;")(feedUrl);
+      } catch {
+        return `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
+      }
+    }
+
+    function parseFeedXml(xml, source) {
+      const rssItems = [...xml.querySelectorAll("item")];
+      const atomItems = [...xml.querySelectorAll("entry")];
+      const nodes = rssItems.length ? rssItems : atomItems;
+
+      return nodes.map(node => {
+        const title = text(node, "title") || "Untitled signal";
+        const link = getLink(node);
+        const guid = text(node, "guid") || text(node, "id") || link;
+        const publishedAt = text(node, "pubDate") || text(node, "published") || text(node, "updated") || text(node, "dc\\:date") || "";
+        const descriptionHtml = text(node, "description") || text(node, "summary") || text(node, "content") || text(node, "content\\:encoded") || "";
+        const description = stripHtml(descriptionHtml);
+        const imageUrl = getImageUrl(node, descriptionHtml);
+        const matchedTerms = getMatchedTerms(`${title} ${description} ${link}`);
+
+        return {
+          id: stableId(link || guid || `${title}:${source.name}`),
+          title: stripHtml(title),
+          link,
+          sourceName: source.name,
+          sourceUrl: source.url,
+          publishedAt: publishedAt ? new Date(publishedAt).toISOString() : "",
+          description,
+          matchedTerms,
+          imageUrl
+        };
+      }).filter(article => article.link || article.title);
+    }
+
+    function getLink(node) {
+      const rssLink = text(node, "link");
+      if (rssLink) return rssLink.trim();
+
+      const atomLinks = [...node.querySelectorAll("link")];
+      const alternate = atomLinks.find(link => !link.getAttribute("rel") || link.getAttribute("rel") === "alternate");
+      return alternate?.getAttribute("href") || atomLinks[0]?.getAttribute("href") || "";
+    }
+
+    function getImageUrl(node, descriptionHtml) {
+      const mediaThumb = node.querySelector("media\\:thumbnail, thumbnail")?.getAttribute("url");
+      const mediaContent = node.querySelector("media\\:content, content")?.getAttribute("url");
+      const enclosure = node.querySelector("enclosure")?.getAttribute("url");
+      const htmlImg = String(descriptionHtml || "").match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
+      return mediaThumb || mediaContent || enclosure || htmlImg || "";
+    }
+
+    function text(node, selector) {
+      return node.querySelector(selector)?.textContent?.trim() || "";
+    }
+
+    function getMatchedTerms(haystack) {
+      const hay = String(haystack || "").toLowerCase();
+      const active = parseActiveTerms();
+      if (active.exclude.some(term => hay.includes(term.value))) return [];
+      return active.include.filter(term => hay.includes(term.value)).map(term => term.original);
+    }
+
+    function parseActiveTerms() {
+      const include = [];
+      const exclude = [];
+
+      for (const item of state.terms.filter(term => term.enabled)) {
+        const raw = String(item.term || "").trim();
+        if (!raw) continue;
+        const excluded = raw.startsWith("-");
+        const cleaned = raw.replace(/^-/, "").replace(/^"|"$/g, "").toLowerCase();
+        if (!cleaned) continue;
+        (excluded ? exclude : include).push({ original: raw, value: cleaned });
+      }
+
+      return { include, exclude };
+    }
+
+    function dedupeArticles(articles) {
+      const seen = new Set();
+      const output = [];
+
+      for (const article of articles) {
+        const key = canonicalKey(article);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        output.push({ ...article, id: stableId(key) });
+      }
+
+      return output;
+    }
+
+    function canonicalKey(article) {
+      if (article.link) return article.link.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase();
+      if (article.id) return article.id;
+      return `${article.title}:${article.sourceName}`.toLowerCase();
+    }
+
+    function renderAll() {
+      renderDashboard();
+      renderSaved();
+      renderHidden();
+      renderAdmin();
+      renderStatus();
+    }
+
+    function renderDashboard() {
+      const articles = filteredArticles(state.articles).filter(article => !state.articleState.hidden[article.id]);
+      els.articles.innerHTML = articles.length ? articles.map(article => articleCard(article)).join("") : emptyHtml("No signals in this view.", "Try refreshing, changing filters, or enabling more terms.");
+      bindArticleButtons(els.articles);
+    }
+
+    function filteredArticles(input) {
+      const query = els.searchInput.value.trim().toLowerCase();
+      const source = els.sourceFilter.value;
+      const term = els.termFilter.value;
+      const showAll = els.showAllToggle.checked;
+
+      let list = [...input];
+      if (!showAll) list = list.filter(article => article.matchedTerms.length);
+      if (query) list = list.filter(article => [article.title, article.description, article.sourceName, article.link].join(" ").toLowerCase().includes(query));
+      if (source) list = list.filter(article => article.sourceName === source);
+      if (term) list = list.filter(article => article.matchedTerms.includes(term));
+      list.sort((a, b) => els.sortMode.value === "oldest" ? toTime(a.publishedAt) - toTime(b.publishedAt) : toTime(b.publishedAt) - toTime(a.publishedAt));
+      return list;
+    }
+
+    function renderSaved() {
+      const saved = Object.values(state.articleState.saved).sort((a, b) => toTime(b.savedAt || b.publishedAt) - toTime(a.savedAt || a.publishedAt));
+      els.savedList.innerHTML = saved.length ? saved.map(article => articleCard(article, "saved")).join("") : emptyHtml("No saved signals yet.", "Save useful articles from the Dashboard.");
+      bindArticleButtons(els.savedList);
+    }
+
+    function renderHidden() {
+      const hidden = Object.values(state.articleState.hidden).sort((a, b) => toTime(b.hiddenAt || b.publishedAt) - toTime(a.hiddenAt || a.publishedAt));
+      els.hiddenList.innerHTML = hidden.length ? hidden.map(article => articleCard(article, "hidden")).join("") : emptyHtml("No hidden static.", "Hide low-value articles from the Dashboard.");
+      bindArticleButtons(els.hiddenList);
+    }
+
+    function articleCard(article, mode = "dashboard") {
+      const saved = Boolean(state.articleState.saved[article.id]);
+      const hidden = Boolean(state.articleState.hidden[article.id]);
+      const thumb = article.imageUrl
+        ? `<img class="thumb" src="${escapeAttr(article.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+        : `<div class="thumb">RSS</div>`;
+
+      return `
+        <article class="article panel">
+          ${thumb}
+          <div>
+            <h3>${escapeHtml(article.title)}</h3>
+            <div class="meta">
+              <span>${escapeHtml(article.sourceName)}</span>
+              <span>•</span>
+              <span>${article.publishedAt ? formatDate(article.publishedAt) : "Undated"}</span>
+            </div>
+            <p class="desc">${escapeHtml(truncate(article.description || "No description supplied by this feed.", 170))}</p>
+            <div class="terms">${article.matchedTerms.length ? article.matchedTerms.map(term => `<span class="pill term">${escapeHtml(term)}</span>`).join("") : `<span class="pill">No term match</span>`}</div>
+            <div class="card-actions">
+              <a class="btn small primary" href="${escapeAttr(article.link)}" target="_blank" rel="noopener noreferrer" data-open="${escapeAttr(article.id)}">Open Article</a>
+              ${mode === "hidden" ? `<button class="btn small good" data-unhide="${escapeAttr(article.id)}">Unhide</button>` : `<button class="btn small" data-save="${escapeAttr(article.id)}">${saved ? "Saved" : "Save"}</button>`}
+              ${mode === "saved" ? `<button class="btn small" data-unsave="${escapeAttr(article.id)}">Unsave</button>` : ""}
+              ${mode !== "hidden" ? `<button class="btn small danger" data-hide="${escapeAttr(article.id)}">${hidden ? "Hidden" : "Hide"}</button>` : ""}
+            </div>
+          </div>
+        </article>
+      `;
+    }
+
+    function bindArticleButtons(root) {
+      root.querySelectorAll("[data-save]").forEach(button => button.addEventListener("click", () => saveArticle(button.dataset.save)));
+      root.querySelectorAll("[data-unsave]").forEach(button => button.addEventListener("click", () => unsaveArticle(button.dataset.unsave)));
+      root.querySelectorAll("[data-hide]").forEach(button => button.addEventListener("click", () => hideArticle(button.dataset.hide)));
+      root.querySelectorAll("[data-unhide]").forEach(button => button.addEventListener("click", () => unhideArticle(button.dataset.unhide)));
+      root.querySelectorAll("[data-open]").forEach(link => link.addEventListener("click", () => markRead(link.dataset.open)));
+    }
+
+    function findArticle(id) {
+      return state.articles.find(article => article.id === id) || state.articleState.saved[id] || state.articleState.hidden[id];
+    }
+
+    function saveArticle(id) {
+      const article = findArticle(id);
+      if (!article) return;
+      state.articleState.saved[id] = { ...article, savedAt: new Date().toISOString() };
+      saveArticleState();
+      toast("Signal saved.");
+      renderAll();
+    }
+
+    function unsaveArticle(id) {
+      delete state.articleState.saved[id];
+      saveArticleState();
+      renderAll();
+    }
+
+    function hideArticle(id) {
+      const article = findArticle(id);
+      if (!article) return;
+      state.articleState.hidden[id] = { ...article, hiddenAt: new Date().toISOString() };
+      saveArticleState();
+      toast("Static hidden.");
+      renderAll();
+    }
+
+    function unhideArticle(id) {
+      delete state.articleState.hidden[id];
+      saveArticleState();
+      renderAll();
+    }
+
+    function markRead(id) {
+      state.articleState.read[id] = new Date().toISOString();
+      saveArticleState();
+    }
+
+    function clearHidden() {
+      if (!Object.keys(state.articleState.hidden).length) return toast("Hidden list is already clear.");
+      if (!confirm("Clear the full hidden list?")) return;
+      state.articleState.hidden = {};
+      saveArticleState();
+      renderAll();
+    }
+
+    function saveArticleState() {
+      writeJson(STORAGE_KEYS.state, state.articleState);
+    }
+
+    function hydrateFilters() {
+      const sources = [...new Set(state.articles.map(article => article.sourceName).filter(Boolean))].sort();
+      const terms = [...new Set(state.articles.flatMap(article => article.matchedTerms).filter(Boolean))].sort();
+
+      els.sourceFilter.innerHTML = `<option value="">All sources</option>${sources.map(source => `<option>${escapeHtml(source)}</option>`).join("")}`;
+      els.termFilter.innerHTML = `<option value="">All matched terms</option>${terms.map(term => `<option>${escapeHtml(term)}</option>`).join("")}`;
+    }
+
+    function hydrateAdmin() {
+      els.cacheTtl.value = state.settings.cacheTtlMinutes;
+      els.proxyTemplate.value = state.settings.proxyTemplate;
+      els.directFetch.checked = Boolean(state.settings.directFetch);
+      els.maxPerSource.value = state.settings.maxArticlesPerSource;
+    }
+
+    function renderAdmin() {
+      els.sourceList.innerHTML = state.sources.map((source, index) => `
+        <div class="row">
+          <div>
+            <strong>${escapeHtml(source.name)}</strong>
+            <small>${escapeHtml(source.url)}</small>
+          </div>
+          <div class="card-actions">
+            <button class="btn small" data-toggle-source="${index}">${source.enabled ? "Disable" : "Enable"}</button>
+            <button class="btn small" data-test-source="${index}">Test</button>
+            <button class="btn small danger" data-delete-source="${index}">Delete</button>
+          </div>
+        </div>
+      `).join("");
+
+      els.termList.innerHTML = state.terms.map((term, index) => `
+        <div class="row">
+          <div>
+            <strong>${escapeHtml(term.term)}</strong>
+            <small>${term.enabled ? "Enabled" : "Disabled"}</small>
+          </div>
+          <div class="card-actions">
+            <button class="btn small" data-toggle-term="${index}">${term.enabled ? "Disable" : "Enable"}</button>
+            <button class="btn small danger" data-delete-term="${index}">Delete</button>
+          </div>
+        </div>
+      `).join("");
+
+      document.querySelectorAll("[data-toggle-source]").forEach(btn => btn.onclick = () => toggleSource(Number(btn.dataset.toggleSource)));
+      document.querySelectorAll("[data-delete-source]").forEach(btn => btn.onclick = () => deleteSource(Number(btn.dataset.deleteSource)));
+      document.querySelectorAll("[data-test-source]").forEach(btn => btn.onclick = () => testSource(Number(btn.dataset.testSource)));
+      document.querySelectorAll("[data-toggle-term]").forEach(btn => btn.onclick = () => toggleTerm(Number(btn.dataset.toggleTerm)));
+      document.querySelectorAll("[data-delete-term]").forEach(btn => btn.onclick = () => deleteTerm(Number(btn.dataset.deleteTerm)));
+    }
+
+    function addSource() {
+      const name = els.newSourceName.value.trim();
+      const url = els.newSourceUrl.value.trim();
+      if (!name || !url) return toast("Source name and URL are required.");
+      state.sources.push({ name, url, enabled: true });
+      writeJson(STORAGE_KEYS.sources, state.sources);
+      els.newSourceName.value = "";
+      els.newSourceUrl.value = "";
+      renderAdmin();
+    }
+
+    function toggleSource(index) {
+      state.sources[index].enabled = !state.sources[index].enabled;
+      writeJson(STORAGE_KEYS.sources, state.sources);
+      renderAdmin();
+    }
+
+    function deleteSource(index) {
+      if (!confirm(`Delete source "${state.sources[index].name}"?`)) return;
+      state.sources.splice(index, 1);
+      writeJson(STORAGE_KEYS.sources, state.sources);
+      renderAdmin();
+    }
+
+    async function testSource(index) {
+      const source = state.sources[index];
+      els.sourceStatus.innerHTML = `<span class="pill">Testing ${escapeHtml(source.name)}...</span>`;
+      const result = await fetchSource(source);
+      els.sourceStatus.innerHTML = result.ok
+        ? `<span class="pill term">${escapeHtml(source.name)} OK: ${result.articles.length} article(s)</span>`
+        : `<span class="pill bad">${escapeHtml(source.name)} failed: ${escapeHtml(result.error)}</span>`;
+    }
+
+    function addTerm() {
+      const term = els.newTerm.value.trim();
+      if (!term) return toast("Add a term first.");
+      state.terms.push({ term, enabled: true });
+      writeJson(STORAGE_KEYS.terms, state.terms);
+      els.newTerm.value = "";
+      renderAdmin();
+    }
+
+    function toggleTerm(index) {
+      state.terms[index].enabled = !state.terms[index].enabled;
+      writeJson(STORAGE_KEYS.terms, state.terms);
+      state.articles = state.articles.map(article => ({ ...article, matchedTerms: getMatchedTerms(`${article.title} ${article.description} ${article.link}`) }));
+      state.cache.articles = state.articles;
+      writeJson(STORAGE_KEYS.cache, state.cache);
+      hydrateFilters();
+      renderAll();
+    }
+
+    function deleteTerm(index) {
+      if (!confirm(`Delete term "${state.terms[index].term}"?`)) return;
+      state.terms.splice(index, 1);
+      writeJson(STORAGE_KEYS.terms, state.terms);
+      renderAll();
+    }
+
+    function saveSettings() {
+      state.settings = {
+        ...state.settings,
+        cacheTtlMinutes: Math.max(1, Number(els.cacheTtl.value || 30)),
+        proxyTemplate: els.proxyTemplate.value.trim() || DEFAULT_CONFIG.settings.proxyTemplate,
+        directFetch: els.directFetch.checked,
+        maxArticlesPerSource: Math.max(1, Number(els.maxPerSource.value || 25))
+      };
+      writeJson(STORAGE_KEYS.settings, state.settings);
+      toast("Settings saved.");
+    }
+
+    function exportConfig() {
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        sources: state.sources,
+        keyTerms: state.terms,
+        settings: state.settings,
+        articleState: state.articleState,
+        cache: state.cache
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `signal-drawer-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function importConfigFile(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => importConfigText(reader.result);
+      reader.readAsText(file);
+      event.target.value = "";
+    }
+
+    function importConfigText(raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (!confirm("Import this config and replace current Signal Drawer data?")) return;
+        state.sources = parsed.sources || parsed.config?.sources || state.sources;
+        state.terms = parsed.keyTerms || parsed.terms || parsed.config?.keyTerms || state.terms;
+        state.settings = { ...DEFAULT_CONFIG.settings, ...(parsed.settings || {}) };
+        state.articleState = parsed.articleState || state.articleState;
+        state.cache = parsed.cache || { articles: [], lastFetch: 0, errors: [] };
+        state.articles = state.cache.articles || [];
+        persistAll();
+        hydrateAdmin();
+        hydrateFilters();
+        renderAll();
+        toast("Config imported.");
+      } catch (error) {
+        toast(`Import failed: ${error.message}`);
+      }
+    }
+
+    function resetDefaults() {
+      if (!confirm("Reset sources, terms, settings, cache, and article state to seed defaults?")) return;
+      state.sources = structuredClone(DEFAULT_CONFIG.sources);
+      state.terms = structuredClone(DEFAULT_CONFIG.keyTerms);
+      state.settings = structuredClone(DEFAULT_CONFIG.settings);
+      state.cache = { articles: [], lastFetch: 0, errors: [] };
+      state.articleState = { saved: {}, hidden: {}, read: {} };
+      state.articles = [];
+      persistAll();
+      hydrateAdmin();
+      hydrateFilters();
+      applyTheme();
+      renderAll();
+      toast("Signal Drawer reset.");
+    }
+
+    function persistAll() {
+      writeJson(STORAGE_KEYS.sources, state.sources);
+      writeJson(STORAGE_KEYS.terms, state.terms);
+      writeJson(STORAGE_KEYS.settings, state.settings);
+      writeJson(STORAGE_KEYS.cache, state.cache);
+      writeJson(STORAGE_KEYS.state, state.articleState);
+    }
+
+    function renderStatus() {
+      const last = state.cache.lastFetch ? formatDate(state.cache.lastFetch) : "never";
+      const age = state.cache.lastFetch ? humanAge(Date.now() - state.cache.lastFetch) : "none";
+      els.lastUpdated.textContent = `Last updated: ${last}`;
+      els.cacheAge.textContent = `Cache age: ${age}`;
+    }
+
+    function refreshSummaryHtml(errors, fetchedCount) {
+      const ok = `<span class="pill term">${fetchedCount} fetched</span>`;
+      const bad = errors.length ? `<span class="pill bad">${errors.length} source error(s)</span>` : `<span class="pill">No source errors</span>`;
+      return `${ok} ${bad}`;
+    }
+
+    function toggleTheme() {
+      state.settings.theme = state.settings.theme === "light" ? "dark" : "light";
+      writeJson(STORAGE_KEYS.settings, state.settings);
+      applyTheme();
+    }
+
+    function applyTheme() {
+      document.documentElement.dataset.theme = state.settings.theme || "dark";
+      els.themeBtn.textContent = state.settings.theme === "light" ? "Toggle dark" : "Toggle light";
+    }
+
+    function emptyHtml(title, body) {
+      return `<div class="empty"><strong>${escapeHtml(title)}</strong><div>${escapeHtml(body)}</div></div>`;
+    }
+
+    function readJson(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return structuredClone(fallback);
+        return JSON.parse(raw);
+      } catch {
+        return structuredClone(fallback);
+      }
+    }
+
+    function writeJson(key, value) {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+
+    function stableId(value) {
+      let hash = 5381;
+      const str = String(value || "");
+      for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash) + str.charCodeAt(i);
+      return `sd_${Math.abs(hash).toString(36)}`;
+    }
+
+    function stripHtml(value) {
+      const doc = new DOMParser().parseFromString(String(value || ""), "text/html");
+      return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+    }
+
+    function truncate(value, length) {
+      const text = String(value || "");
+      return text.length > length ? `${text.slice(0, length - 1).trim()}...` : text;
+    }
+
+    function toTime(value) {
+      const time = new Date(value || 0).getTime();
+      return Number.isFinite(time) ? time : 0;
+    }
+
+    function formatDate(value) {
+      return new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(new Date(value));
+    }
+
+    function humanAge(ms) {
+      const minutes = Math.floor(ms / 60000);
+      if (minutes < 1) return "just now";
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 48) return `${hours}h ${minutes % 60}m`;
+      return `${Math.floor(hours / 24)}d`;
+    }
+
+    function toast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.add("show");
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2800);
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replaceAll("`", "&#096;");
+    }
+  </script>
+</body>
+</html>
