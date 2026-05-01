@@ -705,6 +705,14 @@
               </div>
               <button class="btn primary" id="addSourceBtn">Add source</button>
             </div>
+            <div class="card-actions" style="margin-top:12px">
+              <button class="btn small" id="exportSourcesBtn" type="button">Export sources JSON</button>
+              <label class="btn small" for="importSourcesFile">Import sources file</label>
+              <input id="importSourcesFile" type="file" accept="application/json,.json" />
+            </div>
+            <label for="importSourcesText" style="margin-top:12px">Import sources JSON</label>
+            <textarea id="importSourcesText" placeholder='Paste sources JSON: [{"name":"Example","url":"https://example.com/feed.xml","enabled":true}]'></textarea>
+            <button class="btn small primary" id="importSourcesBtn" type="button">Import pasted sources</button>
             <div id="sourceStatus" class="source-status"></div>
           </div>
 
@@ -718,6 +726,14 @@
               </div>
               <button class="btn primary" id="addTermBtn">Add term</button>
             </div>
+            <div class="card-actions" style="margin-top:12px">
+              <button class="btn small" id="exportTermsBtn" type="button">Export keywords JSON</button>
+              <label class="btn small" for="importTermsFile">Import keywords file</label>
+              <input id="importTermsFile" type="file" accept="application/json,.json" />
+            </div>
+            <label for="importTermsText" style="margin-top:12px">Import keywords JSON</label>
+            <textarea id="importTermsText" placeholder='Paste keywords JSON: [{"term":"OpenAI","enabled":true}]'></textarea>
+            <button class="btn small primary" id="importTermsBtn" type="button">Import pasted keywords</button>
           </div>
         </div>
 
@@ -777,6 +793,7 @@
         <h4>Developer notes</h4>
         <p>This is local-only. Sources, terms, cache, read/saved/hidden state, and settings are stored in <code>localStorage</code>.</p>
         <p>Feeds may fail because direct browser requests to RSS feeds often hit CORS restrictions. The default proxy is <code>https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}</code>, but it is editable in Admin.</p>
+        <p>If a source test says the response is HTML instead of RSS/Atom, the URL is probably a normal web page, a 404 page, or a site-rendered error page. Open the URL directly and look for XML beginning with <code>&lt;rss</code>, <code>&lt;feed</code>, or feed items.</p>
         <p>A private Cloudflare Worker, Netlify Function, or AWS Lambda proxy is better long-term because public proxies can be slow, unavailable, or rate-limited.</p>
         <p><code>localStorage</code> is not secure storage. Do not store secrets, private tokens, or sensitive source URLs here.</p>
         <h4>Term syntax</h4>
@@ -864,9 +881,17 @@
       newSourceName: document.getElementById("newSourceName"),
       newSourceUrl: document.getElementById("newSourceUrl"),
       addSourceBtn: document.getElementById("addSourceBtn"),
+      exportSourcesBtn: document.getElementById("exportSourcesBtn"),
+      importSourcesText: document.getElementById("importSourcesText"),
+      importSourcesBtn: document.getElementById("importSourcesBtn"),
+      importSourcesFile: document.getElementById("importSourcesFile"),
       termList: document.getElementById("termList"),
       newTerm: document.getElementById("newTerm"),
       addTermBtn: document.getElementById("addTermBtn"),
+      exportTermsBtn: document.getElementById("exportTermsBtn"),
+      importTermsText: document.getElementById("importTermsText"),
+      importTermsBtn: document.getElementById("importTermsBtn"),
+      importTermsFile: document.getElementById("importTermsFile"),
       cacheTtl: document.getElementById("cacheTtl"),
       proxyTemplate: document.getElementById("proxyTemplate"),
       directFetch: document.getElementById("directFetch"),
@@ -932,6 +957,12 @@
       els.clearHiddenBtn.addEventListener("click", clearHidden);
       els.addSourceBtn.addEventListener("click", addSource);
       els.addTermBtn.addEventListener("click", addTerm);
+      els.exportSourcesBtn.addEventListener("click", exportSources);
+      els.importSourcesBtn.addEventListener("click", () => importSourcesText(els.importSourcesText.value));
+      els.importSourcesFile.addEventListener("change", event => importJsonFile(event, importSourcesText));
+      els.exportTermsBtn.addEventListener("click", exportTerms);
+      els.importTermsBtn.addEventListener("click", () => importTermsText(els.importTermsText.value));
+      els.importTermsFile.addEventListener("change", event => importJsonFile(event, importTermsText));
       els.saveSettingsBtn.addEventListener("click", saveSettings);
       els.exportBtn.addEventListener("click", exportConfig);
       els.resetBtn.addEventListener("click", resetDefaults);
@@ -1070,6 +1101,9 @@
         diagnostic.responseLength = xmlText.length;
         diagnostic.responseSnippet = xmlText.slice(0, 420);
 
+        const feedShapeError = detectFeedShapeError(xmlText, diagnostic.contentType);
+        if (feedShapeError) throw new Error(feedShapeError);
+
         const xml = new DOMParser().parseFromString(xmlText, "text/xml");
         const parseError = xml.querySelector("parsererror");
         if (parseError) {
@@ -1079,6 +1113,9 @@
 
         diagnostic.rssItemCount = xml.querySelectorAll("item").length;
         diagnostic.atomEntryCount = xml.querySelectorAll("entry").length;
+        if (!isFeedDocument(xml, diagnostic.rssItemCount, diagnostic.atomEntryCount)) {
+          throw new Error("Response parsed as XML, but it does not look like an RSS or Atom feed.");
+        }
         const parsedAll = parseFeedXml(xml, source);
         const parsed = parsedAll.slice(0, Number(state.settings.maxArticlesPerSource || 25));
         diagnostic.parsedCount = parsedAll.length;
@@ -1182,6 +1219,23 @@
       } catch {
         return `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
       }
+    }
+
+    function detectFeedShapeError(text, contentType) {
+      const sample = String(text || "").trimStart().slice(0, 220).toLowerCase();
+      const type = String(contentType || "").toLowerCase();
+      if (type.includes("text/html") || sample.startsWith("<!doctype html") || sample.startsWith("<html")) {
+        return "Response is HTML, not RSS/Atom. Check that the source URL is a real feed URL rather than a normal web page or 404 page.";
+      }
+      if (!sample.startsWith("<")) {
+        return "Response is not XML. Check the feed URL or proxy response.";
+      }
+      return "";
+    }
+
+    function isFeedDocument(xml, rssItemCount, atomEntryCount) {
+      const rootName = xml.documentElement?.localName?.toLowerCase();
+      return rootName === "rss" || rootName === "feed" || rootName === "rdf" || rssItemCount > 0 || atomEntryCount > 0;
     }
 
     async function runWithConcurrency(items, worker, limit) {
@@ -1600,6 +1654,41 @@
       renderAdmin();
     }
 
+    function exportSources() {
+      downloadJson("signal-drawer-sources", {
+        exportedAt: new Date().toISOString(),
+        type: "signal-drawer-sources",
+        sources: state.sources
+      });
+    }
+
+    function importSourcesText(raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        const incoming = normalizeSources(Array.isArray(parsed) ? parsed : parsed.sources);
+        if (!incoming.length) throw new Error("No valid sources found.");
+        if (!confirm(`Replace current sources with ${incoming.length} imported source(s)?`)) return;
+        state.sources = incoming;
+        writeJson(STORAGE_KEYS.sources, state.sources);
+        els.importSourcesText.value = "";
+        renderAdmin();
+        toast(`Imported ${incoming.length} source(s).`);
+      } catch (error) {
+        toast(`Source import failed: ${error.message}`);
+      }
+    }
+
+    function normalizeSources(value) {
+      return (Array.isArray(value) ? value : [])
+        .filter(source => source && source.name && source.url)
+        .map(source => ({
+          name: String(source.name).trim(),
+          url: String(source.url).trim(),
+          enabled: source.enabled !== false
+        }))
+        .filter(source => source.name && source.url);
+    }
+
     async function testSource(index) {
       const source = state.sources[index];
       els.sourceStatus.innerHTML = `<span class="pill">Testing ${escapeHtml(source.name)}...</span>`;
@@ -1635,6 +1724,45 @@
       renderAll();
     }
 
+    function exportTerms() {
+      downloadJson("signal-drawer-keywords", {
+        exportedAt: new Date().toISOString(),
+        type: "signal-drawer-keywords",
+        keyTerms: state.terms
+      });
+    }
+
+    function importTermsText(raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        const incoming = normalizeTerms(Array.isArray(parsed) ? parsed : (parsed.keyTerms || parsed.terms));
+        if (!incoming.length) throw new Error("No valid keywords found.");
+        if (!confirm(`Replace current keywords with ${incoming.length} imported keyword(s)?`)) return;
+        state.terms = incoming;
+        writeJson(STORAGE_KEYS.terms, state.terms);
+        els.importTermsText.value = "";
+        state.articles = state.articles.map(article => ({ ...article, matchedTerms: getMatchedTerms(`${article.title} ${article.description} ${article.link}`) }));
+        state.cache.articles = state.articles;
+        writeJson(STORAGE_KEYS.cache, state.cache);
+        hydrateFilters();
+        renderAll();
+        toast(`Imported ${incoming.length} keyword(s).`);
+      } catch (error) {
+        toast(`Keyword import failed: ${error.message}`);
+      }
+    }
+
+    function normalizeTerms(value) {
+      return (Array.isArray(value) ? value : [])
+        .map(item => typeof item === "string" ? { term: item, enabled: true } : item)
+        .filter(item => item && item.term)
+        .map(item => ({
+          term: String(item.term).trim(),
+          enabled: item.enabled !== false
+        }))
+        .filter(item => item.term);
+    }
+
     function saveSettings() {
       state.settings = {
         ...state.settings,
@@ -1658,11 +1786,15 @@
         articleState: state.articleState,
         cache: state.cache
       };
+      downloadJson("signal-drawer", payload);
+    }
+
+    function downloadJson(name, payload) {
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `signal-drawer-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `${name}-${new Date().toISOString().slice(0,10)}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1670,10 +1802,14 @@
     }
 
     function importConfigFile(event) {
+      importJsonFile(event, importConfigText);
+    }
+
+    function importJsonFile(event, handler) {
       const file = event.target.files?.[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => importConfigText(reader.result);
+      reader.onload = () => handler(reader.result);
       reader.readAsText(file);
       event.target.value = "";
     }
