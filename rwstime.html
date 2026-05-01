@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RWS Timesheet Block Timer</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --border: rgba(255,255,255,.12);
+      --shadow: 0 25px 80px rgba(0,0,0,.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,.2), transparent 35%),
+        radial-gradient(circle at bottom right, rgba(34,197,94,.12), transparent 35%),
+        var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: min(980px, 100%);
+      background: linear-gradient(180deg, rgba(17,24,39,.96), rgba(15,23,42,.96));
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    header {
+      padding: 28px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.7rem, 4vw, 2.6rem);
+      letter-spacing: -0.04em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.45;
+    }
+
+    .total-pill {
+      background: rgba(56,189,248,.12);
+      border: 1px solid rgba(56,189,248,.35);
+      color: #e0f2fe;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    main {
+      padding: 28px;
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    .timer-card, .schedule-card {
+      background: rgba(31,41,55,.72);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 24px;
+    }
+
+    .current-label {
+      color: var(--muted);
+      font-size: .95rem;
+      margin-bottom: 8px;
+    }
+
+    .current-name {
+      font-size: clamp(1.8rem, 5vw, 3rem);
+      line-height: 1.05;
+      font-weight: 850;
+      letter-spacing: -0.05em;
+      margin-bottom: 18px;
+    }
+
+    .countdown {
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(4rem, 14vw, 8.5rem);
+      line-height: .9;
+      font-weight: 900;
+      letter-spacing: -0.07em;
+      margin: 18px 0 24px;
+      color: white;
+      text-shadow: 0 0 36px rgba(56,189,248,.25);
+    }
+
+    .progress-wrap {
+      width: 100%;
+      height: 14px;
+      background: rgba(255,255,255,.08);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      border-radius: inherit;
+      transition: width .25s linear;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 22px;
+      font-size: .95rem;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 16px;
+      padding: 13px 18px;
+      font-size: 1rem;
+      font-weight: 800;
+      cursor: pointer;
+      color: white;
+      background: var(--panel-2);
+      border: 1px solid rgba(255,255,255,.14);
+      transition: transform .12s ease, filter .12s ease, background .12s ease;
+    }
+
+    button:hover { transform: translateY(-1px); filter: brightness(1.08); }
+    button:active { transform: translateY(0); }
+
+    .primary { background: linear-gradient(135deg, #0284c7, #16a34a); }
+    .warning { background: rgba(245,158,11,.18); color: #fde68a; }
+    .danger { background: rgba(239,68,68,.18); color: #fecaca; }
+
+    .schedule-title {
+      margin: 0 0 16px;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+
+    .block-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .block {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 14px;
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 18px;
+      background: rgba(15,23,42,.55);
+    }
+
+    .block.active {
+      border-color: rgba(56,189,248,.7);
+      background: rgba(56,189,248,.12);
+      box-shadow: 0 0 0 1px rgba(56,189,248,.18) inset;
+    }
+
+    .block.done {
+      opacity: .55;
+    }
+
+    .block-name {
+      font-weight: 800;
+      margin-bottom: 2px;
+    }
+
+    .block-duration {
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    .block-status {
+      color: var(--muted);
+      font-size: .9rem;
+      white-space: nowrap;
+    }
+
+    .settings {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+    }
+
+    label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: .95rem;
+    }
+
+    input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: .85rem;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    .complete {
+      color: #bbf7d0;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>RWS Timesheet Block Timer</h1>
+        <p class="subtitle">Start once, then change your portal status each time the sound cue fires and the next block begins.</p>
+      </div>
+      <div class="total-pill" id="totalTime">Total: 2h 45m</div>
+    </header>
+
+    <main>
+      <section class="timer-card">
+        <div class="current-label" id="currentLabel">Ready</div>
+        <div class="current-name" id="currentName">Meetings</div>
+        <div class="countdown" id="countdown">60:00</div>
+
+        <div class="progress-wrap" aria-label="Current block progress">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+
+        <div class="meta-row">
+          <span id="blockCounter">Block 1 of 4</span>
+          <span id="remainingTotal">Remaining total: 2h 45m</span>
+        </div>
+
+        <div class="controls">
+          <button class="primary" id="startPauseBtn">Start</button>
+          <button class="warning" id="skipBtn">Skip Block</button>
+          <button class="danger" id="resetBtn">Reset</button>
+          <button id="testSoundBtn">Test Sound</button>
+        </div>
+      </section>
+
+      <aside class="schedule-card">
+        <h2 class="schedule-title">Schedule</h2>
+        <div class="block-list" id="blockList"></div>
+
+        <div class="settings">
+          <label>
+            <input type="checkbox" id="repeatCheckbox" />
+            Repeat from the beginning after the final block
+          </label>
+          <label>
+            <input type="checkbox" id="voiceCheckbox" checked />
+            Speak next block name after the cue
+          </label>
+          <p class="hint">Tip: keep this browser tab open. Most browsers require you to press Start before audio is allowed.</p>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    const blocks = [
+      { name: "Meetings", minutes: 60 },
+      { name: "Wellbeing", minutes: 22.5 },
+      { name: "Coaching", minutes: 37.5 },
+      { name: "FB Learning / Non FB Learning", minutes: 45 }
+    ];
+
+    let currentIndex = 0;
+    let remainingSeconds = Math.round(blocks[0].minutes * 60);
+    let timerId = null;
+    let running = false;
+    let audioContext = null;
+
+    const currentLabel = document.getElementById("currentLabel");
+    const currentName = document.getElementById("currentName");
+    const countdown = document.getElementById("countdown");
+    const progressBar = document.getElementById("progressBar");
+    const blockCounter = document.getElementById("blockCounter");
+    const remainingTotal = document.getElementById("remainingTotal");
+    const startPauseBtn = document.getElementById("startPauseBtn");
+    const skipBtn = document.getElementById("skipBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const testSoundBtn = document.getElementById("testSoundBtn");
+    const blockList = document.getElementById("blockList");
+    const totalTime = document.getElementById("totalTime");
+    const repeatCheckbox = document.getElementById("repeatCheckbox");
+    const voiceCheckbox = document.getElementById("voiceCheckbox");
+
+    function formatTime(totalSeconds) {
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    function formatDuration(minutes) {
+      const totalMinutes = Math.round(minutes);
+      const hours = Math.floor(totalMinutes / 60);
+      const mins = totalMinutes % 60;
+      if (hours && mins) return `${hours}h ${mins}m`;
+      if (hours) return `${hours}h`;
+      return `${mins}m`;
+    }
+
+    function getTotalRemainingSeconds() {
+      let total = remainingSeconds;
+      for (let i = currentIndex + 1; i < blocks.length; i++) {
+        total += Math.round(blocks[i].minutes * 60);
+      }
+      return total;
+    }
+
+    function renderSchedule() {
+      blockList.innerHTML = "";
+      blocks.forEach((block, index) => {
+        const el = document.createElement("div");
+        el.className = "block";
+        if (index === currentIndex && currentIndex < blocks.length) el.classList.add("active");
+        if (index < currentIndex) el.classList.add("done");
+
+        const status = index < currentIndex ? "Done" : index === currentIndex ? "Current" : "Upcoming";
+
+        el.innerHTML = `
+          <div>
+            <div class="block-name">${block.name}</div>
+            <div class="block-duration">${formatDuration(block.minutes)} (${block.minutes * 60} seconds)</div>
+          </div>
+          <div class="block-status">${status}</div>
+        `;
+        blockList.appendChild(el);
+      });
+    }
+
+    function render() {
+      const isComplete = currentIndex >= blocks.length;
+
+      if (isComplete) {
+        currentLabel.textContent = "Complete";
+        currentName.textContent = "All blocks finished";
+        currentName.classList.add("complete");
+        countdown.textContent = "00:00";
+        progressBar.style.width = "100%";
+        blockCounter.textContent = `Block ${blocks.length} of ${blocks.length}`;
+        remainingTotal.textContent = "Remaining total: 0m";
+        startPauseBtn.textContent = "Start";
+        renderSchedule();
+        return;
+      }
+
+      const block = blocks[currentIndex];
+      const blockSeconds = Math.round(block.minutes * 60);
+      const elapsed = blockSeconds - remainingSeconds;
+      const progress = Math.max(0, Math.min(100, (elapsed / blockSeconds) * 100));
+
+      currentName.classList.remove("complete");
+      currentLabel.textContent = running ? "Current block" : "Paused / ready";
+      currentName.textContent = block.name;
+      countdown.textContent = formatTime(remainingSeconds);
+      progressBar.style.width = `${progress}%`;
+      blockCounter.textContent = `Block ${currentIndex + 1} of ${blocks.length}`;
+      remainingTotal.textContent = `Remaining total: ${formatDuration(getTotalRemainingSeconds() / 60)}`;
+      startPauseBtn.textContent = running ? "Pause" : "Start";
+      totalTime.textContent = `Total: ${formatDuration(blocks.reduce((sum, b) => sum + b.minutes, 0))}`;
+      renderSchedule();
+    }
+
+    function ensureAudioContext() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioContext.state === "suspended") {
+        audioContext.resume();
+      }
+    }
+
+    function beep(frequency, startTime, duration) {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, startTime);
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.35, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + duration + 0.04);
+    }
+
+    function playCue() {
+      ensureAudioContext();
+      const now = audioContext.currentTime;
+      beep(880, now, 0.18);
+      beep(1175, now + 0.22, 0.18);
+      beep(1568, now + 0.44, 0.32);
+    }
+
+    function speak(text) {
+      if (!voiceCheckbox.checked || !("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function startTimer() {
+      if (running || currentIndex >= blocks.length) return;
+      ensureAudioContext();
+      running = true;
+      render();
+      timerId = setInterval(() => {
+        remainingSeconds--;
+        if (remainingSeconds <= 0) {
+          advanceBlock();
+        } else {
+          render();
+        }
+      }, 1000);
+    }
+
+    function pauseTimer() {
+      running = false;
+      clearInterval(timerId);
+      timerId = null;
+      render();
+    }
+
+    function advanceBlock() {
+      playCue();
+      currentIndex++;
+
+      if (currentIndex >= blocks.length) {
+        clearInterval(timerId);
+        timerId = null;
+        running = false;
+
+        if (repeatCheckbox.checked) {
+          currentIndex = 0;
+          remainingSeconds = Math.round(blocks[0].minutes * 60);
+          speak(`Starting ${blocks[0].name}`);
+          startTimer();
+          return;
+        }
+
+        speak("All timesheet blocks are complete.");
+        render();
+        return;
+      }
+
+      remainingSeconds = Math.round(blocks[currentIndex].minutes * 60);
+      speak(`Switch to ${blocks[currentIndex].name}`);
+      render();
+    }
+
+    function resetTimer() {
+      pauseTimer();
+      currentIndex = 0;
+      remainingSeconds = Math.round(blocks[0].minutes * 60);
+      window.speechSynthesis?.cancel?.();
+      render();
+    }
+
+    function skipBlock() {
+      if (currentIndex >= blocks.length) return;
+      advanceBlock();
+    }
+
+    startPauseBtn.addEventListener("click", () => {
+      running ? pauseTimer() : startTimer();
+    });
+
+    skipBtn.addEventListener("click", skipBlock);
+    resetBtn.addEventListener("click", resetTimer);
+    testSoundBtn.addEventListener("click", () => {
+      playCue();
+      speak("Sound test. Next block cue enabled.");
+    });
+
+    render();
+  </script>
+</body>
+</html>
+
