@@ -515,7 +515,7 @@
 
     .video-wrap {
       position: relative;
-      width: 100%;
+      width: min(100%, 560px);
       aspect-ratio: 16 / 9;
       border-radius: 22px;
       overflow: hidden;
@@ -934,13 +934,11 @@
 
     function renderYouTube(url, text) {
       const id = getYouTubeId(url);
+      if (!id) return renderGenericUrl(url, text);
       const note = stripUrl(text, url).trim();
-      const embed = id
-        ? `<div class="video-wrap"><iframe src="https://www.youtube.com/embed/${escapeAttr(id)}" title="YouTube video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>`
-        : renderGenericUrl(url, text);
       return `
         ${note ? `<div class="content" style="margin-bottom:12px">${renderMarkdown(note)}</div>` : ""}
-        ${embed}
+        <div class="video-wrap"><iframe src="${escapeAttr(buildYouTubeEmbedUrl(id))}" title="YouTube video" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>
       `;
     }
 
@@ -1105,7 +1103,7 @@
 
     function extractFirstUrl(text) {
       const match = String(text || "").match(/https?:\/\/[^\s<>)"']+/i);
-      return match ? match[0] : null;
+      return match ? match[0].replace(/[.,!?;:]+$/, "") : null;
     }
 
     function stripUrl(text, url) {
@@ -1115,7 +1113,7 @@
     function isYouTubeUrl(url) {
       try {
         const host = new URL(url).hostname.replace(/^www\./, "");
-        return host === "youtube.com" || host === "youtu.be" || host === "m.youtube.com";
+        return host === "youtube.com" || host === "youtu.be" || host === "m.youtube.com" || host === "music.youtube.com" || host === "youtube-nocookie.com";
       } catch { return false; }
     }
 
@@ -1123,14 +1121,30 @@
       try {
         const u = new URL(url);
         const host = u.hostname.replace(/^www\./, "");
-        if (host === "youtu.be") return u.pathname.slice(1).split("/")[0];
-        if (u.searchParams.get("v")) return u.searchParams.get("v");
-        const embed = u.pathname.match(/\/embed\/([^/?]+)/);
-        if (embed) return embed[1];
-        const shorts = u.pathname.match(/\/shorts\/([^/?]+)/);
-        if (shorts) return shorts[1];
+        let id = null;
+        if (host === "youtu.be") id = u.pathname.slice(1).split("/")[0];
+        else if (u.searchParams.get("v")) id = u.searchParams.get("v");
+        else {
+          const pathMatch = u.pathname.match(/\/(?:embed|shorts|live|v)\/([^/?]+)/);
+          if (pathMatch) id = pathMatch[1];
+        }
+        return normalizeYouTubeId(id);
       } catch {}
       return null;
+    }
+
+    function normalizeYouTubeId(id) {
+      const match = String(id || "").match(/^[A-Za-z0-9_-]{6,}$/);
+      return match ? match[0] : null;
+    }
+
+    function buildYouTubeEmbedUrl(id) {
+      const params = new URLSearchParams({
+        rel: "0",
+        modestbranding: "1",
+        playsinline: "1"
+      });
+      return `https://www.youtube-nocookie.com/embed/${id}?${params.toString()}`;
     }
 
     function isXPostUrl(url) {
@@ -1241,4 +1255,3 @@
   </script>
 </body>
 </html>
-
