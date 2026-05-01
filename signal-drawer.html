@@ -427,6 +427,89 @@
       gap: 7px;
     }
 
+    .debug-panel {
+      margin: 0 0 16px;
+      overflow: hidden;
+    }
+
+    .debug-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .debug-head h3 {
+      margin: 0;
+      letter-spacing: -.03em;
+    }
+
+    .debug-body {
+      display: none;
+      padding: 14px 16px 16px;
+    }
+
+    .debug-panel.open .debug-body { display: block; }
+
+    .debug-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .debug-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .debug-item {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px;
+      background: rgba(255,255,255,.045);
+    }
+
+    .debug-item.ok { border-color: rgba(52,211,153,.28); }
+    .debug-item.fail { border-color: rgba(251,113,133,.34); }
+
+    .debug-item h4 {
+      margin: 0 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .debug-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .debug-grid code,
+    .debug-item pre {
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .debug-item pre {
+      max-height: 180px;
+      overflow: auto;
+      margin: 10px 0 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--muted);
+      background: rgba(0,0,0,.2);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
     .help {
       padding: 20px;
       color: var(--muted);
@@ -470,6 +553,7 @@
       .control-grid { grid-template-columns: 1fr 1fr; }
       .admin-grid { grid-template-columns: 1fr; }
       .form-grid { grid-template-columns: 1fr; }
+      .debug-grid { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 560px) {
@@ -528,7 +612,21 @@
           <span id="lastUpdated">Last updated: never</span>
           <span id="cacheAge">Cache age: none</span>
           <span id="refreshSummary"></span>
+          <button class="btn small" id="debugToggleBtn">Show Debug</button>
         </div>
+      </div>
+      <div class="debug-panel panel" id="debugPanel">
+        <div class="debug-head">
+          <div>
+            <h3>Debug layer</h3>
+            <div class="meta">Per-source fetch, proxy, parse, and cache diagnostics from the last refresh.</div>
+          </div>
+          <div class="card-actions">
+            <button class="btn small" id="copyDebugBtn">Copy diagnostics</button>
+            <button class="btn small danger" id="clearDebugBtn">Clear</button>
+          </div>
+        </div>
+        <div class="debug-body" id="debugBody"></div>
       </div>
       <div id="articles" class="grid"></div>
     </section>
@@ -699,6 +797,11 @@
       sortMode: document.getElementById("sortMode"),
       showAllToggle: document.getElementById("showAllToggle"),
       refreshBtn: document.getElementById("refreshBtn"),
+      debugToggleBtn: document.getElementById("debugToggleBtn"),
+      debugPanel: document.getElementById("debugPanel"),
+      debugBody: document.getElementById("debugBody"),
+      copyDebugBtn: document.getElementById("copyDebugBtn"),
+      clearDebugBtn: document.getElementById("clearDebugBtn"),
       lastUpdated: document.getElementById("lastUpdated"),
       cacheAge: document.getElementById("cacheAge"),
       refreshSummary: document.getElementById("refreshSummary"),
@@ -731,7 +834,7 @@
       sources: readJson(STORAGE_KEYS.sources, DEFAULT_CONFIG.sources),
       terms: readJson(STORAGE_KEYS.terms, DEFAULT_CONFIG.keyTerms),
       settings: readJson(STORAGE_KEYS.settings, DEFAULT_CONFIG.settings),
-      cache: readJson(STORAGE_KEYS.cache, { articles: [], lastFetch: 0, errors: [] }),
+      cache: readJson(STORAGE_KEYS.cache, { articles: [], lastFetch: 0, errors: [], diagnostics: null }),
       articleState: readJson(STORAGE_KEYS.state, { saved: {}, hidden: {}, read: {} }),
       articles: []
     };
@@ -759,6 +862,9 @@
       });
 
       els.refreshBtn.addEventListener("click", () => refreshFeeds(true));
+      els.debugToggleBtn.addEventListener("click", toggleDebugPanel);
+      els.copyDebugBtn.addEventListener("click", copyDebugDiagnostics);
+      els.clearDebugBtn.addEventListener("click", clearDebugDiagnostics);
       els.themeBtn.addEventListener("click", toggleTheme);
       els.clearHiddenBtn.addEventListener("click", clearHidden);
       els.addSourceBtn.addEventListener("click", addSource);
@@ -801,6 +907,22 @@
         return;
       }
 
+      const startedAt = Date.now();
+      const diagnostics = {
+        startedAt: new Date(startedAt).toISOString(),
+        completedAt: "",
+        durationMs: 0,
+        fetchMode: state.settings.directFetch ? "direct" : "proxy",
+        proxyTemplate: state.settings.proxyTemplate,
+        ttlMinutes: state.settings.cacheTtlMinutes,
+        maxArticlesPerSource: state.settings.maxArticlesPerSource,
+        enabledSourceCount: enabledSources.length,
+        fetchedBeforeDedupe: 0,
+        fetchedAfterDedupe: 0,
+        errors: [],
+        sources: []
+      };
+
       els.refreshBtn.disabled = true;
       els.refreshBtn.textContent = "Refreshing...";
       els.refreshSummary.innerHTML = `<span class="pill">Listening to ${enabledSources.length} source(s)</span>`;
@@ -810,20 +932,32 @@
       const errors = [];
 
       for (const result of results) {
+        diagnostics.sources.push(result.diagnostic);
         if (result.ok) articles.push(...result.articles);
         else errors.push({ sourceName: result.source.name, sourceUrl: result.source.url, message: result.error });
       }
 
+      diagnostics.completedAt = new Date().toISOString();
+      diagnostics.durationMs = Date.now() - startedAt;
+      diagnostics.fetchedBeforeDedupe = articles.length;
+      diagnostics.errors = errors;
+
       if (articles.length) {
         const normalized = dedupeArticles(articles).sort((a, b) => toTime(b.publishedAt) - toTime(a.publishedAt));
-        state.cache = { articles: normalized, lastFetch: Date.now(), errors };
+        diagnostics.fetchedAfterDedupe = normalized.length;
+        state.cache = { articles: normalized, lastFetch: Date.now(), errors, diagnostics };
         state.articles = normalized;
         writeJson(STORAGE_KEYS.cache, state.cache);
         toast(`Fetched ${normalized.length} article(s).`);
       } else if (state.cache.articles?.length) {
+        diagnostics.fetchedAfterDedupe = state.cache.articles.length;
+        state.cache = { ...state.cache, errors, diagnostics };
+        writeJson(STORAGE_KEYS.cache, state.cache);
         state.articles = state.cache.articles;
         toast("Refresh failed. Keeping cached articles.");
       } else {
+        state.cache = { articles: [], lastFetch: 0, errors, diagnostics };
+        writeJson(STORAGE_KEYS.cache, state.cache);
         state.articles = [];
         toast("No articles fetched. Check source errors.");
       }
@@ -838,23 +972,81 @@
     }
 
     async function fetchSource(source) {
-      try {
-        const xmlText = await fetchFeed(source.url);
-        const xml = new DOMParser().parseFromString(xmlText, "text/xml");
-        if (xml.querySelector("parsererror")) throw new Error("Feed XML could not be parsed.");
+      const startedAt = performance.now();
+      const diagnostic = {
+        sourceName: source.name,
+        sourceUrl: source.url,
+        enabled: source.enabled,
+        ok: false,
+        fetchMode: state.settings.directFetch ? "direct" : "proxy",
+        requestUrl: state.settings.directFetch ? source.url : buildProxyUrl(source.url),
+        httpStatus: null,
+        contentType: "",
+        responseLength: 0,
+        responseSnippet: "",
+        rssItemCount: 0,
+        atomEntryCount: 0,
+        parsedCount: 0,
+        returnedCount: 0,
+        matchedCount: 0,
+        durationMs: 0,
+        error: ""
+      };
 
-        const parsed = parseFeedXml(xml, source).slice(0, Number(state.settings.maxArticlesPerSource || 25));
-        return { ok: true, source, articles: parsed };
+      try {
+        const fetchResult = await fetchFeed(source.url);
+        const xmlText = fetchResult.text;
+        diagnostic.httpStatus = fetchResult.status;
+        diagnostic.contentType = fetchResult.contentType;
+        diagnostic.responseLength = xmlText.length;
+        diagnostic.responseSnippet = xmlText.slice(0, 420);
+
+        const xml = new DOMParser().parseFromString(xmlText, "text/xml");
+        const parseError = xml.querySelector("parsererror");
+        if (parseError) {
+          diagnostic.responseSnippet = `${diagnostic.responseSnippet}\n\nParser error: ${parseError.textContent.trim().slice(0, 300)}`;
+          throw new Error("Feed XML could not be parsed.");
+        }
+
+        diagnostic.rssItemCount = xml.querySelectorAll("item").length;
+        diagnostic.atomEntryCount = xml.querySelectorAll("entry").length;
+        const parsedAll = parseFeedXml(xml, source);
+        const parsed = parsedAll.slice(0, Number(state.settings.maxArticlesPerSource || 25));
+        diagnostic.parsedCount = parsedAll.length;
+        diagnostic.returnedCount = parsed.length;
+        diagnostic.matchedCount = parsed.filter(article => article.matchedTerms.length).length;
+        diagnostic.ok = true;
+        diagnostic.durationMs = Math.round(performance.now() - startedAt);
+        return { ok: true, source, articles: parsed, diagnostic };
       } catch (error) {
-        return { ok: false, source, error: error.message || String(error), articles: [] };
+        if (error.httpStatus) diagnostic.httpStatus = error.httpStatus;
+        if (error.contentType) diagnostic.contentType = error.contentType;
+        if (error.responseText) {
+          diagnostic.responseLength = error.responseText.length;
+          diagnostic.responseSnippet = error.responseText.slice(0, 420);
+        }
+        diagnostic.error = error.message || String(error);
+        diagnostic.durationMs = Math.round(performance.now() - startedAt);
+        return { ok: false, source, error: diagnostic.error, articles: [], diagnostic };
       }
     }
 
     async function fetchFeed(feedUrl) {
       const url = state.settings.directFetch ? feedUrl : buildProxyUrl(feedUrl);
       const response = await fetch(url, { headers: { Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*" } });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.text();
+      const text = await response.text();
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.httpStatus = response.status;
+        error.contentType = response.headers.get("content-type") || "";
+        error.responseText = text;
+        throw error;
+      }
+      return {
+        text,
+        status: response.status,
+        contentType: response.headers.get("content-type") || ""
+      };
     }
 
     function buildProxyUrl(feedUrl) {
@@ -964,6 +1156,7 @@
       renderSaved();
       renderHidden();
       renderAdmin();
+      renderDebug();
       renderStatus();
     }
 
@@ -971,6 +1164,54 @@
       const articles = filteredArticles(state.articles).filter(article => !state.articleState.hidden[article.id]);
       els.articles.innerHTML = articles.length ? articles.map(article => articleCard(article)).join("") : emptyHtml("No signals in this view.", "Try refreshing, changing filters, or enabling more terms.");
       bindArticleButtons(els.articles);
+    }
+
+    function renderDebug() {
+      const diagnostics = state.cache.diagnostics;
+      if (!diagnostics) {
+        els.debugBody.innerHTML = emptyHtml("No diagnostics yet.", "Run Refresh to capture per-source fetch and parse details.");
+        return;
+      }
+
+      const okCount = diagnostics.sources.filter(source => source.ok).length;
+      const failCount = diagnostics.sources.length - okCount;
+      els.debugBody.innerHTML = `
+        <div class="debug-summary">
+          <span class="pill term">${okCount} source(s) OK</span>
+          <span class="pill ${failCount ? "bad" : ""}">${failCount} failed</span>
+          <span class="pill">${escapeHtml(diagnostics.fetchMode)} mode</span>
+          <span class="pill">${diagnostics.durationMs}ms total</span>
+          <span class="pill">${diagnostics.fetchedBeforeDedupe} before dedupe</span>
+          <span class="pill">${diagnostics.fetchedAfterDedupe} after dedupe</span>
+        </div>
+        <div class="meta">Started ${formatDate(diagnostics.startedAt)}. Proxy template: <code>${escapeHtml(diagnostics.proxyTemplate || "none")}</code></div>
+        <div class="debug-list">
+          ${diagnostics.sources.map(debugSourceHtml).join("")}
+        </div>
+      `;
+    }
+
+    function debugSourceHtml(source) {
+      return `
+        <div class="debug-item ${source.ok ? "ok" : "fail"}">
+          <h4>
+            <span>${escapeHtml(source.sourceName)}</span>
+            <span class="pill ${source.ok ? "term" : "bad"}">${source.ok ? "OK" : "FAILED"}</span>
+          </h4>
+          <div class="debug-grid">
+            <div><strong>Feed URL</strong><br><code>${escapeHtml(source.sourceUrl)}</code></div>
+            <div><strong>Request URL</strong><br><code>${escapeHtml(source.requestUrl)}</code></div>
+            <div><strong>Mode</strong><br>${escapeHtml(source.fetchMode)}</div>
+            <div><strong>HTTP / content type</strong><br>${escapeHtml(source.httpStatus || "none")} / ${escapeHtml(source.contentType || "unknown")}</div>
+            <div><strong>Response length</strong><br>${Number(source.responseLength || 0).toLocaleString()} chars</div>
+            <div><strong>Duration</strong><br>${escapeHtml(source.durationMs)}ms</div>
+            <div><strong>Raw feed nodes</strong><br>${escapeHtml(source.rssItemCount)} RSS item(s), ${escapeHtml(source.atomEntryCount)} Atom entry(s)</div>
+            <div><strong>Parsed / returned / matched</strong><br>${escapeHtml(source.parsedCount)} / ${escapeHtml(source.returnedCount)} / ${escapeHtml(source.matchedCount)}</div>
+            ${source.error ? `<div><strong>Error</strong><br><span class="pill bad">${escapeHtml(source.error)}</span></div>` : ""}
+          </div>
+          ${source.responseSnippet ? `<pre>${escapeHtml(source.responseSnippet)}</pre>` : ""}
+        </div>
+      `;
     }
 
     function filteredArticles(input) {
@@ -1168,8 +1409,8 @@
       els.sourceStatus.innerHTML = `<span class="pill">Testing ${escapeHtml(source.name)}...</span>`;
       const result = await fetchSource(source);
       els.sourceStatus.innerHTML = result.ok
-        ? `<span class="pill term">${escapeHtml(source.name)} OK: ${result.articles.length} article(s)</span>`
-        : `<span class="pill bad">${escapeHtml(source.name)} failed: ${escapeHtml(result.error)}</span>`;
+        ? `<span class="pill term">${escapeHtml(source.name)} OK: ${result.articles.length} article(s)</span><div class="debug-list">${debugSourceHtml(result.diagnostic)}</div>`
+        : `<span class="pill bad">${escapeHtml(source.name)} failed: ${escapeHtml(result.error)}</span><div class="debug-list">${debugSourceHtml(result.diagnostic)}</div>`;
     }
 
     function addTerm() {
@@ -1294,6 +1535,35 @@
       const ok = `<span class="pill term">${fetchedCount} fetched</span>`;
       const bad = errors.length ? `<span class="pill bad">${errors.length} source error(s)</span>` : `<span class="pill">No source errors</span>`;
       return `${ok} ${bad}`;
+    }
+
+    function toggleDebugPanel() {
+      els.debugPanel.classList.toggle("open");
+      els.debugToggleBtn.textContent = els.debugPanel.classList.contains("open") ? "Hide Debug" : "Show Debug";
+      renderDebug();
+    }
+
+    async function copyDebugDiagnostics() {
+      const diagnostics = state.cache.diagnostics;
+      if (!diagnostics) return toast("No diagnostics to copy yet.");
+      const text = JSON.stringify(diagnostics, null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("Diagnostics copied.");
+      } catch {
+        els.importText.value = text;
+        switchTab("admin");
+        toast("Clipboard blocked. Diagnostics copied into Import JSON box.");
+      }
+    }
+
+    function clearDebugDiagnostics() {
+      if (!state.cache.diagnostics) return toast("Debug layer is already clear.");
+      if (!confirm("Clear stored debug diagnostics?")) return;
+      state.cache = { ...state.cache, diagnostics: null };
+      writeJson(STORAGE_KEYS.cache, state.cache);
+      renderDebug();
+      toast("Diagnostics cleared.");
     }
 
     function toggleTheme() {
