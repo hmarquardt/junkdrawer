@@ -1,0 +1,1656 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crypto Mood Ring</title>
+  <script src="https://cdn.jsdelivr.net/npm/dexie@latest/dist/dexie.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07100f;
+      --bg2: #111827;
+      --panel: rgba(16, 28, 35, 0.82);
+      --panel-strong: rgba(21, 35, 44, 0.96);
+      --text: #e9fff8;
+      --muted: #92aaa7;
+      --line: rgba(159, 255, 222, 0.16);
+      --green: #37f29a;
+      --red: #ff6277;
+      --amber: #ffc35a;
+      --cyan: #64e7ff;
+      --violet: #b997ff;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+      --radius: 22px;
+      --sans: "Avenir Next", "Segoe UI", Verdana, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #f0faf5;
+      --bg2: #dfeff0;
+      --panel: rgba(255, 255, 255, 0.82);
+      --panel-strong: rgba(255, 255, 255, 0.96);
+      --text: #10211f;
+      --muted: #526b68;
+      --line: rgba(20, 76, 69, 0.17);
+      --shadow: 0 24px 70px rgba(42, 91, 92, 0.18);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% 5%, rgba(55, 242, 154, 0.22), transparent 28rem),
+        radial-gradient(circle at 92% 0%, rgba(100, 231, 255, 0.18), transparent 24rem),
+        radial-gradient(circle at 72% 80%, rgba(255, 195, 90, 0.12), transparent 24rem),
+        linear-gradient(135deg, var(--bg), var(--bg2));
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.45;
+    }
+
+    button, input, textarea, select { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.68rem 0.92rem;
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--text);
+      cursor: pointer;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--cyan); }
+    button:disabled { opacity: 0.52; cursor: not-allowed; }
+    .primary { background: linear-gradient(135deg, var(--green), #a6ffce); color: #032113; border-color: transparent; font-weight: 900; }
+    .amber { background: linear-gradient(135deg, var(--amber), #ffe0a0); color: #251600; border-color: transparent; font-weight: 900; }
+    .danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+    .ghost { background: transparent; }
+    .tiny { padding: 0.4rem 0.65rem; font-size: 0.82rem; }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.7rem 0.8rem;
+      background: rgba(3, 12, 15, 0.32);
+      color: var(--text);
+      outline: none;
+    }
+    textarea { min-height: 8.5rem; resize: vertical; font-family: var(--mono); font-size: 0.84rem; }
+    label { display: grid; gap: 0.34rem; color: var(--muted); font-size: 0.9rem; }
+    input:focus, textarea:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
+    code, pre { font-family: var(--mono); }
+    pre {
+      overflow: auto;
+      max-height: 28rem;
+      margin: 0;
+      padding: 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(1, 8, 10, 0.54);
+      font-size: 0.82rem;
+    }
+
+    .shell { width: min(1260px, calc(100% - 28px)); margin: 0 auto; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg) 86%, transparent);
+      backdrop-filter: blur(18px);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+    .brand { display: flex; gap: 0.9rem; align-items: center; }
+    .logo {
+      width: 3.2rem;
+      height: 3.2rem;
+      display: grid;
+      place-items: center;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: conic-gradient(from 210deg, var(--green), var(--cyan), var(--amber), var(--green));
+      box-shadow: 0 0 34px rgba(55, 242, 154, 0.18);
+      color: #02110b;
+      font-size: 1.5rem;
+    }
+    h1 { margin: 0; font-size: clamp(1.55rem, 3vw, 2.45rem); letter-spacing: -0.045em; }
+    .subtitle { margin: 0.12rem 0 0; color: var(--muted); }
+    nav { display: flex; gap: 0.45rem; overflow-x: auto; padding-bottom: 0.85rem; }
+    .tab { white-space: nowrap; padding: 0.54rem 0.84rem; }
+    .tab.active { background: var(--panel-strong); border-color: var(--green); }
+    main { padding: 1rem 0 3rem; }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      padding: 1rem;
+    }
+    .panel h2, .panel h3 { margin: 0 0 0.75rem; letter-spacing: -0.03em; }
+    .panel p { color: var(--muted); }
+    .grid { display: grid; gap: 1rem; }
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .section { display: none; }
+    .section.active { display: grid; gap: 1rem; animation: rise 180ms ease both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 1rem;
+    }
+    .status-strip { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.9rem; }
+    .pill, .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.38rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.42rem 0.62rem;
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 0.85rem;
+      font-weight: 800;
+    }
+    .dot { width: 0.68rem; height: 0.68rem; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgba(146, 170, 167, 0.12); }
+    .dot.ok { background: var(--green); box-shadow: 0 0 0 4px rgba(55, 242, 154, 0.14); }
+    .dot.warn { background: var(--amber); box-shadow: 0 0 0 4px rgba(255, 195, 90, 0.14); }
+    .dot.bad { background: var(--red); box-shadow: 0 0 0 4px rgba(255, 98, 119, 0.14); }
+    .coin-card { display: grid; gap: 0.72rem; min-height: 100%; }
+    .coin-head { display: flex; justify-content: space-between; gap: 0.8rem; align-items: start; }
+    .coin-symbol { font-weight: 950; font-size: 1.1rem; }
+    .price { font-size: clamp(1.35rem, 3vw, 2.15rem); font-weight: 950; letter-spacing: -0.04em; }
+    .up { color: var(--green); }
+    .down { color: var(--red); }
+    .stale { color: var(--amber); }
+    .muted { color: var(--muted); }
+    .metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+    .metric { border: 1px solid var(--line); border-radius: 14px; padding: 0.55rem; background: rgba(255, 255, 255, 0.04); }
+    .metric small { display: block; color: var(--muted); }
+    .chart-wrap { height: 90px; }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 16px; }
+    table { width: 100%; border-collapse: collapse; min-width: 820px; }
+    th, td { padding: 0.72rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    tr:last-child td { border-bottom: 0; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem; }
+    .news-card { display: grid; gap: 0.55rem; }
+    .news-card h3 { margin-bottom: 0; }
+    .compact-news .news-card { grid-template-columns: 1fr auto; align-items: center; }
+    .callout {
+      border: 1px solid color-mix(in srgb, var(--amber) 48%, var(--line));
+      background: color-mix(in srgb, var(--amber) 10%, transparent);
+      border-radius: 18px;
+      padding: 0.85rem;
+    }
+    .danger-callout {
+      border-color: color-mix(in srgb, var(--red) 48%, var(--line));
+      background: color-mix(in srgb, var(--red) 10%, transparent);
+    }
+    .form-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.6rem; align-items: end; }
+    .form-row label { min-width: 0; }
+    .span2 { grid-column: span 2; }
+    .span3 { grid-column: span 3; }
+    .span6 { grid-column: span 6; }
+    .empty { padding: 2rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius); }
+    .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 50; display: grid; gap: 0.55rem; width: min(390px, calc(100% - 2rem)); }
+    .toast { border: 1px solid var(--line); border-radius: 16px; padding: 0.75rem 0.85rem; background: var(--panel-strong); box-shadow: var(--shadow); animation: toastIn 160ms ease both; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    .hidden { display: none !important; }
+
+    @media (max-width: 960px) {
+      .hero, .two, .three, .four { grid-template-columns: 1fr; }
+      .form-row { grid-template-columns: 1fr; }
+      .span2, .span3, .span6 { grid-column: auto; }
+      .topbar { align-items: flex-start; }
+      .metric-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body data-theme="dark">
+  <header>
+    <div class="shell topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">₿</div>
+        <div>
+          <h1>Crypto Mood Ring</h1>
+          <p class="subtitle">market ticks, news panic, and robot vibes</p>
+        </div>
+      </div>
+      <button id="themeToggle" type="button" class="ghost">Light mode</button>
+    </div>
+    <nav class="shell" aria-label="Primary">
+      <button class="tab active" data-tab="dashboard" type="button">Dashboard</button>
+      <button class="tab" data-tab="coins" type="button">Coins</button>
+      <button class="tab" data-tab="news" type="button">News</button>
+      <button class="tab" data-tab="llm" type="button">LLM Vibes</button>
+      <button class="tab" data-tab="admin" type="button">Admin</button>
+      <button class="tab" data-tab="debug" type="button">Debug/About</button>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section id="dashboard" class="section active">
+      <div class="hero">
+        <div class="panel">
+          <h2>Crypto Mood Ring</h2>
+          <p>A local-first research dashboard for selected coins, RSS news, and optional OpenAI commentary. It does not trade, connect to wallets, or connect to exchanges for trading.</p>
+          <div class="status-strip">
+            <span class="pill"><span id="wsDot" class="dot"></span><span id="wsStatus">WebSocket idle</span></span>
+            <span class="pill"><span id="fallbackDot" class="dot"></span><span id="fallbackStatus">Fallback idle</span></span>
+            <span class="pill">📰 <span id="newsStatus">News not fetched</span></span>
+            <span class="pill">🤖 <span id="llmStatus">LLM disabled</span></span>
+            <span class="pill">⚠️ <span>Educational only, not financial advice</span></span>
+          </div>
+        </div>
+        <div id="moodCard" class="panel"></div>
+      </div>
+      <div id="coinCards" class="grid four"></div>
+    </section>
+
+    <section id="coins" class="section">
+      <div class="panel">
+        <div class="actions" style="justify-content: space-between;">
+          <div>
+            <h2>Coins</h2>
+            <p>Latest snapshots from Binance WebSocket or CoinGecko fallback.</p>
+          </div>
+          <button id="refreshMarketBtn" class="primary" type="button">Refresh fallback prices</button>
+        </div>
+        <div id="coinTable" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <section id="news" class="section">
+      <div class="panel">
+        <div class="actions" style="justify-content: space-between;">
+          <div>
+            <h2>Crypto News</h2>
+            <p>RSS/Atom feeds cached in IndexedDB. CORS failures are isolated per source.</p>
+          </div>
+          <button id="refreshNewsBtn" class="primary" type="button">Refresh news</button>
+        </div>
+        <div class="grid four">
+          <label>Search <input id="newsSearch" type="search" placeholder="headline, coin, source, term"></label>
+          <label>Coin <select id="newsCoinFilter"></select></label>
+          <label>Source <select id="newsSourceFilter"></select></label>
+          <label>Sort <select id="newsSort"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></label>
+        </div>
+        <div class="actions" style="margin-top: 0.7rem;">
+          <label style="display: inline-flex; align-items: center;"><input id="compactNewsToggle" type="checkbox" style="width: auto;"> Compact table-ish cards</label>
+        </div>
+      </div>
+      <div id="newsList" class="grid"></div>
+    </section>
+
+    <section id="llm" class="section">
+      <div class="panel">
+        <div class="actions" style="justify-content: space-between;">
+          <div>
+            <h2>LLM Market Vibes — Educational, Not Financial Advice</h2>
+            <p>Optional OpenAI commentary based on cached market snapshots and recent news. It must not be treated as trading instruction.</p>
+          </div>
+          <div class="actions">
+            <button id="runLlmBtn" class="amber" type="button">Run Analysis Now</button>
+            <button id="exportLlmBtn" type="button">Export analysis JSON</button>
+            <button id="clearLlmBtn" class="danger" type="button">Clear history</button>
+          </div>
+        </div>
+        <div class="callout">No position sizing, leverage, wallet connection, exchange connection, or automated execution exists in this app.</div>
+      </div>
+      <div id="latestLlm"></div>
+      <div class="panel">
+        <h2>Analysis History</h2>
+        <div id="llmHistory" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="admin" class="section">
+      <div class="panel">
+        <h2>Coin Management</h2>
+        <div class="form-row">
+          <label class="span2">Name <input id="coinName" type="text" placeholder="Solana"></label>
+          <label>Symbol <input id="coinSymbol" type="text" placeholder="SOL"></label>
+          <label>Binance symbol <input id="coinBinance" type="text" placeholder="solusdt"></label>
+          <label>CoinGecko ID <input id="coinGecko" type="text" placeholder="solana"></label>
+          <label>Enabled <select id="coinEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+          <label class="span3">Aliases/key terms <input id="coinAliases" type="text" placeholder="comma-separated aliases"></label>
+          <label class="span3">Notes <input id="coinNotes" type="text"></label>
+        </div>
+        <div class="actions" style="margin-top: 0.75rem;">
+          <button id="saveCoinBtn" class="primary" type="button">Add coin</button>
+          <button id="clearCoinFormBtn" type="button">Clear coin form</button>
+        </div>
+        <div id="coinAdminList" class="grid" style="margin-top: 1rem;"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Provider, News, and Retention Settings</h2>
+        <div class="form-row">
+          <label>CoinGecko poll seconds <input id="coingeckoPollSeconds" type="number" min="15"></label>
+          <label>Persist tick seconds <input id="priceTickPersistSeconds" type="number" min="5"></label>
+          <label>Price retention days <input id="priceRetentionDays" type="number" min="1"></label>
+          <label>Stale market seconds <input id="staleMarketSeconds" type="number" min="15"></label>
+          <label>News refresh minutes <input id="newsRefreshMinutes" type="number" min="5"></label>
+          <label>News retention days <input id="newsRetentionDays" type="number" min="1"></label>
+          <label class="span6">RSS proxy template <input id="rssProxyTemplate" type="text"></label>
+        </div>
+        <div class="actions" style="margin-top: 0.75rem;">
+          <button id="saveSettingsBtn" class="primary" type="button">Save settings</button>
+          <button id="resetSeedBtn" class="danger" type="button">Reset seed data</button>
+          <button id="pruneBtn" type="button">Prune old data</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>News Sources</h2>
+        <div class="form-row">
+          <label class="span2">Name <input id="sourceName" type="text"></label>
+          <label class="span3">RSS URL <input id="sourceUrl" type="url"></label>
+          <label>Enabled <select id="sourceEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+          <label>Use proxy <select id="sourceUseProxy"><option value="true">Proxy</option><option value="false">Direct</option></select></label>
+        </div>
+        <div class="actions" style="margin-top: 0.75rem;">
+          <button id="saveSourceBtn" class="primary" type="button">Add source</button>
+          <button id="clearSourceFormBtn" type="button">Clear source form</button>
+        </div>
+        <div id="sourceAdminList" class="grid" style="margin-top: 1rem;"></div>
+      </div>
+
+      <div class="panel">
+        <h2>OpenAI LLM Settings</h2>
+        <div class="callout danger-callout">Browser API keys are visible to your browser environment. Only remember the key if you accept that localStorage is not secure storage.</div>
+        <div class="form-row" style="margin-top: 0.75rem;">
+          <label>Enable LLM <select id="llmEnabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
+          <label>Model <input id="llmModel" type="text"></label>
+          <label>Interval minutes <input id="llmIntervalMinutes" type="number" min="15"></label>
+          <label>Market window minutes <input id="llmMarketWindowMinutes" type="number" min="15"></label>
+          <label>Max news articles <input id="llmMaxNewsArticles" type="number" min="1"></label>
+          <label>Remember key <select id="rememberOpenAiKey"><option value="false">Do not remember</option><option value="true">Remember</option></select></label>
+          <label class="span6">OpenAI API key <input id="openAiKey" type="password" autocomplete="off" placeholder="sk-..."></label>
+        </div>
+        <div class="actions" style="margin-top: 0.75rem;">
+          <button id="saveLlmSettingsBtn" class="primary" type="button">Save LLM settings</button>
+          <button id="clearOpenAiKeyBtn" class="danger" type="button">Clear key</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Data Controls</h2>
+        <div class="actions">
+          <button id="exportAllBtn" type="button">Export all data JSON</button>
+          <button id="importAllBtn" type="button">Import JSON</button>
+          <button id="clearPricesBtn" class="danger" type="button">Clear price history</button>
+          <button id="clearNewsBtn" class="danger" type="button">Clear news cache</button>
+          <button id="clearDbBtn" class="danger" type="button">Clear all IndexedDB data</button>
+          <button id="clearLocalStorageBtn" class="danger" type="button">Clear localStorage settings</button>
+        </div>
+        <textarea id="importExportBox" placeholder="Export appears here. Paste import JSON here."></textarea>
+      </div>
+    </section>
+
+    <section id="debug" class="section">
+      <div class="panel">
+        <h2>Debug / About</h2>
+        <p>Local IndexedDB stores coins, price ticks, snapshots, RSS news, LLM history, and logs. localStorage stores settings and the OpenAI key only if chosen. CORS can block RSS feeds; proxy settings are configurable. Binance symbols may not exist for every coin.</p>
+        <p>This is a personal research dashboard, not financial advice. It never places trades and never connects to wallets or trading exchanges.</p>
+      </div>
+      <div class="grid two">
+        <div class="panel">
+          <h2>DB Counts / Storage</h2>
+          <pre id="debugCounts">Loading...</pre>
+        </div>
+        <div class="panel">
+          <h2>Provider Status</h2>
+          <pre id="debugProviders">Loading...</pre>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Last 100 Events / Errors</h2>
+        <pre id="debugLog">Loading...</pre>
+      </div>
+    </section>
+  </main>
+
+  <div id="toasts" class="toast-stack" aria-live="polite"></div>
+
+  <script>
+    "use strict";
+
+    const SETTINGS_KEY = "cryptoMoodRing.settings.v1";
+    const OPENAI_KEY_STORAGE = "cryptoMoodRing.openaiKey.v1";
+    const DEFAULT_SETTINGS = {
+      theme: "dark",
+      marketProviderPriority: ["binance-websocket", "coingecko-rest"],
+      coingeckoPollSeconds: 60,
+      priceTickPersistSeconds: 30,
+      priceRetentionDays: 7,
+      newsRefreshMinutes: 15,
+      newsRetentionDays: 14,
+      rssProxyTemplate: "https://api.allorigins.win/raw?url={url}",
+      llmEnabled: false,
+      llmProvider: "openai",
+      llmModel: "gpt-5.5",
+      llmIntervalMinutes: 60,
+      llmMinIntervalMinutes: 15,
+      llmMarketWindowMinutes: 240,
+      llmMaxNewsArticles: 25,
+      staleMarketSeconds: 90,
+      lastNewsFetchAt: 0,
+      lastLlmRunAt: 0,
+      rememberOpenAiKey: false,
+      hiddenArticles: [],
+      savedArticles: []
+    };
+
+    const SEED_COINS = [
+      { id: "bitcoin", name: "Bitcoin", symbol: "BTC", binanceSymbol: "btcusdt", coingeckoId: "bitcoin", enabled: true },
+      { id: "ethereum", name: "Ethereum", symbol: "ETH", binanceSymbol: "ethusdt", coingeckoId: "ethereum", enabled: true },
+      { id: "dogecoin", name: "Dogecoin", symbol: "DOGE", binanceSymbol: "dogeusdt", coingeckoId: "dogecoin", enabled: true },
+      { id: "shiba-inu", name: "Shiba Inu", symbol: "SHIB", binanceSymbol: "shibusdt", coingeckoId: "shiba-inu", enabled: true }
+    ];
+
+    const SEED_SOURCES = [
+      { id: "cointelegraph", name: "Cointelegraph", url: "https://cointelegraph.com/rss", enabled: true, type: "rss", useProxy: true },
+      { id: "decrypt", name: "Decrypt", url: "https://decrypt.co/feed", enabled: true, type: "rss", useProxy: true },
+      { id: "bitcoin-magazine", name: "Bitcoin Magazine", url: "https://bitcoinmagazine.com/.rss/full/", enabled: false, type: "rss", useProxy: true },
+      { id: "newsbtc", name: "NewsBTC", url: "https://www.newsbtc.com/feed/", enabled: false, type: "rss", useProxy: true },
+      { id: "google-news-crypto", name: "Google News - Crypto", url: "https://news.google.com/rss/search?q=cryptocurrency%20OR%20bitcoin%20OR%20ethereum&hl=en-US&gl=US&ceid=US:en", enabled: true, type: "rss", useProxy: true },
+      { id: "google-news-doge-shib", name: "Google News - DOGE / SHIB", url: "https://news.google.com/rss/search?q=dogecoin%20OR%20shiba%20inu%20crypto&hl=en-US&gl=US&ceid=US:en", enabled: true, type: "rss", useProxy: true }
+    ];
+
+    const SEED_TERMS = ["Bitcoin", "BTC", "Ethereum", "ETH", "Dogecoin", "DOGE", "Shiba Inu", "SHIB", "ETF", "SEC", "stablecoin", "exchange", "hack", "wallet", "whale", "liquidation", "memecoin", "DeFi"];
+
+    let db;
+    let settings = structuredClone(DEFAULT_SETTINGS);
+    let ws = null;
+    let wsShouldReconnect = true;
+    let wsBackoffMs = 1500;
+    let fallbackTimer = null;
+    let newsTimer = null;
+    let llmTimer = null;
+    let renderQueued = false;
+    let latestSnapshots = new Map();
+    let latestAnalysis = null;
+    let coinCache = [];
+    let sourceCache = [];
+    let chartMap = new Map();
+    let lastPersistAt = new Map();
+    let editingCoinId = null;
+    let editingSourceId = null;
+    const logs = [];
+    const providerStatus = { websocket: "idle", fallback: "idle", wsUrl: "", lastError: "", lastFallbackAt: 0 };
+
+    const els = {};
+
+    document.addEventListener("DOMContentLoaded", initApp);
+
+    async function initApp() {
+      cacheEls();
+      bindEvents();
+      loadSettings();
+      applyTheme(settings.theme);
+      initDb();
+      await seedDefaultsIfNeeded();
+      await refreshCaches();
+      hydrateAdmin();
+      await loadLatestAnalysis();
+      await loadSnapshotsFromDb();
+      renderAll();
+      startMarketData();
+      if (isNewsStale()) fetchAllNewsSources();
+      scheduleNewsRefresh();
+      scheduleLlmAnalysis();
+      pruneOldData();
+      logEvent("app-started", "Crypto Mood Ring initialized");
+    }
+
+    function cacheEls() {
+      document.querySelectorAll("[id]").forEach((node) => { els[node.id] = node; });
+    }
+
+    function bindEvents() {
+      document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => switchTab(button.dataset.tab)));
+      els.themeToggle.addEventListener("click", () => { applyTheme(settings.theme === "dark" ? "light" : "dark"); saveSettings(); });
+      els.refreshMarketBtn.addEventListener("click", () => fetchCoinGeckoPrices(enabledCoins()));
+      els.refreshNewsBtn.addEventListener("click", fetchAllNewsSources);
+      ["newsSearch", "newsCoinFilter", "newsSourceFilter", "newsSort", "compactNewsToggle"].forEach((id) => els[id].addEventListener("input", renderNews));
+      els.saveCoinBtn.addEventListener("click", saveCoin);
+      els.clearCoinFormBtn.addEventListener("click", clearCoinForm);
+      els.saveSourceBtn.addEventListener("click", saveNewsSource);
+      els.clearSourceFormBtn.addEventListener("click", clearSourceForm);
+      els.saveSettingsBtn.addEventListener("click", saveAdminSettings);
+      els.resetSeedBtn.addEventListener("click", resetSeedData);
+      els.pruneBtn.addEventListener("click", pruneOldData);
+      els.saveLlmSettingsBtn.addEventListener("click", saveLlmSettings);
+      els.clearOpenAiKeyBtn.addEventListener("click", clearOpenAiKey);
+      els.runLlmBtn.addEventListener("click", runLlmAnalysisNow);
+      els.exportLlmBtn.addEventListener("click", exportLlmHistory);
+      els.clearLlmBtn.addEventListener("click", clearLlmHistory);
+      els.exportAllBtn.addEventListener("click", exportAllData);
+      els.importAllBtn.addEventListener("click", importAllData);
+      els.clearPricesBtn.addEventListener("click", clearPriceHistory);
+      els.clearNewsBtn.addEventListener("click", clearNewsCache);
+      els.clearDbBtn.addEventListener("click", clearAllData);
+      els.clearLocalStorageBtn.addEventListener("click", clearLocalStorageSettings);
+    }
+
+    function initDb() {
+      db = new Dexie("CryptoMoodRingDB");
+      db.version(1).stores({
+        coins: "id, symbol, enabled, updatedAt",
+        priceTicks: "++id, coinId, symbol, provider, timestamp, [coinId+timestamp]",
+        marketSnapshots: "coinId, provider, timestamp",
+        newsSources: "id, enabled, type, updatedAt",
+        newsArticles: "id, sourceId, sourceName, publishedAt, fetchedAt, *matchedCoins, *matchedTerms",
+        llmAnalyses: "++id, createdAt, model, *coinsIncluded, recommendationSummary",
+        fetchLogs: "++id, timestamp, level, type"
+      });
+    }
+
+    async function seedDefaultsIfNeeded() {
+      const coinCount = await db.coins.count();
+      if (!coinCount) {
+        const now = new Date().toISOString();
+        await db.coins.bulkPut(SEED_COINS.map((coin, index) => ({
+          ...coin,
+          colorHint: ["#f7931a", "#627eea", "#c2a633", "#ff6b9d"][index],
+          aliases: defaultAliases(coin),
+          notes: "",
+          createdAt: now,
+          updatedAt: now
+        })));
+      }
+      const sourceCount = await db.newsSources.count();
+      if (!sourceCount) {
+        const now = new Date().toISOString();
+        await db.newsSources.bulkPut(SEED_SOURCES.map((source) => ({ ...source, createdAt: now, updatedAt: now })));
+      }
+    }
+
+    async function refreshCaches() {
+      coinCache = await db.coins.orderBy("symbol").toArray();
+      sourceCache = await db.newsSources.orderBy("name").toArray();
+    }
+
+    function loadSettings() {
+      try {
+        settings = { ...structuredClone(DEFAULT_SETTINGS), ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+      } catch {
+        settings = structuredClone(DEFAULT_SETTINGS);
+        showToast("Settings could not be read; using defaults", "warn");
+      }
+      const rememberedKey = localStorage.getItem(OPENAI_KEY_STORAGE);
+      if (settings.rememberOpenAiKey && rememberedKey) settings.openAiKey = rememberedKey;
+    }
+
+    function saveSettings() {
+      try {
+        const toStore = { ...settings };
+        delete toStore.openAiKey;
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(toStore));
+        if (settings.rememberOpenAiKey && settings.openAiKey) localStorage.setItem(OPENAI_KEY_STORAGE, settings.openAiKey);
+      } catch {
+        showToast("localStorage is unavailable or full", "error");
+      }
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+      document.querySelectorAll(".section").forEach((section) => section.classList.toggle("active", section.id === tab));
+      if (tab === "debug") renderDebug();
+      if (tab === "admin") renderAdmin();
+    }
+
+    function applyTheme(theme) {
+      settings.theme = theme;
+      document.body.dataset.theme = theme;
+      els.themeToggle.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+    }
+
+    function startMarketData() {
+      stopMarketData();
+      wsShouldReconnect = true;
+      connectBinanceWebSocket();
+      fetchCoinGeckoPrices(enabledCoins());
+      fallbackTimer = setInterval(() => fetchCoinGeckoPrices(enabledCoins()), settings.coingeckoPollSeconds * 1000);
+    }
+
+    function stopMarketData() {
+      wsShouldReconnect = false;
+      if (ws) ws.close(1000, "restart");
+      ws = null;
+      if (fallbackTimer) clearInterval(fallbackTimer);
+      fallbackTimer = null;
+    }
+
+    function connectBinanceWebSocket() {
+      const coins = enabledCoins().filter((coin) => coin.binanceSymbol);
+      if (!coins.length) {
+        providerStatus.websocket = "no enabled Binance symbols";
+        updateStatusStrip();
+        return;
+      }
+      const url = buildBinanceStreamUrl(coins);
+      providerStatus.wsUrl = url;
+      providerStatus.websocket = "connecting";
+      updateStatusStrip();
+      try {
+        ws = new WebSocket(url);
+        ws.onopen = () => {
+          wsBackoffMs = 1500;
+          providerStatus.websocket = "connected";
+          logEvent("websocket", "Binance WebSocket connected");
+          updateStatusStrip();
+        };
+        ws.onmessage = (event) => handleBinanceMessage(event.data);
+        ws.onerror = () => {
+          providerStatus.lastError = "Binance WebSocket error";
+          providerStatus.websocket = "error";
+          logError("websocket", "Binance WebSocket error");
+          updateStatusStrip();
+        };
+        ws.onclose = () => {
+          providerStatus.websocket = "disconnected";
+          updateStatusStrip();
+          if (!wsShouldReconnect) return;
+          const delay = wsBackoffMs;
+          wsBackoffMs = Math.min(wsBackoffMs * 1.8, 60000);
+          setTimeout(connectBinanceWebSocket, delay);
+        };
+      } catch (error) {
+        providerStatus.websocket = "error";
+        providerStatus.lastError = error.message;
+        logError("websocket", error.message);
+      }
+    }
+
+    function buildBinanceStreamUrl(coins) {
+      const streams = coins.map((coin) => `${coin.binanceSymbol.toLowerCase()}@miniTicker`).join("/");
+      return `wss://stream.binance.com:9443/stream?streams=${streams}`;
+    }
+
+    function handleBinanceMessage(message) {
+      try {
+        const parsed = JSON.parse(message);
+        const raw = parsed.data || parsed;
+        const coin = coinCache.find((item) => item.binanceSymbol?.toUpperCase() === raw.s?.toUpperCase());
+        if (!coin) return;
+        const snapshot = normalizeMarketSnapshot("binance-websocket", raw, coin);
+        latestSnapshots.set(coin.id, snapshot);
+        db.marketSnapshots.put(snapshot);
+        persistPriceTickThrottled(snapshot);
+        queueRender();
+      } catch (error) {
+        logError("binance-message", error.message);
+      }
+    }
+
+    async function fetchCoinGeckoPrices(coins) {
+      const targets = coins.filter((coin) => coin.coingeckoId);
+      if (!targets.length) {
+        providerStatus.fallback = "unavailable";
+        updateStatusStrip();
+        return;
+      }
+      providerStatus.fallback = "polling";
+      updateStatusStrip();
+      try {
+        const ids = targets.map((coin) => coin.coingeckoId).join(",");
+        const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_last_updated_at=true`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`CoinGecko HTTP ${response.status}`);
+        const data = await response.json();
+        for (const coin of targets) {
+          const raw = data[coin.coingeckoId];
+          if (!raw) {
+            logError("coingecko", `No CoinGecko data for ${coin.symbol}`);
+            continue;
+          }
+          const existing = latestSnapshots.get(coin.id);
+          const snapshot = {
+            coinId: coin.id,
+            symbol: coin.symbol,
+            provider: existing && !isSnapshotStale(existing) ? existing.provider : "coingecko-rest",
+            price: Number(raw.usd),
+            open24h: null,
+            high24h: null,
+            low24h: null,
+            volume24h: Number(raw.usd_24h_vol || 0),
+            changePercent24h: Number(raw.usd_24h_change || 0),
+            timestamp: Number(raw.last_updated_at ? raw.last_updated_at * 1000 : Date.now()),
+            raw
+          };
+          if (!existing || isSnapshotStale(existing)) {
+            latestSnapshots.set(coin.id, snapshot);
+            await db.marketSnapshots.put(snapshot);
+            await persistPriceTickThrottled(snapshot);
+          }
+        }
+        providerStatus.fallback = "ready";
+        providerStatus.lastFallbackAt = Date.now();
+        queueRender();
+      } catch (error) {
+        providerStatus.fallback = "error";
+        providerStatus.lastError = error.message;
+        logError("coingecko", error.message);
+        showToast("CoinGecko fallback failed", "error");
+      } finally {
+        updateStatusStrip();
+      }
+    }
+
+    function normalizeMarketSnapshot(provider, raw, coin) {
+      const price = Number(raw.c);
+      const open24h = Number(raw.o);
+      return {
+        coinId: coin.id,
+        symbol: coin.symbol,
+        provider,
+        price,
+        open24h,
+        high24h: Number(raw.h),
+        low24h: Number(raw.l),
+        volume24h: Number(raw.v),
+        quoteVolume24h: Number(raw.q),
+        changePercent24h: open24h ? ((price - open24h) / open24h) * 100 : 0,
+        timestamp: Number(raw.E || Date.now()),
+        raw
+      };
+    }
+
+    async function persistPriceTickThrottled(snapshot) {
+      const last = lastPersistAt.get(snapshot.coinId) || 0;
+      if (Date.now() - last < settings.priceTickPersistSeconds * 1000) return;
+      lastPersistAt.set(snapshot.coinId, Date.now());
+      await db.priceTicks.add({
+        coinId: snapshot.coinId,
+        symbol: snapshot.symbol,
+        provider: snapshot.provider,
+        price: snapshot.price,
+        open24h: snapshot.open24h,
+        high24h: snapshot.high24h,
+        low24h: snapshot.low24h,
+        volume24h: snapshot.volume24h,
+        changePercent24h: snapshot.changePercent24h,
+        timestamp: snapshot.timestamp
+      });
+    }
+
+    async function loadSnapshotsFromDb() {
+      const rows = await db.marketSnapshots.toArray();
+      rows.forEach((row) => latestSnapshots.set(row.coinId, row));
+    }
+
+    async function loadRecentTicks(coinId, windowMs = settings.priceRetentionDays * 86400000) {
+      const cutoff = Date.now() - windowMs;
+      return db.priceTicks.where("[coinId+timestamp]").between([coinId, cutoff], [coinId, Dexie.maxKey]).toArray();
+    }
+
+    function queueRender() {
+      if (renderQueued) return;
+      renderQueued = true;
+      requestAnimationFrame(() => {
+        renderQueued = false;
+        renderAll();
+      });
+    }
+
+    async function renderAll() {
+      updateStatusStrip();
+      renderMoodCard();
+      await renderCoinCards();
+      await renderCoinTable();
+      await renderNews();
+      renderLlmAnalysis();
+      renderAdmin();
+      renderDebug();
+    }
+
+    function updateStatusStrip() {
+      els.wsStatus.textContent = `WebSocket ${providerStatus.websocket}`;
+      els.wsDot.className = `dot ${providerStatus.websocket === "connected" ? "ok" : providerStatus.websocket === "connecting" ? "warn" : "bad"}`;
+      els.fallbackStatus.textContent = `Fallback ${providerStatus.fallback}`;
+      els.fallbackDot.className = `dot ${providerStatus.fallback === "ready" ? "ok" : providerStatus.fallback === "polling" ? "warn" : ""}`;
+      els.newsStatus.textContent = settings.lastNewsFetchAt ? `Last news ${relativeTime(settings.lastNewsFetchAt)}` : "News not fetched";
+      els.llmStatus.textContent = settings.llmEnabled ? "LLM enabled" : "LLM disabled";
+    }
+
+    async function renderCoinCards() {
+      const coins = enabledCoins();
+      if (!coins.length) {
+        els.coinCards.innerHTML = `<div class="empty">No enabled coins. Add or enable coins in Admin.</div>`;
+        return;
+      }
+      els.coinCards.innerHTML = coins.map((coin) => coinCardHtml(coin)).join("");
+      for (const coin of coins) await renderCoinChart(coin.id, `chart-${coin.id}`);
+    }
+
+    function coinCardHtml(coin) {
+      const snap = latestSnapshots.get(coin.id);
+      const change = snap?.changePercent24h || 0;
+      const stale = snap && isSnapshotStale(snap);
+      const action = latestCoinAction(coin.symbol);
+      return `
+        <article class="panel coin-card">
+          <div class="coin-head">
+            <div><div class="coin-symbol">${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</div><div class="muted">${escapeHtml(coin.name)}</div></div>
+            <span class="badge ${stale ? "stale" : ""}">${snap ? escapeHtml(snap.provider) : "no data"}</span>
+          </div>
+          <div class="price">${snap ? formatUsd(snap.price) : "—"}</div>
+          <div class="${change >= 0 ? "up" : "down"}">${snap ? signed(change, 2) + "% 24h" : "Waiting for ticks"}</div>
+          <div class="chart-wrap"><canvas id="chart-${coin.id}"></canvas></div>
+          <div class="metric-grid">
+            <div class="metric"><small>High</small>${snap?.high24h ? formatUsd(snap.high24h) : "—"}</div>
+            <div class="metric"><small>Low</small>${snap?.low24h ? formatUsd(snap.low24h) : "—"}</div>
+            <div class="metric"><small>Vol</small>${snap?.volume24h ? compact(snap.volume24h) : "—"}</div>
+          </div>
+          <div class="actions"><span class="badge">News ${coin.newsCount || 0}</span><span class="badge">${action || "LLM: none"}</span></div>
+          <div class="muted">Updated ${snap ? relativeTime(snap.timestamp) : "never"}${stale ? " · stale" : ""}</div>
+        </article>`;
+    }
+
+    async function renderCoinTable() {
+      const rows = await Promise.all(coinCache.map(async (coin) => {
+        const snap = latestSnapshots.get(coin.id);
+        const ticks = await loadRecentTicks(coin.id, 4 * 60 * 60 * 1000);
+        const change = snap?.changePercent24h || 0;
+        return `<tr>
+          <td><strong>${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</strong><br><span class="muted">${escapeHtml(coin.name)}</span></td>
+          <td>${coin.enabled ? "Enabled" : "Disabled"}</td>
+          <td>${snap ? formatUsd(snap.price) : "—"}</td>
+          <td class="${change >= 0 ? "up" : "down"}">${snap ? signed(change, 2) + "%" : "—"}</td>
+          <td>${snap?.high24h ? formatUsd(snap.high24h) : "—"} / ${snap?.low24h ? formatUsd(snap.low24h) : "—"}</td>
+          <td>${snap?.volume24h ? compact(snap.volume24h) : "—"}</td>
+          <td>${snap ? escapeHtml(snap.provider) : "—"}${snap && isSnapshotStale(snap) ? " · stale" : ""}</td>
+          <td>${ticks.length} ticks</td>
+        </tr>`;
+      }));
+      els.coinTable.innerHTML = `<table><thead><tr><th>Coin</th><th>Status</th><th>Price</th><th>24h</th><th>High / Low</th><th>Volume</th><th>Provider</th><th>History</th></tr></thead><tbody>${rows.join("") || `<tr><td colspan="8">No coins yet.</td></tr>`}</tbody></table>`;
+    }
+
+    async function renderCoinChart(coinId, canvasId) {
+      if (!window.Chart) return;
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ticks = await loadRecentTicks(coinId, 6 * 60 * 60 * 1000);
+      const labels = ticks.map((tick) => new Date(tick.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      const data = ticks.map((tick) => tick.price);
+      if (chartMap.has(canvasId)) chartMap.get(canvasId).destroy();
+      chartMap.set(canvasId, new Chart(canvas, {
+        type: "line",
+        data: { labels, datasets: [{ data, borderColor: "#37f29a", borderWidth: 2, pointRadius: 0, tension: 0.35, fill: false }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: true } }, scales: { x: { display: false }, y: { display: false } } }
+      }));
+    }
+
+    async function fetchAllNewsSources() {
+      const sources = sourceCache.filter((source) => source.enabled);
+      if (!sources.length) {
+        showToast("No enabled news sources", "warn");
+        return;
+      }
+      let total = 0;
+      for (const source of sources) {
+        try {
+          const articles = await fetchRssSource(source);
+          total += articles.length;
+          await saveArticles(articles);
+          await db.newsSources.update(source.id, { lastFetched: Date.now(), lastCount: articles.length, lastError: "" });
+        } catch (error) {
+          await db.newsSources.update(source.id, { lastFetched: Date.now(), lastError: error.message });
+          logError("rss", `${source.name}: ${error.message}`);
+        }
+      }
+      settings.lastNewsFetchAt = Date.now();
+      saveSettings();
+      await refreshCaches();
+      await pruneOldData();
+      await renderNews();
+      updateStatusStrip();
+      showToast(`News refreshed: ${total} articles`);
+    }
+
+    async function fetchRssSource(source) {
+      const url = source.useProxy ? buildProxyUrl(source.url) : source.url;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const xmlText = await response.text();
+      return parseRssXml(xmlText, source);
+    }
+
+    function buildProxyUrl(url) {
+      return settings.rssProxyTemplate.replace("{url}", encodeURIComponent(url));
+    }
+
+    function parseRssXml(xmlText, source) {
+      const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+      const parserError = doc.querySelector("parsererror");
+      if (parserError) throw new Error("RSS parser error");
+      const items = [...doc.querySelectorAll("item, entry")];
+      return items.map((node) => normalizeArticle(node, source)).filter(Boolean);
+    }
+
+    function normalizeArticle(node, source) {
+      const title = textOf(node, "title");
+      const atomLink = node.querySelector("link[href]")?.getAttribute("href");
+      const link = atomLink || textOf(node, "link") || textOf(node, "guid");
+      if (!title || !link) return null;
+      const description = stripHtml(textOf(node, "description") || textOf(node, "summary") || textOf(node, "content"));
+      const publishedAt = Date.parse(textOf(node, "pubDate") || textOf(node, "published") || textOf(node, "updated")) || Date.now();
+      const base = { title, link: canonicalLink(link), description, publishedAt };
+      const matches = matchArticleToCoins(base, coinCache);
+      return {
+        id: stableId(canonicalLink(link) || `${title}-${source.id}`),
+        sourceId: source.id,
+        sourceName: source.name,
+        title,
+        link: canonicalLink(link),
+        description,
+        publishedAt,
+        fetchedAt: Date.now(),
+        matchedCoins: matches.coins,
+        matchedTerms: matches.terms,
+        sentimentHint: sentimentHint(title + " " + description),
+        raw: { title, link }
+      };
+    }
+
+    function matchArticleToCoins(article, coins) {
+      const haystack = `${article.title} ${article.description} ${article.link}`.toLowerCase();
+      const matchedCoins = [];
+      const matchedTerms = new Set();
+      for (const coin of coins) {
+        const terms = [coin.name, coin.symbol, ...(coin.aliases || [])].filter(Boolean);
+        if (terms.some((term) => haystack.includes(term.toLowerCase()))) {
+          matchedCoins.push(coin.symbol);
+          terms.forEach((term) => { if (haystack.includes(term.toLowerCase())) matchedTerms.add(term); });
+        }
+      }
+      SEED_TERMS.forEach((term) => { if (haystack.includes(term.toLowerCase())) matchedTerms.add(term); });
+      return { coins: [...new Set(matchedCoins)], terms: [...matchedTerms] };
+    }
+
+    async function saveArticles(articles) {
+      const unique = dedupeArticles(articles);
+      if (unique.length) await db.newsArticles.bulkPut(unique);
+    }
+
+    function dedupeArticles(articles) {
+      const seen = new Set();
+      return articles.filter((article) => {
+        const key = article.link || `${article.title}-${article.sourceId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    async function renderNews() {
+      const all = await db.newsArticles.orderBy("publishedAt").reverse().toArray();
+      const q = els.newsSearch.value.trim().toLowerCase();
+      const coin = els.newsCoinFilter.value;
+      const source = els.newsSourceFilter.value;
+      const hidden = new Set(settings.hiddenArticles || []);
+      let rows = all.filter((article) => !hidden.has(article.id));
+      if (q) rows = rows.filter((article) => `${article.title} ${article.description} ${article.sourceName} ${article.link} ${article.matchedTerms?.join(" ")}`.toLowerCase().includes(q));
+      if (coin) rows = rows.filter((article) => article.matchedCoins?.includes(coin));
+      if (source) rows = rows.filter((article) => article.sourceId === source);
+      if (els.newsSort.value === "oldest") rows.reverse();
+      els.newsList.classList.toggle("compact-news", els.compactNewsToggle.checked);
+      els.newsList.innerHTML = rows.map(newsCardHtml).join("") || `<div class="empty">No news matches. Try refreshing feeds or changing filters.</div>`;
+      els.newsList.querySelectorAll("[data-news-action]").forEach((button) => button.addEventListener("click", handleNewsAction));
+      fillNewsFilters();
+    }
+
+    function newsCardHtml(article) {
+      return `<article class="panel news-card">
+        <div>
+          <h3>${escapeHtml(article.title)}</h3>
+          <div class="muted">${escapeHtml(article.sourceName)} · ${new Date(article.publishedAt).toLocaleString()} · ${escapeHtml(article.sentimentHint || "neutral")}</div>
+          <p>${escapeHtml(article.description || "No description.")}</p>
+          <div class="actions">${(article.matchedCoins || []).map((item) => `<span class="badge">${escapeHtml(item)}</span>`).join("")}${(article.matchedTerms || []).slice(0, 6).map((item) => `<span class="badge">${escapeHtml(item)}</span>`).join("")}</div>
+        </div>
+        <div class="actions">
+          <a href="${escapeAttr(article.link)}" target="_blank" rel="noopener"><button type="button">Open</button></a>
+          <button type="button" data-news-action="save" data-id="${article.id}">Save</button>
+          <button type="button" data-news-action="hide" data-id="${article.id}">Hide</button>
+        </div>
+      </article>`;
+    }
+
+    function handleNewsAction(event) {
+      const id = event.currentTarget.dataset.id;
+      const action = event.currentTarget.dataset.newsAction;
+      if (action === "hide") settings.hiddenArticles = [...new Set([...(settings.hiddenArticles || []), id])];
+      if (action === "save") settings.savedArticles = [...new Set([...(settings.savedArticles || []), id])];
+      saveSettings();
+      renderNews();
+    }
+
+    async function buildLlmAnalysisPayload() {
+      const coins = enabledCoins();
+      const marketData = coins.map((coin) => ({ coin, snapshot: latestSnapshots.get(coin.id), stale: !latestSnapshots.get(coin.id) || isSnapshotStale(latestSnapshots.get(coin.id)) }));
+      const newsArticles = await loadNewsForAnalysis();
+      return { marketData, newsArticles };
+    }
+
+    async function loadNewsForAnalysis() {
+      return db.newsArticles.orderBy("publishedAt").reverse().limit(settings.llmMaxNewsArticles).toArray();
+    }
+
+    async function callOpenAIAnalysis({ apiKey, model, marketData, newsArticles }) {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          input: [
+            { role: "system", content: "You are a cautious crypto market analyst. Provide educational commentary only, not financial advice. Never recommend leverage, position sizing, urgent trading, wallet actions, or exchange actions. Always return valid JSON only." },
+            { role: "user", content: JSON.stringify({ task: "Analyze recent crypto market data and news. Return JSON only.", requiredSchema: llmSchemaHint(), marketData, newsArticles }) }
+          ]
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error?.message || `OpenAI HTTP ${response.status}`);
+      return extractResponsesText(body);
+    }
+
+    function extractResponsesText(body) {
+      if (body.output_text) return body.output_text;
+      const parts = [];
+      for (const item of body.output || []) {
+        for (const content of item.content || []) {
+          if (content.text) parts.push(content.text);
+          if (content.type === "output_text" && content.text) parts.push(content.text);
+        }
+      }
+      return parts.join("\n").trim() || JSON.stringify(body);
+    }
+
+    function parseLlmJsonResponse(text) {
+      const trimmed = text.trim().replace(/^```json\s*/i, "").replace(/```$/i, "");
+      return JSON.parse(trimmed);
+    }
+
+    async function runLlmAnalysisNow() {
+      try {
+        const apiKey = els.openAiKey.value.trim() || settings.openAiKey;
+        if (!apiKey) throw new Error("Missing OpenAI API key. Add it in Admin first.");
+        showToast("Running LLM analysis");
+        const payload = await buildLlmAnalysisPayload();
+        const prompt = JSON.stringify(payload);
+        const responseText = await callOpenAIAnalysis({ apiKey, model: settings.llmModel, ...payload });
+        let parsed = null;
+        let error = "";
+        try { parsed = parseLlmJsonResponse(responseText); } catch (parseError) { error = `Malformed JSON response: ${parseError.message}`; }
+        const record = {
+          createdAt: Date.now(),
+          model: settings.llmModel,
+          prompt,
+          response: responseText,
+          parsed,
+          coinsIncluded: payload.marketData.map((item) => item.coin.symbol),
+          newsArticleIds: payload.newsArticles.map((item) => item.id),
+          marketWindowMinutes: settings.llmMarketWindowMinutes,
+          recommendationSummary: parsed?.overallMarketMood || "unparsed",
+          error
+        };
+        await saveLlmAnalysis(record);
+        settings.lastLlmRunAt = Date.now();
+        saveSettings();
+        await loadLatestAnalysis();
+        renderLlmAnalysis();
+        showToast(error || "LLM analysis saved", error ? "warn" : "ok");
+      } catch (error) {
+        logError("openai", error.message);
+        showToast(error.message, "error");
+      }
+    }
+
+    async function saveLlmAnalysis(record) {
+      await db.llmAnalyses.add(record);
+    }
+
+    async function loadLatestAnalysis() {
+      latestAnalysis = await db.llmAnalyses.orderBy("createdAt").last();
+    }
+
+    function renderLlmAnalysis() {
+      if (!latestAnalysis) {
+        els.latestLlm.innerHTML = `<div class="empty">No LLM analysis yet. Enable it in Admin or run one manually.</div>`;
+      } else {
+        const parsed = latestAnalysis.parsed;
+        els.latestLlm.innerHTML = parsed ? parsedLlmHtml(latestAnalysis, parsed) : rawLlmHtml(latestAnalysis);
+      }
+      db.llmAnalyses.orderBy("createdAt").reverse().limit(20).toArray().then((rows) => {
+        els.llmHistory.innerHTML = rows.map((row) => `<article class="panel"><strong>${new Date(row.createdAt).toLocaleString()}</strong> · ${escapeHtml(row.model)} · ${escapeHtml(row.recommendationSummary || "unknown")}<p>${escapeHtml(row.parsed?.summary || row.error || row.response?.slice(0, 220) || "")}</p></article>`).join("") || `<div class="empty">No history yet.</div>`;
+      });
+      renderMoodCard();
+      updateStatusStrip();
+    }
+
+    function parsedLlmHtml(record, parsed) {
+      return `<div class="panel">
+        <h2>${escapeHtml(parsed.overallMarketMood || "uncertain").toUpperCase()} Mood</h2>
+        <p>${escapeHtml(parsed.summary || "")}</p>
+        <div class="callout">Educational commentary only. Not financial advice. notFinancialAdvice: ${parsed.notFinancialAdvice === true}</div>
+        <div class="grid three" style="margin-top: 1rem;">${(parsed.coins || []).map((coin) => `<article class="panel">
+          <h3>${escapeHtml(coin.symbol || "")}: ${escapeHtml(coin.action || "watch")}</h3>
+          <div class="metric"><small>Confidence</small><div style="height: 0.6rem; border-radius: 99px; background: rgba(255,255,255,0.09); overflow:hidden;"><span style="display:block;height:100%;width:${Math.max(0, Math.min(100, Number(coin.confidence || 0) * 100))}%;background:var(--green);"></span></div></div>
+          <p>${escapeHtml(coin.rationale || "")}</p>
+          <p><strong>Risks:</strong> ${escapeHtml((coin.risks || []).join("; "))}</p>
+          <p><strong>News:</strong> ${escapeHtml((coin.newsDrivers || []).join("; "))}</p>
+          <p><strong>Market:</strong> ${escapeHtml((coin.marketDrivers || []).join("; "))}</p>
+        </article>`).join("")}</div>
+      </div>`;
+    }
+
+    function rawLlmHtml(record) {
+      return `<div class="panel"><h2>Unparsed LLM Response</h2><div class="callout danger-callout">${escapeHtml(record.error || "Could not parse JSON.")}</div><pre>${escapeHtml(record.response || "")}</pre></div>`;
+    }
+
+    function scheduleLlmAnalysis() {
+      if (llmTimer) clearInterval(llmTimer);
+      llmTimer = setInterval(() => {
+        if (!settings.llmEnabled || !settings.openAiKey) return;
+        const interval = Math.max(settings.llmIntervalMinutes, settings.llmMinIntervalMinutes) * 60000;
+        if (Date.now() - (settings.lastLlmRunAt || 0) >= interval) runLlmAnalysisNow();
+      }, 60000);
+    }
+
+    async function renderAdmin() {
+      renderCoinAdminList();
+      renderSourceAdminList();
+      fillNewsFilters();
+    }
+
+    function hydrateAdmin() {
+      els.coingeckoPollSeconds.value = settings.coingeckoPollSeconds;
+      els.priceTickPersistSeconds.value = settings.priceTickPersistSeconds;
+      els.priceRetentionDays.value = settings.priceRetentionDays;
+      els.staleMarketSeconds.value = settings.staleMarketSeconds;
+      els.newsRefreshMinutes.value = settings.newsRefreshMinutes;
+      els.newsRetentionDays.value = settings.newsRetentionDays;
+      els.rssProxyTemplate.value = settings.rssProxyTemplate;
+      els.llmEnabled.value = String(settings.llmEnabled);
+      els.llmModel.value = settings.llmModel;
+      els.llmIntervalMinutes.value = settings.llmIntervalMinutes;
+      els.llmMarketWindowMinutes.value = settings.llmMarketWindowMinutes;
+      els.llmMaxNewsArticles.value = settings.llmMaxNewsArticles;
+      els.rememberOpenAiKey.value = String(settings.rememberOpenAiKey);
+      els.openAiKey.value = settings.openAiKey || "";
+    }
+
+    function renderCoinAdminList() {
+      els.coinAdminList.innerHTML = coinCache.map((coin) => `<article class="panel">
+        <div class="actions" style="justify-content: space-between;">
+          <div><strong>${escapeHtml(coin.symbol)} · ${escapeHtml(coin.name)}</strong><br><span class="muted">${coin.enabled ? "enabled" : "disabled"} · Binance ${escapeHtml(coin.binanceSymbol || "none")} · CoinGecko ${escapeHtml(coin.coingeckoId || "none")}</span></div>
+          <div class="actions">
+            <button class="tiny" data-edit-coin="${coin.id}" type="button">Edit</button>
+            <button class="tiny" data-toggle-coin="${coin.id}" type="button">${coin.enabled ? "Disable" : "Enable"}</button>
+            <button class="tiny danger" data-delete-coin="${coin.id}" type="button">Delete</button>
+          </div>
+        </div>
+      </article>`).join("") || `<div class="empty">No coins configured.</div>`;
+      els.coinAdminList.querySelectorAll("[data-edit-coin]").forEach((button) => button.addEventListener("click", () => editCoin(button.dataset.editCoin)));
+      els.coinAdminList.querySelectorAll("[data-toggle-coin]").forEach((button) => button.addEventListener("click", () => toggleCoin(button.dataset.toggleCoin)));
+      els.coinAdminList.querySelectorAll("[data-delete-coin]").forEach((button) => button.addEventListener("click", () => deleteCoin(button.dataset.deleteCoin)));
+    }
+
+    async function saveCoin() {
+      const now = new Date().toISOString();
+      const symbol = els.coinSymbol.value.trim().toUpperCase();
+      const name = els.coinName.value.trim();
+      if (!symbol || !name) return showToast("Coin name and symbol are required", "error");
+      const id = editingCoinId || slugify(name);
+      const existing = await db.coins.get(id);
+      await db.coins.put({
+        id,
+        name,
+        symbol,
+        binanceSymbol: els.coinBinance.value.trim().toLowerCase(),
+        coingeckoId: els.coinGecko.value.trim(),
+        enabled: els.coinEnabled.value === "true",
+        aliases: splitCsv(els.coinAliases.value),
+        notes: els.coinNotes.value.trim(),
+        colorHint: existing?.colorHint || "#37f29a",
+        createdAt: existing?.createdAt || now,
+        updatedAt: now
+      });
+      clearCoinForm();
+      await refreshCaches();
+      startMarketData();
+      renderAll();
+      showToast("Coin saved");
+    }
+
+    function editCoin(id) {
+      const coin = coinCache.find((item) => item.id === id);
+      if (!coin) return;
+      editingCoinId = id;
+      els.coinName.value = coin.name;
+      els.coinSymbol.value = coin.symbol;
+      els.coinBinance.value = coin.binanceSymbol || "";
+      els.coinGecko.value = coin.coingeckoId || "";
+      els.coinEnabled.value = String(Boolean(coin.enabled));
+      els.coinAliases.value = (coin.aliases || []).join(", ");
+      els.coinNotes.value = coin.notes || "";
+      els.saveCoinBtn.textContent = "Save coin";
+    }
+
+    function clearCoinForm() {
+      editingCoinId = null;
+      ["coinName", "coinSymbol", "coinBinance", "coinGecko", "coinAliases", "coinNotes"].forEach((id) => { els[id].value = ""; });
+      els.coinEnabled.value = "true";
+      els.saveCoinBtn.textContent = "Add coin";
+    }
+
+    async function toggleCoin(id) {
+      const coin = await db.coins.get(id);
+      await db.coins.update(id, { enabled: !coin.enabled, updatedAt: new Date().toISOString() });
+      await refreshCaches();
+      startMarketData();
+      renderAll();
+    }
+
+    async function deleteCoin(id) {
+      if (!confirm("Delete this coin?")) return;
+      await db.coins.delete(id);
+      await refreshCaches();
+      renderAll();
+    }
+
+    function renderSourceAdminList() {
+      els.sourceAdminList.innerHTML = sourceCache.map((source) => `<article class="panel">
+        <div class="actions" style="justify-content: space-between;">
+          <div><strong>${escapeHtml(source.name)}</strong><br><span class="muted">${source.enabled ? "enabled" : "disabled"} · ${source.useProxy ? "proxy" : "direct"} · ${escapeHtml(source.lastError || `${source.lastCount || 0} articles`)}</span></div>
+          <div class="actions">
+            <button class="tiny" data-test-source="${source.id}" type="button">Test</button>
+            <button class="tiny" data-edit-source="${source.id}" type="button">Edit</button>
+            <button class="tiny" data-toggle-source="${source.id}" type="button">${source.enabled ? "Disable" : "Enable"}</button>
+            <button class="tiny danger" data-delete-source="${source.id}" type="button">Delete</button>
+          </div>
+        </div>
+      </article>`).join("") || `<div class="empty">No sources configured.</div>`;
+      els.sourceAdminList.querySelectorAll("[data-test-source]").forEach((button) => button.addEventListener("click", () => testSource(button.dataset.testSource)));
+      els.sourceAdminList.querySelectorAll("[data-edit-source]").forEach((button) => button.addEventListener("click", () => editSource(button.dataset.editSource)));
+      els.sourceAdminList.querySelectorAll("[data-toggle-source]").forEach((button) => button.addEventListener("click", () => toggleSource(button.dataset.toggleSource)));
+      els.sourceAdminList.querySelectorAll("[data-delete-source]").forEach((button) => button.addEventListener("click", () => deleteNewsSource(button.dataset.deleteSource)));
+    }
+
+    async function saveNewsSource() {
+      const name = els.sourceName.value.trim();
+      const url = els.sourceUrl.value.trim();
+      if (!name || !url) return showToast("Source name and URL are required", "error");
+      const now = new Date().toISOString();
+      const id = editingSourceId || slugify(name);
+      const existing = await db.newsSources.get(id);
+      await db.newsSources.put({ id, name, url, enabled: els.sourceEnabled.value === "true", type: "rss", useProxy: els.sourceUseProxy.value === "true", createdAt: existing?.createdAt || now, updatedAt: now });
+      clearSourceForm();
+      await refreshCaches();
+      renderAll();
+      showToast("Source saved");
+    }
+
+    function editSource(id) {
+      const source = sourceCache.find((item) => item.id === id);
+      if (!source) return;
+      editingSourceId = id;
+      els.sourceName.value = source.name;
+      els.sourceUrl.value = source.url;
+      els.sourceEnabled.value = String(Boolean(source.enabled));
+      els.sourceUseProxy.value = String(Boolean(source.useProxy));
+      els.saveSourceBtn.textContent = "Save source";
+    }
+
+    function clearSourceForm() {
+      editingSourceId = null;
+      els.sourceName.value = "";
+      els.sourceUrl.value = "";
+      els.sourceEnabled.value = "true";
+      els.sourceUseProxy.value = "true";
+      els.saveSourceBtn.textContent = "Add source";
+    }
+
+    async function toggleSource(id) {
+      const source = await db.newsSources.get(id);
+      await db.newsSources.update(id, { enabled: !source.enabled, updatedAt: new Date().toISOString() });
+      await refreshCaches();
+      renderAll();
+    }
+
+    async function deleteNewsSource(id) {
+      if (!confirm("Delete this news source?")) return;
+      await db.newsSources.delete(id);
+      await refreshCaches();
+      renderAll();
+    }
+
+    async function testSource(id) {
+      const source = sourceCache.find((item) => item.id === id);
+      try {
+        const articles = await fetchRssSource(source);
+        showToast(`${source.name}: ${articles.length} articles found`);
+      } catch (error) {
+        showToast(`${source.name}: ${error.message}`, "error");
+      }
+    }
+
+    function saveAdminSettings() {
+      settings.coingeckoPollSeconds = num("coingeckoPollSeconds", 60);
+      settings.priceTickPersistSeconds = num("priceTickPersistSeconds", 30);
+      settings.priceRetentionDays = num("priceRetentionDays", 7);
+      settings.staleMarketSeconds = num("staleMarketSeconds", 90);
+      settings.newsRefreshMinutes = num("newsRefreshMinutes", 15);
+      settings.newsRetentionDays = num("newsRetentionDays", 14);
+      settings.rssProxyTemplate = els.rssProxyTemplate.value.trim() || DEFAULT_SETTINGS.rssProxyTemplate;
+      saveSettings();
+      startMarketData();
+      scheduleNewsRefresh();
+      showToast("Settings saved");
+    }
+
+    function saveLlmSettings() {
+      settings.llmEnabled = els.llmEnabled.value === "true";
+      settings.llmModel = els.llmModel.value.trim() || DEFAULT_SETTINGS.llmModel;
+      settings.llmIntervalMinutes = Math.max(num("llmIntervalMinutes", 60), settings.llmMinIntervalMinutes);
+      settings.llmMarketWindowMinutes = num("llmMarketWindowMinutes", 240);
+      settings.llmMaxNewsArticles = num("llmMaxNewsArticles", 25);
+      settings.rememberOpenAiKey = els.rememberOpenAiKey.value === "true";
+      settings.openAiKey = els.openAiKey.value.trim();
+      if (!settings.rememberOpenAiKey) localStorage.removeItem(OPENAI_KEY_STORAGE);
+      saveSettings();
+      scheduleLlmAnalysis();
+      updateStatusStrip();
+      showToast("LLM settings saved");
+    }
+
+    function clearOpenAiKey() {
+      settings.openAiKey = "";
+      settings.rememberOpenAiKey = false;
+      els.openAiKey.value = "";
+      els.rememberOpenAiKey.value = "false";
+      localStorage.removeItem(OPENAI_KEY_STORAGE);
+      saveSettings();
+      showToast("OpenAI key cleared");
+    }
+
+    async function exportAllData() {
+      const data = {};
+      for (const table of db.tables) data[table.name] = await table.toArray();
+      data.settings = settings;
+      els.importExportBox.value = JSON.stringify(data, null, 2);
+      showToast("Export ready");
+    }
+
+    async function importAllData() {
+      if (!confirm("Import JSON and overwrite matching tables?")) return;
+      const data = JSON.parse(els.importExportBox.value);
+      for (const table of db.tables) {
+        if (Array.isArray(data[table.name])) {
+          await table.clear();
+          await table.bulkPut(data[table.name]);
+        }
+      }
+      if (data.settings) {
+        settings = { ...settings, ...data.settings };
+        saveSettings();
+      }
+      await refreshCaches();
+      hydrateAdmin();
+      renderAll();
+      showToast("Import complete");
+    }
+
+    async function resetSeedData() {
+      if (!confirm("Reset coins and news sources to seed defaults?")) return;
+      await db.coins.clear();
+      await db.newsSources.clear();
+      await seedDefaultsIfNeeded();
+      await refreshCaches();
+      startMarketData();
+      renderAll();
+      showToast("Seed data restored");
+    }
+
+    async function clearPriceHistory() {
+      if (!confirm("Clear all price history?")) return;
+      await db.priceTicks.clear();
+      showToast("Price history cleared");
+    }
+
+    async function clearNewsCache() {
+      if (!confirm("Clear cached news articles?")) return;
+      await db.newsArticles.clear();
+      renderNews();
+      showToast("News cache cleared");
+    }
+
+    async function clearAllData() {
+      if (!confirm("Clear all IndexedDB data?")) return;
+      for (const table of db.tables) await table.clear();
+      await seedDefaultsIfNeeded();
+      await refreshCaches();
+      renderAll();
+      showToast("IndexedDB cleared and seeds restored");
+    }
+
+    function clearLocalStorageSettings() {
+      if (!confirm("Clear localStorage settings, including remembered API key?")) return;
+      localStorage.removeItem(SETTINGS_KEY);
+      localStorage.removeItem(OPENAI_KEY_STORAGE);
+      loadSettings();
+      hydrateAdmin();
+      applyTheme(settings.theme);
+      showToast("localStorage settings cleared");
+    }
+
+    async function pruneOldData() {
+      const priceCutoff = Date.now() - settings.priceRetentionDays * 86400000;
+      const newsCutoff = Date.now() - settings.newsRetentionDays * 86400000;
+      await db.priceTicks.where("timestamp").below(priceCutoff).delete();
+      await db.newsArticles.where("fetchedAt").below(newsCutoff).delete();
+      logEvent("prune", "Old data pruned");
+    }
+
+    function scheduleNewsRefresh() {
+      if (newsTimer) clearInterval(newsTimer);
+      newsTimer = setInterval(() => { if (isNewsStale()) fetchAllNewsSources(); }, 60000);
+    }
+
+    function isNewsStale() {
+      return Date.now() - (settings.lastNewsFetchAt || 0) > settings.newsRefreshMinutes * 60000;
+    }
+
+    async function exportLlmHistory() {
+      els.importExportBox.value = JSON.stringify(await db.llmAnalyses.toArray(), null, 2);
+      switchTab("admin");
+      showToast("LLM history exported to Admin box");
+    }
+
+    async function clearLlmHistory() {
+      if (!confirm("Clear LLM analysis history?")) return;
+      await db.llmAnalyses.clear();
+      latestAnalysis = null;
+      renderLlmAnalysis();
+    }
+
+    async function renderDebug() {
+      if (!els.debugCounts) return;
+      const counts = {};
+      for (const table of db.tables) counts[table.name] = await table.count();
+      let estimate = {};
+      if (navigator.storage?.estimate) estimate = await navigator.storage.estimate();
+      els.debugCounts.textContent = JSON.stringify({ counts, storageEstimate: estimate }, null, 2);
+      els.debugProviders.textContent = JSON.stringify({ providerStatus, settings: safeSettings() }, null, 2);
+      els.debugLog.textContent = JSON.stringify(logs.slice(-100), null, 2);
+    }
+
+    function logEvent(type, message) {
+      const row = { timestamp: Date.now(), level: "info", type, message };
+      logs.push(row);
+      db?.fetchLogs?.add(row).catch(() => {});
+    }
+
+    function logError(type, message) {
+      const row = { timestamp: Date.now(), level: "error", type, message };
+      logs.push(row);
+      db?.fetchLogs?.add(row).catch(() => {});
+    }
+
+    function renderMoodCard() {
+      if (!latestAnalysis?.parsed) {
+        els.moodCard.innerHTML = `<h2>🤖 Robot vibes</h2><p>No analysis yet. Enable OpenAI in Admin or run one manually.</p>`;
+        return;
+      }
+      els.moodCard.innerHTML = `<h2>🤖 ${escapeHtml(latestAnalysis.parsed.overallMarketMood || "uncertain")} mood</h2><p>${escapeHtml(latestAnalysis.parsed.summary || "")}</p><span class="badge">Not financial advice</span>`;
+    }
+
+    function fillNewsFilters() {
+      const coinValue = els.newsCoinFilter.value;
+      const sourceValue = els.newsSourceFilter.value;
+      els.newsCoinFilter.innerHTML = `<option value="">All coins</option>${coinCache.map((coin) => `<option value="${escapeAttr(coin.symbol)}">${escapeHtml(coin.symbol)}</option>`).join("")}`;
+      els.newsSourceFilter.innerHTML = `<option value="">All sources</option>${sourceCache.map((source) => `<option value="${escapeAttr(source.id)}">${escapeHtml(source.name)}</option>`).join("")}`;
+      els.newsCoinFilter.value = coinValue;
+      els.newsSourceFilter.value = sourceValue;
+    }
+
+    function enabledCoins() {
+      return coinCache.filter((coin) => coin.enabled);
+    }
+
+    function isSnapshotStale(snapshot) {
+      return Date.now() - Number(snapshot.timestamp || 0) > settings.staleMarketSeconds * 1000;
+    }
+
+    function latestCoinAction(symbol) {
+      return latestAnalysis?.parsed?.coins?.find((coin) => coin.symbol === symbol)?.action;
+    }
+
+    function llmSchemaHint() {
+      return {
+        overallMarketMood: "bullish|bearish|mixed|uncertain",
+        summary: "string",
+        coins: [{ symbol: "BTC", action: "buy|sell|hold|watch", confidence: 0.0, timeHorizon: "intraday|days|weeks", rationale: "string", risks: ["string"], newsDrivers: ["string"], marketDrivers: ["string"] }],
+        riskWarnings: ["string"],
+        notFinancialAdvice: true
+      };
+    }
+
+    function textOf(node, selector) {
+      return node.querySelector(selector)?.textContent?.trim() || "";
+    }
+
+    function stripHtml(value) {
+      const div = document.createElement("div");
+      div.innerHTML = value || "";
+      return div.textContent.trim();
+    }
+
+    function canonicalLink(link) {
+      try {
+        const url = new URL(link);
+        url.hash = "";
+        return url.toString();
+      } catch {
+        return link.trim();
+      }
+    }
+
+    function stableId(text) {
+      let hash = 0;
+      for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+      return `a-${Math.abs(hash)}-${text.length}`;
+    }
+
+    function sentimentHint(text) {
+      const lower = text.toLowerCase();
+      if (/(hack|lawsuit|ban|crash|liquidation|exploit|fraud|selloff)/.test(lower)) return "risk";
+      if (/(etf|rally|surge|adoption|approval|record|upgrade)/.test(lower)) return "constructive";
+      return "neutral";
+    }
+
+    function defaultAliases(coin) {
+      return coin.symbol === "SHIB" ? ["Shiba", "Shiba Inu", "SHIB"] : [coin.name, coin.symbol];
+    }
+
+    function splitCsv(value) {
+      return value.split(",").map((item) => item.trim()).filter(Boolean);
+    }
+
+    function slugify(value) {
+      return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    }
+
+    function num(id, fallback) {
+      const value = Number(els[id].value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function coinEmoji(symbol) {
+      return { BTC: "₿", ETH: "Ξ", DOGE: "🐕", SHIB: "🐕‍🦺" }[symbol] || "◈";
+    }
+
+    function formatUsd(value) {
+      if (!Number.isFinite(Number(value))) return "—";
+      return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value < 1 ? 8 : 2 }).format(value);
+    }
+
+    function compact(value) {
+      return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value);
+    }
+
+    function signed(value, digits = 2) {
+      return `${value >= 0 ? "+" : ""}${Number(value).toFixed(digits)}`;
+    }
+
+    function relativeTime(timestamp) {
+      const seconds = Math.max(1, Math.round((Date.now() - Number(timestamp)) / 1000));
+      if (seconds < 60) return `${seconds}s ago`;
+      const minutes = Math.round(seconds / 60);
+      if (minutes < 60) return `${minutes}m ago`;
+      const hours = Math.round(minutes / 60);
+      if (hours < 48) return `${hours}h ago`;
+      return `${Math.round(hours / 24)}d ago`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replace(/`/g, "&#096;");
+    }
+
+    function safeSettings() {
+      const copy = { ...settings };
+      if (copy.openAiKey) copy.openAiKey = "present-redacted";
+      return copy;
+    }
+
+    function showToast(message, tone = "ok") {
+      const node = document.createElement("div");
+      node.className = "toast";
+      if (tone === "error") node.style.borderColor = "var(--red)";
+      if (tone === "warn") node.style.borderColor = "var(--amber)";
+      node.textContent = message;
+      els.toasts.append(node);
+      setTimeout(() => node.remove(), 4200);
+    }
+  </script>
+</body>
+</html>
