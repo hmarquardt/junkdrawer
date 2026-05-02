@@ -181,6 +181,15 @@
     .metric { border: 1px solid var(--line); border-radius: 14px; padding: 0.55rem; background: rgba(255, 255, 255, 0.04); }
     .metric small { display: block; color: var(--muted); }
     .chart-wrap { height: 90px; }
+    .chart-wrap-large { height: 320px; }
+    .chart-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.8rem;
+      margin-bottom: 0.8rem;
+    }
     .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 16px; }
     table { width: 100%; border-collapse: collapse; min-width: 820px; }
     th, td { padding: 0.72rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
@@ -257,6 +266,20 @@
           </div>
         </div>
         <div id="moodCard" class="panel"></div>
+      </div>
+      <div class="panel">
+        <div class="chart-toolbar">
+          <div>
+            <h2>Rolling Price vs Time</h2>
+            <p>Progressive time series built from retained price ticks. If Binance WebSocket is blocked, CoinGecko polling keeps this moving.</p>
+          </div>
+          <div class="actions">
+            <label>Coin <select id="dashboardChartCoin"></select></label>
+            <label>Window <select id="dashboardChartWindow"><option value="60">1 hour</option><option value="360" selected>6 hours</option><option value="1440">24 hours</option><option value="10080">7 days</option></select></label>
+          </div>
+        </div>
+        <div class="chart-wrap-large"><canvas id="dashboardPriceChart"></canvas></div>
+        <div id="dashboardChartEmpty" class="empty hidden">Waiting for price ticks. CoinGecko fallback should add points every polling interval when WebSocket is unavailable.</div>
       </div>
       <div id="coinCards" class="grid four"></div>
     </section>
@@ -464,10 +487,13 @@
     ];
 
     const SEED_SOURCES = [
+      { id: "coindesk", name: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/", enabled: true, type: "rss", useProxy: true },
       { id: "cointelegraph", name: "Cointelegraph", url: "https://cointelegraph.com/rss", enabled: true, type: "rss", useProxy: true },
       { id: "decrypt", name: "Decrypt", url: "https://decrypt.co/feed", enabled: true, type: "rss", useProxy: true },
-      { id: "bitcoin-magazine", name: "Bitcoin Magazine", url: "https://bitcoinmagazine.com/.rss/full/", enabled: false, type: "rss", useProxy: true },
+      { id: "blockworks", name: "Blockworks", url: "https://blockworks.co/feed", enabled: true, type: "rss", useProxy: true },
+      { id: "bitcoin-magazine", name: "Bitcoin Magazine", url: "https://bitcoinmagazine.com/.rss/full/", enabled: true, type: "rss", useProxy: true },
       { id: "newsbtc", name: "NewsBTC", url: "https://www.newsbtc.com/feed/", enabled: false, type: "rss", useProxy: true },
+      { id: "cryptoslate", name: "CryptoSlate", url: "https://cryptoslate.com/feed/", enabled: false, type: "rss", useProxy: true },
       { id: "google-news-crypto", name: "Google News - Crypto", url: "https://news.google.com/rss/search?q=cryptocurrency%20OR%20bitcoin%20OR%20ethereum&hl=en-US&gl=US&ceid=US:en", enabled: true, type: "rss", useProxy: true },
       { id: "google-news-doge-shib", name: "Google News - DOGE / SHIB", url: "https://news.google.com/rss/search?q=dogecoin%20OR%20shiba%20inu%20crypto&hl=en-US&gl=US&ceid=US:en", enabled: true, type: "rss", useProxy: true }
     ];
@@ -478,6 +504,7 @@
     let settings = structuredClone(DEFAULT_SETTINGS);
     let ws = null;
     let wsShouldReconnect = true;
+    let marketRunId = 0;
     let wsBackoffMs = 1500;
     let fallbackTimer = null;
     let newsTimer = null;
@@ -526,6 +553,8 @@
       document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => switchTab(button.dataset.tab)));
       els.themeToggle.addEventListener("click", () => { applyTheme(settings.theme === "dark" ? "light" : "dark"); saveSettings(); });
       els.refreshMarketBtn.addEventListener("click", () => fetchCoinGeckoPrices(enabledCoins()));
+      els.dashboardChartCoin.addEventListener("change", () => renderDashboardTimeSeries());
+      els.dashboardChartWindow.addEventListener("change", () => renderDashboardTimeSeries());
       els.refreshNewsBtn.addEventListener("click", fetchAllNewsSources);
       ["newsSearch", "newsCoinFilter", "newsSourceFilter", "newsSort", "compactNewsToggle"].forEach((id) => els[id].addEventListener("input", renderNews));
       els.saveCoinBtn.addEventListener("click", saveCoin);
@@ -579,6 +608,25 @@
         const now = new Date().toISOString();
         await db.newsSources.bulkPut(SEED_SOURCES.map((source) => ({ ...source, createdAt: now, updatedAt: now })));
       }
+      await ensureSeedNewsSourcesPresent();
+    }
+
+    async function ensureSeedNewsSourcesPresent() {
+      const now = new Date().toISOString();
+      for (const source of SEED_SOURCES) {
+        const existing = await db.newsSources.get(source.id);
+        if (!existing) {
+          await db.newsSources.put({ ...source, createdAt: now, updatedAt: now });
+          continue;
+        }
+        await db.newsSources.update(source.id, {
+          name: source.name,
+          url: source.url,
+          type: source.type,
+          useProxy: source.useProxy,
+          updatedAt: existing.updatedAt || now
+        });
+      }
     }
 
     async function refreshCaches() {
@@ -624,7 +672,8 @@
     function startMarketData() {
       stopMarketData();
       wsShouldReconnect = true;
-      connectBinanceWebSocket();
+      marketRunId += 1;
+      connectBinanceWebSocket(marketRunId);
       fetchCoinGeckoPrices(enabledCoins());
       fallbackTimer = setInterval(() => fetchCoinGeckoPrices(enabledCoins()), settings.coingeckoPollSeconds * 1000);
     }
@@ -637,7 +686,8 @@
       fallbackTimer = null;
     }
 
-    function connectBinanceWebSocket() {
+    function connectBinanceWebSocket(runId = marketRunId) {
+      if (runId !== marketRunId) return;
       const coins = enabledCoins().filter((coin) => coin.binanceSymbol);
       if (!coins.length) {
         providerStatus.websocket = "no enabled Binance symbols";
@@ -664,12 +714,13 @@
           updateStatusStrip();
         };
         ws.onclose = () => {
+          if (runId !== marketRunId) return;
           providerStatus.websocket = "disconnected";
           updateStatusStrip();
           if (!wsShouldReconnect) return;
           const delay = wsBackoffMs;
           wsBackoffMs = Math.min(wsBackoffMs * 1.8, 60000);
-          setTimeout(connectBinanceWebSocket, delay);
+          setTimeout(() => connectBinanceWebSocket(runId), delay);
         };
       } catch (error) {
         providerStatus.websocket = "error";
@@ -721,20 +772,21 @@
             continue;
           }
           const existing = latestSnapshots.get(coin.id);
+          const shouldUseFallback = !existing || providerStatus.websocket !== "connected" || existing.provider === "coingecko-rest" || isSnapshotStale(existing) || !coin.binanceSymbol;
           const snapshot = {
             coinId: coin.id,
             symbol: coin.symbol,
-            provider: existing && !isSnapshotStale(existing) ? existing.provider : "coingecko-rest",
+            provider: shouldUseFallback ? "coingecko-rest" : existing.provider,
             price: Number(raw.usd),
             open24h: null,
             high24h: null,
             low24h: null,
             volume24h: Number(raw.usd_24h_vol || 0),
             changePercent24h: Number(raw.usd_24h_change || 0),
-            timestamp: Number(raw.last_updated_at ? raw.last_updated_at * 1000 : Date.now()),
+            timestamp: Date.now(),
             raw
           };
-          if (!existing || isSnapshotStale(existing)) {
+          if (shouldUseFallback) {
             latestSnapshots.set(coin.id, snapshot);
             await db.marketSnapshots.put(snapshot);
             await persistPriceTickThrottled(snapshot);
@@ -812,6 +864,8 @@
     async function renderAll() {
       updateStatusStrip();
       renderMoodCard();
+      fillDashboardChartControls();
+      await renderDashboardTimeSeries();
       await renderCoinCards();
       await renderCoinTable();
       await renderNews();
@@ -837,6 +891,64 @@
       }
       els.coinCards.innerHTML = coins.map((coin) => coinCardHtml(coin)).join("");
       for (const coin of coins) await renderCoinChart(coin.id, `chart-${coin.id}`);
+    }
+
+    function fillDashboardChartControls() {
+      const current = els.dashboardChartCoin.value;
+      const coins = enabledCoins();
+      els.dashboardChartCoin.innerHTML = coins.map((coin) => `<option value="${escapeAttr(coin.id)}">${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</option>`).join("");
+      if (coins.some((coin) => coin.id === current)) els.dashboardChartCoin.value = current;
+      else if (coins[0]) els.dashboardChartCoin.value = coins[0].id;
+    }
+
+    async function renderDashboardTimeSeries() {
+      if (!window.Chart) return;
+      const coinId = els.dashboardChartCoin.value || enabledCoins()[0]?.id;
+      const coin = coinCache.find((item) => item.id === coinId);
+      if (!coin) {
+        els.dashboardChartEmpty.classList.remove("hidden");
+        return;
+      }
+      const windowMinutes = Number(els.dashboardChartWindow.value || 360);
+      const ticks = await loadRecentTicks(coin.id, windowMinutes * 60000);
+      const snapshot = latestSnapshots.get(coin.id);
+      const points = ticks.map((tick) => ({ x: tick.timestamp, y: tick.price }));
+      if (snapshot && (!points.length || points[points.length - 1].x !== snapshot.timestamp)) {
+        points.push({ x: snapshot.timestamp, y: snapshot.price });
+      }
+      els.dashboardChartEmpty.classList.toggle("hidden", points.length > 0);
+      const canvasId = "dashboardPriceChart";
+      const canvas = els.dashboardPriceChart;
+      if (chartMap.has(canvasId)) chartMap.get(canvasId).destroy();
+      chartMap.set(canvasId, new Chart(canvas, {
+        type: "line",
+        data: {
+          labels: points.map((point) => new Date(point.x).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
+          datasets: [{
+            label: `${coin.symbol} price`,
+            data: points.map((point) => point.y),
+            borderColor: coin.colorHint || "#37f29a",
+            backgroundColor: "rgba(55, 242, 154, 0.12)",
+            borderWidth: 2,
+            pointRadius: points.length < 30 ? 2 : 0,
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            legend: { display: true, labels: { color: getComputedStyle(document.body).getPropertyValue("--text") } },
+            tooltip: { callbacks: { label: (ctx) => `${coin.symbol}: ${formatUsd(ctx.parsed.y)}` } }
+          },
+          scales: {
+            x: { ticks: { color: getComputedStyle(document.body).getPropertyValue("--muted"), maxTicksLimit: 8 }, grid: { color: "rgba(255,255,255,0.05)" } },
+            y: { ticks: { color: getComputedStyle(document.body).getPropertyValue("--muted"), callback: (value) => formatUsd(value) }, grid: { color: "rgba(255,255,255,0.06)" } }
+          }
+        }
+      }));
     }
 
     function coinCardHtml(coin) {
