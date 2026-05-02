@@ -389,6 +389,7 @@
         <div class="actions" style="margin-top: 0.75rem;">
           <button id="saveSourceBtn" class="primary" type="button">Add source</button>
           <button id="clearSourceFormBtn" type="button">Clear source form</button>
+          <button id="seedSourcesBtn" class="amber" type="button">Seed/update crypto sources</button>
         </div>
         <div id="sourceAdminList" class="grid" style="margin-top: 1rem;"></div>
       </div>
@@ -501,7 +502,7 @@
     const SEED_TERMS = ["Bitcoin", "BTC", "Ethereum", "ETH", "Dogecoin", "DOGE", "Shiba Inu", "SHIB", "ETF", "SEC", "stablecoin", "exchange", "hack", "wallet", "whale", "liquidation", "memecoin", "DeFi"];
 
     let db;
-    let settings = structuredClone(DEFAULT_SETTINGS);
+    let settings = cloneDefaults();
     let ws = null;
     let wsShouldReconnect = true;
     let marketRunId = 0;
@@ -523,7 +524,9 @@
 
     const els = {};
 
-    document.addEventListener("DOMContentLoaded", initApp);
+    document.addEventListener("DOMContentLoaded", () => {
+      initApp().catch((error) => showStartupFailure(error));
+    });
 
     async function initApp() {
       cacheEls();
@@ -545,6 +548,22 @@
       logEvent("app-started", "Crypto Mood Ring initialized");
     }
 
+    function cloneDefaults() {
+      return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    }
+
+    function showStartupFailure(error) {
+      const message = error?.message || String(error);
+      console.error("Crypto Mood Ring startup failed:", error);
+      if (els.wsStatus) els.wsStatus.textContent = "Startup failed";
+      if (els.wsDot) els.wsDot.className = "dot bad";
+      if (els.fallbackStatus) els.fallbackStatus.textContent = "Startup failed";
+      if (els.fallbackDot) els.fallbackDot.className = "dot bad";
+      if (els.newsStatus) els.newsStatus.textContent = "Startup failed";
+      if (els.coinCards) els.coinCards.innerHTML = `<div class="empty">Startup failed: ${escapeHtml(message)}. Check the Debug/About tab or browser console.</div>`;
+      showToast(`Startup failed: ${message}`, "error");
+    }
+
     function cacheEls() {
       document.querySelectorAll("[id]").forEach((node) => { els[node.id] = node; });
     }
@@ -561,6 +580,7 @@
       els.clearCoinFormBtn.addEventListener("click", clearCoinForm);
       els.saveSourceBtn.addEventListener("click", saveNewsSource);
       els.clearSourceFormBtn.addEventListener("click", clearSourceForm);
+      els.seedSourcesBtn.addEventListener("click", seedSourcesNow);
       els.saveSettingsBtn.addEventListener("click", saveAdminSettings);
       els.resetSeedBtn.addEventListener("click", resetSeedData);
       els.pruneBtn.addEventListener("click", pruneOldData);
@@ -629,6 +649,14 @@
       }
     }
 
+    async function seedSourcesNow() {
+      await ensureSeedNewsSourcesPresent();
+      await refreshCaches();
+      renderAdmin();
+      fillNewsFilters();
+      showToast("Crypto news sources seeded/updated");
+    }
+
     async function refreshCaches() {
       coinCache = await db.coins.orderBy("symbol").toArray();
       sourceCache = await db.newsSources.orderBy("name").toArray();
@@ -636,9 +664,9 @@
 
     function loadSettings() {
       try {
-        settings = { ...structuredClone(DEFAULT_SETTINGS), ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+        settings = { ...cloneDefaults(), ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
       } catch {
-        settings = structuredClone(DEFAULT_SETTINGS);
+        settings = cloneDefaults();
         showToast("Settings could not be read; using defaults", "warn");
       }
       const rememberedKey = localStorage.getItem(OPENAI_KEY_STORAGE);
