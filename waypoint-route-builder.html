@@ -1,0 +1,1724 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Waypoint Route Builder</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101419;
+      --panel: rgba(24, 31, 39, 0.82);
+      --panel-solid: #18202a;
+      --panel-2: #202a35;
+      --text: #eef4f8;
+      --muted: #a8b4bf;
+      --line: rgba(255, 255, 255, 0.12);
+      --accent: #46c2a7;
+      --accent-2: #f2b84b;
+      --danger: #ff6b78;
+      --ok: #77d483;
+      --warn: #ffca64;
+      --shadow: 0 18px 55px rgba(0, 0, 0, 0.32);
+      --radius: 8px;
+      --input: #111820;
+      --button: #273442;
+      --button-hover: #324253;
+      --map-line: #2dd4bf;
+    }
+
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f4f7f8;
+      --panel: rgba(255, 255, 255, 0.86);
+      --panel-solid: #ffffff;
+      --panel-2: #edf2f4;
+      --text: #172029;
+      --muted: #5d6975;
+      --line: rgba(0, 0, 0, 0.12);
+      --accent: #087f6f;
+      --accent-2: #b47408;
+      --danger: #b42332;
+      --ok: #1d7c43;
+      --warn: #9a6700;
+      --shadow: 0 18px 40px rgba(18, 31, 44, 0.12);
+      --input: #ffffff;
+      --button: #e5ecef;
+      --button-hover: #d9e3e7;
+      --map-line: #087f6f;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(70, 194, 167, 0.14), transparent 28rem),
+        linear-gradient(135deg, var(--bg), var(--bg));
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 800;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+      backdrop-filter: blur(16px);
+    }
+
+    h1, h2, h3 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: clamp(1.2rem, 2vw, 1.65rem); }
+    h2 { font-size: 1.15rem; }
+    h3 { font-size: 0.98rem; }
+    p { margin: 0.35rem 0 0; color: var(--muted); }
+    a { color: var(--accent); }
+
+    main {
+      width: min(1500px, 100%);
+      margin: 0 auto;
+      padding: 1rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0.35rem;
+      overflow-x: auto;
+      padding: 0.5rem 0 1rem;
+    }
+
+    .tab-button, button, .link-button {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--button);
+      color: var(--text);
+      padding: 0.62rem 0.85rem;
+      min-height: 2.4rem;
+      font: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      text-decoration: none;
+      transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+      white-space: nowrap;
+    }
+
+    button:hover, .link-button:hover, .tab-button:hover { background: var(--button-hover); }
+    button:active, .link-button:active { transform: translateY(1px); }
+    button.primary, .link-button.primary {
+      background: var(--accent);
+      border-color: transparent;
+      color: #041915;
+      font-weight: 700;
+    }
+    button.danger { color: var(--danger); }
+    button:disabled {
+      opacity: 0.52;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .tab-button.active {
+      background: var(--accent);
+      color: #041915;
+      border-color: transparent;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 0.8fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1rem;
+      backdrop-filter: blur(14px);
+    }
+    .stack { display: grid; gap: 1rem; }
+    .row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+    .between { justify-content: space-between; }
+    .field { display: grid; gap: 0.4rem; }
+    .field label { color: var(--muted); font-size: 0.88rem; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--input);
+      color: var(--text);
+      padding: 0.68rem 0.75rem;
+      font: inherit;
+    }
+    textarea {
+      min-height: 290px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.86rem;
+    }
+    .output-box {
+      width: 100%;
+      min-height: 8rem;
+      max-height: 18rem;
+      overflow: auto;
+      white-space: pre;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--input);
+      color: var(--text);
+      padding: 0.75rem;
+    }
+    .section { display: none; }
+    .section.active { display: block; }
+    .muted { color: var(--muted); }
+    .small { font-size: 0.86rem; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      min-height: 1.8rem;
+      padding: 0.25rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel-2) 82%, transparent);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .badge.ok { color: var(--ok); }
+    .badge.warn { color: var(--warn); }
+    .badge.bad { color: var(--danger); }
+    .note {
+      border-left: 3px solid var(--accent-2);
+      padding: 0.55rem 0.75rem;
+      background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      color: var(--muted);
+    }
+    .error-list {
+      display: none;
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+    }
+    .error-list.active { display: block; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.58rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
+    tr:last-child td { border-bottom: 0; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    #map {
+      width: 100%;
+      min-height: 64vh;
+      height: 680px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      overflow: hidden;
+      background: #d8e1e8;
+    }
+    .marker-pin {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 50% 50% 50% 4px;
+      transform: rotate(-45deg);
+      background: var(--accent);
+      color: #041915;
+      border: 2px solid #fff;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+      font-weight: 800;
+      font-size: 0.78rem;
+    }
+    .marker-pin span { transform: rotate(45deg); }
+    .history-list { display: grid; gap: 0.75rem; }
+    .history-item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.85rem;
+      background: color-mix(in srgb, var(--panel-2) 64%, transparent);
+      display: grid;
+      gap: 0.65rem;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.65rem;
+    }
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.7rem;
+      background: color-mix(in srgb, var(--panel-2) 56%, transparent);
+    }
+    .stat strong { display: block; font-size: 1.05rem; }
+    .toast-wrap {
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      z-index: 2000;
+      display: grid;
+      gap: 0.5rem;
+      max-width: min(380px, calc(100vw - 2rem));
+    }
+    .toast {
+      padding: 0.8rem 0.9rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel-solid);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+    .toast.error { border-color: color-mix(in srgb, var(--danger) 48%, transparent); }
+    .toast.success { border-color: color-mix(in srgb, var(--ok) 48%, transparent); }
+    .empty {
+      border: 1px dashed var(--line);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .leaflet-popup-content button {
+      color: #111;
+      background: #e9f2f2;
+      border: 1px solid #cad7d8;
+      border-radius: 6px;
+      padding: 0.35rem 0.55rem;
+      min-height: auto;
+    }
+
+    @media (max-width: 950px) {
+      .grid, .two-col { grid-template-columns: 1fr; }
+      #map { min-height: 420px; height: 58vh; }
+      header { align-items: flex-start; flex-direction: column; }
+    }
+    @media (max-width: 620px) {
+      main { padding: 0.75rem; }
+      .panel { padding: 0.8rem; }
+      .row > button, .row > .link-button { flex: 1 1 auto; }
+      .stats-grid { grid-template-columns: 1fr; }
+      textarea { min-height: 230px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Waypoint Route Builder</h1>
+      <p class="small">Build ordered routes from latitude/longitude pairs and export them for Google Maps.</p>
+    </div>
+    <div class="row">
+      <span id="storageBadge" class="badge">localStorage checking</span>
+      <button id="headerBuildBtn" class="primary" type="button">Build Route</button>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs" aria-label="App sections">
+      <button class="tab-button active" type="button" data-tab="builder">Builder</button>
+      <button class="tab-button" type="button" data-tab="mapSection">Map</button>
+      <button class="tab-button" type="button" data-tab="outputs">Outputs</button>
+      <button class="tab-button" type="button" data-tab="history">History</button>
+      <button class="tab-button" type="button" data-tab="settings">Settings / Help</button>
+    </nav>
+
+    <section id="builder" class="section active">
+      <div class="grid">
+        <div class="panel stack">
+          <div class="two-col">
+            <label class="field">Route name
+              <input id="routeName" type="text" autocomplete="off">
+            </label>
+            <div class="two-col">
+              <label class="field">Travel mode
+                <select id="travelMode">
+                  <option value="driving">driving</option>
+                  <option value="walking">walking</option>
+                  <option value="bicycling">bicycling</option>
+                  <option value="transit">transit</option>
+                </select>
+              </label>
+              <label class="field">Units
+                <select id="units">
+                  <option value="miles">miles</option>
+                  <option value="kilometers">kilometers</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <label class="field">Coordinates
+            <textarea id="coordinateInput" spellcheck="false" placeholder="Start: 38.3551, -87.5672&#10;Stop 2: 38.3612, -87.5801&#10;38.3744&deg; N, 87.5929&deg; W"></textarea>
+          </label>
+
+          <div class="row">
+            <button id="buildBtn" class="primary" type="button">Build Route</button>
+            <button id="reverseBtn" type="button">Reverse Route</button>
+            <button id="clearInputBtn" type="button">Clear Input</button>
+            <button id="exampleBtn" type="button">Load Example</button>
+          </div>
+
+          <div id="parseErrors" class="error-list"></div>
+          <div class="note small">Blank lines and lines beginning with # are ignored. JSON arrays with lat/lng objects are supported.</div>
+        </div>
+
+        <div class="panel stack">
+          <div class="row between">
+            <h2>Parse Preview</h2>
+            <span id="previewCount" class="badge">0 waypoints</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>#</th><th>Name</th><th>Latitude</th><th>Longitude</th><th>Status</th></tr>
+              </thead>
+              <tbody id="previewBody">
+                <tr><td colspan="5" class="muted">Paste coordinates and build a route.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="mapSection" class="section">
+      <div class="stack">
+        <div class="panel stack">
+          <div class="row between">
+            <div class="row">
+              <span id="waypointBadge" class="badge">0 waypoints loaded</span>
+              <span id="routeBadge" class="badge">route not drawn</span>
+              <span id="modeBadge" class="badge">straight-line mode</span>
+              <span id="routingBadge" class="badge warn">road-following unavailable/experimental</span>
+            </div>
+            <div class="row">
+              <button id="zoomBtn" type="button">Zoom to route</button>
+              <button id="clearMapBtn" type="button">Clear map</button>
+              <button id="reverseMapBtn" type="button">Reverse route</button>
+              <button id="optimizeBtn" type="button" disabled title="Not implemented in v1; route order is preserved.">Optimize order</button>
+            </div>
+          </div>
+          <label class="field" style="max-width: 340px;">Route display mode
+            <select id="routeDisplayMode">
+              <option value="straight">Straight-line route</option>
+              <option value="road">Road-following route (experimental)</option>
+            </select>
+          </label>
+          <label class="field" style="max-width: 340px;">Basemap
+            <select id="basemapSelect">
+              <option value="cartoVoyager">CARTO Voyager</option>
+              <option value="cartoLight">CARTO Light</option>
+              <option value="osm">OpenStreetMap Standard</option>
+              <option value="osmHot">OpenStreetMap HOT</option>
+              <option value="custom">Custom tile URL from Settings</option>
+            </select>
+          </label>
+          <p class="small muted">Optimize order: Not implemented in v1; route order is preserved. Google Maps navigation output is the reliable navigation target.</p>
+          <div id="map"></div>
+        </div>
+
+        <div class="panel stack">
+          <h2>Route Stats</h2>
+          <div id="statsCard" class="stats-grid"></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Leg</th><th>From</th><th>To</th><th>Straight-line distance</th></tr></thead>
+              <tbody id="legsBody"><tr><td colspan="4" class="muted">No route built yet.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="outputs" class="section">
+      <div class="stack">
+        <div class="panel stack">
+          <div class="row between">
+            <h2>Google Maps</h2>
+            <span class="badge warn">Google Maps may limit waypoints</span>
+          </div>
+          <div class="row">
+            <a id="openGoogleBtn" class="link-button primary" href="#" target="_blank" rel="noopener">Open in Google Maps</a>
+            <button id="copyGoogleBtn" type="button">Copy Google Maps URL</button>
+          </div>
+          <div id="googleUrlBox" class="output-box mono" aria-label="Google Maps URL"></div>
+          <div id="segmentLinks" class="stack"></div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel stack">
+            <div class="row between"><h3>Normalized Coordinates</h3><button id="copyCoordsBtn" type="button">Copy</button></div>
+            <div id="coordsBox" class="output-box mono"></div>
+          </div>
+          <div class="panel stack">
+            <div class="row between"><h3>Labeled Coordinates</h3><button id="copyLabeledBtn" type="button">Copy</button></div>
+            <div id="labeledBox" class="output-box mono"></div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel stack">
+            <div class="row between"><h3>GeoJSON</h3><div class="row"><button id="copyGeoBtn" type="button">Copy</button><button id="downloadGeoBtn" type="button">Download</button></div></div>
+            <div id="geoBox" class="output-box mono"></div>
+          </div>
+          <div class="panel stack">
+            <div class="row between"><h3>GPX</h3><div class="row"><button id="copyGpxBtn" type="button">Copy</button><button id="downloadGpxBtn" type="button">Download</button></div></div>
+            <div id="gpxBox" class="output-box mono"></div>
+          </div>
+        </div>
+
+        <div class="panel stack">
+          <div class="row between"><h3>KML</h3><div class="row"><button id="copyKmlBtn" type="button">Copy</button><button id="downloadKmlBtn" type="button">Download</button></div></div>
+          <div id="kmlBox" class="output-box mono"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="history" class="section">
+      <div class="panel stack">
+        <div class="row between">
+          <h2>History</h2>
+          <div class="row">
+            <button id="exportHistoryBtn" type="button">Export all history JSON</button>
+            <button id="importHistoryBtn" type="button">Import history JSON</button>
+            <button id="clearHistoryBtn" class="danger" type="button">Clear all history</button>
+            <input id="historyImportFile" type="file" accept="application/json,.json" hidden>
+          </div>
+        </div>
+        <label class="field">Search history
+          <input id="historySearch" type="search" placeholder="Route name, label, coordinate, or date">
+        </label>
+        <div id="historyList" class="history-list"></div>
+      </div>
+    </section>
+
+    <section id="settings" class="section">
+      <div class="grid">
+        <div class="panel stack">
+          <h2>Settings</h2>
+          <div class="two-col">
+            <label class="field">Default travel mode
+              <select id="settingTravelMode">
+                <option value="driving">driving</option>
+                <option value="walking">walking</option>
+                <option value="bicycling">bicycling</option>
+                <option value="transit">transit</option>
+              </select>
+            </label>
+            <label class="field">Default units
+              <select id="settingUnits">
+                <option value="miles">miles</option>
+                <option value="kilometers">kilometers</option>
+              </select>
+            </label>
+          </div>
+          <div class="two-col">
+            <label class="field">Google Maps max intermediate waypoints per segment
+              <input id="settingMaxWaypoints" type="number" min="1" max="23" step="1">
+            </label>
+            <label class="field">Theme
+              <select id="settingTheme">
+                <option value="dark">dark</option>
+                <option value="light">light</option>
+                <option value="system">system</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">Tile layer URL
+            <input id="settingTileUrl" type="text">
+          </label>
+          <label class="field">Tile attribution
+            <input id="settingTileAttribution" type="text">
+          </label>
+          <label class="field">Optional experimental routing provider URL/template
+            <input id="settingRoutingProvider" type="text" placeholder="Optional only; straight-line route is always used in v1">
+          </label>
+          <label class="row small">
+            <input id="settingAutoSave" type="checkbox" style="width:auto">
+            Auto-save history on build
+          </label>
+          <div class="row">
+            <button id="saveSettingsBtn" class="primary" type="button">Save settings</button>
+            <button id="resetSettingsBtn" type="button">Reset settings</button>
+          </div>
+        </div>
+
+        <div class="panel stack">
+          <h2>Help</h2>
+          <p>The app uses Leaflet with no-key map tiles. CARTO Voyager is the default basemap, and OpenStreetMap variants are available from the Map tab.</p>
+          <p>Google Maps output is generated as a directions URL. Route order is preserved, and Google Maps may limit the number of waypoints it accepts.</p>
+          <p>For many waypoints, the app splits routes into ordered segments. Each segment overlaps the previous endpoint as the next origin.</p>
+          <p>Straight-line distance is not driving distance. Estimated drive distance and drive time are unavailable unless a routing provider is configured outside this v1 flow.</p>
+          <p>History is stored only in localStorage on this device and browser. There is no backend, account, sync, analytics, or tracking.</p>
+          <p class="note small">Road-following route mode is experimental and uses the public OSRM driving demo service. If it is blocked or unavailable, the app keeps the straight-line route.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toastWrap" class="toast-wrap" aria-live="polite"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    "use strict";
+
+    const HISTORY_KEY = "waypointRouteBuilder.history.v1";
+    const SETTINGS_KEY = "waypointRouteBuilder.settings.v1";
+    const BASEMAPS = {
+      cartoVoyager: {
+        name: "CARTO Voyager",
+        url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+      },
+      cartoLight: {
+        name: "CARTO Light",
+        url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+      },
+      osm: {
+        name: "OpenStreetMap Standard",
+        url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      },
+      osmHot: {
+        name: "OpenStreetMap HOT",
+        url: "https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Tiles style by Humanitarian OpenStreetMap Team'
+      }
+    };
+    const DEFAULT_BASEMAP = "cartoVoyager";
+    const DEFAULT_TILE_URL = BASEMAPS[DEFAULT_BASEMAP].url;
+    const DEFAULT_ATTRIBUTION = BASEMAPS[DEFAULT_BASEMAP].attribution;
+    const EXAMPLE_INPUT = [
+      "Start: 38.3551, -87.5672",
+      "River Bend: 38.3612, -87.5801",
+      "Low Water Crossing: 38.3744, -87.5929",
+      "Tree Line Pull-off: 38.3825, -87.6042",
+      "Finish: 38.3899, -87.6155"
+    ].join("\n");
+
+    const defaultSettings = {
+      travelMode: "driving",
+      units: "miles",
+      maxIntermediate: 10,
+      autoSave: true,
+      theme: "dark",
+      tileUrl: DEFAULT_TILE_URL,
+      tileAttribution: DEFAULT_ATTRIBUTION,
+      basemap: DEFAULT_BASEMAP,
+      routingProvider: ""
+    };
+
+    const state = {
+      settings: { ...defaultSettings },
+      history: [],
+      parsed: { waypoints: [], errors: [], rows: [] },
+      currentRoute: null,
+      map: null,
+      tileLayer: null,
+      tileErrorCount: 0,
+      markerLayer: null,
+      polyline: null,
+      routeMode: "straight",
+      routingRequestId: 0
+    };
+
+    const el = {};
+
+    document.addEventListener("DOMContentLoaded", initApp);
+
+    function initApp() {
+      bindElements();
+      state.settings = loadSettings();
+      state.history = loadHistory();
+      applyTheme();
+      hydrateSettingsUi();
+      hydrateBuilderDefaults();
+      bindEvents();
+      prepareMapShell();
+      renderHistory();
+      renderOutputs(null);
+      renderStats(null);
+      checkStorage();
+    }
+
+    function bindElements() {
+      document.querySelectorAll("[id]").forEach(node => { el[node.id] = node; });
+    }
+
+    function bindEvents() {
+      document.querySelectorAll(".tab-button").forEach(button => {
+        button.addEventListener("click", () => switchTab(button.dataset.tab));
+      });
+      el.buildBtn.addEventListener("click", buildRoute);
+      el.headerBuildBtn.addEventListener("click", buildRoute);
+      el.exampleBtn.addEventListener("click", () => { el.coordinateInput.value = EXAMPLE_INPUT; renderParsePreview(parseCoordinateInput(el.coordinateInput.value)); });
+      el.clearInputBtn.addEventListener("click", () => { el.coordinateInput.value = ""; state.parsed = { waypoints: [], errors: [], rows: [] }; renderParsePreview(state.parsed); });
+      el.reverseBtn.addEventListener("click", reverseRoute);
+      el.reverseMapBtn.addEventListener("click", reverseRoute);
+      el.clearMapBtn.addEventListener("click", clearMap);
+      el.zoomBtn.addEventListener("click", fitMapToWaypoints);
+      el.routeDisplayMode.addEventListener("change", () => {
+        state.routeMode = el.routeDisplayMode.value;
+        const waypoints = state.currentRoute ? state.currentRoute.parsedWaypoints : state.parsed.waypoints;
+        if (waypoints && waypoints.length) renderMap(waypoints);
+      });
+      el.basemapSelect.addEventListener("change", () => {
+        setBasemap(el.basemapSelect.value);
+      });
+      el.travelMode.addEventListener("change", rebuildOutputsOnly);
+      el.units.addEventListener("change", rebuildOutputsOnly);
+      el.coordinateInput.addEventListener("input", debounce(() => {
+        state.currentRoute = null;
+        renderParsePreview(parseCoordinateInput(el.coordinateInput.value));
+      }, 180));
+      el.routeName.addEventListener("change", updateCurrentRouteName);
+      el.copyGoogleBtn.addEventListener("click", () => copyOutput("googleMapsUrl"));
+      el.copyCoordsBtn.addEventListener("click", () => copyTextFromBox(el.coordsBox));
+      el.copyLabeledBtn.addEventListener("click", () => copyTextFromBox(el.labeledBox));
+      el.copyGeoBtn.addEventListener("click", () => copyTextFromBox(el.geoBox));
+      el.copyGpxBtn.addEventListener("click", () => copyTextFromBox(el.gpxBox));
+      el.copyKmlBtn.addEventListener("click", () => copyTextFromBox(el.kmlBox));
+      el.downloadGeoBtn.addEventListener("click", () => downloadCurrent("geojson"));
+      el.downloadGpxBtn.addEventListener("click", () => downloadCurrent("gpx"));
+      el.downloadKmlBtn.addEventListener("click", () => downloadCurrent("kml"));
+      el.historySearch.addEventListener("input", renderHistory);
+      el.exportHistoryBtn.addEventListener("click", exportHistory);
+      el.importHistoryBtn.addEventListener("click", () => el.historyImportFile.click());
+      el.historyImportFile.addEventListener("change", handleHistoryImportFile);
+      el.clearHistoryBtn.addEventListener("click", clearAllHistory);
+      el.saveSettingsBtn.addEventListener("click", saveSettingsFromUi);
+      el.resetSettingsBtn.addEventListener("click", resetSettings);
+      document.addEventListener("click", handleDocumentClick);
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+      window.addEventListener("offline", () => showToast("Browser is offline. Existing map tiles may still show from cache.", "error"));
+      window.addEventListener("online", () => showToast("Browser is online.", "success"));
+    }
+
+    function switchTab(id) {
+      document.querySelectorAll(".tab-button").forEach(button => button.classList.toggle("active", button.dataset.tab === id));
+      document.querySelectorAll(".section").forEach(section => section.classList.toggle("active", section.id === id));
+      if (id === "mapSection") {
+        ensureMap();
+        setTimeout(() => {
+          if (state.map) {
+            state.map.invalidateSize();
+            fitMapToWaypoints();
+          }
+        }, 120);
+      }
+    }
+
+    function loadSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+        const settings = { ...defaultSettings, ...saved };
+        if (!BASEMAPS[settings.basemap] && settings.basemap !== "custom") settings.basemap = DEFAULT_BASEMAP;
+        if (!isUsableTileTemplate(settings.tileUrl)) settings.tileUrl = DEFAULT_TILE_URL;
+        if (settings.basemap !== "custom") {
+          const config = BASEMAPS[settings.basemap] || BASEMAPS[DEFAULT_BASEMAP];
+          settings.tileUrl = config.url;
+          settings.tileAttribution = config.attribution;
+        }
+        return settings;
+      } catch (error) {
+        showToast("Settings could not be loaded; defaults are active.", "error");
+        return { ...defaultSettings };
+      }
+    }
+
+    function saveSettings() {
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+        return true;
+      } catch (error) {
+        showToast("Settings could not be saved. localStorage may be full or unavailable.", "error");
+        return false;
+      }
+    }
+
+    function loadHistory() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        showToast("History could not be loaded.", "error");
+        return [];
+      }
+    }
+
+    function saveHistory() {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(state.history));
+        return true;
+      } catch (error) {
+        showToast("History could not be saved. localStorage may be full or unavailable.", "error");
+        return false;
+      }
+    }
+
+    function checkStorage() {
+      try {
+        const key = "__wrb_test__";
+        localStorage.setItem(key, "1");
+        localStorage.removeItem(key);
+        el.storageBadge.textContent = "localStorage ready";
+        el.storageBadge.className = "badge ok";
+      } catch (error) {
+        el.storageBadge.textContent = "localStorage unavailable";
+        el.storageBadge.className = "badge bad";
+      }
+    }
+
+    function hydrateBuilderDefaults() {
+      el.travelMode.value = state.settings.travelMode;
+      el.units.value = state.settings.units;
+      el.routeName.value = defaultRouteName();
+    }
+
+    function hydrateSettingsUi() {
+      el.settingTravelMode.value = state.settings.travelMode;
+      el.settingUnits.value = state.settings.units;
+      el.settingMaxWaypoints.value = state.settings.maxIntermediate;
+      el.settingAutoSave.checked = Boolean(state.settings.autoSave);
+      el.settingTheme.value = state.settings.theme;
+      el.settingTileUrl.value = state.settings.tileUrl;
+      el.settingTileAttribution.value = state.settings.tileAttribution;
+      el.settingRoutingProvider.value = state.settings.routingProvider;
+      el.basemapSelect.value = state.settings.basemap || DEFAULT_BASEMAP;
+    }
+
+    function saveSettingsFromUi() {
+      const customTileUrl = el.settingTileUrl.value.trim();
+      const customAttribution = el.settingTileAttribution.value.trim();
+      state.settings = {
+        travelMode: el.settingTravelMode.value,
+        units: el.settingUnits.value,
+        maxIntermediate: clamp(parseInt(el.settingMaxWaypoints.value, 10) || 10, 1, 23),
+        autoSave: el.settingAutoSave.checked,
+        theme: el.settingTheme.value,
+        tileUrl: isUsableTileTemplate(customTileUrl) ? customTileUrl : getBasemapConfig(state.settings.basemap).url,
+        tileAttribution: customAttribution || getBasemapConfig(state.settings.basemap).attribution,
+        basemap: state.settings.basemap || DEFAULT_BASEMAP,
+        routingProvider: el.settingRoutingProvider.value.trim()
+      };
+      el.travelMode.value = state.settings.travelMode;
+      el.units.value = state.settings.units;
+      saveSettings();
+      applyTheme();
+      refreshTileLayer();
+      rebuildOutputsOnly();
+      showToast("Settings saved.", "success");
+    }
+
+    function resetSettings() {
+      if (!confirm("Reset settings to defaults?")) return;
+      state.settings = { ...defaultSettings };
+      saveSettings();
+      hydrateSettingsUi();
+      hydrateBuilderDefaults();
+      applyTheme();
+      refreshTileLayer();
+      showToast("Settings reset.", "success");
+    }
+
+    function setBasemap(key) {
+      state.settings.basemap = key === "custom" ? "custom" : (BASEMAPS[key] ? key : DEFAULT_BASEMAP);
+      if (state.settings.basemap !== "custom") {
+        const config = getBasemapConfig(state.settings.basemap);
+        state.settings.tileUrl = config.url;
+        state.settings.tileAttribution = config.attribution;
+      }
+      hydrateSettingsUi();
+      saveSettings();
+      refreshTileLayer();
+      if (state.map) setTimeout(() => state.map.invalidateSize(), 80);
+      showToast("Basemap set to " + getBasemapConfig(state.settings.basemap).name + ".", "success");
+    }
+
+    function getBasemapConfig(key) {
+      if (key === "custom") {
+        return {
+          name: "custom tile layer",
+          url: isUsableTileTemplate(state.settings.tileUrl) ? state.settings.tileUrl : DEFAULT_TILE_URL,
+          attribution: state.settings.tileAttribution || DEFAULT_ATTRIBUTION
+        };
+      }
+      return BASEMAPS[key] || BASEMAPS[DEFAULT_BASEMAP];
+    }
+
+    function applyTheme() {
+      const theme = state.settings.theme;
+      const resolved = theme === "system"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : theme;
+      document.documentElement.dataset.theme = resolved;
+    }
+
+    function parseCoordinateInput(text) {
+      const trimmed = text.trim();
+      if (!trimmed) return { waypoints: [], errors: [{ message: "Input is empty." }], rows: [] };
+      if (trimmed.startsWith("[") || trimmed.startsWith("{")) return parseJsonInput(trimmed);
+      const rows = [];
+      const waypoints = [];
+      const errors = [];
+      text.split(/\r?\n/).forEach((rawLine, index) => {
+        const lineNumber = index + 1;
+        const parsed = parseLine(rawLine, lineNumber);
+        if (parsed.skip) return;
+        rows.push(parsed);
+        if (parsed.valid) waypoints.push(parsed.waypoint);
+        else errors.push({ lineNumber, message: parsed.error || "Invalid coordinate line." });
+      });
+      assignDefaultLabels(waypoints);
+      rows.forEach(row => {
+        if (row.valid) row.waypoint = waypoints.find(wp => wp.sourceLine === row.lineNumber) || row.waypoint;
+      });
+      return { waypoints, errors, rows };
+    }
+
+    function parseJsonInput(text) {
+      const rows = [];
+      const waypoints = [];
+      const errors = [];
+      try {
+        const data = JSON.parse(text);
+        const list = Array.isArray(data) ? data : (Array.isArray(data.waypoints) ? data.waypoints : null);
+        if (!list) throw new Error("JSON must be an array, or an object with a waypoints array.");
+        list.forEach((item, index) => {
+          const lineNumber = index + 1;
+          const lat = item.lat ?? item.latitude;
+          const lng = item.lng ?? item.lon ?? item.long ?? item.longitude;
+          const waypoint = {
+            lat: Number(lat),
+            lng: Number(lng),
+            name: String(item.name || item.label || "").trim(),
+            sourceLine: lineNumber,
+            original: JSON.stringify(item)
+          };
+          const validation = validateWaypoint(waypoint);
+          if (validation.valid) {
+            waypoints.push(waypoint);
+            rows.push({ lineNumber, valid: true, waypoint });
+          } else {
+            errors.push({ lineNumber, message: validation.message });
+            rows.push({ lineNumber, valid: false, error: validation.message, original: waypoint.original });
+          }
+        });
+        assignDefaultLabels(waypoints);
+        return { waypoints, errors, rows };
+      } catch (error) {
+        return { waypoints: [], errors: [{ message: "JSON parse error: " + error.message }], rows: [] };
+      }
+    }
+
+    function parseLine(rawLine, lineNumber) {
+      const withoutComment = rawLine.replace(/\s+#.*$/, "");
+      const line = withoutComment.trim();
+      if (!line || line.startsWith("#")) return { skip: true };
+      const colonIndex = line.lastIndexOf(":");
+      const explicitLabel = colonIndex >= 0 ? line.slice(0, colonIndex).trim() : "";
+      const coordinateText = colonIndex >= 0 ? line.slice(colonIndex + 1).trim() : line;
+      const tokenRegex = /([+-]?\d+(?:\.\d+)?)\s*(?:&deg;|deg|degrees|°)?\s*([NSEW])?/gi;
+      const tokens = [];
+      let match;
+      while ((match = tokenRegex.exec(coordinateText)) !== null) {
+        tokens.push({ value: parseFloat(match[1]), dir: (match[2] || "").toUpperCase(), index: match.index });
+      }
+      if (tokens.length < 2) {
+        return { lineNumber, valid: false, error: "Expected at least latitude and longitude.", original: rawLine };
+      }
+      if (tokens.length > 2) {
+        const extrasAreEmpty = coordinateText.replace(tokenRegex, "").replace(/[,\s:.-]/g, "").length === 0;
+        if (!extrasAreEmpty) return { lineNumber, valid: false, error: "Too many numeric coordinate values.", original: rawLine };
+      }
+      const labelPart = explicitLabel || coordinateText.slice(0, tokens[0].index).replace(/[:,|-]+$/g, "").trim();
+      const first = tokens[tokens.length - 2];
+      const second = tokens[tokens.length - 1];
+      let latToken = first;
+      let lngToken = second;
+      if ((first.dir && "EW".includes(first.dir)) || (second.dir && "NS".includes(second.dir) && first.dir && "EW".includes(first.dir))) {
+        latToken = second;
+        lngToken = first;
+      }
+      const waypoint = {
+        lat: normalizeCoordinate(latToken.value, latToken.dir, "lat"),
+        lng: normalizeCoordinate(lngToken.value, lngToken.dir, "lng"),
+        name: labelPart,
+        sourceLine: lineNumber,
+        original: rawLine
+      };
+      const validation = validateWaypoint(waypoint);
+      if (!validation.valid) return { lineNumber, valid: false, error: validation.message, original: rawLine };
+      return { lineNumber, valid: true, waypoint, original: rawLine };
+    }
+
+    function normalizeCoordinate(value, direction, axis) {
+      let n = Number(value);
+      if (!Number.isFinite(n)) return NaN;
+      if (direction === "S" || direction === "W") n = -Math.abs(n);
+      if (direction === "N" || direction === "E") n = Math.abs(n);
+      return Number(n.toFixed(7));
+    }
+
+    function validateWaypoint(waypoint) {
+      if (!Number.isFinite(waypoint.lat)) return { valid: false, message: "Latitude is not a valid number." };
+      if (!Number.isFinite(waypoint.lng)) return { valid: false, message: "Longitude is not a valid number." };
+      if (waypoint.lat < -90 || waypoint.lat > 90) return { valid: false, message: "Latitude must be between -90 and 90." };
+      if (waypoint.lng < -180 || waypoint.lng > 180) return { valid: false, message: "Longitude must be between -180 and 180." };
+      return { valid: true, message: "OK" };
+    }
+
+    function assignDefaultLabels(waypoints) {
+      waypoints.forEach((wp, index) => {
+        if (wp.name) return;
+        if (index === 0) wp.name = "Start";
+        else if (index === waypoints.length - 1) wp.name = "Finish";
+        else wp.name = "Stop " + (index + 1);
+      });
+    }
+
+    function buildRoute() {
+      const parsed = parseCoordinateInput(el.coordinateInput.value);
+      state.parsed = parsed;
+      renderParsePreview(parsed);
+      if (parsed.waypoints.length === 0) {
+        clearMap();
+        renderOutputs(null);
+        renderStats(null);
+        showError("No valid waypoints found.");
+        return;
+      }
+      renderMap(parsed.waypoints);
+      const stats = calculateRouteStats(parsed.waypoints);
+      const routeName = el.routeName.value.trim() || defaultRouteName();
+      el.routeName.value = routeName;
+      const route = assembleRouteRecord({
+        id: state.currentRoute && state.currentRoute.id ? state.currentRoute.id : makeId(),
+        createdAt: state.currentRoute && state.currentRoute.createdAt ? state.currentRoute.createdAt : new Date().toISOString(),
+        routeName,
+        inputOriginal: el.coordinateInput.value,
+        parsedWaypoints: parsed.waypoints,
+        travelMode: el.travelMode.value,
+        routeStats: stats
+      });
+      state.currentRoute = route;
+      renderOutputs(route);
+      renderStats(stats);
+      if (state.settings.autoSave) saveRouteToHistory(route);
+      if (parsed.waypoints.length === 1) {
+        showToast("One waypoint loaded. Route outputs require at least two points.", "error");
+      } else if (parsed.errors.length) {
+        showToast("Route built with " + parsed.errors.length + " parse warning(s).", "error");
+      } else {
+        showToast("Route built.", "success");
+      }
+    }
+
+    function assembleRouteRecord(base) {
+      const route = { ...base };
+      route.updatedAt = new Date().toISOString();
+      route.notes = route.parsedWaypoints.length < 2 ? "At least two valid waypoints are required for route outputs." : "";
+      route.googleMapsUrl = buildGoogleMapsUrl(route.parsedWaypoints, route.travelMode);
+      route.googleMapsOpenUrl = buildGoogleMapsPathUrl(route.parsedWaypoints, route.travelMode);
+      route.segmentedGoogleMapsUrls = buildSegmentedGoogleMapsUrls(route.parsedWaypoints, route.travelMode, state.settings.maxIntermediate);
+      route.geoJson = JSON.stringify(buildGeoJson(route.parsedWaypoints, route.routeName), null, 2);
+      route.gpx = buildGpx(route.parsedWaypoints, route.routeName);
+      route.kml = buildKml(route.parsedWaypoints, route.routeName);
+      return route;
+    }
+
+    function renderParsePreview(parsed) {
+      state.parsed = parsed;
+      el.previewCount.textContent = parsed.waypoints.length + " valid waypoint" + (parsed.waypoints.length === 1 ? "" : "s");
+      el.previewBody.innerHTML = "";
+      if (!parsed.rows.length) {
+        el.previewBody.innerHTML = '<tr><td colspan="5" class="muted">No parseable rows yet.</td></tr>';
+      } else {
+        parsed.rows.forEach((row, index) => {
+          const tr = document.createElement("tr");
+          if (row.valid) {
+            tr.innerHTML = "<td>" + (index + 1) + "</td><td>" + esc(row.waypoint.name) + "</td><td class='mono'>" + fmtCoord(row.waypoint.lat) + "</td><td class='mono'>" + fmtCoord(row.waypoint.lng) + "</td><td><span class='badge ok'>valid</span></td>";
+          } else {
+            tr.innerHTML = "<td>" + row.lineNumber + "</td><td colspan='3' class='muted'>" + esc(row.original || "") + "</td><td><span class='badge bad'>" + esc(row.error) + "</span></td>";
+          }
+          el.previewBody.appendChild(tr);
+        });
+      }
+      renderErrors(parsed.errors);
+    }
+
+    function renderErrors(errors) {
+      if (!errors.length) {
+        el.parseErrors.classList.remove("active");
+        el.parseErrors.innerHTML = "";
+        return;
+      }
+      el.parseErrors.classList.add("active");
+      el.parseErrors.innerHTML = "<strong>Parse issues</strong><ul>" + errors.map(error => {
+        const prefix = error.lineNumber ? "Line " + error.lineNumber + ": " : "";
+        return "<li>" + esc(prefix + error.message) + "</li>";
+      }).join("") + "</ul>";
+    }
+
+    function prepareMapShell() {
+      el.map.innerHTML = '<div class="empty">Map will load when this tab is opened or a route is built.</div>';
+    }
+
+    function ensureMap() {
+      if (state.map) return true;
+      return initMap();
+    }
+
+    function initMap() {
+      if (!window.L) {
+        el.map.innerHTML = "<div class='empty'>Leaflet did not load. Check network access or CDN availability.</div>";
+        return false;
+      }
+      el.map.innerHTML = "";
+      state.map = L.map("map", { zoomControl: true }).setView([38.37, -87.59], 12);
+      state.markerLayer = L.layerGroup().addTo(state.map);
+      refreshTileLayer();
+      setTimeout(() => state.map.invalidateSize(), 120);
+      return true;
+    }
+
+    function refreshTileLayer() {
+      if (!state.map || !window.L) return;
+      if (state.tileLayer) state.map.removeLayer(state.tileLayer);
+      state.tileErrorCount = 0;
+      const basemapConfig = getBasemapConfig(state.settings.basemap);
+      const tileUrl = state.settings.basemap === "custom" && isUsableTileTemplate(state.settings.tileUrl)
+        ? state.settings.tileUrl
+        : basemapConfig.url;
+      const attribution = state.settings.basemap === "custom"
+        ? (state.settings.tileAttribution || DEFAULT_ATTRIBUTION)
+        : basemapConfig.attribution;
+      state.tileLayer = L.tileLayer(tileUrl, {
+        attribution,
+        maxZoom: 19
+      }).addTo(state.map);
+      state.tileLayer.on("tileerror", () => {
+        state.tileErrorCount += 1;
+        if (state.tileErrorCount === 1) {
+          showToast("A map tile failed to load from " + basemapConfig.name + ". Try another basemap if tiles stay blank.", "error");
+        }
+        if (state.tileErrorCount === 3 && state.settings.basemap !== DEFAULT_BASEMAP) {
+          state.settings.basemap = DEFAULT_BASEMAP;
+          state.settings.tileUrl = DEFAULT_TILE_URL;
+          state.settings.tileAttribution = DEFAULT_ATTRIBUTION;
+          hydrateSettingsUi();
+          saveSettings();
+          refreshTileLayer();
+          showToast("Basemap was reset to CARTO Voyager after repeated tile failures.", "error");
+        }
+      });
+    }
+
+    function clearMap() {
+      if (state.markerLayer) state.markerLayer.clearLayers();
+      if (state.polyline && state.map) state.map.removeLayer(state.polyline);
+      state.polyline = null;
+      el.waypointBadge.textContent = "0 waypoints loaded";
+      el.waypointBadge.className = "badge";
+      el.routeBadge.textContent = "route not drawn";
+      el.routeBadge.className = "badge";
+      state.currentRoute = null;
+      renderStats(null);
+      renderOutputs(null);
+    }
+
+    function renderMap(waypoints) {
+      if (!ensureMap() || !window.L) return;
+      const requestId = ++state.routingRequestId;
+      state.markerLayer.clearLayers();
+      if (state.polyline) state.map.removeLayer(state.polyline);
+      waypoints.forEach((wp, index) => state.markerLayer.addLayer(createNumberedMarker(wp, index)));
+      if (waypoints.length >= 2) drawPolyline(waypoints);
+      else state.polyline = null;
+      el.waypointBadge.textContent = waypoints.length + " waypoint" + (waypoints.length === 1 ? "" : "s") + " loaded";
+      el.waypointBadge.className = "badge ok";
+      el.routeBadge.textContent = waypoints.length >= 2 ? "route drawn" : "marker only";
+      el.routeBadge.className = waypoints.length >= 2 ? "badge ok" : "badge warn";
+      el.modeBadge.textContent = "straight-line mode";
+      el.routingBadge.textContent = "road-following unavailable/experimental";
+      el.routingBadge.className = "badge warn";
+      if (state.routeMode === "road" && waypoints.length >= 2) {
+        drawRoadFollowingRoute(waypoints, requestId);
+      }
+      setTimeout(() => {
+        state.map.invalidateSize();
+        fitMapToWaypoints();
+      }, 120);
+    }
+
+    function createNumberedMarker(waypoint, index) {
+      const icon = L.divIcon({
+        className: "",
+        html: '<div class="marker-pin"><span>' + (index + 1) + "</span></div>",
+        iconSize: [30, 30],
+        iconAnchor: [15, 30],
+        popupAnchor: [0, -28]
+      });
+      const html = [
+        "<strong>Waypoint " + (index + 1) + "</strong>",
+        "<div>" + esc(waypoint.name) + "</div>",
+        '<div class="mono">' + fmtCoord(waypoint.lat) + ", " + fmtCoord(waypoint.lng) + "</div>",
+        '<button type="button" data-copy-coord="' + fmtCoord(waypoint.lat) + "," + fmtCoord(waypoint.lng) + '">Copy coordinate</button>'
+      ].join("");
+      return L.marker([waypoint.lat, waypoint.lng], { icon }).bindPopup(html);
+    }
+
+    function drawPolyline(waypoints) {
+      state.polyline = L.polyline(waypoints.map(wp => [wp.lat, wp.lng]), {
+        color: getComputedStyle(document.documentElement).getPropertyValue("--map-line").trim() || "#2dd4bf",
+        weight: 5,
+        opacity: 0.88
+      }).addTo(state.map);
+    }
+
+    async function drawRoadFollowingRoute(waypoints, requestId) {
+      if (el.travelMode.value !== "driving") {
+        el.routingBadge.textContent = "road-following supports driving only in v1";
+        showToast("Experimental road-following uses the OSRM driving demo server. Straight-line route kept for this travel mode.", "error");
+        return;
+      }
+      if (waypoints.length > 100) {
+        el.routingBadge.textContent = "too many waypoints for experimental road-following";
+        showToast("Too many waypoints for experimental road-following. Straight-line route kept.", "error");
+        return;
+      }
+      el.modeBadge.textContent = "road-following requested";
+      el.routingBadge.textContent = "loading OSRM road-following route";
+      el.routingBadge.className = "badge warn";
+      try {
+        const coords = waypoints.map(wp => fmtCoord(wp.lng) + "," + fmtCoord(wp.lat)).join(";");
+        const url = "https://router.project-osrm.org/route/v1/driving/" + coords + "?overview=full&geometries=geojson&steps=false";
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("OSRM returned " + response.status);
+        const data = await response.json();
+        if (!data.routes || !data.routes[0] || !data.routes[0].geometry) throw new Error("OSRM response did not include a route.");
+        if (requestId !== state.routingRequestId) return;
+        const line = data.routes[0].geometry.coordinates.map(pair => [pair[1], pair[0]]);
+        if (state.polyline) state.map.removeLayer(state.polyline);
+        state.polyline = L.polyline(line, {
+          color: getComputedStyle(document.documentElement).getPropertyValue("--map-line").trim() || "#2dd4bf",
+          weight: 5,
+          opacity: 0.9
+        }).addTo(state.map);
+        el.modeBadge.textContent = "road-following mode";
+        el.routingBadge.textContent = "experimental OSRM route drawn";
+        el.routingBadge.className = "badge ok";
+        fitMapToWaypoints();
+      } catch (error) {
+        if (requestId !== state.routingRequestId) return;
+        el.modeBadge.textContent = "straight-line mode";
+        el.routingBadge.textContent = "road-following failed; straight-line fallback";
+        el.routingBadge.className = "badge warn";
+        showToast("Road-following route unavailable: " + error.message, "error");
+      }
+    }
+
+    function fitMapToWaypoints() {
+      const waypoints = state.currentRoute ? state.currentRoute.parsedWaypoints : state.parsed.waypoints;
+      if (!state.map || !waypoints || !waypoints.length) return;
+      const bounds = L.latLngBounds(waypoints.map(wp => [wp.lat, wp.lng]));
+      state.map.fitBounds(bounds.pad(0.16), { maxZoom: waypoints.length === 1 ? 14 : 17 });
+    }
+
+    function reverseRoute() {
+      const active = state.currentRoute ? state.currentRoute.parsedWaypoints : state.parsed.waypoints;
+      if (!active || !active.length) {
+        showToast("Build or load a route before reversing.", "error");
+        return;
+      }
+      const reversed = active.slice().reverse().map((wp, index, list) => ({
+        ...wp,
+        name: index === 0 && !wp.originalName ? "Start" : index === list.length - 1 && !wp.originalName ? "Finish" : wp.name
+      }));
+      el.coordinateInput.value = reversed.map(wp => wp.name + ": " + fmtCoord(wp.lat) + ", " + fmtCoord(wp.lng)).join("\n");
+      state.currentRoute = null;
+      buildRoute();
+    }
+
+    function calculateRouteStats(waypoints) {
+      if (!waypoints || !waypoints.length) return null;
+      const units = el.units.value || state.settings.units;
+      const legs = [];
+      let total = 0;
+      for (let i = 1; i < waypoints.length; i += 1) {
+        const distance = haversineDistance(waypoints[i - 1], waypoints[i], units);
+        total += distance;
+        legs.push({ from: waypoints[i - 1], to: waypoints[i], distance });
+      }
+      const lats = waypoints.map(wp => wp.lat);
+      const lngs = waypoints.map(wp => wp.lng);
+      const bbox = {
+        minLat: Math.min(...lats),
+        minLng: Math.min(...lngs),
+        maxLat: Math.max(...lats),
+        maxLng: Math.max(...lngs)
+      };
+      const center = {
+        lat: (bbox.minLat + bbox.maxLat) / 2,
+        lng: (bbox.minLng + bbox.maxLng) / 2
+      };
+      return {
+        units,
+        waypointCount: waypoints.length,
+        totalDistance: total,
+        legs,
+        bbox,
+        center,
+        estimatedDriveDistance: "Unavailable unless routing provider exists",
+        estimatedDriveTime: "Unavailable unless routing provider exists"
+      };
+    }
+
+    function haversineDistance(a, b, units) {
+      const earthRadiusKm = 6371.0088;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+      const km = 2 * earthRadiusKm * Math.asin(Math.sqrt(h));
+      return units === "kilometers" ? km : km * 0.621371;
+    }
+
+    function renderStats(stats) {
+      if (!stats) {
+        el.statsCard.innerHTML = '<div class="empty">Build a route to see stats.</div>';
+        el.legsBody.innerHTML = '<tr><td colspan="4" class="muted">No route built yet.</td></tr>';
+        return;
+      }
+      const unitLabel = stats.units === "kilometers" ? "km" : "mi";
+      el.statsCard.innerHTML = [
+        statHtml("Waypoints", stats.waypointCount),
+        statHtml("Straight-line total", formatDistance(stats.totalDistance, unitLabel)),
+        statHtml("Bounding box", fmtCoord(stats.bbox.minLat) + ", " + fmtCoord(stats.bbox.minLng) + " to " + fmtCoord(stats.bbox.maxLat) + ", " + fmtCoord(stats.bbox.maxLng)),
+        statHtml("Center point", fmtCoord(stats.center.lat) + ", " + fmtCoord(stats.center.lng)),
+        statHtml("Estimated drive distance", "Unavailable"),
+        statHtml("Estimated drive time", "Unavailable")
+      ].join("");
+      if (!stats.legs.length) {
+        el.legsBody.innerHTML = '<tr><td colspan="4" class="muted">At least two waypoints are required for route legs.</td></tr>';
+        return;
+      }
+      el.legsBody.innerHTML = stats.legs.map((leg, index) => (
+        "<tr><td>" + (index + 1) + "</td><td>" + esc(leg.from.name) + "</td><td>" + esc(leg.to.name) + "</td><td>" + formatDistance(leg.distance, unitLabel) + "</td></tr>"
+      )).join("");
+    }
+
+    function statHtml(label, value) {
+      return '<div class="stat"><span class="small muted">' + esc(label) + '</span><strong>' + esc(String(value)) + '</strong></div>';
+    }
+
+    function buildGoogleMapsUrl(waypoints, travelMode) {
+      if (!waypoints || waypoints.length < 2) return "";
+      const origin = encodeURIComponent(coordPair(waypoints[0]));
+      const destination = encodeURIComponent(coordPair(waypoints[waypoints.length - 1]));
+      const waypointsParam = waypoints.length > 2
+        ? "&waypoints=" + encodeURIComponent(waypoints.slice(1, -1).map(coordPair).join("|"))
+        : "";
+      return "https://www.google.com/maps/dir/?api=1&origin=" + origin + "&destination=" + destination + waypointsParam + "&travelmode=" + encodeURIComponent(travelMode || "driving");
+    }
+
+    function buildGoogleMapsPathUrl(waypoints, travelMode) {
+      if (!waypoints || waypoints.length < 2) return "";
+      const path = waypoints.map(coordPair).join("/");
+      return "https://www.google.com/maps/dir/" + path + "/?travelmode=" + encodeURIComponent(travelMode || "driving");
+    }
+
+    function buildSegmentedGoogleMapsUrls(waypoints, travelMode, maxIntermediate) {
+      if (!waypoints || waypoints.length < 2) return [];
+      const maxPointsPerSegment = clamp((Number(maxIntermediate) || 10) + 2, 3, 25);
+      if (waypoints.length <= maxPointsPerSegment) return [{ label: "Segment 1", waypoints: waypoints.slice(), url: buildGoogleMapsUrl(waypoints, travelMode), openUrl: buildGoogleMapsPathUrl(waypoints, travelMode) }];
+      const segments = [];
+      let start = 0;
+      while (start < waypoints.length - 1) {
+        const end = Math.min(start + maxPointsPerSegment - 1, waypoints.length - 1);
+        const segmentPoints = waypoints.slice(start, end + 1);
+        segments.push({ label: "Segment " + (segments.length + 1), waypoints: segmentPoints, url: buildGoogleMapsUrl(segmentPoints, travelMode), openUrl: buildGoogleMapsPathUrl(segmentPoints, travelMode) });
+        start = end;
+      }
+      return segments;
+    }
+
+    function buildGeoJson(waypoints, routeName) {
+      const pointFeatures = waypoints.map((wp, index) => ({
+        type: "Feature",
+        properties: { name: wp.name, number: index + 1 },
+        geometry: { type: "Point", coordinates: [wp.lng, wp.lat] }
+      }));
+      const lineFeature = {
+        type: "Feature",
+        properties: { name: routeName || "Route", kind: "route-order" },
+        geometry: { type: "LineString", coordinates: waypoints.map(wp => [wp.lng, wp.lat]) }
+      };
+      return { type: "FeatureCollection", features: [...pointFeatures, lineFeature] };
+    }
+
+    function buildGpx(waypoints, routeName) {
+      const safeName = xmlEsc(routeName || "Route");
+      const wpts = waypoints.map(wp => '  <wpt lat="' + fmtCoord(wp.lat) + '" lon="' + fmtCoord(wp.lng) + '"><name>' + xmlEsc(wp.name) + "</name></wpt>").join("\n");
+      const rtepts = waypoints.map(wp => '    <rtept lat="' + fmtCoord(wp.lat) + '" lon="' + fmtCoord(wp.lng) + '"><name>' + xmlEsc(wp.name) + "</name></rtept>").join("\n");
+      return ['<?xml version="1.0" encoding="UTF-8"?>', '<gpx version="1.1" creator="Waypoint Route Builder" xmlns="http://www.topografix.com/GPX/1/1">', "  <metadata><name>" + safeName + "</name></metadata>", wpts, "  <rte>", "    <name>" + safeName + "</name>", rtepts, "  </rte>", "</gpx>"].join("\n");
+    }
+
+    function buildKml(waypoints, routeName) {
+      const safeName = xmlEsc(routeName || "Route");
+      const placemarks = waypoints.map((wp, index) => [
+        "    <Placemark>",
+        "      <name>" + xmlEsc((index + 1) + ". " + wp.name) + "</name>",
+        "      <Point><coordinates>" + fmtCoord(wp.lng) + "," + fmtCoord(wp.lat) + ",0</coordinates></Point>",
+        "    </Placemark>"
+      ].join("\n")).join("\n");
+      const lineCoords = waypoints.map(wp => fmtCoord(wp.lng) + "," + fmtCoord(wp.lat) + ",0").join(" ");
+      return ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2">', "  <Document>", "    <name>" + safeName + "</name>", placemarks, "    <Placemark>", "      <name>" + safeName + " route</name>", "      <LineString><tessellate>1</tessellate><coordinates>" + lineCoords + "</coordinates></LineString>", "    </Placemark>", "  </Document>", "</kml>"].join("\n");
+    }
+
+    function renderOutputs(route) {
+      const disabled = !route || !route.googleMapsUrl;
+      el.openGoogleBtn.href = disabled ? "#" : (route.googleMapsOpenUrl || route.googleMapsUrl);
+      el.openGoogleBtn.setAttribute("aria-disabled", String(disabled));
+      el.googleUrlBox.textContent = route ? (route.googleMapsUrl || "At least two valid waypoints are required.") : "Build a route to generate Google Maps output.";
+      const waypoints = route ? route.parsedWaypoints : [];
+      el.coordsBox.textContent = waypoints.map(coordPair).join("\n");
+      el.labeledBox.textContent = waypoints.map(wp => wp.name + ": " + coordPair(wp)).join("\n");
+      el.geoBox.textContent = route ? route.geoJson : "";
+      el.gpxBox.textContent = route ? route.gpx : "";
+      el.kmlBox.textContent = route ? route.kml : "";
+      renderSegmentLinks(route);
+    }
+
+    function renderSegmentLinks(route) {
+      el.segmentLinks.innerHTML = "";
+      if (!route || !route.segmentedGoogleMapsUrls || !route.segmentedGoogleMapsUrls.length) return;
+      if (route.segmentedGoogleMapsUrls.length === 1) return;
+      const wrap = document.createElement("div");
+      wrap.className = "panel stack";
+      wrap.innerHTML = "<h3>Segmented Google Maps URLs</h3><p class='small muted'>Segments preserve order and use each previous endpoint as the next segment origin.</p>";
+      route.segmentedGoogleMapsUrls.forEach(segment => {
+        const row = document.createElement("div");
+        row.className = "history-item";
+        row.innerHTML = '<div class="row between"><strong>' + esc(segment.label) + '</strong><a class="link-button" href="' + esc(segment.openUrl || segment.url) + '" target="_blank" rel="noopener">Open</a></div><div class="output-box mono">' + esc(segment.url) + "</div>";
+        wrap.appendChild(row);
+      });
+      el.segmentLinks.appendChild(wrap);
+    }
+
+    function rebuildOutputsOnly() {
+      if (!state.currentRoute) return;
+      const stats = calculateRouteStats(state.currentRoute.parsedWaypoints);
+      state.currentRoute = assembleRouteRecord({ ...state.currentRoute, travelMode: el.travelMode.value, routeStats: stats });
+      renderOutputs(state.currentRoute);
+      renderStats(stats);
+    }
+
+    function updateCurrentRouteName() {
+      if (!state.currentRoute) return;
+      state.currentRoute.routeName = el.routeName.value.trim() || defaultRouteName();
+      state.currentRoute = assembleRouteRecord(state.currentRoute);
+      renderOutputs(state.currentRoute);
+      saveRouteToHistory(state.currentRoute);
+    }
+
+    function saveRouteToHistory(route) {
+      const existing = state.history.findIndex(item => item.id === route.id);
+      const copy = JSON.parse(JSON.stringify(route));
+      if (existing >= 0) state.history[existing] = copy;
+      else state.history.unshift(copy);
+      state.history.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      saveHistory();
+      renderHistory();
+    }
+
+    function loadRouteFromHistory(id) {
+      const route = state.history.find(item => item.id === id);
+      if (!route) return showToast("History item was not found.", "error");
+      state.currentRoute = JSON.parse(JSON.stringify(route));
+      el.routeName.value = route.routeName;
+      el.coordinateInput.value = route.inputOriginal || route.parsedWaypoints.map(wp => wp.name + ": " + coordPair(wp)).join("\n");
+      el.travelMode.value = route.travelMode || state.settings.travelMode;
+      state.parsed = { waypoints: route.parsedWaypoints, errors: [], rows: route.parsedWaypoints.map((wp, index) => ({ lineNumber: index + 1, valid: true, waypoint: wp })) };
+      renderParsePreview(state.parsed);
+      renderMap(route.parsedWaypoints);
+      renderOutputs(route);
+      renderStats(route.routeStats || calculateRouteStats(route.parsedWaypoints));
+      switchTab("builder");
+      showToast("Route loaded from history.", "success");
+    }
+
+    function deleteRouteFromHistory(id) {
+      if (!confirm("Delete this route from history?")) return;
+      state.history = state.history.filter(item => item.id !== id);
+      saveHistory();
+      renderHistory();
+    }
+
+    function renameRoute(id) {
+      const route = state.history.find(item => item.id === id);
+      if (!route) return;
+      const name = prompt("New route name", route.routeName);
+      if (!name || !name.trim()) return;
+      route.routeName = name.trim();
+      route.updatedAt = new Date().toISOString();
+      saveHistory();
+      renderHistory();
+    }
+
+    function duplicateRoute(id) {
+      const route = state.history.find(item => item.id === id);
+      if (!route) return;
+      const copy = JSON.parse(JSON.stringify(route));
+      copy.id = makeId();
+      copy.routeName = copy.routeName + " copy";
+      copy.createdAt = new Date().toISOString();
+      copy.updatedAt = copy.createdAt;
+      state.history.unshift(copy);
+      saveHistory();
+      renderHistory();
+      showToast("Route duplicated.", "success");
+    }
+
+    function exportHistory() {
+      downloadTextFile("waypoint-route-builder-history.json", JSON.stringify(state.history, null, 2), "application/json");
+    }
+
+    function handleHistoryImportFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => importHistory(reader.result);
+      reader.onerror = () => showToast("Could not read history file.", "error");
+      reader.readAsText(file);
+      event.target.value = "";
+    }
+
+    function importHistory(json) {
+      try {
+        const imported = JSON.parse(json);
+        if (!Array.isArray(imported)) throw new Error("History JSON must be an array.");
+        const cleaned = imported.filter(item => item && item.id && Array.isArray(item.parsedWaypoints));
+        if (!cleaned.length) throw new Error("No valid history records found.");
+        const byId = new Map(state.history.map(item => [item.id, item]));
+        cleaned.forEach(item => byId.set(item.id, item));
+        state.history = Array.from(byId.values()).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+        saveHistory();
+        renderHistory();
+        showToast("Imported " + cleaned.length + " history record(s).", "success");
+      } catch (error) {
+        showToast("Malformed history JSON: " + error.message, "error");
+      }
+    }
+
+    function clearAllHistory() {
+      if (!confirm("Clear all route history from this browser?")) return;
+      state.history = [];
+      saveHistory();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const query = (el.historySearch ? el.historySearch.value : "").trim().toLowerCase();
+      const items = state.history.filter(route => historyMatches(route, query));
+      el.historyList.innerHTML = "";
+      if (!items.length) {
+        el.historyList.innerHTML = '<div class="empty">No saved routes match the current filter.</div>';
+        return;
+      }
+      items.forEach(route => {
+        const first = route.parsedWaypoints[0];
+        const last = route.parsedWaypoints[route.parsedWaypoints.length - 1];
+        const unitLabel = route.routeStats && route.routeStats.units === "kilometers" ? "km" : "mi";
+        const distance = route.routeStats ? formatDistance(route.routeStats.totalDistance, unitLabel) : "n/a";
+        const item = document.createElement("div");
+        item.className = "history-item";
+        item.innerHTML = [
+          '<div class="row between"><div><strong>' + esc(route.routeName) + '</strong><p class="small">' + esc(formatDate(route.createdAt)) + " - " + route.parsedWaypoints.length + " waypoint(s) - " + distance + '</p></div></div>',
+          '<div class="small muted">First: ' + esc(first ? first.name + " " + coordPair(first) : "n/a") + '</div>',
+          '<div class="small muted">Last: ' + esc(last ? last.name + " " + coordPair(last) : "n/a") + '</div>',
+          '<div class="row">',
+          '<button type="button" data-history-load="' + route.id + '">Load</button>',
+          '<button type="button" data-history-rename="' + route.id + '">Rename</button>',
+          '<button type="button" data-history-duplicate="' + route.id + '">Duplicate</button>',
+          '<button type="button" data-history-export="' + route.id + '">Export JSON</button>',
+          '<button class="danger" type="button" data-history-delete="' + route.id + '">Delete</button>',
+          '</div>'
+        ].join("");
+        el.historyList.appendChild(item);
+      });
+    }
+
+    function historyMatches(route, query) {
+      if (!query) return true;
+      const haystack = [
+        route.routeName,
+        route.createdAt,
+        route.updatedAt,
+        ...(route.parsedWaypoints || []).flatMap(wp => [wp.name, wp.lat, wp.lng, coordPair(wp)])
+      ].join(" ").toLowerCase();
+      return haystack.includes(query);
+    }
+
+    function handleDocumentClick(event) {
+      const target = event.target.closest("button");
+      if (!target) return;
+      if (target.dataset.copyCoord) copyToClipboard(target.dataset.copyCoord);
+      if (target.dataset.historyLoad) loadRouteFromHistory(target.dataset.historyLoad);
+      if (target.dataset.historyRename) renameRoute(target.dataset.historyRename);
+      if (target.dataset.historyDuplicate) duplicateRoute(target.dataset.historyDuplicate);
+      if (target.dataset.historyDelete) deleteRouteFromHistory(target.dataset.historyDelete);
+      if (target.dataset.historyExport) {
+        const route = state.history.find(item => item.id === target.dataset.historyExport);
+        if (route) downloadTextFile(safeFilename(route.routeName) + ".json", JSON.stringify(route, null, 2), "application/json");
+      }
+    }
+
+    function copyOutput(key) {
+      if (!state.currentRoute || !state.currentRoute[key]) return showToast("Nothing to copy yet.", "error");
+      copyToClipboard(state.currentRoute[key]);
+    }
+
+    function copyTextFromBox(box) {
+      if (!box.textContent.trim()) return showToast("Nothing to copy yet.", "error");
+      copyToClipboard(box.textContent);
+    }
+
+    function copyToClipboard(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => showToast("Copied.", "success")).catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+        showToast("Copied.", "success");
+      } catch (error) {
+        showToast("Copy failed.", "error");
+      } finally {
+        textarea.remove();
+      }
+    }
+
+    function downloadCurrent(type) {
+      if (!state.currentRoute) return showToast("Build a route before downloading.", "error");
+      const base = safeFilename(state.currentRoute.routeName);
+      if (type === "geojson") downloadTextFile(base + ".geojson", state.currentRoute.geoJson, "application/geo+json");
+      if (type === "gpx") downloadTextFile(base + ".gpx", state.currentRoute.gpx, "application/gpx+xml");
+      if (type === "kml") downloadTextFile(base + ".kml", state.currentRoute.kml, "application/vnd.google-earth.kml+xml");
+    }
+
+    function downloadTextFile(filename, content, mimeType) {
+      const blob = new Blob([content], { type: mimeType + ";charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function showToast(message, type) {
+      const toast = document.createElement("div");
+      toast.className = "toast " + (type || "");
+      toast.textContent = message;
+      el.toastWrap.appendChild(toast);
+      setTimeout(() => toast.remove(), 4200);
+    }
+
+    function showError(message) {
+      showToast(message, "error");
+    }
+
+    function defaultRouteName() {
+      const d = new Date();
+      return "Route " + d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    }
+
+    function coordPair(wp) {
+      return fmtCoord(wp.lat) + "," + fmtCoord(wp.lng);
+    }
+
+    function fmtCoord(value) {
+      return Number(value).toFixed(6).replace(/\.?0+$/, match => match.startsWith(".") ? "" : "");
+    }
+
+    function formatDistance(value, unitLabel) {
+      return (Number(value) || 0).toFixed(2) + " " + unitLabel;
+    }
+
+    function toRad(deg) { return deg * Math.PI / 180; }
+    function pad(n) { return String(n).padStart(2, "0"); }
+    function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+    function makeId() { return "route-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 9); }
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+    function xmlEsc(value) { return esc(value); }
+    function formatDate(value) {
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? "Unknown date" : d.toLocaleString();
+    }
+    function safeFilename(value) {
+      return String(value || "route").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "route";
+    }
+    function isUsableTileTemplate(value) {
+      return typeof value === "string" && /^https?:\/\//i.test(value) && value.includes("{z}") && value.includes("{x}") && value.includes("{y}");
+    }
+    function debounce(fn, wait) {
+      let timer;
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), wait);
+      };
+    }
+  </script>
+</body>
+</html>
