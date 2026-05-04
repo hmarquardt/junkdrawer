@@ -264,6 +264,13 @@
             <span class="pill">🤖 <span id="llmStatus">LLM disabled</span></span>
             <span class="pill">⚠️ <span>Educational only, not financial advice</span></span>
           </div>
+          <div class="actions" style="margin-top: 0.9rem;">
+            <button id="manualStartMarketBtn" class="primary" type="button">Start market data</button>
+            <button id="manualStopMarketBtn" type="button">Stop market data</button>
+            <button id="manualFetchPricesBtn" type="button">Fetch prices once</button>
+            <button id="manualRefreshNewsBtn" class="amber" type="button">Refresh news feeds</button>
+            <button id="manualSeedSourcesBtn" type="button">Seed news sources</button>
+          </div>
         </div>
         <div id="moodCard" class="panel"></div>
       </div>
@@ -369,6 +376,7 @@
           <label>Stale market seconds <input id="staleMarketSeconds" type="number" min="15"></label>
           <label>News refresh minutes <input id="newsRefreshMinutes" type="number" min="5"></label>
           <label>News retention days <input id="newsRetentionDays" type="number" min="1"></label>
+          <label class="span3">Binance WebSocket endpoint <select id="binanceWsEndpoint"><option value="wss://stream.binance.com:443">stream.binance.com:443</option><option value="wss://stream.binance.com:9443">stream.binance.com:9443</option><option value="wss://data-stream.binance.vision">data-stream.binance.vision</option></select></label>
           <label class="span6">RSS proxy template <input id="rssProxyTemplate" type="text"></label>
         </div>
         <div class="actions" style="margin-top: 0.75rem;">
@@ -465,6 +473,7 @@
       newsRefreshMinutes: 15,
       newsRetentionDays: 14,
       rssProxyTemplate: "https://api.allorigins.win/raw?url={url}",
+      binanceWsEndpoint: "wss://stream.binance.com:443",
       llmEnabled: false,
       llmProvider: "openai",
       llmModel: "gpt-5.5",
@@ -507,6 +516,7 @@
     let wsShouldReconnect = true;
     let marketRunId = 0;
     let wsBackoffMs = 1500;
+    let wsFailureCount = 0;
     let fallbackTimer = null;
     let newsTimer = null;
     let llmTimer = null;
@@ -571,6 +581,11 @@
     function bindEvents() {
       document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => switchTab(button.dataset.tab)));
       els.themeToggle.addEventListener("click", () => { applyTheme(settings.theme === "dark" ? "light" : "dark"); saveSettings(); });
+      els.manualStartMarketBtn.addEventListener("click", manualStartMarketData);
+      els.manualStopMarketBtn.addEventListener("click", () => { stopMarketData(); showToast("Market data stopped"); });
+      els.manualFetchPricesBtn.addEventListener("click", () => fetchCoinGeckoPrices(enabledCoinsOrSeeds()));
+      els.manualRefreshNewsBtn.addEventListener("click", fetchAllNewsSources);
+      els.manualSeedSourcesBtn.addEventListener("click", seedSourcesNow);
       els.refreshMarketBtn.addEventListener("click", () => fetchCoinGeckoPrices(enabledCoins()));
       els.dashboardChartCoin.addEventListener("change", () => renderDashboardTimeSeries());
       els.dashboardChartWindow.addEventListener("change", () => renderDashboardTimeSeries());
@@ -598,6 +613,7 @@
     }
 
     function initDb() {
+      if (!window.Dexie) throw new Error("Dexie failed to load from CDN, so IndexedDB storage is unavailable.");
       db = new Dexie("CryptoMoodRingDB");
       db.version(1).stores({
         coins: "id, symbol, enabled, updatedAt",
@@ -650,6 +666,10 @@
     }
 
     async function seedSourcesNow() {
+      if (!db?.newsSources) {
+        showToast("IndexedDB is not ready; news source seeding requires Dexie/IndexedDB", "error");
+        return;
+      }
       await ensureSeedNewsSourcesPresent();
       await refreshCaches();
       renderAdmin();
@@ -658,8 +678,13 @@
     }
 
     async function refreshCaches() {
+      if (!db?.coins || !db?.newsSources) {
+        coinCache = seedCoinsForMemory();
+        sourceCache = SEED_SOURCES.map((source) => ({ ...source }));
+        return;
+      }
       coinCache = await db.coins.orderBy("symbol").toArray();
-      sourceCache = await db.newsSources.orderBy("name").toArray();
+      sourceCache = (await db.newsSources.toArray()).sort((a, b) => a.name.localeCompare(b.name));
     }
 
     function loadSettings() {
@@ -702,8 +727,18 @@
       wsShouldReconnect = true;
       marketRunId += 1;
       connectBinanceWebSocket(marketRunId);
-      fetchCoinGeckoPrices(enabledCoins());
-      fallbackTimer = setInterval(() => fetchCoinGeckoPrices(enabledCoins()), settings.coingeckoPollSeconds * 1000);
+      fetchCoinGeckoPrices(enabledCoinsOrSeeds());
+      fallbackTimer = setInterval(() => fetchCoinGeckoPrices(enabledCoinsOrSeeds()), settings.coingeckoPollSeconds * 1000);
+    }
+
+    async function manualStartMarketData() {
+      if (!coinCache.length) {
+        coinCache = seedCoinsForMemory();
+        fillDashboardChartControls();
+        renderCoinCards();
+      }
+      startMarketData();
+      showToast("Market data started manually");
     }
 
     function stopMarketData() {
@@ -716,7 +751,7 @@
 
     function connectBinanceWebSocket(runId = marketRunId) {
       if (runId !== marketRunId) return;
-      const coins = enabledCoins().filter((coin) => coin.binanceSymbol);
+      const coins = enabledCoinsOrSeeds().filter((coin) => coin.binanceSymbol);
       if (!coins.length) {
         providerStatus.websocket = "no enabled Binance symbols";
         updateStatusStrip();
@@ -730,15 +765,17 @@
         ws = new WebSocket(url);
         ws.onopen = () => {
           wsBackoffMs = 1500;
+          wsFailureCount = 0;
           providerStatus.websocket = "connected";
           logEvent("websocket", "Binance WebSocket connected");
           updateStatusStrip();
         };
         ws.onmessage = (event) => handleBinanceMessage(event.data);
         ws.onerror = () => {
-          providerStatus.lastError = "Binance WebSocket error";
+          wsFailureCount += 1;
+          providerStatus.lastError = `Binance WebSocket error for ${url}`;
           providerStatus.websocket = "error";
-          logError("websocket", "Binance WebSocket error");
+          logError("websocket", providerStatus.lastError);
           updateStatusStrip();
         };
         ws.onclose = () => {
@@ -746,6 +783,13 @@
           providerStatus.websocket = "disconnected";
           updateStatusStrip();
           if (!wsShouldReconnect) return;
+          if (wsFailureCount >= 3) {
+            providerStatus.websocket = "disabled after failures";
+            providerStatus.lastError = "Binance WebSocket failed repeatedly; using CoinGecko REST fallback. Try the :443 or data-stream endpoint in Admin.";
+            logError("websocket", providerStatus.lastError);
+            updateStatusStrip();
+            return;
+          }
           const delay = wsBackoffMs;
           wsBackoffMs = Math.min(wsBackoffMs * 1.8, 60000);
           setTimeout(() => connectBinanceWebSocket(runId), delay);
@@ -759,7 +803,8 @@
 
     function buildBinanceStreamUrl(coins) {
       const streams = coins.map((coin) => `${coin.binanceSymbol.toLowerCase()}@miniTicker`).join("/");
-      return `wss://stream.binance.com:9443/stream?streams=${streams}`;
+      const base = (settings.binanceWsEndpoint || DEFAULT_SETTINGS.binanceWsEndpoint).replace(/\/$/, "");
+      return `${base}/stream?streams=${streams}`;
     }
 
     function handleBinanceMessage(message) {
@@ -770,7 +815,7 @@
         if (!coin) return;
         const snapshot = normalizeMarketSnapshot("binance-websocket", raw, coin);
         latestSnapshots.set(coin.id, snapshot);
-        db.marketSnapshots.put(snapshot);
+        putMarketSnapshot(snapshot);
         persistPriceTickThrottled(snapshot);
         queueRender();
       } catch (error) {
@@ -816,7 +861,7 @@
           };
           if (shouldUseFallback) {
             latestSnapshots.set(coin.id, snapshot);
-            await db.marketSnapshots.put(snapshot);
+            await putMarketSnapshot(snapshot);
             await persistPriceTickThrottled(snapshot);
           }
         }
@@ -856,6 +901,7 @@
       const last = lastPersistAt.get(snapshot.coinId) || 0;
       if (Date.now() - last < settings.priceTickPersistSeconds * 1000) return;
       lastPersistAt.set(snapshot.coinId, Date.now());
+      if (!db?.priceTicks) return;
       await db.priceTicks.add({
         coinId: snapshot.coinId,
         symbol: snapshot.symbol,
@@ -871,13 +917,20 @@
     }
 
     async function loadSnapshotsFromDb() {
+      if (!db?.marketSnapshots) return;
       const rows = await db.marketSnapshots.toArray();
       rows.forEach((row) => latestSnapshots.set(row.coinId, row));
     }
 
     async function loadRecentTicks(coinId, windowMs = settings.priceRetentionDays * 86400000) {
+      if (!db?.priceTicks) return [];
       const cutoff = Date.now() - windowMs;
       return db.priceTicks.where("[coinId+timestamp]").between([coinId, cutoff], [coinId, Dexie.maxKey]).toArray();
+    }
+
+    async function putMarketSnapshot(snapshot) {
+      if (!db?.marketSnapshots) return;
+      await db.marketSnapshots.put(snapshot);
     }
 
     function queueRender() {
@@ -1038,30 +1091,41 @@
     }
 
     async function fetchAllNewsSources() {
-      const sources = sourceCache.filter((source) => source.enabled);
-      if (!sources.length) {
-        showToast("No enabled news sources", "warn");
-        return;
-      }
-      let total = 0;
-      for (const source of sources) {
-        try {
-          const articles = await fetchRssSource(source);
-          total += articles.length;
-          await saveArticles(articles);
-          await db.newsSources.update(source.id, { lastFetched: Date.now(), lastCount: articles.length, lastError: "" });
-        } catch (error) {
-          await db.newsSources.update(source.id, { lastFetched: Date.now(), lastError: error.message });
-          logError("rss", `${source.name}: ${error.message}`);
+      try {
+        if (!sourceCache.length && db?.newsSources) {
+          await ensureSeedNewsSourcesPresent();
+          await refreshCaches();
         }
+        const sources = sourceCache.filter((source) => source.enabled);
+        if (!sources.length) {
+          showToast("No enabled news sources", "warn");
+          return;
+        }
+        let total = 0;
+        for (const source of sources) {
+          try {
+            const articles = await fetchRssSource(source);
+            total += articles.length;
+            await saveArticles(articles);
+            if (db?.newsSources) await db.newsSources.update(source.id, { lastFetched: Date.now(), lastCount: articles.length, lastError: "" });
+          } catch (error) {
+            const message = normalizeError(error);
+            if (db?.newsSources) await db.newsSources.update(source.id, { lastFetched: Date.now(), lastError: message });
+            logError("rss", `${source.name}: ${message}`);
+          }
+        }
+        settings.lastNewsFetchAt = Date.now();
+        saveSettings();
+        await safeStep("refresh news source cache", () => refreshCaches());
+        await safeStep("prune old news data", () => pruneOldData());
+        await safeStep("render news", () => renderNews());
+        updateStatusStrip();
+        showToast(`News refreshed: ${total} articles`);
+      } catch (error) {
+        const message = normalizeError(error);
+        logError("rss-refresh", message);
+        showToast(`News refresh failed: ${message}`, "error");
       }
-      settings.lastNewsFetchAt = Date.now();
-      saveSettings();
-      await refreshCaches();
-      await pruneOldData();
-      await renderNews();
-      updateStatusStrip();
-      showToast(`News refreshed: ${total} articles`);
     }
 
     async function fetchRssSource(source) {
@@ -1125,6 +1189,7 @@
     }
 
     async function saveArticles(articles) {
+      if (!db?.newsArticles) return;
       const unique = dedupeArticles(articles);
       if (unique.length) await db.newsArticles.bulkPut(unique);
     }
@@ -1140,6 +1205,11 @@
     }
 
     async function renderNews() {
+      if (!db?.newsArticles) {
+        fillNewsFilters();
+        els.newsList.innerHTML = `<div class="empty">News storage is unavailable because IndexedDB/Dexie did not initialize. Market data can still be started manually.</div>`;
+        return;
+      }
       const all = await db.newsArticles.orderBy("publishedAt").reverse().toArray();
       const q = els.newsSearch.value.trim().toLowerCase();
       const coin = els.newsCoinFilter.value;
@@ -1270,6 +1340,13 @@
     }
 
     function renderLlmAnalysis() {
+      if (!db?.llmAnalyses) {
+        els.latestLlm.innerHTML = `<div class="empty">LLM history storage is unavailable because IndexedDB/Dexie did not initialize.</div>`;
+        els.llmHistory.innerHTML = `<div class="empty">No persistent LLM history available.</div>`;
+        renderMoodCard();
+        updateStatusStrip();
+        return;
+      }
       if (!latestAnalysis) {
         els.latestLlm.innerHTML = `<div class="empty">No LLM analysis yet. Enable it in Admin or run one manually.</div>`;
       } else {
@@ -1325,6 +1402,7 @@
       els.staleMarketSeconds.value = settings.staleMarketSeconds;
       els.newsRefreshMinutes.value = settings.newsRefreshMinutes;
       els.newsRetentionDays.value = settings.newsRetentionDays;
+      els.binanceWsEndpoint.value = settings.binanceWsEndpoint || DEFAULT_SETTINGS.binanceWsEndpoint;
       els.rssProxyTemplate.value = settings.rssProxyTemplate;
       els.llmEnabled.value = String(settings.llmEnabled);
       els.llmModel.value = settings.llmModel;
@@ -1497,6 +1575,7 @@
       settings.staleMarketSeconds = num("staleMarketSeconds", 90);
       settings.newsRefreshMinutes = num("newsRefreshMinutes", 15);
       settings.newsRetentionDays = num("newsRetentionDays", 14);
+      settings.binanceWsEndpoint = els.binanceWsEndpoint.value || DEFAULT_SETTINGS.binanceWsEndpoint;
       settings.rssProxyTemplate = els.rssProxyTemplate.value.trim() || DEFAULT_SETTINGS.rssProxyTemplate;
       saveSettings();
       startMarketData();
@@ -1600,6 +1679,7 @@
     }
 
     async function pruneOldData() {
+      if (!db?.priceTicks || !db?.newsArticles) return;
       const priceCutoff = Date.now() - settings.priceRetentionDays * 86400000;
       const newsCutoff = Date.now() - settings.newsRetentionDays * 86400000;
       await db.priceTicks.where("timestamp").below(priceCutoff).delete();
@@ -1631,6 +1711,12 @@
 
     async function renderDebug() {
       if (!els.debugCounts) return;
+      if (!db?.tables) {
+        els.debugCounts.textContent = JSON.stringify({ indexedDb: "unavailable" }, null, 2);
+        els.debugProviders.textContent = JSON.stringify({ providerStatus, settings: safeSettings() }, null, 2);
+        els.debugLog.textContent = JSON.stringify(logs.slice(-100), null, 2);
+        return;
+      }
       const counts = {};
       for (const table of db.tables) counts[table.name] = await table.count();
       let estimate = {};
@@ -1652,6 +1738,26 @@
       db?.fetchLogs?.add(row).catch(() => {});
     }
 
+    async function safeStep(label, fn) {
+      try {
+        return await fn();
+      } catch (error) {
+        const message = normalizeError(error);
+        logError(label, message);
+        return null;
+      }
+    }
+
+    function normalizeError(error) {
+      if (error instanceof Error) return error.message;
+      if (typeof error === "string") return error;
+      try {
+        return JSON.stringify(error);
+      } catch {
+        return String(error);
+      }
+    }
+
     function renderMoodCard() {
       if (!latestAnalysis?.parsed) {
         els.moodCard.innerHTML = `<h2>🤖 Robot vibes</h2><p>No analysis yet. Enable OpenAI in Admin or run one manually.</p>`;
@@ -1671,6 +1777,23 @@
 
     function enabledCoins() {
       return coinCache.filter((coin) => coin.enabled);
+    }
+
+    function enabledCoinsOrSeeds() {
+      const coins = enabledCoins();
+      return coins.length ? coins : seedCoinsForMemory();
+    }
+
+    function seedCoinsForMemory() {
+      const now = new Date().toISOString();
+      return SEED_COINS.map((coin, index) => ({
+        ...coin,
+        colorHint: ["#f7931a", "#627eea", "#c2a633", "#ff6b9d"][index],
+        aliases: defaultAliases(coin),
+        notes: "",
+        createdAt: now,
+        updatedAt: now
+      }));
     }
 
     function isSnapshotStale(snapshot) {
