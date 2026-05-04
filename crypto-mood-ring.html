@@ -1313,10 +1313,19 @@
       const coins = enabledCoins();
       if (!coins.length) {
         els.coinCards.innerHTML = `<div class="empty">No enabled coins. Add or enable coins in Admin.</div>`;
+        els.coinCards.dataset.signature = "";
         return;
       }
-      els.coinCards.innerHTML = `<div class="coin-row header"><span>Coin</span><span>Price</span><span>24h</span><span>Range / Volume</span><span>Trend</span><span>Status</span></div>${coins.map((coin) => coinCardHtml(coin)).join("")}`;
-      for (const coin of coins) await renderCoinChart(coin.id, `chart-${coin.id}`);
+      const signature = coins.map((coin) => coin.id).join("|");
+      if (els.coinCards.dataset.signature !== signature) {
+        clearChartsByPrefix("chart-");
+        els.coinCards.innerHTML = `<div class="coin-row header"><span>Coin</span><span>Price</span><span>24h</span><span>Range / Volume</span><span>Trend</span><span>Status</span></div>${coins.map((coin) => coinRowShellHtml(coin)).join("")}`;
+        els.coinCards.dataset.signature = signature;
+      }
+      for (const coin of coins) {
+        updateCoinRow(coin);
+        await renderCoinChart(coin.id, `chart-${coin.id}`);
+      }
     }
 
     function fillDashboardChartControls() {
@@ -1361,20 +1370,44 @@
       });
     }
 
-    function coinCardHtml(coin) {
+    function coinRowShellHtml(coin) {
+      return `
+        <article class="coin-row" id="coin-row-${escapeAttr(coin.id)}">
+          <div><strong>${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</strong><br><span class="muted">${escapeHtml(coin.name)}</span></div>
+          <div><strong id="coin-price-${escapeAttr(coin.id)}">—</strong><br><span class="muted" id="coin-updated-${escapeAttr(coin.id)}">never</span></div>
+          <div id="coin-change-${escapeAttr(coin.id)}">—</div>
+          <div id="coin-range-${escapeAttr(coin.id)}"><span class="muted">H/L</span> — / — · <span class="muted">Vol</span> —</div>
+          <div class="mini-chart"><canvas id="chart-${escapeAttr(coin.id)}"></canvas></div>
+          <div id="coin-status-${escapeAttr(coin.id)}"><span class="badge">no data</span></div>
+        </article>`;
+    }
+
+    function updateCoinRow(coin) {
       const snap = latestSnapshots.get(coin.id);
       const change = snap?.changePercent24h || 0;
       const stale = snap && isSnapshotStale(snap);
       const action = latestCoinAction(coin.symbol);
-      return `
-        <article class="coin-row">
-          <div><strong>${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</strong><br><span class="muted">${escapeHtml(coin.name)}</span></div>
-          <div><strong>${snap ? formatUsd(snap.price) : "—"}</strong><br><span class="muted">${snap ? relativeTime(snap.timestamp) : "never"}</span></div>
-          <div class="${change >= 0 ? "up" : "down"}">${snap ? signed(change, 2) + "%" : "—"}</div>
-          <div><span class="muted">H/L</span> ${snap?.high24h ? formatUsd(snap.high24h) : "—"} / ${snap?.low24h ? formatUsd(snap.low24h) : "—"} · <span class="muted">Vol</span> ${snap?.volume24h ? compact(snap.volume24h) : "—"}</div>
-          <div class="mini-chart"><canvas id="chart-${coin.id}"></canvas></div>
-          <div><span class="badge ${stale ? "stale" : ""}">${snap ? escapeHtml(snap.provider) : "no data"}</span> <span class="badge">${action || "LLM: none"}</span></div>
-        </article>`;
+      const price = document.getElementById(`coin-price-${coin.id}`);
+      const updated = document.getElementById(`coin-updated-${coin.id}`);
+      const changeNode = document.getElementById(`coin-change-${coin.id}`);
+      const range = document.getElementById(`coin-range-${coin.id}`);
+      const status = document.getElementById(`coin-status-${coin.id}`);
+      if (price) price.textContent = snap ? formatUsd(snap.price) : "—";
+      if (updated) updated.textContent = snap ? relativeTime(snap.timestamp) : "never";
+      if (changeNode) {
+        changeNode.className = snap ? (change >= 0 ? "up" : "down") : "";
+        changeNode.textContent = snap ? `${signed(change, 2)}%` : "—";
+      }
+      if (range) range.innerHTML = `<span class="muted">H/L</span> ${snap?.high24h ? formatUsd(snap.high24h) : "—"} / ${snap?.low24h ? formatUsd(snap.low24h) : "—"} · <span class="muted">Vol</span> ${snap?.volume24h ? compact(snap.volume24h) : "—"}`;
+      if (status) status.innerHTML = `<span class="badge ${stale ? "stale" : ""}">${snap ? escapeHtml(snap.provider) : "no data"}</span> <span class="badge">${action || "LLM: none"}</span>`;
+    }
+
+    function clearChartsByPrefix(prefix) {
+      for (const [key, chart] of chartMap.entries()) {
+        if (!key.startsWith(prefix)) continue;
+        chart.destroy();
+        chartMap.delete(key);
+      }
     }
 
     function upsertLineChart(canvasId, canvas, config) {
