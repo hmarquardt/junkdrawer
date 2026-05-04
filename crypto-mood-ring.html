@@ -212,16 +212,17 @@
       z-index: 30;
     }
     .icon-btn:hover::after, .icon-btn:focus-visible::after { opacity: 1; }
-    .coin-list { display: grid; gap: 0.55rem; }
+    .coin-list { display: grid; gap: 0.32rem; }
     .coin-row {
       display: grid;
-      grid-template-columns: minmax(8rem, 1.1fr) minmax(8rem, 1fr) minmax(5rem, .55fr) minmax(9rem, .9fr) minmax(11rem, 1.2fr) minmax(8rem, .75fr);
-      gap: 0.75rem;
+      grid-template-columns: minmax(7rem, 1fr) minmax(7rem, .9fr) minmax(4.5rem, .5fr) minmax(10rem, 1fr) minmax(10rem, 1fr) minmax(7rem, .7fr);
+      gap: 0.55rem;
       align-items: center;
       border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 0.7rem;
+      border-radius: 12px;
+      padding: 0.45rem 0.55rem;
       background: rgba(255, 255, 255, 0.04);
+      font-size: 0.9rem;
     }
     .coin-row.header {
       color: var(--muted);
@@ -230,7 +231,7 @@
       letter-spacing: 0.08em;
       background: transparent;
     }
-    .mini-chart { height: 46px; }
+    .mini-chart { height: 34px; }
     .coin-head { display: flex; justify-content: space-between; gap: 0.8rem; align-items: start; }
     .coin-symbol { font-weight: 950; font-size: 1.1rem; }
     .price { font-size: clamp(1.35rem, 3vw, 2.15rem); font-weight: 950; letter-spacing: -0.04em; }
@@ -465,7 +466,6 @@
           <label>News retention days <input id="newsRetentionDays" type="number" min="1"></label>
           <label class="span3">Market mode <select id="marketAutoStartWebSocket"><option value="false">REST fallback first</option><option value="true">Try WebSocket on load</option></select></label>
           <label class="span3">WebSocket provider <select id="webSocketProvider"><option value="coinbase">Coinbase Exchange</option><option value="kraken">Kraken</option><option value="binance">Binance</option></select></label>
-          <label class="span3">Binance WebSocket endpoint <select id="binanceWsEndpoint"><option value="wss://stream.binance.us:9443">Binance.US stream.binance.us:9443</option><option value="wss://stream.binance.com:443">Binance.com stream.binance.com:443</option><option value="wss://stream.binance.com:9443">Binance.com stream.binance.com:9443</option><option value="wss://data-stream.binance.vision">Binance.com data-stream.binance.vision</option></select></label>
           <label class="span6">RSS proxy template <input id="rssProxyTemplate" type="text"></label>
         </div>
         <div class="actions" style="margin-top: 0.75rem;">
@@ -563,7 +563,6 @@
       newsRefreshMinutes: 15,
       newsRetentionDays: 14,
       rssProxyTemplate: "https://api.allorigins.win/raw?url={url}",
-      binanceWsEndpoint: "wss://stream.binance.us:9443",
       webSocketProvider: "coinbase",
       marketAutoStartWebSocket: false,
       llmEnabled: false,
@@ -910,8 +909,7 @@
 
     function buildBinanceStreamUrl(coins) {
       const streams = coins.map((coin) => `${coin.binanceSymbol.toLowerCase()}@miniTicker`).join("/");
-      const base = (settings.binanceWsEndpoint || DEFAULT_SETTINGS.binanceWsEndpoint).replace(/\/$/, "");
-      return `${base}/stream?streams=${streams}`;
+      return `wss://stream.binance.us:9443/stream?streams=${streams}`;
     }
 
     function handleWebSocketError(provider, url) {
@@ -1324,7 +1322,11 @@
     function fillDashboardChartControls() {
       const current = els.dashboardChartCoin.value;
       const coins = enabledCoins();
-      els.dashboardChartCoin.innerHTML = coins.map((coin) => `<option value="${escapeAttr(coin.id)}">${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</option>`).join("");
+      const signature = coins.map((coin) => coin.id).join("|");
+      if (els.dashboardChartCoin.dataset.signature !== signature) {
+        els.dashboardChartCoin.innerHTML = coins.map((coin) => `<option value="${escapeAttr(coin.id)}">${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</option>`).join("");
+        els.dashboardChartCoin.dataset.signature = signature;
+      }
       if (coins.some((coin) => coin.id === current)) els.dashboardChartCoin.value = current;
       else if (coins[0]) els.dashboardChartCoin.value = coins[0].id;
     }
@@ -1369,9 +1371,9 @@
           <div><strong>${coinEmoji(coin.symbol)} ${escapeHtml(coin.symbol)}</strong><br><span class="muted">${escapeHtml(coin.name)}</span></div>
           <div><strong>${snap ? formatUsd(snap.price) : "—"}</strong><br><span class="muted">${snap ? relativeTime(snap.timestamp) : "never"}</span></div>
           <div class="${change >= 0 ? "up" : "down"}">${snap ? signed(change, 2) + "%" : "—"}</div>
-          <div><span class="muted">H/L</span> ${snap?.high24h ? formatUsd(snap.high24h) : "—"} / ${snap?.low24h ? formatUsd(snap.low24h) : "—"}<br><span class="muted">Vol</span> ${snap?.volume24h ? compact(snap.volume24h) : "—"}</div>
+          <div><span class="muted">H/L</span> ${snap?.high24h ? formatUsd(snap.high24h) : "—"} / ${snap?.low24h ? formatUsd(snap.low24h) : "—"} · <span class="muted">Vol</span> ${snap?.volume24h ? compact(snap.volume24h) : "—"}</div>
           <div class="mini-chart"><canvas id="chart-${coin.id}"></canvas></div>
-          <div><span class="badge ${stale ? "stale" : ""}">${snap ? escapeHtml(snap.provider) : "no data"}</span><br><span class="badge">${action || "LLM: none"}</span></div>
+          <div><span class="badge ${stale ? "stale" : ""}">${snap ? escapeHtml(snap.provider) : "no data"}</span> <span class="badge">${action || "LLM: none"}</span></div>
         </article>`;
     }
 
@@ -1388,6 +1390,11 @@
         fill: Boolean(config.fill)
       };
       if (chart) {
+        if (chart.options.plugins.legend.display !== Boolean(config.showLegend) || chart.options.scales.x.display !== Boolean(config.showScales)) {
+          chart.destroy();
+          chartMap.delete(canvasId);
+          return upsertLineChart(canvasId, canvas, config);
+        }
         chart.data.labels = config.labels;
         chart.data.datasets[0].data = config.data;
         chart.data.datasets[0].label = dataset.label;
@@ -1443,8 +1450,12 @@
       const canvas = document.getElementById(canvasId);
       if (!canvas) return;
       const ticks = await loadRecentTicks(coinId, 6 * 60 * 60 * 1000);
-      const labels = ticks.map((tick) => new Date(tick.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      const data = ticks.map((tick) => tick.price);
+      const snapshot = latestSnapshots.get(coinId);
+      const points = ticks.map((tick) => ({ timestamp: tick.timestamp, price: tick.price }));
+      if (snapshot && (!points.length || points[points.length - 1].timestamp !== snapshot.timestamp)) points.push({ timestamp: snapshot.timestamp, price: snapshot.price });
+      if (points.length === 1) points.unshift({ timestamp: points[0].timestamp - 60000, price: points[0].price });
+      const labels = points.map((tick) => new Date(tick.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      const data = points.map((tick) => tick.price);
       upsertLineChart(canvasId, canvas, { labels, data, label: "", borderColor: "#37f29a", fill: false, showLegend: false, showScales: false, pointRadius: 0 });
     }
 
@@ -1808,7 +1819,6 @@
       els.newsRetentionDays.value = settings.newsRetentionDays;
       els.marketAutoStartWebSocket.value = String(Boolean(settings.marketAutoStartWebSocket));
       els.webSocketProvider.value = settings.webSocketProvider || DEFAULT_SETTINGS.webSocketProvider;
-      els.binanceWsEndpoint.value = settings.binanceWsEndpoint || DEFAULT_SETTINGS.binanceWsEndpoint;
       els.rssProxyTemplate.value = settings.rssProxyTemplate;
       els.llmEnabled.value = String(settings.llmEnabled);
       els.llmModel.value = settings.llmModel;
@@ -1987,7 +1997,6 @@
       settings.newsRetentionDays = num("newsRetentionDays", 14);
       settings.marketAutoStartWebSocket = els.marketAutoStartWebSocket.value === "true";
       settings.webSocketProvider = els.webSocketProvider.value || DEFAULT_SETTINGS.webSocketProvider;
-      settings.binanceWsEndpoint = els.binanceWsEndpoint.value || DEFAULT_SETTINGS.binanceWsEndpoint;
       settings.rssProxyTemplate = els.rssProxyTemplate.value.trim() || DEFAULT_SETTINGS.rssProxyTemplate;
       saveSettings();
       startMarketData({ websocket: settings.marketAutoStartWebSocket });
