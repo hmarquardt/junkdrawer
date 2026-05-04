@@ -266,20 +266,36 @@
           </div>
           <div class="actions" style="margin-top: 0.9rem;">
             <button id="manualStartMarketBtn" class="primary" type="button">Start REST prices</button>
-            <button id="manualStartWebSocketBtn" type="button">Try Binance WebSocket</button>
+            <button id="manualStartWebSocketBtn" type="button">Try selected WebSocket</button>
             <button id="manualStopMarketBtn" type="button">Stop market data</button>
             <button id="manualFetchPricesBtn" type="button">Fetch prices once</button>
             <button id="manualRefreshNewsBtn" class="amber" type="button">Refresh news feeds</button>
             <button id="manualSeedSourcesBtn" type="button">Seed news sources</button>
+            <button id="dashboardRunLlmBtn" class="amber" type="button">Run LLM vibes now</button>
           </div>
         </div>
         <div id="moodCard" class="panel"></div>
+      </div>
+      <div class="grid two">
+        <div class="panel">
+          <h2>Next Triggers</h2>
+          <div class="metric-grid">
+            <div class="metric"><small>News refresh</small><strong id="nextNewsTimer">—</strong></div>
+            <div class="metric"><small>LLM analysis</small><strong id="nextLlmTimer">—</strong></div>
+            <div class="metric"><small>Latest LLM run</small><strong id="lastLlmRun">Never</strong></div>
+          </div>
+          <p class="muted">Automatic LLM runs require LLM enabled, a saved API key, and the configured interval to elapse.</p>
+        </div>
+        <div class="panel">
+          <h2>Top 5 Relevant Stories</h2>
+          <div id="dashboardTopNews" class="grid"></div>
+        </div>
       </div>
       <div class="panel">
         <div class="chart-toolbar">
           <div>
             <h2>Rolling Price vs Time</h2>
-            <p>Progressive time series built from retained price ticks. If Binance WebSocket is blocked, CoinGecko polling keeps this moving.</p>
+            <p>Progressive time series built from retained price ticks. If an exchange WebSocket is blocked, CoinGecko polling keeps this moving.</p>
           </div>
           <div class="actions">
             <label>Coin <select id="dashboardChartCoin"></select></label>
@@ -297,7 +313,7 @@
         <div class="actions" style="justify-content: space-between;">
           <div>
             <h2>Coins</h2>
-            <p>Latest snapshots from Binance WebSocket or CoinGecko fallback.</p>
+            <p>Latest snapshots from the selected WebSocket provider or CoinGecko fallback.</p>
           </div>
           <button id="refreshMarketBtn" class="primary" type="button">Refresh fallback prices</button>
         </div>
@@ -356,6 +372,8 @@
           <label class="span2">Name <input id="coinName" type="text" placeholder="Solana"></label>
           <label>Symbol <input id="coinSymbol" type="text" placeholder="SOL"></label>
           <label>Binance symbol <input id="coinBinance" type="text" placeholder="solusdt"></label>
+          <label>Coinbase product <input id="coinCoinbase" type="text" placeholder="SOL-USD"></label>
+          <label>Kraken pair <input id="coinKraken" type="text" placeholder="SOL/USD"></label>
           <label>CoinGecko ID <input id="coinGecko" type="text" placeholder="solana"></label>
           <label>Enabled <select id="coinEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
           <label class="span3">Aliases/key terms <input id="coinAliases" type="text" placeholder="comma-separated aliases"></label>
@@ -377,7 +395,8 @@
           <label>Stale market seconds <input id="staleMarketSeconds" type="number" min="15"></label>
           <label>News refresh minutes <input id="newsRefreshMinutes" type="number" min="5"></label>
           <label>News retention days <input id="newsRetentionDays" type="number" min="1"></label>
-          <label class="span3">Market mode <select id="marketAutoStartWebSocket"><option value="false">REST fallback first</option><option value="true">Try Binance WebSocket on load</option></select></label>
+          <label class="span3">Market mode <select id="marketAutoStartWebSocket"><option value="false">REST fallback first</option><option value="true">Try WebSocket on load</option></select></label>
+          <label class="span3">WebSocket provider <select id="webSocketProvider"><option value="coinbase">Coinbase Exchange</option><option value="kraken">Kraken</option><option value="binance">Binance</option></select></label>
           <label class="span3">Binance WebSocket endpoint <select id="binanceWsEndpoint"><option value="wss://stream.binance.us:9443">Binance.US stream.binance.us:9443</option><option value="wss://stream.binance.com:443">Binance.com stream.binance.com:443</option><option value="wss://stream.binance.com:9443">Binance.com stream.binance.com:9443</option><option value="wss://data-stream.binance.vision">Binance.com data-stream.binance.vision</option></select></label>
           <label class="span6">RSS proxy template <input id="rssProxyTemplate" type="text"></label>
         </div>
@@ -439,8 +458,8 @@
     <section id="debug" class="section">
       <div class="panel">
         <h2>Debug / About</h2>
-        <p>Local IndexedDB stores coins, price ticks, snapshots, RSS news, LLM history, and logs. localStorage stores settings and the OpenAI key only if chosen. CORS can block RSS feeds; proxy settings are configurable. Binance symbols may not exist for every coin.</p>
-        <p>Binance WebSocket is optional. Binance.com streams can fail because of region, network, VPN, firewall, or browser policy. In the US, try the Binance.US endpoint or leave the app in REST fallback mode. CoinGecko polling is the reliable default path for this static page.</p>
+        <p>Local IndexedDB stores coins, price ticks, snapshots, RSS news, LLM history, and logs. localStorage stores settings and the OpenAI key only if chosen. CORS can block RSS feeds; proxy settings are configurable. Exchange symbols may not exist for every coin.</p>
+        <p>Real-time WebSocket is optional. Coinbase and Kraken are usually better US-friendly public market feeds, though not every coin/pair is listed everywhere. Binance.com streams can fail because of region, network, VPN, firewall, or browser policy. CoinGecko polling remains the reliable default path for this static page.</p>
         <p>This is a personal research dashboard, not financial advice. It never places trades and never connects to wallets or trading exchanges.</p>
       </div>
       <div class="grid two">
@@ -477,6 +496,7 @@
       newsRetentionDays: 14,
       rssProxyTemplate: "https://api.allorigins.win/raw?url={url}",
       binanceWsEndpoint: "wss://stream.binance.us:9443",
+      webSocketProvider: "coinbase",
       marketAutoStartWebSocket: false,
       llmEnabled: false,
       llmProvider: "openai",
@@ -494,10 +514,10 @@
     };
 
     const SEED_COINS = [
-      { id: "bitcoin", name: "Bitcoin", symbol: "BTC", binanceSymbol: "btcusdt", coingeckoId: "bitcoin", enabled: true },
-      { id: "ethereum", name: "Ethereum", symbol: "ETH", binanceSymbol: "ethusdt", coingeckoId: "ethereum", enabled: true },
-      { id: "dogecoin", name: "Dogecoin", symbol: "DOGE", binanceSymbol: "dogeusdt", coingeckoId: "dogecoin", enabled: true },
-      { id: "shiba-inu", name: "Shiba Inu", symbol: "SHIB", binanceSymbol: "shibusdt", coingeckoId: "shiba-inu", enabled: true }
+      { id: "bitcoin", name: "Bitcoin", symbol: "BTC", binanceSymbol: "btcusdt", coinbaseProduct: "BTC-USD", krakenPair: "BTC/USD", coingeckoId: "bitcoin", enabled: true },
+      { id: "ethereum", name: "Ethereum", symbol: "ETH", binanceSymbol: "ethusdt", coinbaseProduct: "ETH-USD", krakenPair: "ETH/USD", coingeckoId: "ethereum", enabled: true },
+      { id: "dogecoin", name: "Dogecoin", symbol: "DOGE", binanceSymbol: "dogeusdt", coinbaseProduct: "DOGE-USD", krakenPair: "DOGE/USD", coingeckoId: "dogecoin", enabled: true },
+      { id: "shiba-inu", name: "Shiba Inu", symbol: "SHIB", binanceSymbol: "shibusdt", coinbaseProduct: "SHIB-USD", krakenPair: "SHIB/USD", coingeckoId: "shiba-inu", enabled: true }
     ];
 
     const SEED_SOURCES = [
@@ -524,6 +544,7 @@
     let fallbackTimer = null;
     let newsTimer = null;
     let llmTimer = null;
+    let countdownTimer = null;
     let renderQueued = false;
     let latestSnapshots = new Map();
     let latestAnalysis = null;
@@ -558,6 +579,7 @@
       if (isNewsStale()) fetchAllNewsSources();
       scheduleNewsRefresh();
       scheduleLlmAnalysis();
+      scheduleDashboardTimers();
       pruneOldData();
       logEvent("app-started", "Crypto Mood Ring initialized");
     }
@@ -591,6 +613,7 @@
       els.manualFetchPricesBtn.addEventListener("click", () => fetchCoinGeckoPrices(enabledCoinsOrSeeds()));
       els.manualRefreshNewsBtn.addEventListener("click", fetchAllNewsSources);
       els.manualSeedSourcesBtn.addEventListener("click", seedSourcesNow);
+      els.dashboardRunLlmBtn.addEventListener("click", runLlmAnalysisNow);
       els.refreshMarketBtn.addEventListener("click", () => fetchCoinGeckoPrices(enabledCoins()));
       els.dashboardChartCoin.addEventListener("change", () => renderDashboardTimeSeries());
       els.dashboardChartWindow.addEventListener("change", () => renderDashboardTimeSeries());
@@ -650,6 +673,20 @@
         await db.newsSources.bulkPut(SEED_SOURCES.map((source) => ({ ...source, createdAt: now, updatedAt: now })));
       }
       await ensureSeedNewsSourcesPresent();
+      await ensureCoinProviderMappings();
+    }
+
+    async function ensureCoinProviderMappings() {
+      for (const seed of SEED_COINS) {
+        const existing = await db.coins.get(seed.id);
+        if (!existing) continue;
+        await db.coins.update(seed.id, {
+          coinbaseProduct: existing.coinbaseProduct || seed.coinbaseProduct || "",
+          krakenPair: existing.krakenPair || seed.krakenPair || "",
+          binanceSymbol: existing.binanceSymbol || seed.binanceSymbol || "",
+          coingeckoId: existing.coingeckoId || seed.coingeckoId || ""
+        });
+      }
     }
 
     async function ensureSeedNewsSourcesPresent() {
@@ -731,7 +768,7 @@
       stopMarketData();
       wsShouldReconnect = true;
       marketRunId += 1;
-      if (websocket) connectBinanceWebSocket(marketRunId);
+      if (websocket) connectMarketWebSocket(marketRunId);
       else {
         providerStatus.websocket = "off";
         providerStatus.lastError = "WebSocket is opt-in. REST fallback is running.";
@@ -754,8 +791,8 @@
       wsFailureCount = 0;
       wsShouldReconnect = true;
       marketRunId += 1;
-      connectBinanceWebSocket(marketRunId);
-      showToast("Trying Binance WebSocket");
+      connectMarketWebSocket(marketRunId);
+      showToast(`Trying ${webSocketProviderLabel()} WebSocket`);
     }
 
     function stopMarketData() {
@@ -764,6 +801,12 @@
       ws = null;
       if (fallbackTimer) clearInterval(fallbackTimer);
       fallbackTimer = null;
+    }
+
+    function connectMarketWebSocket(runId = marketRunId) {
+      if (settings.webSocketProvider === "coinbase") return connectCoinbaseWebSocket(runId);
+      if (settings.webSocketProvider === "kraken") return connectKrakenWebSocket(runId);
+      return connectBinanceWebSocket(runId);
     }
 
     function connectBinanceWebSocket(runId = marketRunId) {
@@ -788,29 +831,8 @@
           updateStatusStrip();
         };
         ws.onmessage = (event) => handleBinanceMessage(event.data);
-        ws.onerror = () => {
-          wsFailureCount += 1;
-          providerStatus.lastError = `Binance WebSocket error for ${url}`;
-          providerStatus.websocket = "error";
-          logError("websocket", providerStatus.lastError);
-          updateStatusStrip();
-        };
-        ws.onclose = () => {
-          if (runId !== marketRunId) return;
-          providerStatus.websocket = "disconnected";
-          updateStatusStrip();
-          if (!wsShouldReconnect) return;
-          if (wsFailureCount >= 3) {
-            providerStatus.websocket = "disabled after failures";
-            providerStatus.lastError = "Binance WebSocket failed repeatedly; using CoinGecko REST fallback. Try the :443 or data-stream endpoint in Admin.";
-            logError("websocket", providerStatus.lastError);
-            updateStatusStrip();
-            return;
-          }
-          const delay = wsBackoffMs;
-          wsBackoffMs = Math.min(wsBackoffMs * 1.8, 60000);
-          setTimeout(() => connectBinanceWebSocket(runId), delay);
-        };
+        ws.onerror = () => handleWebSocketError("Binance", url);
+        ws.onclose = () => handleWebSocketClose(runId);
       } catch (error) {
         providerStatus.websocket = "error";
         providerStatus.lastError = error.message;
@@ -822,6 +844,105 @@
       const streams = coins.map((coin) => `${coin.binanceSymbol.toLowerCase()}@miniTicker`).join("/");
       const base = (settings.binanceWsEndpoint || DEFAULT_SETTINGS.binanceWsEndpoint).replace(/\/$/, "");
       return `${base}/stream?streams=${streams}`;
+    }
+
+    function handleWebSocketError(provider, url) {
+      wsFailureCount += 1;
+      providerStatus.lastError = `${provider} WebSocket error for ${url}`;
+      providerStatus.websocket = "error";
+      logError("websocket", providerStatus.lastError);
+      updateStatusStrip();
+    }
+
+    function handleWebSocketClose(runId) {
+      if (runId !== marketRunId) return;
+      providerStatus.websocket = "disconnected";
+      updateStatusStrip();
+      if (!wsShouldReconnect) return;
+      if (wsFailureCount >= 3) {
+        providerStatus.websocket = "disabled after failures";
+        providerStatus.lastError = `${webSocketProviderLabel()} WebSocket failed repeatedly; using CoinGecko REST fallback. Try another provider in Admin.`;
+        logError("websocket", providerStatus.lastError);
+        updateStatusStrip();
+        return;
+      }
+      const delay = wsBackoffMs;
+      wsBackoffMs = Math.min(wsBackoffMs * 1.8, 60000);
+      setTimeout(() => connectMarketWebSocket(runId), delay);
+    }
+
+    function connectCoinbaseWebSocket(runId = marketRunId) {
+      if (runId !== marketRunId) return;
+      const coins = enabledCoinsOrSeeds().filter((coin) => coin.coinbaseProduct);
+      if (!coins.length) {
+        providerStatus.websocket = "no enabled Coinbase products";
+        updateStatusStrip();
+        return;
+      }
+      const url = "wss://ws-feed.exchange.coinbase.com";
+      providerStatus.wsUrl = url;
+      providerStatus.websocket = "connecting";
+      updateStatusStrip();
+      try {
+        ws = new WebSocket(url);
+        ws.onopen = () => {
+          wsBackoffMs = 1500;
+          wsFailureCount = 0;
+          providerStatus.websocket = "connected";
+          ws.send(JSON.stringify({
+            type: "subscribe",
+            product_ids: coins.map((coin) => coin.coinbaseProduct),
+            channels: ["ticker"]
+          }));
+          logEvent("websocket", "Coinbase WebSocket connected");
+          updateStatusStrip();
+        };
+        ws.onmessage = (event) => handleCoinbaseMessage(event.data);
+        ws.onerror = () => handleWebSocketError("Coinbase", url);
+        ws.onclose = () => handleWebSocketClose(runId);
+      } catch (error) {
+        providerStatus.websocket = "error";
+        providerStatus.lastError = error.message;
+        logError("websocket", error.message);
+      }
+    }
+
+    function connectKrakenWebSocket(runId = marketRunId) {
+      if (runId !== marketRunId) return;
+      const coins = enabledCoinsOrSeeds().filter((coin) => coin.krakenPair);
+      if (!coins.length) {
+        providerStatus.websocket = "no enabled Kraken pairs";
+        updateStatusStrip();
+        return;
+      }
+      const url = "wss://ws.kraken.com/v2";
+      providerStatus.wsUrl = url;
+      providerStatus.websocket = "connecting";
+      updateStatusStrip();
+      try {
+        ws = new WebSocket(url);
+        ws.onopen = () => {
+          wsBackoffMs = 1500;
+          wsFailureCount = 0;
+          providerStatus.websocket = "connected";
+          ws.send(JSON.stringify({
+            method: "subscribe",
+            params: {
+              channel: "ticker",
+              symbol: coins.map((coin) => coin.krakenPair)
+            }
+          }));
+          logEvent("websocket", "Kraken WebSocket connected");
+          updateStatusStrip();
+        };
+        ws.onmessage = (event) => handleKrakenMessage(event.data);
+        ws.onerror = () => handleWebSocketError("Kraken", url);
+        ws.onclose = () => handleWebSocketClose(runId);
+      } catch (error) {
+        providerStatus.websocket = "error";
+        providerStatus.lastError = error.message;
+        logError("websocket", error.message);
+      }
     }
 
     function handleBinanceMessage(message) {
@@ -837,6 +958,67 @@
         queueRender();
       } catch (error) {
         logError("binance-message", error.message);
+      }
+    }
+
+    function handleCoinbaseMessage(message) {
+      try {
+        const raw = JSON.parse(message);
+        if (raw.type !== "ticker" || !raw.product_id || !raw.price) return;
+        const coin = coinCache.find((item) => item.coinbaseProduct === raw.product_id);
+        if (!coin) return;
+        const snapshot = {
+          coinId: coin.id,
+          symbol: coin.symbol,
+          provider: "coinbase-websocket",
+          price: Number(raw.price),
+          open24h: Number(raw.open_24h || 0) || null,
+          high24h: Number(raw.high_24h || 0) || null,
+          low24h: Number(raw.low_24h || 0) || null,
+          volume24h: Number(raw.volume_24h || raw.volume_30d || 0),
+          changePercent24h: raw.open_24h ? ((Number(raw.price) - Number(raw.open_24h)) / Number(raw.open_24h)) * 100 : 0,
+          timestamp: Date.parse(raw.time) || Date.now(),
+          raw
+        };
+        latestSnapshots.set(coin.id, snapshot);
+        putMarketSnapshot(snapshot);
+        persistPriceTickThrottled(snapshot);
+        queueRender();
+      } catch (error) {
+        logError("coinbase-message", error.message);
+      }
+    }
+
+    function handleKrakenMessage(message) {
+      try {
+        const raw = JSON.parse(message);
+        if (raw.channel !== "ticker" || !Array.isArray(raw.data)) return;
+        for (const ticker of raw.data) {
+          const coin = coinCache.find((item) => item.krakenPair === ticker.symbol);
+          if (!coin) continue;
+          const price = Number(ticker.last || ticker.mark || ticker.bid || ticker.ask);
+          if (!Number.isFinite(price)) continue;
+          const open24h = Number(ticker.open || 0) || null;
+          const snapshot = {
+            coinId: coin.id,
+            symbol: coin.symbol,
+            provider: "kraken-websocket",
+            price,
+            open24h,
+            high24h: Number(ticker.high || 0) || null,
+            low24h: Number(ticker.low || 0) || null,
+            volume24h: Number(ticker.volume || 0),
+            changePercent24h: open24h ? ((price - open24h) / open24h) * 100 : 0,
+            timestamp: Date.now(),
+            raw: ticker
+          };
+          latestSnapshots.set(coin.id, snapshot);
+          putMarketSnapshot(snapshot);
+          persistPriceTickThrottled(snapshot);
+        }
+        queueRender();
+      } catch (error) {
+        logError("kraken-message", error.message);
       }
     }
 
@@ -962,6 +1144,8 @@
     async function renderAll() {
       updateStatusStrip();
       renderMoodCard();
+      updateDashboardTimers();
+      await renderDashboardTopNews();
       fillDashboardChartControls();
       await renderDashboardTimeSeries();
       await renderCoinCards();
@@ -979,6 +1163,64 @@
       els.fallbackDot.className = `dot ${providerStatus.fallback === "ready" ? "ok" : providerStatus.fallback === "polling" ? "warn" : ""}`;
       els.newsStatus.textContent = settings.lastNewsFetchAt ? `Last news ${relativeTime(settings.lastNewsFetchAt)}` : "News not fetched";
       els.llmStatus.textContent = settings.llmEnabled ? "LLM enabled" : "LLM disabled";
+    }
+
+    function scheduleDashboardTimers() {
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = setInterval(updateDashboardTimers, 1000);
+      updateDashboardTimers();
+    }
+
+    function updateDashboardTimers() {
+      if (!els.nextNewsTimer || !els.nextLlmTimer || !els.lastLlmRun) return;
+      const nextNewsAt = (settings.lastNewsFetchAt || 0) + settings.newsRefreshMinutes * 60000;
+      els.nextNewsTimer.textContent = settings.lastNewsFetchAt ? countdownLabel(nextNewsAt) : "Ready now";
+      els.lastLlmRun.textContent = settings.lastLlmRunAt ? relativeTime(settings.lastLlmRunAt) : "Never";
+      if (!settings.llmEnabled) {
+        els.nextLlmTimer.textContent = "Disabled";
+      } else if (!settings.openAiKey) {
+        els.nextLlmTimer.textContent = "Needs saved key";
+      } else {
+        const interval = Math.max(settings.llmIntervalMinutes, settings.llmMinIntervalMinutes) * 60000;
+        els.nextLlmTimer.textContent = settings.lastLlmRunAt ? countdownLabel(settings.lastLlmRunAt + interval) : "Ready now";
+      }
+    }
+
+    async function renderDashboardTopNews() {
+      if (!els.dashboardTopNews) return;
+      if (!db?.newsArticles) {
+        els.dashboardTopNews.innerHTML = `<div class="empty">News storage is unavailable.</div>`;
+        return;
+      }
+      const articles = await db.newsArticles.orderBy("publishedAt").reverse().limit(120).toArray();
+      const hidden = new Set(settings.hiddenArticles || []);
+      const top = articles
+        .filter((article) => !hidden.has(article.id))
+        .map((article) => ({ article, score: articleRelevanceScore(article) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5)
+        .map((item) => item.article);
+      els.dashboardTopNews.innerHTML = top.map(dashboardNewsHtml).join("") || `<div class="empty">No matched news yet. Refresh feeds or seed sources.</div>`;
+    }
+
+    function articleRelevanceScore(article) {
+      const ageHours = Math.max(0, (Date.now() - Number(article.publishedAt || 0)) / 3600000);
+      const recency = Math.max(0, 48 - ageHours);
+      const coinScore = (article.matchedCoins || []).length * 18;
+      const termScore = Math.min((article.matchedTerms || []).length, 8) * 5;
+      const sentimentScore = article.sentimentHint === "risk" || article.sentimentHint === "constructive" ? 8 : 0;
+      return recency + coinScore + termScore + sentimentScore;
+    }
+
+    function dashboardNewsHtml(article) {
+      return `<article class="news-card" style="border-top:1px solid var(--line);padding-top:.65rem;">
+        <div>
+          <h3 style="font-size:.98rem;">${escapeHtml(article.title)}</h3>
+          <div class="muted">${escapeHtml(article.sourceName)} · ${relativeTime(article.publishedAt)}</div>
+          <div class="actions" style="margin-top:.35rem;">${(article.matchedCoins || []).slice(0, 4).map((coin) => `<span class="badge">${escapeHtml(coin)}</span>`).join("")}${(article.matchedTerms || []).slice(0, 4).map((term) => `<span class="badge">${escapeHtml(term)}</span>`).join("")}</div>
+        </div>
+        <a href="${escapeAttr(article.link)}" target="_blank" rel="noopener"><button class="tiny" type="button">Open</button></a>
+      </article>`;
     }
 
     async function renderCoinCards() {
@@ -1384,6 +1626,7 @@
         await saveLlmAnalysis(record);
         settings.lastLlmRunAt = Date.now();
         saveSettings();
+        updateDashboardTimers();
         await loadLatestAnalysis();
         renderLlmAnalysis();
         showToast(error || "LLM analysis saved", error ? "warn" : "ok");
@@ -1465,6 +1708,7 @@
       els.newsRefreshMinutes.value = settings.newsRefreshMinutes;
       els.newsRetentionDays.value = settings.newsRetentionDays;
       els.marketAutoStartWebSocket.value = String(Boolean(settings.marketAutoStartWebSocket));
+      els.webSocketProvider.value = settings.webSocketProvider || DEFAULT_SETTINGS.webSocketProvider;
       els.binanceWsEndpoint.value = settings.binanceWsEndpoint || DEFAULT_SETTINGS.binanceWsEndpoint;
       els.rssProxyTemplate.value = settings.rssProxyTemplate;
       els.llmEnabled.value = String(settings.llmEnabled);
@@ -1479,7 +1723,7 @@
     function renderCoinAdminList() {
       els.coinAdminList.innerHTML = coinCache.map((coin) => `<article class="panel">
         <div class="actions" style="justify-content: space-between;">
-          <div><strong>${escapeHtml(coin.symbol)} · ${escapeHtml(coin.name)}</strong><br><span class="muted">${coin.enabled ? "enabled" : "disabled"} · Binance ${escapeHtml(coin.binanceSymbol || "none")} · CoinGecko ${escapeHtml(coin.coingeckoId || "none")}</span></div>
+          <div><strong>${escapeHtml(coin.symbol)} · ${escapeHtml(coin.name)}</strong><br><span class="muted">${coin.enabled ? "enabled" : "disabled"} · Binance ${escapeHtml(coin.binanceSymbol || "none")} · Coinbase ${escapeHtml(coin.coinbaseProduct || "none")} · Kraken ${escapeHtml(coin.krakenPair || "none")} · CoinGecko ${escapeHtml(coin.coingeckoId || "none")}</span></div>
           <div class="actions">
             <button class="tiny" data-edit-coin="${coin.id}" type="button">Edit</button>
             <button class="tiny" data-toggle-coin="${coin.id}" type="button">${coin.enabled ? "Disable" : "Enable"}</button>
@@ -1504,6 +1748,8 @@
         name,
         symbol,
         binanceSymbol: els.coinBinance.value.trim().toLowerCase(),
+        coinbaseProduct: els.coinCoinbase.value.trim().toUpperCase(),
+        krakenPair: els.coinKraken.value.trim().toUpperCase(),
         coingeckoId: els.coinGecko.value.trim(),
         enabled: els.coinEnabled.value === "true",
         aliases: splitCsv(els.coinAliases.value),
@@ -1526,6 +1772,8 @@
       els.coinName.value = coin.name;
       els.coinSymbol.value = coin.symbol;
       els.coinBinance.value = coin.binanceSymbol || "";
+      els.coinCoinbase.value = coin.coinbaseProduct || "";
+      els.coinKraken.value = coin.krakenPair || "";
       els.coinGecko.value = coin.coingeckoId || "";
       els.coinEnabled.value = String(Boolean(coin.enabled));
       els.coinAliases.value = (coin.aliases || []).join(", ");
@@ -1535,7 +1783,7 @@
 
     function clearCoinForm() {
       editingCoinId = null;
-      ["coinName", "coinSymbol", "coinBinance", "coinGecko", "coinAliases", "coinNotes"].forEach((id) => { els[id].value = ""; });
+      ["coinName", "coinSymbol", "coinBinance", "coinCoinbase", "coinKraken", "coinGecko", "coinAliases", "coinNotes"].forEach((id) => { els[id].value = ""; });
       els.coinEnabled.value = "true";
       els.saveCoinBtn.textContent = "Add coin";
     }
@@ -1639,6 +1887,7 @@
       settings.newsRefreshMinutes = num("newsRefreshMinutes", 15);
       settings.newsRetentionDays = num("newsRetentionDays", 14);
       settings.marketAutoStartWebSocket = els.marketAutoStartWebSocket.value === "true";
+      settings.webSocketProvider = els.webSocketProvider.value || DEFAULT_SETTINGS.webSocketProvider;
       settings.binanceWsEndpoint = els.binanceWsEndpoint.value || DEFAULT_SETTINGS.binanceWsEndpoint;
       settings.rssProxyTemplate = els.rssProxyTemplate.value.trim() || DEFAULT_SETTINGS.rssProxyTemplate;
       saveSettings();
@@ -1659,6 +1908,7 @@
       saveSettings();
       scheduleLlmAnalysis();
       updateStatusStrip();
+      updateDashboardTimers();
       showToast("LLM settings saved");
     }
 
@@ -1868,6 +2118,10 @@
       return latestAnalysis?.parsed?.coins?.find((coin) => coin.symbol === symbol)?.action;
     }
 
+    function webSocketProviderLabel() {
+      return { coinbase: "Coinbase", kraken: "Kraken", binance: "Binance" }[settings.webSocketProvider] || "Market";
+    }
+
     function llmSchemaHint() {
       return {
         overallMarketMood: "bullish|bearish|mixed|uncertain",
@@ -1953,6 +2207,20 @@
       const hours = Math.round(minutes / 60);
       if (hours < 48) return `${hours}h ago`;
       return `${Math.round(hours / 24)}d ago`;
+    }
+
+    function countdownLabel(timestamp) {
+      const remaining = Number(timestamp) - Date.now();
+      if (!Number.isFinite(remaining) || remaining <= 0) return "Ready now";
+      const totalSeconds = Math.ceil(remaining / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      if (minutes >= 60) {
+        const hours = Math.floor(minutes / 60);
+        const restMinutes = minutes % 60;
+        return `${hours}h ${restMinutes}m`;
+      }
+      return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
     }
 
     function escapeHtml(value) {
