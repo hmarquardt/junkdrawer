@@ -399,7 +399,7 @@
         <div class="callout danger-callout">Browser localStorage is not secure. Only remember an API key if you accept that risk.</div>
         <div class="grid six" style="margin-top: 0.8rem;">
           <label>Enable OpenAI <select id="settingOpenAiEnabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
-          <label>Model <input id="settingOpenAiModel" type="text"></label>
+          <label class="span2">Model <select id="settingOpenAiModel"></select></label>
           <label>LLM interval minutes <input id="settingLlmInterval" type="number" min="5"></label>
           <label>LLM market window minutes <input id="settingLlmWindow" type="number" min="5"></label>
           <label>Max news in input <input id="settingLlmNewsMax" type="number" min="1"></label>
@@ -407,8 +407,10 @@
           <label class="span6">OpenAI API key <input id="openAiKey" type="password" autocomplete="off" placeholder="sk-..."></label>
         </div>
         <div class="actions" style="margin-top: 0.8rem;">
+          <button id="fetchOpenAiModelsBtn" type="button">Fetch available models</button>
           <button id="saveLlmSettingsBtn" class="primary" type="button">Save LLM settings</button>
           <button id="clearKeyBtn" class="danger" type="button">Clear key</button>
+          <span id="openAiModelsStatus" class="badge">Fallback model list loaded</span>
         </div>
       </div>
 
@@ -491,6 +493,7 @@
       const DB_NAME = "PolymarketPulseDB";
       const LS_SETTINGS = "polymarketPulse.settings.v1";
       const LS_KEY = "polymarketPulse.openAiKey";
+      const FALLBACK_OPENAI_MODELS = ["gpt-5-mini", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-nano", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"];
       const DEFAULT_SETTINGS = {
         theme: "dark",
         autoStartWebSocket: false,
@@ -507,7 +510,7 @@
         apiProxyTemplate: "https://api.codetabs.com/v1/proxy?quest={url}",
         rssProxyTemplate: "https://api.allorigins.win/raw?url={url}",
         openAiEnabled: false,
-        openAiModel: "gpt-4.1-mini",
+        openAiModel: "gpt-5-mini",
         llmIntervalMinutes: 30,
         llmMarketWindowMinutes: 60,
         maxNewsArticlesInLlm: 8,
@@ -602,6 +605,7 @@
         on("saveSettingsBtn", "click", () => { readSettingsForm(); saveSettings(); applyTheme(); startIntervals(); showToast("Settings saved"); });
         on("saveLlmSettingsBtn", "click", () => { readLlmSettingsForm(); saveSettings(); fillSettingsForm(); showToast("LLM settings saved"); queueRender(); });
         on("clearKeyBtn", "click", clearOpenAiKey);
+        on("fetchOpenAiModelsBtn", "click", fetchOpenAiModels);
         on("saveSourceBtn", "click", saveNewsSourceFromForm);
         on("clearSourceBtn", "click", clearSourceForm);
         on("exportAllBtn", "click", exportAllData);
@@ -643,6 +647,7 @@
         try {
           const saved = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
           state.settings = { ...DEFAULT_SETTINGS, ...saved };
+          if (!saved.openAiModel || saved.openAiModel === "gpt-4.1-mini") state.settings.openAiModel = DEFAULT_SETTINGS.openAiModel;
           if (state.settings.rememberOpenAiKey) state.openAiKeyMemory = localStorage.getItem(LS_KEY) || "";
         } catch (err) {
           state.settings = { ...DEFAULT_SETTINGS };
@@ -1736,6 +1741,7 @@
       }
 
       function fillSettingsForm() {
+        populateOpenAiModelSelect(FALLBACK_OPENAI_MODELS, state.settings.openAiModel);
         setVal("settingTheme", state.settings.theme);
         setVal("settingAutoWs", String(state.settings.autoStartWebSocket));
         setVal("settingRestSeconds", state.settings.restPollingSeconds);
@@ -1789,6 +1795,50 @@
         });
         state.openAiKeyMemory = val("openAiKey");
         state.providerStatus.llm.state = state.settings.openAiEnabled ? "ready" : "disabled";
+      }
+
+      function populateOpenAiModelSelect(models, selected) {
+        const el = state.els.settingOpenAiModel;
+        if (!el) return;
+        const ids = [...new Set([selected, ...models, ...FALLBACK_OPENAI_MODELS].filter(Boolean))];
+        el.innerHTML = ids.map(id => `<option value="${attr(id)}"${id === selected ? " selected" : ""}>${escapeHtml(id)}</option>`).join("");
+      }
+
+      async function fetchOpenAiModels() {
+        const key = val("openAiKey") || state.openAiKeyMemory || (state.settings.rememberOpenAiKey ? localStorage.getItem(LS_KEY) : "");
+        if (!key) return showToast("Enter an OpenAI API key before fetching models", "warn");
+        text("openAiModelsStatus", "Fetching models...");
+        try {
+          const res = await fetch("https://api.openai.com/v1/models", { headers: { "Authorization": `Bearer ${key}` } });
+          if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
+          const data = await res.json();
+          const models = (data.data || []).map(m => m.id).filter(isLikelyChatModel).sort(preferredModelSort);
+          if (!models.length) throw new Error("No chat-capable models found in model list");
+          populateOpenAiModelSelect(models, state.settings.openAiModel);
+          text("openAiModelsStatus", `${models.length} models loaded`);
+          showToast("OpenAI model list updated");
+        } catch (err) {
+          text("openAiModelsStatus", "Model fetch failed; fallback list kept");
+          logError("openai-models", err);
+          showToast("Could not fetch OpenAI models. See Debug logs.", "bad");
+        }
+      }
+
+      function isLikelyChatModel(id) {
+        if (!/^(gpt|o[0-9])/.test(id)) return false;
+        return !/(audio|realtime|transcribe|tts|embedding|moderation|image|search|computer|instruct|babbage|davinci|dall-e|whisper)/i.test(id);
+      }
+
+      function preferredModelSort(a, b) {
+        const rank = id => {
+          if (id === "gpt-5-mini") return 0;
+          if (/^gpt-5\.[0-9]+$/.test(id)) return 1;
+          if (/^gpt-5/.test(id)) return 2;
+          if (/^gpt-4\.1/.test(id)) return 3;
+          if (/^gpt-4o/.test(id)) return 4;
+          return 9;
+        };
+        return rank(a) - rank(b) || a.localeCompare(b);
       }
 
       function applyTheme() {
