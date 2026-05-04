@@ -253,6 +253,51 @@
       gap: 0.48rem;
       align-content: center;
     }
+    .viz-frame {
+      width: 100%;
+      min-height: 320px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at center, rgba(255, 191, 69, 0.08), transparent 34%),
+        rgba(1, 6, 15, 0.58);
+      overflow: hidden;
+    }
+    .viz-frame svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      min-height: 320px;
+    }
+    .viz-node, .viz-cme, .flare-point {
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+    .viz-node:hover, .viz-cme:hover, .flare-point:hover { opacity: 0.78; }
+    .viz-label {
+      fill: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+    .viz-title {
+      fill: var(--text);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .viz-note {
+      fill: var(--muted);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 11px;
+    }
+    .flare-lane {
+      stroke: rgba(139, 213, 255, 0.18);
+      stroke-width: 1;
+    }
+    .network-link {
+      stroke: rgba(139, 213, 255, 0.28);
+      stroke-width: 1.4;
+    }
     .bar-row {
       display: grid;
       grid-template-columns: 88px minmax(0, 1fr) 44px;
@@ -816,8 +861,10 @@
         '<div class="two">',
         '<div class="panel"><h2>Event counts by type</h2><div class="chart">' + renderBars(counts, DONKI_ENDPOINTS) + '</div></div>',
         '<div class="panel"><h2>Event counts by day</h2><div class="chart">' + renderBars(daily) + '</div></div>',
-        '</div>'
+        '</div>',
+        '<div class="panel stack"><div><h2>Linked Event Network</h2><p>DONKI-linked activity IDs, colored by event type. This is a relationship map, not a physics model.</p></div>' + renderLinkedEventNetwork(state.events) + '</div>'
       ].join("");
+      wireVizClicks(el.dashboard);
     }
 
     function renderTimeline() {
@@ -836,6 +883,8 @@
       const speedRows = cmes.map(event => ({ event, analysis: fastestAnalysis(event.raw) })).filter(item => item.analysis && item.analysis.speed).sort((a, b) => b.analysis.speed - a.analysis.speed);
       el.cme.innerHTML = [
         '<div class="panel stack"><h2>CME Tracker</h2>',
+        '<div><h3>CME Solar Disk View</h3><p class="small muted">Uses CME analysis latitude/longitude for position, halfAngle for cone width, and speed for color. Longitude is projected as an observer-facing disk heuristic.</p></div>',
+        renderCmeSolarDisk(cmes),
         speedRows.length ? '<h3>Fastest CMEs</h3><div class="chart">' + renderBars(Object.fromEntries(speedRows.slice(0, 8).map(item => [item.event.id, item.analysis.speed]))) + '</div>' : '<div class="empty">No CME speed data in the current range.</div>',
         '<div class="table-wrap"><table><thead><tr><th>Activity ID</th><th>Start</th><th>Source</th><th>Active Region</th><th>Fastest Analysis</th><th>Note</th></tr></thead><tbody>',
         cmes.length ? cmes.map(event => {
@@ -845,6 +894,7 @@
         '</tbody></table></div></div>'
       ].join("");
       el.cme.querySelectorAll("[data-row-event]").forEach(row => row.addEventListener("click", () => openEventDrawer(row.dataset.rowEvent)));
+      wireVizClicks(el.cme);
     }
 
     function renderFlareTab() {
@@ -856,6 +906,7 @@
       });
       const sorted = flares.slice().sort((a, b) => classifyFlare(b.raw.classType).rank - classifyFlare(a.raw.classType).rank);
       el.flare.innerHTML = [
+        '<div class="panel stack"><div><h2>Flare Class Ladder</h2><p class="small muted">Flares climb from A/B/C through M and X class. Horizontal position is event time within the selected range.</p></div>' + renderFlareClassLadder(flares) + '</div>',
         '<div class="two">',
         '<div class="panel"><h2>Flare class distribution</h2><div class="chart">' + renderBars(distribution) + '</div></div>',
         '<div class="panel"><h2>Top flares</h2><div class="timeline">' + (sorted.slice(0, 8).map(eventCardHtml).join("") || '<div class="empty">No flares loaded.</div>') + '</div></div>',
@@ -865,6 +916,7 @@
         '</tbody></table></div></div>'
       ].join("");
       el.flare.querySelectorAll("[data-event-id], [data-row-event]").forEach(node => node.addEventListener("click", () => openEventDrawer(node.dataset.eventId || node.dataset.rowEvent)));
+      wireVizClicks(el.flare);
     }
 
     function renderStormCalendar() {
@@ -936,6 +988,155 @@
 
     function metric(label, value, sub, klass) {
       return '<div class="card metric ' + klass + '"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong><p>' + esc(sub) + '</p></div>';
+    }
+
+    function renderCmeSolarDisk(cmes) {
+      const plotted = cmes.map(event => ({ event, analysis: fastestAnalysis(event.raw) }))
+        .filter(item => item.analysis && Number.isFinite(Number(item.analysis.latitude)) && Number.isFinite(Number(item.analysis.longitude)));
+      if (!plotted.length) return '<div class="empty">No CME latitude/longitude analysis data in this range.</div>';
+      const width = 680;
+      const height = 460;
+      const cx = 340;
+      const cy = 225;
+      const r = 165;
+      const maxSpeed = Math.max(...plotted.map(item => Number(item.analysis.speed) || 0), 1);
+      const cmeShapes = plotted.slice(0, 40).map(item => {
+        const a = item.analysis;
+        const lat = clampNumber(Number(a.latitude), -90, 90);
+        const lon = clampNumber(Number(a.longitude), -180, 180);
+        const latRad = lat * Math.PI / 180;
+        const lonRad = lon * Math.PI / 180;
+        const x = cx + Math.sin(lonRad) * Math.cos(latRad) * r;
+        const y = cy - Math.sin(latRad) * r;
+        const cone = clampNumber(Number(a.halfAngle) || 12, 5, 90);
+        const speed = Number(a.speed) || 0;
+        const size = 8 + cone * 0.72;
+        const color = cmeSpeedColor(speed, maxSpeed);
+        const opacity = 0.28 + Math.min(0.55, speed / Math.max(maxSpeed, 1) * 0.55);
+        return [
+          '<circle class="viz-cme" data-event-id="' + esc(item.event.id) + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + size.toFixed(1) + '" fill="' + color + '" opacity="' + opacity.toFixed(2) + '" stroke="' + color + '" stroke-width="2">',
+          '<title>' + esc(item.event.title + " - " + joinParts([speed && speed + " km/s", "lat " + lat, "lon " + lon, "halfAngle " + cone])) + '</title></circle>',
+          '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3.2" fill="#fff" opacity="0.9"></circle>'
+        ].join("");
+      }).join("");
+      return [
+        '<div class="viz-frame"><svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="CME solar disk view">',
+        '<defs><radialGradient id="solarDisk" cx="50%" cy="45%" r="60%"><stop offset="0%" stop-color="#fff2a6"/><stop offset="32%" stop-color="#ffbf45"/><stop offset="70%" stop-color="#ff5d38"/><stop offset="100%" stop-color="#5c1724"/></radialGradient></defs>',
+        '<text x="24" y="30" class="viz-title">CME direction and cone-width projection</text>',
+        '<text x="24" y="49" class="viz-note">Circle size = halfAngle. Color = speed. Center line is observer-facing longitude 0.</text>',
+        '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="url(#solarDisk)" opacity="0.9" stroke="rgba(255,255,255,0.28)" stroke-width="2"></circle>',
+        '<ellipse cx="' + cx + '" cy="' + cy + '" rx="' + r + '" ry="' + (r * 0.42) + '" fill="none" stroke="rgba(255,255,255,0.18)"></ellipse>',
+        '<line x1="' + (cx - r) + '" y1="' + cy + '" x2="' + (cx + r) + '" y2="' + cy + '" stroke="rgba(255,255,255,0.16)"></line>',
+        '<line x1="' + cx + '" y1="' + (cy - r) + '" x2="' + cx + '" y2="' + (cy + r) + '" stroke="rgba(255,255,255,0.16)"></line>',
+        '<text x="' + (cx - 13) + '" y="' + (cy - r - 10) + '" class="viz-label">N</text><text x="' + (cx - 12) + '" y="' + (cy + r + 22) + '" class="viz-label">S</text>',
+        '<text x="' + (cx - r - 36) + '" y="' + (cy + 4) + '" class="viz-label">-90</text><text x="' + (cx + r + 10) + '" y="' + (cy + 4) + '" class="viz-label">+90</text>',
+        cmeShapes,
+        '<text x="24" y="430" class="viz-note">' + plotted.length + ' CME analysis point' + (plotted.length === 1 ? "" : "s") + ' with geometry. Showing up to 40.</text>',
+        '</svg></div>'
+      ].join("");
+    }
+
+    function renderFlareClassLadder(flares) {
+      if (!flares.length) return '<div class="empty">No flare class data yet.</div>';
+      const withClass = flares.filter(event => event.raw.classType);
+      if (!withClass.length) return '<div class="empty">Flares loaded, but classType is missing.</div>';
+      const width = 760;
+      const height = 360;
+      const left = 72;
+      const right = 28;
+      const top = 42;
+      const laneGap = 54;
+      const lanes = ["X", "M", "C", "B", "A"];
+      const times = withClass.map(event => parseDonkiTime(event.raw.peakTime || event.raw.beginTime || event.time).getTime()).filter(Number.isFinite);
+      const minTime = Math.min(...times);
+      const maxTime = Math.max(...times);
+      const span = Math.max(1, maxTime - minTime);
+      const points = withClass.slice(0, 80).map(event => {
+        const cls = classifyFlare(event.raw.classType);
+        const laneIndex = lanes.includes(cls.classLetter) ? lanes.indexOf(cls.classLetter) : lanes.length - 1;
+        const t = parseDonkiTime(event.raw.peakTime || event.raw.beginTime || event.time).getTime();
+        const x = left + ((t - minTime) / span) * (width - left - right);
+        const y = top + laneIndex * laneGap;
+        const radius = clampNumber(4 + cls.rank / 14, 5, 18);
+        const color = flareClassColor(cls.classLetter);
+        return '<circle class="flare-point" data-event-id="' + esc(event.id) + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + radius.toFixed(1) + '" fill="' + color + '" opacity="0.88" stroke="#fff" stroke-opacity="0.45"><title>' + esc(event.raw.classType + " - " + formatDate(event.raw.peakTime || event.time)) + '</title></circle>';
+      }).join("");
+      const lanesSvg = lanes.map((lane, index) => {
+        const y = top + index * laneGap;
+        return '<line class="flare-lane" x1="' + left + '" y1="' + y + '" x2="' + (width - right) + '" y2="' + y + '"></line><text x="24" y="' + (y + 5) + '" class="viz-title" fill="' + flareClassColor(lane) + '">' + lane + '</text>';
+      }).join("");
+      return [
+        '<div class="viz-frame"><svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Solar flare class ladder">',
+        '<text x="22" y="24" class="viz-title">Flare class ladder</text>',
+        lanesSvg,
+        points,
+        '<text x="' + left + '" y="330" class="viz-label">' + esc(formatDate(minTime)) + '</text>',
+        '<text x="' + (width - 230) + '" y="330" class="viz-label">' + esc(formatDate(maxTime)) + '</text>',
+        '<text x="22" y="350" class="viz-note">Dot size reflects class rank. X-class is highest, then M, C, B, A.</text>',
+        '</svg></div>'
+      ].join("");
+    }
+
+    function renderLinkedEventNetwork(events) {
+      const links = [];
+      const nodeMap = new Map();
+      const aliasToEvent = new Map();
+      events.forEach(event => {
+        eventAliases(event).forEach(alias => aliasToEvent.set(alias, event));
+      });
+      events.forEach(event => {
+        const sourceId = event.raw.activityID || event.raw.flrID || event.raw.messageID || event.id;
+        nodeMap.set(sourceId, { id: sourceId, event, type: event.type, external: false });
+        (event.linkedEvents || []).forEach(link => {
+          const targetId = typeof link === "string" ? link : (link.activityID || link.id || link.messageID || JSON.stringify(link));
+          if (!targetId) return;
+          const targetEvent = aliasToEvent.get(targetId);
+          nodeMap.set(targetId, { id: targetId, event: targetEvent || null, type: targetEvent ? targetEvent.type : "LINK", external: !targetEvent });
+          links.push({ source: sourceId, target: targetId });
+        });
+      });
+      if (!links.length) return '<div class="empty">No linkedEvents relationships in the loaded range. Plasma gossip is currently unconnected.</div>';
+      const width = 760;
+      const height = 420;
+      const nodes = [...nodeMap.values()].slice(0, 70);
+      const nodeIndex = new Map(nodes.map((node, index) => [node.id, index]));
+      const cx = width / 2;
+      const cy = height / 2 + 12;
+      const radius = 150;
+      nodes.forEach((node, index) => {
+        const angle = -Math.PI / 2 + index / Math.max(nodes.length, 1) * Math.PI * 2;
+        node.x = cx + Math.cos(angle) * radius;
+        node.y = cy + Math.sin(angle) * radius;
+      });
+      const linkSvg = links.filter(link => nodeIndex.has(link.source) && nodeIndex.has(link.target)).slice(0, 100).map(link => {
+        const a = nodes[nodeIndex.get(link.source)];
+        const b = nodes[nodeIndex.get(link.target)];
+        return '<line class="network-link" x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '"></line>';
+      }).join("");
+      const nodeSvg = nodes.map(node => {
+        const meta = DONKI_ENDPOINTS[node.type] || { color: "#9ab1c8" };
+        const size = node.external ? 5 : 8 + Math.min(5, (node.event?.severity || 0) / 2);
+        const data = node.event ? ' data-event-id="' + esc(node.event.id) + '"' : "";
+        return '<circle class="viz-node" ' + data + ' cx="' + node.x.toFixed(1) + '" cy="' + node.y.toFixed(1) + '" r="' + size.toFixed(1) + '" fill="' + meta.color + '" opacity="' + (node.external ? "0.5" : "0.9") + '"><title>' + esc(node.event ? node.event.title : node.id) + '</title></circle>';
+      }).join("");
+      return [
+        '<div class="viz-frame"><svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="DONKI linked event network">',
+        '<text x="22" y="28" class="viz-title">Linked event network</text>',
+        '<text x="22" y="48" class="viz-note">Solid nodes are loaded events. Dim nodes are linked IDs outside this fetch window.</text>',
+        linkSvg,
+        nodeSvg,
+        '<text x="22" y="395" class="viz-note">' + links.length + ' relationship' + (links.length === 1 ? "" : "s") + ' found. Showing up to 70 nodes and 100 links.</text>',
+        '</svg></div>'
+      ].join("");
+    }
+
+    function wireVizClicks(root) {
+      root.querySelectorAll(".viz-cme[data-event-id], .flare-point[data-event-id], .viz-node[data-event-id]").forEach(node => {
+        node.addEventListener("click", event => {
+          event.stopPropagation();
+          openEventDrawer(node.dataset.eventId);
+        });
+      });
     }
 
     function renderBars(data, metadata) {
@@ -1049,6 +1250,34 @@
       return analyses.slice().sort((a, b) => (b.speed || 0) - (a.speed || 0))[0] || null;
     }
 
+    function cmeSpeedColor(speed, maxSpeed) {
+      if (!speed) return "#9ab1c8";
+      const ratio = speed / Math.max(maxSpeed, 1);
+      if (speed >= 2000 || ratio > 0.82) return "#ff4f6d";
+      if (speed >= 1000 || ratio > 0.55) return "#ffbf45";
+      if (speed >= 500) return "#9d7cff";
+      return "#27d7ff";
+    }
+
+    function flareClassColor(classLetter) {
+      return { X: "#ff4f6d", M: "#ffbf45", C: "#27d7ff", B: "#58e6a6", A: "#9d7cff", Unknown: "#9ab1c8" }[classLetter] || "#9ab1c8";
+    }
+
+    function eventAliases(event) {
+      return [
+        event.id,
+        event.raw.activityID,
+        event.raw.flrID,
+        event.raw.gstID,
+        event.raw.sepID,
+        event.raw.ipsID,
+        event.raw.hssID,
+        event.raw.rbeID,
+        event.raw.mpcID,
+        event.raw.messageID
+      ].filter(Boolean).map(String);
+    }
+
     function formatInstruments(instruments) {
       if (!Array.isArray(instruments)) return "n/a";
       return instruments.map(item => item.displayName || item.name || JSON.stringify(item)).join(", ");
@@ -1105,6 +1334,10 @@
 
     function joinParts(parts) {
       return parts.filter(Boolean).join(" - ");
+    }
+
+    function clampNumber(value, min, max) {
+      return Math.max(min, Math.min(max, value));
     }
 
     function esc(value) {
