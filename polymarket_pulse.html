@@ -289,6 +289,9 @@
         <div class="toolbar">
           <div><h2>Explorer</h2><p>Discover active markets/events from Gamma, filter for quick crypto markets, then add them to the Follow Stack.</p></div>
           <div class="actions">
+            <button id="presetAllBtn" type="button">All Active</button>
+            <button id="presetSoonBtn" type="button">Resolving Soon</button>
+            <button id="presetVolumeBtn" type="button">Highest Volume</button>
             <button id="presetChaosBtn" class="amber" type="button">Scalp-ish Chaos</button>
             <button id="presetBtc5Btn" class="amber" type="button">5-Minute BTC Spot Hunter</button>
             <button id="fetchExplorerBtn" class="primary" type="button">Fetch markets</button>
@@ -308,12 +311,12 @@
           <label>Maximum spread <input id="filterMaxSpread" type="number" min="0" max="1" step="0.01" value="1"></label>
           <label><span>Active only</span><select id="filterActive"><option value="true">Yes</option><option value="false">No</option></select></label>
           <label><span>Not resolved only</span><select id="filterUnresolved"><option value="true">Yes</option><option value="false">No</option></select></label>
-          <label><span>Has CLOB token IDs only</span><select id="filterHasTokens"><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label><span>Has CLOB token IDs only</span><select id="filterHasTokens"><option value="false">No</option><option value="true">Yes</option></select></label>
         </div>
       </div>
       <div class="panel">
         <div class="toolbar">
-          <div><h2>Explorer Results</h2><p><span id="explorerCount">0</span> markets after filters.</p></div>
+          <div><h2>Explorer Results</h2><p><span id="explorerCount">0</span> markets after filters. <span id="explorerHint">Loading active markets automatically.</span></p></div>
           <button id="refreshExplorerBooksBtn" type="button">Refresh visible orderbooks</button>
         </div>
         <div id="explorerResults" class="grid"></div>
@@ -557,10 +560,12 @@
         await seedDefaultsIfNeeded();
         await refreshCaches();
         fillSettingsForm();
+        setDefaultExplorerBrowseMode();
         queueRender();
         if (state.settings.defaultExplorerPreset === "chaos") applyChaosPreset();
         if (state.settings.defaultExplorerPreset === "btc5") applyBtcPreset();
         startIntervals();
+        autoDiscoverMarkets();
         if (state.settings.autoStartWebSocket) startWebSocket();
         logEvent("info", "app", "Polymarket Pulse initialized");
       }
@@ -584,6 +589,9 @@
         on("runLlmNowBtn", "click", () => runLlmAnalysis("follow-stack"));
         on("runLlmTabBtn", "click", () => runLlmAnalysis("follow-stack"));
         on("dashToExplorerBtn", "click", () => selectTab("explorer"));
+        on("presetAllBtn", "click", applyAllActivePreset);
+        on("presetSoonBtn", "click", applyResolvingSoonPreset);
+        on("presetVolumeBtn", "click", applyHighestVolumePreset);
         on("presetChaosBtn", "click", applyChaosPreset);
         on("presetBtc5Btn", "click", applyBtcPreset);
         on("refreshFollowRestBtn", "click", refreshFollowedRest);
@@ -701,6 +709,12 @@
         state.llmTimer = setInterval(() => maybeAutoLlm(), Math.max(5, state.settings.llmIntervalMinutes) * 60000);
       }
 
+      function autoDiscoverMarkets() {
+        const last = Number(localStorage.getItem("polymarketPulse.lastDiscovery") || 0);
+        const stale = Date.now() - last > Math.max(1, state.settings.discoveryRefreshMinutes) * 60000;
+        if (!state.markets.size || stale) discoverMarkets(false);
+      }
+
       function queueRender() {
         if (state.renderQueued) return;
         state.renderQueued = true;
@@ -762,9 +776,24 @@
         const results = getFilteredExplorerMarkets();
         state.explorerResults = results;
         text("explorerCount", results.length);
-        html("explorerResults", results.length ? results.slice(0, 80).map(marketCardHtml).join("") : `<div class="empty">No Explorer results. Fetch Gamma markets or relax filters.</div>`);
+        renderExplorerHint(results.length);
+        html("explorerResults", results.length ? results.slice(0, 80).map(marketCardHtml).join("") : explorerEmptyHtml());
         html("newMarketList", state.newMarkets.length ? state.newMarkets.slice(0, 20).map(marketCardHtml).join("") : `<div class="empty">WebSocket new_market events that match quick crypto filters appear here.</div>`);
         bindDynamicButtons();
+      }
+
+      function renderExplorerHint(resultCount) {
+        const gamma = state.providerStatus.gamma;
+        if (gamma.state === "loading") return text("explorerHint", "Fetching active markets from Gamma now.");
+        if (!state.markets.size) return text("explorerHint", "No cached markets yet. The app will fetch active Gamma markets automatically.");
+        if (!resultCount) return text("explorerHint", "Cached markets exist, but the current filters hide them.");
+        text("explorerHint", `Browsing ${resultCount} cached active markets. Use search only to narrow the list.`);
+      }
+
+      function explorerEmptyHtml() {
+        if (state.providerStatus.gamma.state === "loading") return `<div class="empty">Fetching active Polymarket markets from Gamma. Results should appear here automatically.</div>`;
+        if (!state.markets.size) return `<div class="empty">No cached markets yet. Click Fetch markets if the automatic request was blocked by the browser or network.</div>`;
+        return `<div class="empty">No markets match the current filters. Try All Active, clear Search, or turn off the CLOB-token-only filter.</div>`;
       }
 
       function renderFollowStack() {
@@ -1387,6 +1416,52 @@
         return ms <= hours * 3600000;
       }
 
+      function setDefaultExplorerBrowseMode() {
+        if (!val("filterWindow")) setVal("filterWindow", "all");
+        if (!val("filterSort")) setVal("filterSort", "activity");
+        setVal("filterHasTokens", "false");
+        setVal("filterActive", "true");
+        setVal("filterUnresolved", "true");
+      }
+
+      function clearExplorerFilters() {
+        setVal("filterSearch", "");
+        setVal("filterTag", "");
+        setVal("filterCrypto", "false");
+        setVal("filterBitcoin", "false");
+        setVal("filterEthereum", "false");
+        setVal("filterMinVolume", "0");
+        setVal("filterMinLiquidity", "0");
+        setVal("filterMaxSpread", "1");
+        setVal("filterActive", "true");
+        setVal("filterUnresolved", "true");
+        setVal("filterHasTokens", "false");
+      }
+
+      function applyAllActivePreset() {
+        clearExplorerFilters();
+        setVal("filterWindow", "all");
+        setVal("filterSort", "activity");
+        showToast("Browsing all active markets");
+        queueRender();
+      }
+
+      function applyResolvingSoonPreset() {
+        clearExplorerFilters();
+        setVal("filterWindow", "24");
+        setVal("filterSort", "quickest");
+        showToast("Browsing markets resolving in the next 24 hours");
+        queueRender();
+      }
+
+      function applyHighestVolumePreset() {
+        clearExplorerFilters();
+        setVal("filterWindow", "all");
+        setVal("filterSort", "volume");
+        showToast("Browsing highest-volume active markets");
+        queueRender();
+      }
+
       function searchMatchesMarket(query, market) {
         const hay = marketHaystack(market);
         const terms = query.match(/[a-z0-9-]+/g) || [];
@@ -1395,6 +1470,7 @@
       }
 
       function applyChaosPreset() {
+        clearExplorerFilters();
         setVal("filterCrypto", "true");
         setVal("filterBitcoin", "false");
         setVal("filterEthereum", "false");
@@ -1411,6 +1487,7 @@
       }
 
       function applyBtcPreset() {
+        clearExplorerFilters();
         setVal("filterSearch", "btc bitcoin 5 min candle price above below up down spot binance coinbase");
         setVal("filterCrypto", "true");
         setVal("filterBitcoin", "true");
