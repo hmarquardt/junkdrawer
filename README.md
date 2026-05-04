@@ -1,146 +1,37 @@
-# Hank's Junk Drawer of Random Pages
+# Hank's Junk Drawer
 
-A playful GitHub Pages landing page for a repository full of standalone single-page experiments, tools, demos, and assorted digital weirdness.
+A GitHub Pages collection of standalone, single-file browser apps and experiments.
 
-The goal is simple: drop new `.html` files into the repo and let the home page discover them automatically, so you do **not** have to manually edit `index.html` every time you add another page.
+Most pages in this repo are intentionally self-contained: one `.html` file with inline HTML, CSS, and JavaScript. There is no build step and no backend for the base apps. The homepage discovers pages in the repository and uses `junk-drawer.json` to show nicer titles, descriptions, emoji, and hidden/private entries.
 
-## What It Does
+## Current Apps
 
-This project provides a single-page `index.html` that:
+| App | File | Purpose |
+|---|---|---|
+| RWS Time Block Timer | `rwstime.html` | Countdown helper for timesheet blocks. |
+| Collection of Absurdities | `collectionofabsurdities.html` | A collection of odd stories and absurd links. |
+| Bookmarklet Collection | `bookmarklets.html` | Local bookmarklet shelf with drag-to-bookmarks links and highlighted source. |
+| Signal Drawer | `signal-drawer.html` | Local RSS/topic tracker with configurable feeds, key terms, source diagnostics, and cached results. |
+| Pontifex Daily Desk | `pontifex-daily-desk.html` | Educational Solitaire/Pontifex cipher notebook with daily public seed keying. |
+| Manual Party Line | `manual-party-line.html` | One-to-one WebRTC video/audio chat using manual copy/paste signaling. |
+| Crypto Mood Ring | `crypto-mood-ring.html` | Local-first crypto dashboard with market data, RSS news, IndexedDB retention, and optional OpenAI commentary. |
+| Waypoint Route Builder | `waypoint-route-builder.html` | Build ordered map routes from latitude/longitude pairs with Google Maps exports. |
 
-- Displays a modern, fun landing page titled **Hank's Junk Drawer of Random Pages**
-- Uses the GitHub REST API to inspect the public repository contents
-- Automatically finds `.html` files in the repo
-- Builds a menu/card grid linking to those pages
-- Skips `index.html` so the homepage does not list itself
-- Supports optional metadata through `junk-drawer.json`
-- Works well as a GitHub Pages repo-based site
+`private-test.html` is intentionally hidden by metadata.
 
-## Why the GitHub API Is Needed
+## How The Homepage Works
 
-GitHub Pages is static hosting. That means JavaScript running in the browser cannot directly ask the server, “What files are in this directory?”
+`index.html` is the landing page. It uses the public GitHub repository API to inspect the repo contents and discover `.html` files. Because GitHub Pages is static hosting, browser JavaScript cannot simply list files from the server directory, so the GitHub API is used instead.
 
-Instead, this page uses GitHub's public repository API to list files in the repo, then builds the menu in the browser.
-
-This works best when the repository is public.
-
-## Basic Repo Structure
-
-A simple setup might look like this:
-
-```text
-/
-├── index.html
-├── favicon.ico
-├── junk-drawer.json        optional
-├── timer.html
-├── absurdities.html
-├── camera-monitor.html
-└── assets/
-    ├── favicon-16.png
-    ├── favicon-32.png
-    └── apple-touch-icon.png
-```
-
-Each standalone page can simply live as its own `.html` file.
-
-## Setup
-
-1. Add the generated `index.html` file to the root of your repo.
-2. Add your standalone `.html` pages to the repo.
-3. Enable GitHub Pages for the repository.
-4. Visit your GitHub Pages URL.
-
-For a repo named `junk-drawer`, the URL would usually be:
-
-```text
-https://YOUR-USERNAME.github.io/junk-drawer/
-```
-
-## Configuration
-
-Inside `index.html`, look for the configuration block:
-
-```js
-const CONFIG = {
-  owner: "hmarquardt",
-  repo: "your-repo-name",
-  branch: "main",
-  rootPath: "",
-  maxDepth: 3
-};
-```
-
-### `owner`
-
-Your GitHub username or organization name.
-
-Example:
-
-```js
-owner: "hmarquardt"
-```
-
-### `repo`
-
-The repository name.
-
-Example:
-
-```js
-repo: "junk-drawer"
-```
-
-### `branch`
-
-Usually `main`, unless your GitHub Pages site is published from another branch.
-
-```js
-branch: "main"
-```
-
-### `rootPath`
-
-Use an empty string if your pages are in the repo root.
-
-```js
-rootPath: ""
-```
-
-If your pages are inside a subfolder, use something like:
-
-```js
-rootPath: "pages"
-```
-
-### `maxDepth`
-
-Controls how deeply the index page searches folders for `.html` files.
-
-```js
-maxDepth: 3
-```
-
-For a simple repo, `1` or `2` may be enough. For a repo with nested folders, use `3` or higher.
-
-## Optional Page Metadata
-
-You can add a `junk-drawer.json` file to customize how discovered pages appear.
-
-Example:
+The homepage then reads `junk-drawer.json` for display metadata:
 
 ```json
 {
   "pages": {
-    "timer.html": {
-      "title": "RWS Time Block Timer",
-      "description": "A countdown helper for recurring timesheet blocks.",
-      "emoji": "⏱️"
-    },
-    "absurdities.html": {
-      "title": "Collection of Absurdities",
-      "description": "A local-first time capsule for weirdness, links, media, and notes.",
-      "emoji": "🌀"
+    "crypto-mood-ring.html": {
+      "title": "Crypto Mood Ring",
+      "description": "Local-first crypto dashboard for market ticks, RSS news, and optional LLM vibes.",
+      "emoji": "₿"
     },
     "private-test.html": {
       "hide": true
@@ -149,115 +40,142 @@ Example:
 }
 ```
 
-### Supported Metadata Fields
+Supported metadata fields:
 
 | Field | Purpose |
 |---|---|
-| `title` | Display name for the page card |
-| `description` | Short explanation shown under the title |
-| `emoji` | Fun visual marker for the card |
-| `hide` | If `true`, the page is not shown |
+| `title` | Display name for the page card. |
+| `description` | Short explanation shown under the title. |
+| `emoji` | Visual marker for the card. |
+| `hide` | If `true`, the page is not shown on the homepage. |
 
-If no metadata exists for a page, the index will generate a readable title from the file name.
+If a page has no metadata, the homepage falls back to a readable title generated from the file name.
 
-For example:
+## Project Direction
 
-```text
-rws-time-block-timer.html
-```
+This started as a simple GitHub Pages index for random standalone HTML pages. Over time it has become a small local-first app shelf:
 
-becomes something like:
+- The homepage now auto-discovers pages and uses `junk-drawer.json` for clean cards.
+- Favicons and web app manifest assets were added.
+- Several tools now use `localStorage` or IndexedDB for local-only persistence.
+- RSS apps include proxy settings because browser RSS fetches often fail due to CORS.
+- Crypto Mood Ring added optional OpenAI analysis, Coinbase/Kraken WebSocket options, REST fallback, dashboard help, and safer LLM JSON parsing.
+- Manual Party Line added a backend-free WebRTC proof of concept with copy/paste signaling.
+- Pontifex Daily Desk added an educational cipher notebook with daily public seed support.
 
-```text
-Rws Time Block Timer
-```
+## App Notes
 
-## Favicon Support
+### Signal Drawer
 
-You can use a favicon on GitHub Pages without a custom domain.
+Signal Drawer is a personal RSS/topic tracker. It stores sources, key terms, article cache, hidden/saved state, settings, and diagnostics in browser storage. It supports RSS proxy configuration because many feeds do not allow direct browser fetches.
 
-Recommended files:
+### Crypto Mood Ring
 
-```text
-/favicon.ico
-/assets/favicon-16.png
-/assets/favicon-32.png
-/assets/apple-touch-icon.png
-```
+Crypto Mood Ring is a research dashboard, not a trading tool. It does not place trades, connect to wallets, or connect to exchange accounts.
 
-Add this to the `<head>` of `index.html` and any standalone pages:
+It uses:
 
-```html
-<link rel="icon" href="./favicon.ico">
-<link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="./assets/favicon-16.png">
-<link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon.png">
-```
+- Dexie/IndexedDB for coins, price ticks, snapshots, news articles, logs, and LLM analysis history.
+- `localStorage` for settings and an optional remembered OpenAI API key.
+- CoinGecko REST polling as the reliable default market data path.
+- Optional Coinbase, Kraken, or Binance WebSocket feeds for live market data.
+- RSS feeds plus a configurable proxy for crypto news.
+- Optional OpenAI Responses API calls for educational “market vibes,” clearly labeled as not financial advice.
 
-Use relative paths like `./favicon.ico`, not `/favicon.ico`, because repo-based GitHub Pages sites live under a path like:
+### Manual Party Line
 
-```text
-https://YOUR-USERNAME.github.io/REPO-NAME/
-```
+Manual Party Line is a v1 WebRTC demo. It has no signaling server. Offer/answer JSON must be manually copied between users. Public STUN servers are included, but restrictive networks may require TURN.
 
-A root-relative path would point to the account-level root instead of the repo site.
+### Pontifex Daily Desk
 
-## Adding a New Page
+Pontifex Daily Desk implements Bruce Schneier’s Solitaire/Pontifex cipher for education. It clearly warns that this is not modern secure encryption. It can derive a reproducible daily public seed from NASA APOD and optionally combine it with a private phrase.
 
-To add a new page:
+## Adding A New Page
 
-1. Create a new `.html` file.
-2. Commit and push it to the repo.
-3. The homepage should discover it automatically.
-4. Optionally add metadata for it in `junk-drawer.json`.
+1. Add a standalone `.html` file to the repository root.
+2. Commit and push it.
+3. Add an entry to `junk-drawer.json` if you want a custom title, description, or emoji.
+4. GitHub Pages will serve it after deployment.
 
-Example:
-
-```text
-weird-camera-viewer.html
-```
-
-Optional metadata:
+Example metadata:
 
 ```json
 {
   "pages": {
-    "weird-camera-viewer.html": {
-      "title": "Weird Camera Viewer",
-      "description": "A strange little RTSP/ONVIF viewer experiment.",
-      "emoji": "📹"
+    "new-tool.html": {
+      "title": "New Tool",
+      "description": "Short description of what it does.",
+      "emoji": "🧰"
     }
   }
 }
 ```
 
-## Notes and Limitations
+## Local-First Storage
 
-Because the menu is built using the GitHub API:
+Several apps store data only in the browser:
 
-- The repo generally needs to be public.
-- API responses may be cached briefly.
-- GitHub API rate limits may apply.
-- Very large repositories may need a lower `maxDepth` or a more curated structure.
-- If using a custom domain, automatic repo detection may not work and the config should be filled in manually.
+- `localStorage` is used for lightweight settings and preferences.
+- IndexedDB is used where larger or structured data is needed.
+- Clearing browser site data will remove locally stored app data.
+- `localStorage` is not secure storage. Do not store sensitive secrets on shared machines.
 
-## Suggested Naming Style
+## Network And CORS Limitations
 
-Use clear, descriptive filenames:
+These apps run from static hosting, so there is no private backend by default.
+
+Important limitations:
+
+- RSS feeds may fail because many sites block browser cross-origin requests.
+- Proxy settings are included in RSS-heavy apps, but public proxies can be slow or unreliable.
+- WebSocket market feeds can fail because of region, network, VPN, firewall, or browser policy.
+- OpenAI API keys used in the browser are visible to that browser session and should be treated carefully.
+
+## GitHub Pages
+
+This repo is intended to be deployed directly through GitHub Pages from `main`.
+
+Typical URL format:
 
 ```text
-time-block-timer.html
-collection-of-absurdities.html
-rtsp-monitor.html
-keto-meal-randomizer.html
+https://hmarquardt.github.io/junkdrawer/
 ```
 
-Avoid spaces in filenames. Hyphens are easiest to read and work well in URLs.
+Because this is a repo-based Pages site, app links and assets should use relative paths where possible.
 
-## Project Philosophy
+## Development Style
 
-This is not meant to be precious.
+The default pattern is:
 
-It is a junk drawer: a useful, chaotic, half-brilliant, half-questionable pile of tools, toys, experiments, demos, rabbit holes, prototypes, and “I made this because I wanted it to exist” pages.
+- Single-file app.
+- Inline CSS and JavaScript.
+- No build system.
+- No backend unless a future app explicitly introduces one.
+- Vanilla JavaScript unless a CDN library is clearly useful.
+- Local-first data storage where practical.
 
-Add weird things. Break stuff. Fix some of it. Keep going.
+External CDN libraries currently used where useful include Dexie and Chart.js in Crypto Mood Ring.
+
+## Favicons And PWA Assets
+
+The repo includes favicon and manifest assets:
+
+```text
+favicon.ico
+favicon.svg
+favicon-96x96.png
+apple-touch-icon.png
+site.webmanifest
+web-app-manifest-192x192.png
+web-app-manifest-512x512.png
+```
+
+Standalone pages can reference these with relative paths.
+
+## Limitations
+
+- The homepage works best when the repository is public because it uses the GitHub public contents API.
+- GitHub API responses may be cached briefly.
+- Browser storage is per-browser and per-device.
+- Static apps cannot hide API keys from the user’s browser.
+- Public proxies and public market APIs can rate-limit, time out, or change behavior.
