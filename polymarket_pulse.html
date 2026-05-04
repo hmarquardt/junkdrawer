@@ -1132,7 +1132,7 @@
             state.wsReconnectAttempts = 0;
             state.providerStatus.websocket.state = "open";
             state.providerStatus.websocket.lastOpen = Date.now();
-            sendWsSubscription();
+            sendWsSubscription("initial");
             clearInterval(state.wsHeartbeat);
             state.wsHeartbeat = setInterval(() => {
               if (state.ws?.readyState === WebSocket.OPEN) state.ws.send("PING");
@@ -1180,9 +1180,14 @@
       function sendWsSubscription() {
         if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
         const assets = subscribedAssets();
+        if (!assets.length) return;
         state.wsSubscribedAssets = new Set(assets);
         state.providerStatus.websocket.subscribedAssets = assets.length;
-        state.ws.send(JSON.stringify({ assets_ids: assets, type: "market", custom_feature_enabled: true }));
+        const initial = arguments[0] === "initial";
+        const payload = initial
+          ? { assets_ids: assets, type: "market", custom_feature_enabled: true }
+          : { assets_ids: assets, operation: "subscribe", custom_feature_enabled: true };
+        state.ws.send(JSON.stringify(payload));
       }
 
       function resubscribeWebSocket() {
@@ -1195,7 +1200,11 @@
         if (data === "PONG") return;
         state.providerStatus.websocket.lastMessage = Date.now();
         let msg = null;
-        try { msg = typeof data === "string" ? JSON.parse(data) : data; } catch (err) { return logError("websocket-parse", err); }
+        try { msg = typeof data === "string" ? JSON.parse(data) : data; } catch (err) {
+          state.providerStatus.websocket.lastError = String(data).slice(0, 180);
+          logEvent("warn", "websocket-message", `Non-JSON WebSocket message: ${String(data).slice(0, 180)}`);
+          return queueRender();
+        }
         const messages = Array.isArray(msg) ? msg : [msg];
         for (const item of messages) handleWsEvent(item);
         queueRender();
@@ -1329,7 +1338,7 @@
         try {
           state.providerStatus.llm.state = "loading";
           queueRender();
-          const body = { model: state.settings.openAiModel, messages: [{ role: "user", content: prompt }], temperature: 0.2, response_format: { type: "json_object" } };
+          const body = chatCompletionBody(state.settings.openAiModel, prompt);
           const res = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` }, body: JSON.stringify(body) });
           if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
           const raw = await res.json();
@@ -1360,6 +1369,20 @@
         } finally {
           queueRender();
         }
+      }
+
+      function chatCompletionBody(model, prompt) {
+        const body = {
+          model,
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" }
+        };
+        if (supportsCustomTemperature(model)) body.temperature = 0.2;
+        return body;
+      }
+
+      function supportsCustomTemperature(model) {
+        return !/^gpt-5/i.test(model) && !/^o[0-9]/i.test(model);
       }
 
       async function buildLlmInput(scope, marketId) {
