@@ -1,0 +1,1875 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polymarket Pulse</title>
+  <meta name="description" content="Local-first research dashboard for high-activity quick-resolving Polymarket markets.">
+  <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="shortcut icon" href="favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Polymarket Pulse">
+  <link rel="manifest" href="site.webmanifest">
+  <script src="https://cdn.jsdelivr.net/npm/dexie@latest/dist/dexie.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #05080c;
+      --bg2: #0e1624;
+      --panel: rgba(12, 23, 34, 0.84);
+      --panel-strong: rgba(16, 30, 45, 0.96);
+      --text: #ecfff9;
+      --muted: #91a8b2;
+      --line: rgba(108, 242, 255, 0.16);
+      --green: #34f59c;
+      --cyan: #63e8ff;
+      --violet: #b78cff;
+      --amber: #ffc45d;
+      --red: #ff617a;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+      --radius: 18px;
+      --sans: "Avenir Next", "Segoe UI", Verdana, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #edf8f7;
+      --bg2: #e6ecff;
+      --panel: rgba(255, 255, 255, 0.84);
+      --panel-strong: rgba(255, 255, 255, 0.97);
+      --text: #102023;
+      --muted: #546b76;
+      --line: rgba(21, 76, 94, 0.18);
+      --shadow: 0 24px 70px rgba(31, 78, 100, 0.16);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 8% 6%, rgba(52, 245, 156, 0.20), transparent 27rem),
+        radial-gradient(circle at 88% 4%, rgba(99, 232, 255, 0.20), transparent 25rem),
+        radial-gradient(circle at 72% 78%, rgba(183, 140, 255, 0.16), transparent 27rem),
+        linear-gradient(135deg, var(--bg), var(--bg2));
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.45;
+    }
+    button, input, textarea, select { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.62rem 0.88rem;
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--text);
+      cursor: pointer;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--cyan); }
+    button:disabled { opacity: 0.52; cursor: not-allowed; }
+    .primary { background: linear-gradient(135deg, var(--green), #a9ffd2); color: #031b10; border-color: transparent; font-weight: 900; }
+    .amber { background: linear-gradient(135deg, var(--amber), #ffe2a5); color: #231600; border-color: transparent; font-weight: 900; }
+    .danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+    .ghost { background: transparent; }
+    .tiny { padding: 0.38rem 0.62rem; font-size: 0.82rem; }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.68rem 0.76rem;
+      background: rgba(2, 9, 14, 0.36);
+      color: var(--text);
+      outline: none;
+    }
+    textarea { min-height: 8rem; resize: vertical; font-family: var(--mono); font-size: 0.84rem; }
+    label { display: grid; gap: 0.32rem; color: var(--muted); font-size: 0.88rem; min-width: 0; }
+    input:focus, textarea:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
+    a { color: var(--cyan); }
+    code, pre { font-family: var(--mono); }
+    pre { overflow: auto; max-height: 28rem; margin: 0; padding: 0.82rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(1, 7, 11, 0.58); font-size: 0.8rem; }
+    .shell { width: min(1340px, calc(100% - 28px)); margin: 0 auto; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg) 86%, transparent);
+      backdrop-filter: blur(18px);
+    }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.9rem 0; }
+    .brand { display: flex; gap: 0.85rem; align-items: center; }
+    .logo {
+      width: 3.1rem; height: 3.1rem; display: grid; place-items: center;
+      border-radius: 18px; border: 1px solid var(--line);
+      background: conic-gradient(from 220deg, var(--green), var(--cyan), var(--violet), var(--green));
+      box-shadow: 0 0 34px rgba(99, 232, 255, 0.18);
+      color: #061018; font-weight: 950;
+    }
+    h1 { margin: 0; font-size: clamp(1.55rem, 3vw, 2.4rem); letter-spacing: -0.04em; }
+    .subtitle { margin: 0.1rem 0 0; color: var(--muted); }
+    nav { display: flex; gap: 0.42rem; overflow-x: auto; overflow-y: visible; padding: 0.15rem 0 0.82rem; }
+    .tab { white-space: nowrap; padding: 0.52rem 0.8rem; }
+    .tab.active { background: var(--panel-strong); border-color: var(--green); }
+    main { padding: 1rem 0 3rem; }
+    .section { display: none; }
+    .section.active { display: grid; gap: 1rem; animation: rise 180ms ease both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      padding: 1rem;
+    }
+    .panel h2, .panel h3 { margin: 0 0 0.72rem; letter-spacing: -0.03em; }
+    .panel p { color: var(--muted); margin-top: 0; }
+    .hero { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 1rem; }
+    .grid { display: grid; gap: 1rem; }
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .span2 { grid-column: span 2; }
+    .span3 { grid-column: span 3; }
+    .span4 { grid-column: span 4; }
+    .span6 { grid-column: span 6; }
+    .actions, .status-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0.52rem; }
+    .status-strip { margin-top: 0.9rem; }
+    .pill, .badge {
+      display: inline-flex; align-items: center; gap: 0.36rem;
+      border: 1px solid var(--line); border-radius: 999px; padding: 0.4rem 0.6rem;
+      background: rgba(255, 255, 255, 0.05); font-size: 0.82rem; font-weight: 800;
+    }
+    .dot { width: 0.65rem; height: 0.65rem; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgba(145, 168, 178, 0.12); }
+    .dot.ok { background: var(--green); box-shadow: 0 0 0 4px rgba(52, 245, 156, 0.14); }
+    .dot.warn { background: var(--amber); box-shadow: 0 0 0 4px rgba(255, 196, 93, 0.14); }
+    .dot.bad { background: var(--red); box-shadow: 0 0 0 4px rgba(255, 97, 122, 0.14); }
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.55rem; }
+    .metric { border: 1px solid var(--line); border-radius: 14px; padding: 0.65rem; background: rgba(255, 255, 255, 0.045); min-width: 0; }
+    .metric small { display: block; color: var(--muted); }
+    .metric strong { font-size: 1.25rem; letter-spacing: -0.03em; overflow-wrap: anywhere; }
+    .card { border: 1px solid var(--line); border-radius: 14px; padding: 0.78rem; background: rgba(255, 255, 255, 0.045); min-width: 0; }
+    .card h3 { margin-bottom: 0.35rem; overflow-wrap: anywhere; }
+    .market-card { display: grid; gap: 0.55rem; }
+    .market-meta { display: flex; flex-wrap: wrap; gap: 0.38rem; }
+    .price-big { font-size: clamp(1.35rem, 3vw, 2rem); font-weight: 950; letter-spacing: -0.04em; }
+    .up { color: var(--green); }
+    .down { color: var(--red); }
+    .warn { color: var(--amber); }
+    .muted { color: var(--muted); }
+    .stale { color: var(--amber); }
+    .resolved { color: var(--red); }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; min-width: 980px; }
+    th, td { padding: 0.68rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em; }
+    tr:last-child td { border-bottom: 0; }
+    .chart-wrap { height: 90px; }
+    .chart-wrap-large { height: 320px; }
+    .depth-wrap { height: 260px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: end; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+    .empty { padding: 1.6rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius); }
+    .callout { border: 1px solid color-mix(in srgb, var(--amber) 48%, var(--line)); background: color-mix(in srgb, var(--amber) 10%, transparent); border-radius: 14px; padding: 0.8rem; }
+    .danger-callout { border-color: color-mix(in srgb, var(--red) 48%, var(--line)); background: color-mix(in srgb, var(--red) 10%, transparent); }
+    .news-card { display: grid; gap: 0.45rem; }
+    .compact-news .news-card { grid-template-columns: 1fr auto; align-items: center; }
+    .json { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .hidden { display: none !important; }
+    .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 50; display: grid; gap: 0.55rem; width: min(410px, calc(100% - 2rem)); }
+    .toast { border: 1px solid var(--line); border-radius: 14px; padding: 0.75rem 0.85rem; background: var(--panel-strong); box-shadow: var(--shadow); animation: toastIn 160ms ease both; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    @media (max-width: 980px) {
+      .hero, .two, .three, .four, .six { grid-template-columns: 1fr; }
+      .span2, .span3, .span4, .span6 { grid-column: auto; }
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topbar { align-items: flex-start; }
+    }
+    @media (max-width: 620px) {
+      .metric-grid { grid-template-columns: 1fr; }
+      .brand { align-items: flex-start; }
+      .logo { width: 2.6rem; height: 2.6rem; border-radius: 14px; }
+    }
+  </style>
+</head>
+<body data-theme="dark">
+  <header>
+    <div class="shell topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">PP</div>
+        <div>
+          <h1>Polymarket Pulse</h1>
+          <p class="subtitle">fast markets, live odds, news smoke, and robot hunches</p>
+        </div>
+      </div>
+      <button id="themeToggle" type="button" class="ghost">Light mode</button>
+    </div>
+    <nav class="shell" aria-label="Primary">
+      <button class="tab active" data-tab="dashboard" type="button">Dashboard</button>
+      <button class="tab" data-tab="follow" type="button">Follow Stack</button>
+      <button class="tab" data-tab="explorer" type="button">Explorer</button>
+      <button class="tab" data-tab="detail" type="button">Market Detail</button>
+      <button class="tab" data-tab="news" type="button">News</button>
+      <button class="tab" data-tab="llm" type="button">LLM Opportunities</button>
+      <button class="tab" data-tab="admin" type="button">Admin</button>
+      <button class="tab" data-tab="help" type="button">Help</button>
+      <button class="tab" data-tab="debug" type="button">Debug/About</button>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section id="dashboard" class="section active">
+      <div class="hero">
+        <div class="panel">
+          <h2>Polymarket Pulse</h2>
+          <p>A local-first research cockpit for high-activity quick-resolution Polymarket markets, tailored news, and optional educational LLM analysis.</p>
+          <div class="status-strip">
+            <span class="pill"><span id="wsDot" class="dot"></span><span id="wsStatus">WebSocket idle</span></span>
+            <span class="pill"><span id="restDot" class="dot"></span><span id="restStatus">REST fallback idle</span></span>
+            <span class="pill"><span id="newsDot" class="dot"></span><span id="newsStatus">News idle</span></span>
+            <span class="pill"><span id="llmDot" class="dot"></span><span id="llmStatus">LLM disabled</span></span>
+            <span class="pill"><span id="cacheDot" class="dot ok"></span><span id="cacheStatus">Cache ready</span></span>
+            <span class="pill">Last discovery <span id="lastDiscoveryLabel">never</span></span>
+            <span class="pill">Research only / not financial advice</span>
+          </div>
+          <div class="actions" style="margin-top: 0.9rem;">
+            <button id="startWsBtn" class="primary" type="button">Start WebSocket</button>
+            <button id="stopWsBtn" class="danger" type="button">Stop WebSocket</button>
+            <button id="refreshMarketsBtn" type="button">Refresh markets</button>
+            <button id="refreshNewsBtn" type="button">Refresh news</button>
+            <button id="runLlmNowBtn" class="amber" type="button">Run LLM analysis now</button>
+            <button id="pruneBtn" type="button">Prune stale/resolved markets</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Quick Resolve Radar</h2>
+          <div class="metric-grid">
+            <div class="metric"><small>&lt; 5 min</small><strong id="radar5">0</strong></div>
+            <div class="metric"><small>&lt; 15 min</small><strong id="radar15">0</strong></div>
+            <div class="metric"><small>&lt; 1 hour</small><strong id="radar60">0</strong></div>
+            <div class="metric"><small>Today</small><strong id="radarToday">0</strong></div>
+          </div>
+          <p class="muted">Closed, stale, or resolved markets are excluded from quick-resolve scoring.</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="toolbar">
+          <div><h2>Hottest Quick Markets</h2><p>Ranked by activity, liquidity, spread, crypto relevance, and time to close.</p></div>
+          <button id="dashToExplorerBtn" type="button">Open Explorer</button>
+        </div>
+        <div id="hotMarkets" class="grid"></div>
+      </div>
+      <div class="panel">
+        <h2>Follow Stack Snapshot</h2>
+        <div id="followSnapshot" class="grid three"></div>
+      </div>
+      <div class="panel">
+        <h2>Top Tailored News</h2>
+        <div id="topNews" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="follow" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div><h2>Follow Stack</h2><p>Markets you care about. Stored locally in IndexedDB and subscribed over WebSocket when asset IDs are available.</p></div>
+          <div class="actions">
+            <button id="refreshFollowRestBtn" class="primary" type="button">Refresh REST data</button>
+            <button id="subscribeFollowBtn" type="button">Force subscribe assets</button>
+          </div>
+        </div>
+        <div id="followList"></div>
+      </div>
+    </section>
+
+    <section id="explorer" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div><h2>Explorer</h2><p>Discover active markets/events from Gamma, filter for quick crypto markets, then add them to the Follow Stack.</p></div>
+          <div class="actions">
+            <button id="presetChaosBtn" class="amber" type="button">Scalp-ish Chaos</button>
+            <button id="presetBtc5Btn" class="amber" type="button">5-Minute BTC Spot Hunter</button>
+            <button id="fetchExplorerBtn" class="primary" type="button">Fetch markets</button>
+          </div>
+        </div>
+        <div class="grid six">
+          <label class="span2">Search <input id="filterSearch" type="search" placeholder="BTC, 5 min, above, event slug"></label>
+          <label>Category/tag <input id="filterTag" type="text" placeholder="crypto"></label>
+          <label>Resolve window <select id="filterWindow"><option value="all">All</option><option value="5">next 5 minutes</option><option value="15">next 15 minutes</option><option value="60">next hour</option><option value="today">today</option><option value="24">next 24 hours</option><option value="custom">custom hours</option></select></label>
+          <label>Custom hours <input id="filterCustomHours" type="number" min="1" value="6"></label>
+          <label>Sort <select id="filterSort"><option value="activity">Highest activity score</option><option value="quickest">Quickest resolving</option><option value="volume">Highest volume</option><option value="liquidity">Highest liquidity</option><option value="spread">Tightest spread</option><option value="created">Newly created</option></select></label>
+          <label><span>Crypto only</span><select id="filterCrypto"><option value="false">No</option><option value="true">Yes</option></select></label>
+          <label><span>Bitcoin only</span><select id="filterBitcoin"><option value="false">No</option><option value="true">Yes</option></select></label>
+          <label><span>Ethereum only</span><select id="filterEthereum"><option value="false">No</option><option value="true">Yes</option></select></label>
+          <label>Minimum volume <input id="filterMinVolume" type="number" min="0" value="0"></label>
+          <label>Minimum liquidity <input id="filterMinLiquidity" type="number" min="0" value="0"></label>
+          <label>Maximum spread <input id="filterMaxSpread" type="number" min="0" max="1" step="0.01" value="1"></label>
+          <label><span>Active only</span><select id="filterActive"><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label><span>Not resolved only</span><select id="filterUnresolved"><option value="true">Yes</option><option value="false">No</option></select></label>
+          <label><span>Has CLOB token IDs only</span><select id="filterHasTokens"><option value="true">Yes</option><option value="false">No</option></select></label>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="toolbar">
+          <div><h2>Explorer Results</h2><p><span id="explorerCount">0</span> markets after filters.</p></div>
+          <button id="refreshExplorerBooksBtn" type="button">Refresh visible orderbooks</button>
+        </div>
+        <div id="explorerResults" class="grid"></div>
+      </div>
+      <div class="panel">
+        <h2>New Market Stream</h2>
+        <div id="newMarketList" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="detail" class="section">
+      <div id="detailContent" class="grid"></div>
+    </section>
+
+    <section id="news" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div><h2>News</h2><p>RSS/Atom feeds parsed in browser, cached locally, and matched to followed or quick-resolution markets.</p></div>
+          <div class="actions">
+            <button id="refreshNewsTabBtn" class="primary" type="button">Refresh news</button>
+            <button id="seedNewsBtn" type="button">Seed sources</button>
+          </div>
+        </div>
+        <div class="grid four">
+          <label>Search <input id="newsSearch" type="search" placeholder="headline, source, BTC, Polymarket"></label>
+          <label>Market <select id="newsMarketFilter"></select></label>
+          <label>View <select id="newsView"><option value="global">Global news</option><option value="followed">Followed-market news</option><option value="tailored">Top tailored stories</option></select></label>
+          <label>Density <select id="newsDensity"><option value="expanded">Expanded</option><option value="compact">Compact</option></select></label>
+        </div>
+      </div>
+      <div id="newsList" class="grid"></div>
+    </section>
+
+    <section id="llm" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div><h2>LLM Opportunities</h2><p>Educational JSON-only analysis. No trades, no wallets, no position sizing, no leverage.</p></div>
+          <div class="actions">
+            <button id="runLlmTabBtn" class="amber" type="button">Run full stack analysis</button>
+            <button id="exportLlmBtn" type="button">Export LLM history</button>
+            <button id="clearLlmBtn" class="danger" type="button">Clear LLM history</button>
+          </div>
+        </div>
+        <div class="callout">LLM classifications are research labels such as watch, possible mispricing, too wide, news-sensitive, avoid, or stale. They are not financial advice.</div>
+      </div>
+      <div id="latestLlm" class="grid"></div>
+      <div class="panel">
+        <h2>Analysis History</h2>
+        <div id="llmHistory" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="admin" class="section">
+      <div class="panel">
+        <h2>Settings</h2>
+        <div class="grid six">
+          <label>Theme <select id="settingTheme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+          <label>Auto-start WebSocket <select id="settingAutoWs"><option value="false">No</option><option value="true">Yes</option></select></label>
+          <label>REST polling seconds <input id="settingRestSeconds" type="number" min="10"></label>
+          <label>Persist tick seconds <input id="settingTickSeconds" type="number" min="2"></label>
+          <label>Discovery refresh minutes <input id="settingDiscoveryMinutes" type="number" min="1"></label>
+          <label>News refresh minutes <input id="settingNewsMinutes" type="number" min="5"></label>
+          <label>Price/orderbook retention days <input id="settingPriceDays" type="number" min="1"></label>
+          <label>News retention days <input id="settingNewsDays" type="number" min="1"></label>
+          <label>Resolved retention days <input id="settingResolvedDays" type="number" min="1"></label>
+          <label>Default explorer preset <select id="settingPreset"><option value="none">None</option><option value="chaos">Scalp-ish Chaos</option><option value="btc5">5-Minute BTC Spot Hunter</option></select></label>
+          <label>Max followed markets <input id="settingMaxFollowed" type="number" min="1"></label>
+          <label>Max WebSocket asset IDs <input id="settingMaxAssets" type="number" min="2"></label>
+          <label class="span6">RSS proxy template <input id="settingProxy" type="text" placeholder="https://api.allorigins.win/raw?url={url}"></label>
+        </div>
+        <div class="actions" style="margin-top: 0.8rem;">
+          <button id="saveSettingsBtn" class="primary" type="button">Save settings</button>
+          <button id="clearStorageBtn" class="danger" type="button">Clear localStorage</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>OpenAI Settings</h2>
+        <div class="callout danger-callout">Browser localStorage is not secure. Only remember an API key if you accept that risk.</div>
+        <div class="grid six" style="margin-top: 0.8rem;">
+          <label>Enable OpenAI <select id="settingOpenAiEnabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></label>
+          <label>Model <input id="settingOpenAiModel" type="text"></label>
+          <label>LLM interval minutes <input id="settingLlmInterval" type="number" min="5"></label>
+          <label>LLM market window minutes <input id="settingLlmWindow" type="number" min="5"></label>
+          <label>Max news in input <input id="settingLlmNewsMax" type="number" min="1"></label>
+          <label>Remember key <select id="settingRememberKey"><option value="false">No</option><option value="true">Yes</option></select></label>
+          <label class="span6">OpenAI API key <input id="openAiKey" type="password" autocomplete="off" placeholder="sk-..."></label>
+        </div>
+        <div class="actions" style="margin-top: 0.8rem;">
+          <button id="saveLlmSettingsBtn" class="primary" type="button">Save LLM settings</button>
+          <button id="clearKeyBtn" class="danger" type="button">Clear key</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>News Sources</h2>
+        <div class="grid six">
+          <label class="span2">Name <input id="sourceName" type="text"></label>
+          <label class="span3">RSS/Atom URL <input id="sourceUrl" type="url"></label>
+          <label>Enabled <select id="sourceEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+          <label>Use proxy <select id="sourceProxy"><option value="true">Proxy</option><option value="false">Direct</option></select></label>
+          <label>Credibility boost <input id="sourceCredibility" type="number" min="0" max="2" step="0.1" value="1"></label>
+        </div>
+        <div class="actions" style="margin-top: 0.8rem;">
+          <button id="saveSourceBtn" class="primary" type="button">Add source</button>
+          <button id="clearSourceBtn" type="button">Clear form</button>
+          <button id="seedSourceBtn" class="amber" type="button">Seed defaults</button>
+        </div>
+        <div id="sourceList" class="grid" style="margin-top: 1rem;"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Data Controls</h2>
+        <div class="actions">
+          <button id="exportAllBtn" type="button">Export/import all data</button>
+          <button id="importAllBtn" type="button">Import JSON</button>
+          <button id="clearMarketHistoryBtn" class="danger" type="button">Clear market history</button>
+          <button id="clearNewsCacheBtn" class="danger" type="button">Clear news cache</button>
+          <button id="clearLlmHistoryBtn" class="danger" type="button">Clear LLM history</button>
+          <button id="clearDbBtn" class="danger" type="button">Clear all IndexedDB</button>
+        </div>
+        <textarea id="importExportBox" placeholder="Export appears here. Paste an exported JSON blob here before importing."></textarea>
+      </div>
+    </section>
+
+    <section id="help" class="section">
+      <div class="panel">
+        <h2>Help</h2>
+        <p>Polymarket Pulse is a browser-only research dashboard. It never places trades, never connects wallets, and never asks for Polymarket credentials.</p>
+        <div class="grid two">
+          <div class="callout"><strong>API limitations</strong><br>Gamma, CLOB, Data API, RSS, and WebSocket endpoints may change shape, rate-limit, or fail CORS checks. Each provider failure is logged and isolated so the rest of the UI keeps working.</div>
+          <div class="callout"><strong>Browser key risk</strong><br>OpenAI calls run from your browser. Remembered API keys are stored in localStorage, which is convenient but not secure storage.</div>
+          <div class="callout"><strong>Research-only labels</strong><br>LLM output is constrained to educational classifications such as watch, possible mispricing, news-sensitive, too wide, avoid, and stale.</div>
+          <div class="callout"><strong>RSS proxy behavior</strong><br>Many news sites block browser RSS fetches. Configure a proxy template containing <code>{url}</code> to fetch those feeds.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="debug" class="section">
+      <div class="panel">
+        <div class="toolbar">
+          <div><h2>Debug/About</h2><p>Provider status, IndexedDB counts, last errors, and local logs.</p></div>
+          <div class="actions">
+            <button id="refreshDebugBtn" type="button">Refresh debug</button>
+            <button id="clearLogsBtn" class="danger" type="button">Clear logs</button>
+          </div>
+        </div>
+        <div id="debugCounts" class="metric-grid"></div>
+      </div>
+      <div class="panel">
+        <h2>Provider Status</h2>
+        <pre id="providerStatus" class="json"></pre>
+      </div>
+      <div class="panel">
+        <h2>Logs</h2>
+        <div id="debugLogs" class="grid"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const GAMMA = "https://gamma-api.polymarket.com";
+      const CLOB = "https://clob.polymarket.com";
+      const DATA = "https://data-api.polymarket.com";
+      const MARKET_WS = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
+      const DB_NAME = "PolymarketPulseDB";
+      const LS_SETTINGS = "polymarketPulse.settings.v1";
+      const LS_KEY = "polymarketPulse.openAiKey";
+      const DEFAULT_SETTINGS = {
+        theme: "dark",
+        autoStartWebSocket: false,
+        restPollingSeconds: 30,
+        persistTickSeconds: 6,
+        discoveryRefreshMinutes: 5,
+        newsRefreshMinutes: 20,
+        priceRetentionDays: 3,
+        newsRetentionDays: 7,
+        resolvedRetentionDays: 2,
+        defaultExplorerPreset: "none",
+        maxFollowedMarkets: 24,
+        maxWebSocketAssetIds: 80,
+        rssProxyTemplate: "https://api.allorigins.win/raw?url={url}",
+        openAiEnabled: false,
+        openAiModel: "gpt-4.1-mini",
+        llmIntervalMinutes: 30,
+        llmMarketWindowMinutes: 60,
+        maxNewsArticlesInLlm: 8,
+        rememberOpenAiKey: false
+      };
+      const state = {
+        db: null,
+        settings: { ...DEFAULT_SETTINGS },
+        openAiKeyMemory: "",
+        els: {},
+        markets: new Map(),
+        followed: new Map(),
+        snapshots: new Map(),
+        orderBooks: new Map(),
+        recentTicks: new Map(),
+        news: [],
+        newsSources: [],
+        llmAnalyses: [],
+        explorerResults: [],
+        newMarkets: [],
+        selectedMarketId: null,
+        ws: null,
+        wsActive: false,
+        wsReconnectAttempts: 0,
+        wsHeartbeat: null,
+        wsSubscribedAssets: new Set(),
+        assetToMarket: new Map(),
+        restTimer: null,
+        discoveryTimer: null,
+        newsTimer: null,
+        llmTimer: null,
+        renderQueued: false,
+        providerStatus: {
+          websocket: { state: "idle", lastOpen: null, lastMessage: null, lastError: null, subscribedAssets: 0 },
+          rest: { state: "idle", lastOk: null, lastError: null },
+          gamma: { state: "idle", lastOk: null, lastError: null },
+          news: { state: "idle", lastOk: null, lastError: null },
+          llm: { state: "disabled", lastOk: null, lastError: null },
+          dataApi: { state: "idle", lastOk: null, lastError: null }
+        },
+        charts: {}
+      };
+
+      document.addEventListener("DOMContentLoaded", init);
+
+      async function init() {
+        cacheEls();
+        bindEvents();
+        loadSettings();
+        applyTheme();
+        await initDb();
+        await seedDefaultsIfNeeded();
+        await refreshCaches();
+        fillSettingsForm();
+        queueRender();
+        if (state.settings.defaultExplorerPreset === "chaos") applyChaosPreset();
+        if (state.settings.defaultExplorerPreset === "btc5") applyBtcPreset();
+        startIntervals();
+        if (state.settings.autoStartWebSocket) startWebSocket();
+        logEvent("info", "app", "Polymarket Pulse initialized");
+      }
+
+      function cacheEls() {
+        document.querySelectorAll("[id]").forEach(el => state.els[el.id] = el);
+      }
+
+      function bindEvents() {
+        document.querySelectorAll(".tab").forEach(btn => btn.addEventListener("click", () => selectTab(btn.dataset.tab)));
+        on("themeToggle", "click", () => { state.settings.theme = state.settings.theme === "dark" ? "light" : "dark"; saveSettings(); applyTheme(); });
+        on("startWsBtn", "click", startWebSocket);
+        on("stopWsBtn", "click", stopWebSocket);
+        on("refreshMarketsBtn", "click", () => discoverMarkets(true));
+        on("fetchExplorerBtn", "click", () => discoverMarkets(true));
+        on("refreshExplorerBooksBtn", "click", refreshVisibleOrderbooks);
+        on("refreshNewsBtn", "click", () => refreshNews(true));
+        on("refreshNewsTabBtn", "click", () => refreshNews(true));
+        on("seedNewsBtn", "click", seedNewsSources);
+        on("seedSourceBtn", "click", seedNewsSources);
+        on("runLlmNowBtn", "click", () => runLlmAnalysis("follow-stack"));
+        on("runLlmTabBtn", "click", () => runLlmAnalysis("follow-stack"));
+        on("dashToExplorerBtn", "click", () => selectTab("explorer"));
+        on("presetChaosBtn", "click", applyChaosPreset);
+        on("presetBtc5Btn", "click", applyBtcPreset);
+        on("refreshFollowRestBtn", "click", refreshFollowedRest);
+        on("subscribeFollowBtn", "click", resubscribeWebSocket);
+        on("pruneBtn", "click", pruneStaleData);
+        on("saveSettingsBtn", "click", () => { readSettingsForm(); saveSettings(); applyTheme(); startIntervals(); showToast("Settings saved"); });
+        on("saveLlmSettingsBtn", "click", () => { readLlmSettingsForm(); saveSettings(); fillSettingsForm(); showToast("LLM settings saved"); queueRender(); });
+        on("clearKeyBtn", "click", clearOpenAiKey);
+        on("saveSourceBtn", "click", saveNewsSourceFromForm);
+        on("clearSourceBtn", "click", clearSourceForm);
+        on("exportAllBtn", "click", exportAllData);
+        on("importAllBtn", "click", importAllData);
+        on("clearMarketHistoryBtn", "click", clearMarketHistory);
+        on("clearNewsCacheBtn", "click", clearNewsCache);
+        on("clearLlmHistoryBtn", "click", clearLlmHistory);
+        on("clearDbBtn", "click", clearAllDb);
+        on("clearStorageBtn", "click", clearLocalStorage);
+        on("exportLlmBtn", "click", exportLlmHistory);
+        on("clearLlmBtn", "click", clearLlmHistory);
+        on("clearLogsBtn", "click", async () => { await state.db.fetchLogs.clear(); await renderDebug(); showToast("Logs cleared"); });
+        on("refreshDebugBtn", "click", renderDebug);
+        ["filterSearch","filterTag","filterWindow","filterCustomHours","filterSort","filterCrypto","filterBitcoin","filterEthereum","filterMinVolume","filterMinLiquidity","filterMaxSpread","filterActive","filterUnresolved","filterHasTokens","newsSearch","newsMarketFilter","newsView","newsDensity"].forEach(id => on(id, "input", queueRender));
+      }
+
+      function on(id, event, fn) {
+        const el = state.els[id];
+        if (el) el.addEventListener(event, fn);
+      }
+
+      async function initDb() {
+        state.db = new Dexie(DB_NAME);
+        state.db.version(1).stores({
+          markets: "id, conditionId, slug, question, eventTitle, active, closed, resolved, endDate, volume, liquidity, updatedAt, *tags",
+          followedMarkets: "id, marketId, conditionId, pinned, addedAt, updatedAt",
+          marketSnapshots: "id, marketId, conditionId, timestamp, provider, bestBid, bestAsk, spread, midpoint, lastTradePrice, volume, liquidity",
+          orderBooks: "id, marketId, assetId, outcome, timestamp",
+          marketTicks: "++id, marketId, assetId, outcome, timestamp, price, bestBid, bestAsk, spread, provider, [marketId+timestamp]",
+          newsSources: "id, enabled, type, updatedAt",
+          newsArticles: "id, sourceId, sourceName, publishedAt, fetchedAt, *matchedMarkets, *matchedTerms",
+          llmAnalyses: "++id, createdAt, model, scope, *marketIds, overallMood",
+          fetchLogs: "++id, timestamp, level, type"
+        });
+        await state.db.open();
+      }
+
+      function loadSettings() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}");
+          state.settings = { ...DEFAULT_SETTINGS, ...saved };
+          if (state.settings.rememberOpenAiKey) state.openAiKeyMemory = localStorage.getItem(LS_KEY) || "";
+        } catch (err) {
+          state.settings = { ...DEFAULT_SETTINGS };
+          logError("settings", err);
+        }
+      }
+
+      function saveSettings() {
+        localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings));
+        if (state.settings.rememberOpenAiKey && state.openAiKeyMemory) localStorage.setItem(LS_KEY, state.openAiKeyMemory);
+        if (!state.settings.rememberOpenAiKey) localStorage.removeItem(LS_KEY);
+      }
+
+      async function seedDefaultsIfNeeded() {
+        if (await state.db.newsSources.count() === 0) await seedNewsSources(false);
+      }
+
+      async function seedNewsSources(show = true) {
+        const now = Date.now();
+        const sources = [
+          ["coindesk", "CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"],
+          ["cointelegraph", "Cointelegraph", "https://cointelegraph.com/rss"],
+          ["decrypt", "Decrypt", "https://decrypt.co/feed"],
+          ["blockworks", "Blockworks", "https://blockworks.co/feed"],
+          ["bitcoinmagazine", "Bitcoin Magazine", "https://bitcoinmagazine.com/.rss/full/"],
+          ["theblock", "The Block", "https://www.theblock.co/rss.xml"],
+          ["gn-bitcoin-price", "Google News Bitcoin price", "https://news.google.com/rss/search?q=Bitcoin%20price&hl=en-US&gl=US&ceid=US:en"],
+          ["gn-btc-etf", "Google News BTC spot ETF", "https://news.google.com/rss/search?q=BTC%20spot%20ETF&hl=en-US&gl=US&ceid=US:en"],
+          ["gn-ethereum-price", "Google News Ethereum price", "https://news.google.com/rss/search?q=Ethereum%20price&hl=en-US&gl=US&ceid=US:en"],
+          ["gn-liquidation", "Google News crypto liquidation", "https://news.google.com/rss/search?q=crypto%20liquidation&hl=en-US&gl=US&ceid=US:en"],
+          ["gn-polymarket", "Google News Polymarket", "https://news.google.com/rss/search?q=Polymarket&hl=en-US&gl=US&ceid=US:en"]
+        ].map(([id, name, url]) => ({ id, name, url, enabled: true, type: "rss", useProxy: true, credibility: id.startsWith("gn-") ? 0.75 : 1.05, updatedAt: now }));
+        await state.db.newsSources.bulkPut(sources);
+        await refreshCaches();
+        if (show) showToast("Default news sources seeded");
+        queueRender();
+      }
+
+      async function refreshCaches() {
+        const [markets, followed, snapshots, sources, articles, analyses] = await Promise.all([
+          state.db.markets.toArray(),
+          state.db.followedMarkets.toArray(),
+          state.db.marketSnapshots.orderBy("timestamp").reverse().limit(1200).toArray(),
+          state.db.newsSources.toArray(),
+          state.db.newsArticles.orderBy("fetchedAt").reverse().limit(600).toArray(),
+          state.db.llmAnalyses.orderBy("createdAt").reverse().limit(50).toArray()
+        ]);
+        state.markets = new Map(markets.map(m => [m.id, m]));
+        state.followed = new Map(followed.map(f => [f.marketId, f]));
+        state.snapshots = new Map();
+        for (const s of snapshots) if (!state.snapshots.has(s.marketId)) state.snapshots.set(s.marketId, s);
+        state.newsSources = sources;
+        state.news = articles;
+        state.llmAnalyses = analyses;
+        rebuildAssetMap();
+      }
+
+      function startIntervals() {
+        clearInterval(state.restTimer);
+        clearInterval(state.discoveryTimer);
+        clearInterval(state.newsTimer);
+        clearInterval(state.llmTimer);
+        state.restTimer = setInterval(refreshFollowedRest, Math.max(10, state.settings.restPollingSeconds) * 1000);
+        state.discoveryTimer = setInterval(() => discoverMarkets(false), Math.max(1, state.settings.discoveryRefreshMinutes) * 60000);
+        state.newsTimer = setInterval(() => refreshNews(false), Math.max(5, state.settings.newsRefreshMinutes) * 60000);
+        state.llmTimer = setInterval(() => maybeAutoLlm(), Math.max(5, state.settings.llmIntervalMinutes) * 60000);
+      }
+
+      function queueRender() {
+        if (state.renderQueued) return;
+        state.renderQueued = true;
+        requestAnimationFrame(() => {
+          state.renderQueued = false;
+          renderAll();
+        });
+      }
+
+      function renderAll() {
+        renderStatus();
+        renderDashboard();
+        renderExplorer();
+        renderFollowStack();
+        renderDetail();
+        renderNews();
+        renderLlm();
+        renderAdmin();
+        renderDebug();
+      }
+
+      function renderStatus() {
+        setStatus("ws", state.providerStatus.websocket.state, state.providerStatus.websocket.state === "open" ? "WebSocket open" : "WebSocket " + state.providerStatus.websocket.state);
+        setStatus("rest", state.providerStatus.rest.state, "REST fallback " + state.providerStatus.rest.state);
+        setStatus("news", state.providerStatus.news.state, "News " + state.providerStatus.news.state);
+        setStatus("llm", state.settings.openAiEnabled ? state.providerStatus.llm.state : "idle", state.settings.openAiEnabled ? "LLM " + state.providerStatus.llm.state : "LLM disabled");
+        text("cacheStatus", `Cache ${state.markets.size} markets / ${state.news.length} articles`);
+        const last = Number(localStorage.getItem("polymarketPulse.lastDiscovery") || 0);
+        text("lastDiscoveryLabel", last ? relativeTime(last) : "never");
+      }
+
+      function setStatus(prefix, status, label) {
+        const dot = state.els[prefix + "Dot"];
+        const textEl = state.els[prefix + "Status"];
+        if (!dot || !textEl) return;
+        dot.className = "dot " + (["open","ok","ready","connected"].includes(status) ? "ok" : ["loading","refreshing","connecting","warn","reconnecting"].includes(status) ? "warn" : status === "error" || status === "closed" ? "bad" : "");
+        textEl.textContent = label;
+      }
+
+      function renderDashboard() {
+        const followedMarkets = getFollowedMarkets();
+        const activeFollowed = followedMarkets.filter(isLiveMarket);
+        const now = Date.now();
+        text("radar5", activeFollowed.filter(m => msUntil(m.endDate) <= 5 * 60000).length);
+        text("radar15", activeFollowed.filter(m => msUntil(m.endDate) <= 15 * 60000).length);
+        text("radar60", activeFollowed.filter(m => msUntil(m.endDate) <= 60 * 60000).length);
+        text("radarToday", activeFollowed.filter(m => sameLocalDay(new Date(m.endDate), new Date(now))).length);
+
+        const hot = getFilteredExplorerMarkets().slice(0, 8);
+        html("hotMarkets", hot.length ? hot.map(marketCardHtml).join("") : `<div class="empty">Fetch markets or adjust Explorer filters to find quick markets.</div>`);
+        html("followSnapshot", followedMarkets.length ? followedMarkets.map(snapshotCardHtml).join("") : `<div class="empty">No followed markets yet. Add markets from Explorer.</div>`);
+        const top = topTailoredNews(5);
+        html("topNews", top.length ? top.map(articleCardHtml).join("") : `<div class="empty">No matched news yet. Refresh news after adding markets.</div>`);
+        bindDynamicButtons();
+        renderSparklines();
+      }
+
+      function renderExplorer() {
+        const results = getFilteredExplorerMarkets();
+        state.explorerResults = results;
+        text("explorerCount", results.length);
+        html("explorerResults", results.length ? results.slice(0, 80).map(marketCardHtml).join("") : `<div class="empty">No Explorer results. Fetch Gamma markets or relax filters.</div>`);
+        html("newMarketList", state.newMarkets.length ? state.newMarkets.slice(0, 20).map(marketCardHtml).join("") : `<div class="empty">WebSocket new_market events that match quick crypto filters appear here.</div>`);
+        bindDynamicButtons();
+      }
+
+      function renderFollowStack() {
+        const markets = getFollowedMarkets().sort((a,b) => (state.followed.get(b.id)?.pinned ? 1 : 0) - (state.followed.get(a.id)?.pinned ? 1 : 0) || msUntil(a.endDate) - msUntil(b.endDate));
+        if (!markets.length) {
+          html("followList", `<div class="empty">Follow Stack is empty. Use Explorer to add a quick market.</div>`);
+          return;
+        }
+        html("followList", `<div class="table-wrap"><table><thead><tr>
+          <th>Question</th><th>Event</th><th>Slug / tags</th><th>End</th><th>State</th><th>YES / NO token IDs</th><th>Condition ID</th><th>Bid / ask</th><th>Spread / mid</th><th>Last</th><th>Volume / liquidity</th><th>Scores</th><th>LLM</th><th>Controls</th>
+        </tr></thead><tbody>${markets.map(m => {
+          const s = latestSnapshot(m);
+          const f = state.followed.get(m.id) || {};
+          const llm = latestLlmForMarket(m.id);
+          return `<tr>
+            <td><strong>${escapeHtml(m.question || "Untitled market")}</strong></td>
+            <td>${escapeHtml(m.eventTitle || "")}</td>
+            <td><div>${escapeHtml(m.slug || "")}</div><div>${badges(m.tags || [])}</div></td>
+            <td>${formatDate(m.endDate)}<br><span class="${isLiveMarket(m) ? "" : "resolved"}">${countdownTo(m.endDate)}</span></td>
+            <td>${marketStateBadge(m)}</td>
+            <td><code>${escapeHtml(m.yesTokenId || "")}</code><br><code>${escapeHtml(m.noTokenId || "")}</code></td>
+            <td><code>${escapeHtml(m.conditionId || "")}</code></td>
+            <td>${formatPrice(s.bestBid)} / ${formatPrice(s.bestAsk)}</td>
+            <td>${formatPercent(s.spread)} / ${formatPrice(s.midpoint)}</td>
+            <td>${formatPrice(s.lastTradePrice)}</td>
+            <td>${formatCurrency(num(m.volume))}<br>${formatCurrency(num(m.liquidity))}</td>
+            <td>A ${activityScore(m).toFixed(0)}<br>N ${marketNewsScore(m).toFixed(0)}</td>
+            <td>${llm ? escapeHtml(llm.classification || llm.overallMood || "recent") : "none"}</td>
+            <td><div class="actions">
+              <button class="tiny" data-detail="${attr(m.id)}" type="button">Details</button>
+              <button class="tiny" data-pin="${attr(m.id)}" type="button">${f.pinned ? "Unpin" : "Pin"}</button>
+              <button class="tiny" data-refresh-book="${attr(m.id)}" type="button">Refresh orderbook</button>
+              <button class="tiny" data-force-sub="${attr(m.id)}" type="button">Subscribe</button>
+              <button class="tiny" data-open="${attr(m.id)}" type="button">Open</button>
+              <button class="tiny danger" data-remove="${attr(m.id)}" type="button">Remove</button>
+            </div></td>
+          </tr>`;
+        }).join("")}</tbody></table></div>`);
+        bindDynamicButtons();
+      }
+
+      function renderDetail() {
+        const m = state.selectedMarketId ? state.markets.get(state.selectedMarketId) : getFollowedMarkets()[0] || state.explorerResults[0];
+        if (!m) {
+          html("detailContent", `<div class="panel empty">Select a market from Explorer or Follow Stack.</div>`);
+          return;
+        }
+        state.selectedMarketId = m.id;
+        const s = latestSnapshot(m);
+        const followed = state.followed.has(m.id);
+        const news = articlesForMarket(m).slice(0, 10);
+        const llm = latestLlmForMarket(m.id);
+        const book = state.orderBooks.get(m.id) || {};
+        html("detailContent", `
+          <div class="panel">
+            <div class="toolbar">
+              <div>
+                <h2>${escapeHtml(m.question || "Untitled market")}</h2>
+                <p>${escapeHtml(m.eventTitle || "")}</p>
+              </div>
+              <div class="actions">
+                <button data-follow="${attr(m.id)}" class="${followed ? "danger" : "primary"}" type="button">${followed ? "Remove follow" : "Add follow"}</button>
+                <button data-refresh-book="${attr(m.id)}" type="button">Refresh REST data</button>
+                <button data-run-market-llm="${attr(m.id)}" class="amber" type="button">Run LLM on this market</button>
+                <button data-copy-json="${attr(m.id)}" type="button">Copy market JSON</button>
+                <button data-open="${attr(m.id)}" type="button">Open on Polymarket</button>
+              </div>
+            </div>
+            <div class="grid two">
+              <div class="card"><h3>Resolution</h3><p>${escapeHtml(m.description || m.resolutionSource || "No description available from cached metadata.")}</p></div>
+              <div class="metric-grid">
+                <div class="metric"><small>Countdown</small><strong>${countdownTo(m.endDate)}</strong></div>
+                <div class="metric"><small>YES bid / ask</small><strong>${formatPrice(s.bestBid)} / ${formatPrice(s.bestAsk)}</strong></div>
+                <div class="metric"><small>Spread</small><strong>${formatPercent(s.spread)}</strong></div>
+                <div class="metric"><small>Last trade</small><strong>${formatPrice(s.lastTradePrice)}</strong></div>
+              </div>
+            </div>
+            <div class="market-meta" style="margin-top: 0.7rem;">
+              ${marketStateBadge(m)}${badges(m.tags || [])}
+              <span class="badge">End ${formatDate(m.endDate)}</span><span class="badge">Volume ${formatCurrency(num(m.volume))}</span><span class="badge">Liquidity ${formatCurrency(num(m.liquidity))}</span>
+            </div>
+          </div>
+          <div class="grid two">
+            <div class="panel"><h2>Market Identifiers</h2><pre>${escapeHtml(JSON.stringify({ id: m.id, slug: m.slug, conditionId: m.conditionId, yesTokenId: m.yesTokenId, noTokenId: m.noTokenId, outcomes: m.outcomes, clobTokenIds: m.clobTokenIds }, null, 2))}</pre></div>
+            <div class="panel"><h2>Latest Order Book</h2><pre>${escapeHtml(JSON.stringify(book, null, 2))}</pre></div>
+          </div>
+          <div class="grid two">
+            <div class="panel"><h2>Price Chart</h2><div class="chart-wrap-large"><canvas id="detailPriceChart"></canvas></div></div>
+            <div class="panel"><h2>Orderbook Depth</h2><div class="depth-wrap"><canvas id="detailDepthChart"></canvas></div></div>
+          </div>
+          <div class="grid two">
+            <div class="panel"><h2>Tailored News</h2><div class="grid">${news.length ? news.map(articleCardHtml).join("") : `<div class="empty">No matched news for this market.</div>`}</div></div>
+            <div class="panel"><h2>LLM Analysis</h2>${llm ? llmCardHtml(llm) : `<div class="empty">No LLM analysis for this market.</div>`}</div>
+          </div>
+        `);
+        bindDynamicButtons();
+        renderDetailCharts(m);
+      }
+
+      function renderNews() {
+        const q = val("newsSearch").toLowerCase();
+        const marketId = val("newsMarketFilter");
+        const view = val("newsView") || "global";
+        const density = val("newsDensity") || "expanded";
+        const followedIds = [...state.followed.keys()];
+        const selected = state.markets.get(marketId);
+        let articles = [...state.news];
+        if (view === "followed") articles = articles.filter(a => (a.matchedMarkets || []).some(id => followedIds.includes(id)));
+        if (view === "tailored") articles = topTailoredNews(50);
+        if (selected) articles = articles.filter(a => (a.matchedMarkets || []).includes(selected.id));
+        if (q) articles = articles.filter(a => haystack(a).includes(q));
+        articles.sort((a,b) => num(b.publishedAt || b.fetchedAt) - num(a.publishedAt || a.fetchedAt));
+        const options = [`<option value="">All markets</option>`].concat(getFollowedMarkets().map(m => `<option value="${attr(m.id)}"${marketId === m.id ? " selected" : ""}>${escapeHtml(short(m.question, 70))}</option>`));
+        html("newsMarketFilter", options.join(""));
+        state.els.newsList?.classList.toggle("compact-news", density === "compact");
+        html("newsList", articles.length ? articles.slice(0, 120).map(articleCardHtml).join("") : `<div class="empty">No news articles match the current filters.</div>`);
+      }
+
+      function renderLlm() {
+        const latest = state.llmAnalyses[0];
+        html("latestLlm", latest ? `<div class="panel"><h2>Latest Analysis</h2>${llmCardHtml(latest)}</div>` : `<div class="panel empty">No LLM analysis yet. Enable OpenAI in Admin and run analysis manually.</div>`);
+        html("llmHistory", state.llmAnalyses.length ? state.llmAnalyses.map(llmCardHtml).join("") : `<div class="empty">No LLM history.</div>`);
+      }
+
+      function renderAdmin() {
+        html("sourceList", state.newsSources.length ? state.newsSources.map(s => `<div class="card">
+          <div class="toolbar"><div><h3>${escapeHtml(s.name)}</h3><p>${escapeHtml(s.url)}</p></div>
+          <div class="actions"><span class="badge">${s.enabled ? "enabled" : "disabled"}</span><span class="badge">${s.useProxy ? "proxy" : "direct"}</span><button class="tiny" data-edit-source="${attr(s.id)}" type="button">Edit</button><button class="tiny danger" data-delete-source="${attr(s.id)}" type="button">Delete</button></div></div>
+        </div>`).join("") : `<div class="empty">No news sources configured.</div>`);
+        bindDynamicButtons();
+      }
+
+      async function renderDebug() {
+        if (!state.db) return;
+        const stores = ["markets","followedMarkets","marketSnapshots","orderBooks","marketTicks","newsSources","newsArticles","llmAnalyses","fetchLogs"];
+        const counts = await Promise.all(stores.map(s => state.db[s].count().then(c => [s,c]).catch(() => [s,0])));
+        html("debugCounts", counts.map(([s,c]) => `<div class="metric"><small>${escapeHtml(s)}</small><strong>${c}</strong></div>`).join(""));
+        html("providerStatus", escapeHtml(JSON.stringify(state.providerStatus, null, 2)));
+        const logs = await state.db.fetchLogs.orderBy("timestamp").reverse().limit(120).toArray();
+        html("debugLogs", logs.length ? logs.map(l => `<div class="card"><strong>${formatDate(l.timestamp)} ${escapeHtml(l.level)} ${escapeHtml(l.type)}</strong><pre>${escapeHtml(l.message || "")}</pre></div>`).join("") : `<div class="empty">No logs.</div>`);
+      }
+
+      async function discoverMarkets(manual) {
+        try {
+          state.providerStatus.gamma.state = "loading";
+          state.providerStatus.rest.state = "loading";
+          queueRender();
+          const queries = [
+            `${GAMMA}/markets?active=true&closed=false&limit=500&order=volume&ascending=false`,
+            `${GAMMA}/markets?active=true&closed=false&limit=500&order=endDate&ascending=true`,
+            `${GAMMA}/events?active=true&closed=false&limit=250&order=volume&ascending=false`
+          ];
+          const payloads = await Promise.allSettled(queries.map(fetchJson));
+          const raw = payloads.flatMap(p => p.status === "fulfilled" ? unwrapArray(p.value) : []);
+          const markets = [];
+          for (const item of raw) {
+            if (Array.isArray(item.markets)) item.markets.forEach(m => markets.push(normalizeMarket(m, item)));
+            else markets.push(normalizeMarket(item, item.event || null));
+          }
+          const deduped = [...new Map(markets.filter(Boolean).map(m => [m.conditionId || m.id, m])).values()];
+          if (deduped.length) await state.db.markets.bulkPut(deduped);
+          localStorage.setItem("polymarketPulse.lastDiscovery", String(Date.now()));
+          state.providerStatus.gamma = { state: "ok", lastOk: Date.now(), lastError: null };
+          state.providerStatus.rest.state = "ok";
+          await refreshCaches();
+          if (manual) showToast(`Fetched ${deduped.length} markets from Gamma`);
+          refreshVisibleOrderbooks();
+        } catch (err) {
+          state.providerStatus.gamma = { state: "error", lastOk: state.providerStatus.gamma.lastOk, lastError: String(err) };
+          state.providerStatus.rest = { state: "error", lastOk: state.providerStatus.rest.lastOk, lastError: String(err) };
+          logError("gamma", err);
+          if (manual) showToast("Market discovery failed. See Debug logs.", "bad");
+        } finally {
+          queueRender();
+        }
+      }
+
+      function normalizeMarket(raw, event) {
+        if (!raw || typeof raw !== "object") return null;
+        const clobTokenIds = normalizeTokenIds(parseMaybeJson(raw.clobTokenIds || raw.clobTokenIdsJson || raw.clob_token_ids || raw.tokens || raw.outcomeTokens));
+        const outcomes = parseMaybeJson(raw.outcomes || raw.outcomePrices || raw.shortOutcomes);
+        const tags = normalizeTags(raw.tags || event?.tags || raw.category || event?.category);
+        const yesNo = extractYesNoTokens(clobTokenIds, outcomes, raw);
+        const id = String(raw.id || raw.marketId || raw.conditionId || raw.slug || cryptoRandom());
+        const endDate = parseDate(raw.endDate || raw.endDateIso || raw.end_date || raw.closeTime || raw.resolutionTime || event?.endDate || event?.end_date);
+        const m = {
+          id,
+          conditionId: str(raw.conditionId || raw.condition_id || raw.condition || ""),
+          slug: str(raw.slug || raw.marketSlug || ""),
+          question: str(raw.question || raw.title || raw.description || event?.title || ""),
+          eventTitle: str(event?.title || raw.eventTitle || raw.groupItemTitle || ""),
+          description: str(raw.description || raw.rules || raw.resolutionSource || ""),
+          resolutionSource: str(raw.resolutionSource || raw.resolution_source || ""),
+          active: bool(raw.active, true),
+          closed: bool(raw.closed, false),
+          resolved: bool(raw.resolved || raw.archived || raw.marketResolved, false),
+          endDate,
+          startDate: parseDate(raw.startDate || raw.start_date || raw.createdAt || raw.created_at),
+          createdAt: parseDate(raw.createdAt || raw.created_at),
+          volume: num(raw.volumeNum ?? raw.volume ?? raw.volume24hr ?? raw.volume24hrClob ?? raw.volumeClob),
+          liquidity: num(raw.liquidityNum ?? raw.liquidity ?? raw.liquidityClob),
+          updatedAt: Date.now(),
+          tags,
+          category: str(raw.category || event?.category || ""),
+          outcomes: Array.isArray(outcomes) ? outcomes : [],
+          clobTokenIds: Array.isArray(clobTokenIds) ? clobTokenIds.map(String) : [],
+          yesTokenId: yesNo.yes,
+          noTokenId: yesNo.no,
+          raw
+        };
+        return m.id || m.conditionId ? m : null;
+      }
+
+      function extractYesNoTokens(tokenIds, outcomes, raw) {
+        const tokens = Array.isArray(tokenIds) ? tokenIds.map(String) : [];
+        const out = Array.isArray(outcomes) ? outcomes.map(x => typeof x === "string" ? x : x?.name || x?.outcome || "") : [];
+        const yesIdx = out.findIndex(x => /^yes$/i.test(String(x)));
+        const noIdx = out.findIndex(x => /^no$/i.test(String(x)));
+        return {
+          yes: str(raw.yesTokenId || raw.yes_token_id || tokens[yesIdx >= 0 ? yesIdx : 0] || ""),
+          no: str(raw.noTokenId || raw.no_token_id || tokens[noIdx >= 0 ? noIdx : 1] || "")
+        };
+      }
+
+      async function refreshVisibleOrderbooks() {
+        const targets = [...new Set([...getFollowedMarkets(), ...getFilteredExplorerMarkets().slice(0, 20)].map(m => m.id))].map(id => state.markets.get(id)).filter(Boolean);
+        for (const m of targets) await refreshOrderbook(m.id, false);
+      }
+
+      async function refreshFollowedRest() {
+        if (!state.followed.size) return;
+        state.providerStatus.rest.state = "loading";
+        queueRender();
+        for (const m of getFollowedMarkets()) await refreshOrderbook(m.id, false);
+        state.providerStatus.rest.state = "ok";
+        state.providerStatus.rest.lastOk = Date.now();
+        queueRender();
+      }
+
+      async function refreshOrderbook(marketId, toast) {
+        const m = state.markets.get(marketId);
+        if (!m) return;
+        const tokenIds = assetIdsForMarket(m);
+        if (!tokenIds.length) return;
+        const snapshots = [];
+        for (const assetId of tokenIds) {
+          try {
+            const book = await fetchBook(assetId);
+            const outcome = assetId === m.noTokenId ? "NO" : "YES";
+            state.orderBooks.set(m.id, { ...(state.orderBooks.get(m.id) || {}), [outcome]: book, updatedAt: Date.now() });
+            await state.db.orderBooks.put({ id: `${m.id}:${assetId}:${Date.now()}`, marketId: m.id, assetId, outcome, timestamp: Date.now(), book });
+            snapshots.push(snapshotFromBook(m, assetId, outcome, book));
+          } catch (err) {
+            logError("clob-book", err, { marketId: m.id, assetId });
+          }
+        }
+        const merged = mergeSnapshots(m, snapshots);
+        if (merged) await persistSnapshotAndTick(m, merged, "rest");
+        state.providerStatus.rest.lastOk = Date.now();
+        if (toast) showToast("Orderbook refreshed");
+        await refreshCaches();
+        queueRender();
+      }
+
+      async function fetchBook(assetId) {
+        try {
+          return await fetchJson(`${CLOB}/book?token_id=${encodeURIComponent(assetId)}`);
+        } catch (err) {
+          return await fetchJson(`${CLOB}/orderbook?token_id=${encodeURIComponent(assetId)}`);
+        }
+      }
+
+      function snapshotFromBook(m, assetId, outcome, book) {
+        const bids = normalizeLevels(book?.bids || book?.buys || book?.bid || []);
+        const asks = normalizeLevels(book?.asks || book?.sells || book?.ask || []);
+        const bestBid = bids.length ? Math.max(...bids.map(x => x.price)) : null;
+        const bestAsk = asks.length ? Math.min(...asks.map(x => x.price)) : null;
+        return {
+          marketId: m.id,
+          conditionId: m.conditionId,
+          assetId,
+          outcome,
+          timestamp: Date.now(),
+          provider: "rest",
+          bestBid,
+          bestAsk,
+          spread: bestBid != null && bestAsk != null ? Math.max(0, bestAsk - bestBid) : null,
+          midpoint: bestBid != null && bestAsk != null ? (bestAsk + bestBid) / 2 : null,
+          lastTradePrice: null,
+          volume: m.volume,
+          liquidity: m.liquidity
+        };
+      }
+
+      function mergeSnapshots(m, snapshots) {
+        const yes = snapshots.find(s => s.outcome === "YES") || snapshots[0];
+        if (!yes) return null;
+        const prev = latestSnapshot(m);
+        return { ...prev, ...yes, id: `${m.id}:${Date.now()}`, timestamp: Date.now(), provider: "rest", volume: m.volume, liquidity: m.liquidity };
+      }
+
+      async function persistSnapshotAndTick(m, snap, provider) {
+        const now = Date.now();
+        const full = { ...snap, id: `${m.id}:${now}`, marketId: m.id, conditionId: m.conditionId, timestamp: now, provider };
+        state.snapshots.set(m.id, full);
+        await state.db.marketSnapshots.put(full);
+        const lastPersist = state.recentTicks.get(m.id) || 0;
+        if (now - lastPersist >= state.settings.persistTickSeconds * 1000) {
+          state.recentTicks.set(m.id, now);
+          await state.db.marketTicks.add({ marketId: m.id, assetId: snap.assetId || m.yesTokenId || "", outcome: snap.outcome || "YES", timestamp: now, price: snap.lastTradePrice ?? snap.midpoint ?? snap.bestBid ?? null, bestBid: snap.bestBid ?? null, bestAsk: snap.bestAsk ?? null, spread: snap.spread ?? null, provider });
+        }
+      }
+
+      function startWebSocket() {
+        if (state.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(state.ws.readyState)) return;
+        const assets = subscribedAssets();
+        if (!assets.length) {
+          showToast("Add followed markets with token IDs before starting WebSocket", "warn");
+          return;
+        }
+        state.wsActive = true;
+        state.providerStatus.websocket.state = "connecting";
+        queueRender();
+        try {
+          state.ws = new WebSocket(MARKET_WS);
+          state.ws.onopen = () => {
+            state.wsReconnectAttempts = 0;
+            state.providerStatus.websocket.state = "open";
+            state.providerStatus.websocket.lastOpen = Date.now();
+            sendWsSubscription();
+            clearInterval(state.wsHeartbeat);
+            state.wsHeartbeat = setInterval(() => {
+              if (state.ws?.readyState === WebSocket.OPEN) state.ws.send("PING");
+            }, 10000);
+            showToast("Market WebSocket open");
+            queueRender();
+          };
+          state.ws.onmessage = event => handleWsMessage(event.data);
+          state.ws.onerror = () => {
+            state.providerStatus.websocket.state = "error";
+            state.providerStatus.websocket.lastError = "WebSocket error";
+            logEvent("error", "websocket", "WebSocket error event");
+            queueRender();
+          };
+          state.ws.onclose = () => {
+            clearInterval(state.wsHeartbeat);
+            state.providerStatus.websocket.state = state.wsActive ? "reconnecting" : "closed";
+            queueRender();
+            if (state.wsActive) scheduleReconnect();
+          };
+        } catch (err) {
+          logError("websocket", err);
+          scheduleReconnect();
+        }
+      }
+
+      function stopWebSocket() {
+        state.wsActive = false;
+        clearInterval(state.wsHeartbeat);
+        if (state.ws) state.ws.close();
+        state.ws = null;
+        state.wsSubscribedAssets.clear();
+        state.providerStatus.websocket.state = "closed";
+        state.providerStatus.websocket.subscribedAssets = 0;
+        showToast("WebSocket stopped");
+        queueRender();
+      }
+
+      function scheduleReconnect() {
+        if (!state.wsActive) return;
+        const delay = Math.min(30000, 1000 * Math.pow(2, state.wsReconnectAttempts++));
+        setTimeout(() => { if (state.wsActive) startWebSocket(); }, delay);
+      }
+
+      function sendWsSubscription() {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        const assets = subscribedAssets();
+        state.wsSubscribedAssets = new Set(assets);
+        state.providerStatus.websocket.subscribedAssets = assets.length;
+        state.ws.send(JSON.stringify({ assets_ids: assets, type: "market", custom_feature_enabled: true }));
+      }
+
+      function resubscribeWebSocket() {
+        rebuildAssetMap();
+        if (state.ws?.readyState === WebSocket.OPEN) sendWsSubscription();
+        else if (state.wsActive) startWebSocket();
+      }
+
+      function handleWsMessage(data) {
+        if (data === "PONG") return;
+        state.providerStatus.websocket.lastMessage = Date.now();
+        let msg = null;
+        try { msg = typeof data === "string" ? JSON.parse(data) : data; } catch (err) { return logError("websocket-parse", err); }
+        const messages = Array.isArray(msg) ? msg : [msg];
+        for (const item of messages) handleWsEvent(item);
+        queueRender();
+      }
+
+      async function handleWsEvent(evt) {
+        const type = evt.event_type || evt.type || evt.event || "";
+        const assetId = str(evt.asset_id || evt.assetId || evt.token_id || evt.tokenId || evt.market);
+        const linked = state.assetToMarket.get(assetId);
+        const market = linked ? state.markets.get(linked.marketId) : null;
+        if (type === "new_market") {
+          const m = normalizeMarket(evt.market || evt, evt.event || null);
+          if (m && isCryptoMarket(m)) {
+            state.newMarkets.unshift(m);
+            state.newMarkets = state.newMarkets.slice(0, 50);
+            await state.db.markets.put(m);
+            state.markets.set(m.id, m);
+          }
+          return;
+        }
+        if (type === "market_resolved") {
+          const cid = str(evt.condition_id || evt.conditionId);
+          const m = [...state.markets.values()].find(x => x.conditionId === cid || x.id === str(evt.market_id));
+          if (m) {
+            m.resolved = true; m.closed = true; m.updatedAt = Date.now();
+            await state.db.markets.put(m); state.markets.set(m.id, m);
+          }
+          return;
+        }
+        if (!market) return;
+        const prev = latestSnapshot(market);
+        let snap = { ...prev, marketId: market.id, conditionId: market.conditionId, assetId, outcome: linked.outcome, provider: "websocket", timestamp: Date.now(), volume: market.volume, liquidity: market.liquidity };
+        if (type === "book") {
+          const book = evt;
+          state.orderBooks.set(market.id, { ...(state.orderBooks.get(market.id) || {}), [linked.outcome]: book, updatedAt: Date.now() });
+          await state.db.orderBooks.put({ id: `${market.id}:${assetId}:${Date.now()}`, marketId: market.id, assetId, outcome: linked.outcome, timestamp: Date.now(), book });
+          snap = { ...snap, ...snapshotFromBook(market, assetId, linked.outcome, book) };
+        }
+        if (type === "best_bid_ask") {
+          snap.bestBid = nullableNum(evt.best_bid || evt.bid);
+          snap.bestAsk = nullableNum(evt.best_ask || evt.ask);
+        }
+        if (type === "price_change") {
+          snap.lastTradePrice = nullableNum(evt.price || evt.last_price || evt.last_trade_price) ?? snap.lastTradePrice;
+        }
+        if (type === "last_trade_price") {
+          snap.lastTradePrice = nullableNum(evt.price || evt.last_trade_price);
+        }
+        if (snap.bestBid != null && snap.bestAsk != null) {
+          snap.spread = Math.max(0, snap.bestAsk - snap.bestBid);
+          snap.midpoint = (snap.bestAsk + snap.bestBid) / 2;
+        }
+        await persistSnapshotAndTick(market, snap, "websocket");
+      }
+
+      async function refreshNews(manual) {
+        state.providerStatus.news.state = "refreshing";
+        queueRender();
+        let added = 0;
+        const sources = state.newsSources.filter(s => s.enabled);
+        for (const source of sources) {
+          try {
+            const url = source.useProxy ? state.settings.rssProxyTemplate.replace("{url}", encodeURIComponent(source.url)) : source.url;
+            const text = await fetchText(url);
+            const articles = parseFeed(text, source);
+            const matched = articles.map(a => matchArticleToMarkets(a, source));
+            for (const article of matched) {
+              await state.db.newsArticles.put(article);
+              added += 1;
+            }
+            source.updatedAt = Date.now();
+            await state.db.newsSources.put(source);
+          } catch (err) {
+            logError("news", err, { source: source.name });
+            state.providerStatus.news.lastError = `${source.name}: ${String(err)}`;
+          }
+        }
+        await pruneNews();
+        await refreshCaches();
+        state.providerStatus.news.state = "ok";
+        state.providerStatus.news.lastOk = Date.now();
+        if (manual) showToast(`News refresh complete (${added} parsed)`);
+        queueRender();
+      }
+
+      function parseFeed(xmlText, source) {
+        const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+        const nodes = [...doc.querySelectorAll("item, entry")];
+        return nodes.map(node => {
+          const title = textOf(node, "title");
+          const link = textOf(node, "link") || node.querySelector("link")?.getAttribute("href") || "";
+          const summary = textOf(node, "description") || textOf(node, "summary") || textOf(node, "content") || "";
+          const publishedAt = parseDate(textOf(node, "pubDate") || textOf(node, "published") || textOf(node, "updated"));
+          const canonical = canonicalUrl(link) || normalizeTitle(title);
+          return {
+            id: `${source.id}:${canonical}`,
+            sourceId: source.id,
+            sourceName: source.name,
+            title: title || "Untitled",
+            url: link,
+            summary,
+            publishedAt,
+            fetchedAt: Date.now(),
+            matchedMarkets: [],
+            matchedTerms: [],
+            relevance: 0
+          };
+        }).filter(a => a.title || a.url);
+      }
+
+      function matchArticleToMarkets(article, source) {
+        const matchedMarkets = [];
+        const terms = new Set();
+        const lower = haystack(article);
+        for (const m of [...state.markets.values()]) {
+          const score = newsRelevanceScore(article, m, source);
+          if (score > 8) {
+            matchedMarkets.push(m.id);
+            keywordTerms(m).forEach(t => { if (lower.includes(t)) terms.add(t); });
+          }
+        }
+        return { ...article, matchedMarkets: [...new Set(matchedMarkets)].slice(0, 40), matchedTerms: [...terms].slice(0, 30), relevance: matchedMarkets.length ? matchedMarkets.reduce((sum, id) => sum + newsRelevanceScore(article, state.markets.get(id), source), 0) : 0 };
+      }
+
+      async function runLlmAnalysis(scope, marketId) {
+        if (!state.settings.openAiEnabled) return showToast("Enable OpenAI in Admin first", "warn");
+        const key = state.openAiKeyMemory || (state.settings.rememberOpenAiKey ? localStorage.getItem(LS_KEY) : "");
+        if (!key) return showToast("OpenAI API key required", "warn");
+        const payload = await buildLlmInput(scope, marketId);
+        const prompt = `You are analyzing prediction-market research data for Polymarket Pulse. This is educational research only, not financial advice. Do not recommend exact orders, position sizing, leverage, wallet activity, or automated trades. Return structured JSON only matching this schema: {"generatedAt":"...","overallMood":"calm|watchful|chaotic|dangerous","opportunities":[{"marketId":"...","question":"...","classification":"watch|possible_mispricing|too_wide|news_sensitive|avoid|stale","confidence":0.0,"timeSensitivity":"immediate|soon|later","why":"...","dataSignals":["..."],"newsSignals":["..."],"risks":["..."],"missingData":["..."]}],"summary":"...","disclaimer":"Educational research only, not financial advice."}\n\nInput JSON:\n${JSON.stringify(payload)}`;
+        try {
+          state.providerStatus.llm.state = "loading";
+          queueRender();
+          const body = { model: state.settings.openAiModel, messages: [{ role: "user", content: prompt }], temperature: 0.2, response_format: { type: "json_object" } };
+          const res = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` }, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
+          const raw = await res.json();
+          const content = raw?.choices?.[0]?.message?.content || "";
+          let parsed = {};
+          try { parsed = JSON.parse(content); } catch { parsed = { summary: content, opportunities: [], disclaimer: "Educational research only, not financial advice." }; }
+          const row = {
+            createdAt: Date.now(),
+            model: state.settings.openAiModel,
+            scope,
+            marketIds: payload.followedMarkets.map(m => m.id),
+            overallMood: parsed.overallMood || "watchful",
+            inputSummary: summarizeLlmInput(payload),
+            rawText: content,
+            rawJson: raw,
+            parsed
+          };
+          await state.db.llmAnalyses.add(row);
+          state.providerStatus.llm.state = "ok";
+          state.providerStatus.llm.lastOk = Date.now();
+          await refreshCaches();
+          showToast("LLM analysis stored");
+        } catch (err) {
+          state.providerStatus.llm.state = "error";
+          state.providerStatus.llm.lastError = String(err);
+          logError("llm", err);
+          showToast("LLM analysis failed. See Debug logs.", "bad");
+        } finally {
+          queueRender();
+        }
+      }
+
+      async function buildLlmInput(scope, marketId) {
+        const followed = marketId ? [state.markets.get(marketId)].filter(Boolean) : getFollowedMarkets();
+        const quick = getFilteredExplorerMarkets().slice(0, 12);
+        const since = Date.now() - state.settings.llmMarketWindowMinutes * 60000;
+        const ticks = await state.db.marketTicks.where("timestamp").above(since).toArray().catch(() => []);
+        return {
+          generatedAt: new Date().toISOString(),
+          constraints: ["Educational research only", "No buy/sell orders", "No position sizing", "No leverage", "No automated trading"],
+          warnings: ["Browser API and RSS data may be stale, missing, CORS-blocked, or rate-limited"],
+          followedMarkets: followed.map(llmMarketShape),
+          topExplorerQuickMarkets: quick.map(llmMarketShape),
+          recentTicks: ticks.slice(-250),
+          latestOrderbooks: followed.map(m => ({ marketId: m.id, book: state.orderBooks.get(m.id) || null })),
+          tailoredNewsStories: topTailoredNews(state.settings.maxNewsArticlesInLlm).map(a => ({ title: a.title, sourceName: a.sourceName, url: a.url, publishedAt: a.publishedAt, matchedMarkets: a.matchedMarkets, matchedTerms: a.matchedTerms, relevance: a.relevance })),
+          providerStatus: state.providerStatus
+        };
+      }
+
+      function llmMarketShape(m) {
+        const s = latestSnapshot(m);
+        return { id: m.id, conditionId: m.conditionId, question: m.question, eventTitle: m.eventTitle, slug: m.slug, endDate: m.endDate, countdown: countdownTo(m.endDate), active: m.active, closed: m.closed, resolved: m.resolved, yesTokenId: m.yesTokenId, noTokenId: m.noTokenId, bestBid: s.bestBid, bestAsk: s.bestAsk, spread: s.spread, midpoint: s.midpoint, lastTradePrice: s.lastTradePrice, volume: m.volume, liquidity: m.liquidity, activityScore: activityScore(m), newsScore: marketNewsScore(m) };
+      }
+
+      function getFilteredExplorerMarkets() {
+        let markets = [...state.markets.values()];
+        const q = val("filterSearch").toLowerCase();
+        const tag = val("filterTag").toLowerCase();
+        const win = val("filterWindow") || "all";
+        const custom = num(val("filterCustomHours")) || 6;
+        const minVol = num(val("filterMinVolume"));
+        const minLiq = num(val("filterMinLiquidity"));
+        const maxSpread = num(val("filterMaxSpread"), 1);
+        if (q) markets = markets.filter(m => searchMatchesMarket(q, m));
+        if (tag) markets = markets.filter(m => (m.tags || []).join(" ").toLowerCase().includes(tag) || String(m.category || "").toLowerCase().includes(tag));
+        if (val("filterCrypto") === "true") markets = markets.filter(isCryptoMarket);
+        if (val("filterBitcoin") === "true") markets = markets.filter(isBitcoinMarket);
+        if (val("filterEthereum") === "true") markets = markets.filter(isEthereumMarket);
+        if (val("filterActive") !== "false") markets = markets.filter(m => m.active && !m.closed);
+        if (val("filterUnresolved") !== "false") markets = markets.filter(m => !m.resolved);
+        if (val("filterHasTokens") !== "false") markets = markets.filter(m => assetIdsForMarket(m).length > 0);
+        markets = markets.filter(m => num(m.volume) >= minVol && num(m.liquidity) >= minLiq && (latestSnapshot(m).spread == null || latestSnapshot(m).spread <= maxSpread));
+        markets = markets.filter(m => windowMatch(m, win, custom));
+        const sort = val("filterSort") || "activity";
+        markets.sort((a,b) => {
+          if (sort === "quickest") return msUntil(a.endDate) - msUntil(b.endDate);
+          if (sort === "volume") return num(b.volume) - num(a.volume);
+          if (sort === "liquidity") return num(b.liquidity) - num(a.liquidity);
+          if (sort === "spread") return (latestSnapshot(a).spread ?? 99) - (latestSnapshot(b).spread ?? 99);
+          if (sort === "created") return num(b.createdAt) - num(a.createdAt);
+          return activityScore(b) - activityScore(a);
+        });
+        return markets;
+      }
+
+      function windowMatch(m, win, custom) {
+        if (win === "all") return true;
+        const ms = msUntil(m.endDate);
+        if (ms < 0) return false;
+        if (win === "today") return sameLocalDay(new Date(m.endDate), new Date());
+        const hours = win === "custom" ? custom : Number(win) / 60;
+        return ms <= hours * 3600000;
+      }
+
+      function searchMatchesMarket(query, market) {
+        const hay = marketHaystack(market);
+        const terms = query.match(/[a-z0-9-]+/g) || [];
+        if (!terms.length) return true;
+        return terms.some(term => hay.includes(term));
+      }
+
+      function applyChaosPreset() {
+        setVal("filterCrypto", "true");
+        setVal("filterBitcoin", "false");
+        setVal("filterEthereum", "false");
+        setVal("filterWindow", "60");
+        setVal("filterMinLiquidity", "500");
+        setVal("filterMinVolume", "500");
+        setVal("filterMaxSpread", "0.08");
+        setVal("filterActive", "true");
+        setVal("filterUnresolved", "true");
+        setVal("filterHasTokens", "true");
+        setVal("filterSort", "activity");
+        showToast("Scalp-ish Chaos preset applied");
+        queueRender();
+      }
+
+      function applyBtcPreset() {
+        setVal("filterSearch", "btc bitcoin 5 min candle price above below up down spot binance coinbase");
+        setVal("filterCrypto", "true");
+        setVal("filterBitcoin", "true");
+        setVal("filterWindow", "60");
+        setVal("filterMinLiquidity", "250");
+        setVal("filterMaxSpread", "0.1");
+        setVal("filterActive", "true");
+        setVal("filterUnresolved", "true");
+        setVal("filterHasTokens", "true");
+        setVal("filterSort", "activity");
+        showToast("5-Minute BTC Spot Hunter preset applied");
+        queueRender();
+      }
+
+      async function addFollow(marketId) {
+        const m = state.markets.get(marketId);
+        if (!m) return;
+        if (!state.followed.has(marketId) && state.followed.size >= state.settings.maxFollowedMarkets) return showToast("Max followed markets reached", "warn");
+        const row = state.followed.get(marketId) || { id: marketId, marketId, conditionId: m.conditionId, pinned: false, addedAt: Date.now() };
+        row.updatedAt = Date.now();
+        await state.db.followedMarkets.put(row);
+        await refreshCaches();
+        resubscribeWebSocket();
+        showToast("Market added to Follow Stack");
+        queueRender();
+      }
+
+      async function removeFollow(marketId) {
+        await state.db.followedMarkets.delete(marketId);
+        await refreshCaches();
+        resubscribeWebSocket();
+        showToast("Market removed");
+        queueRender();
+      }
+
+      async function togglePin(marketId) {
+        const row = state.followed.get(marketId);
+        if (!row) return;
+        row.pinned = !row.pinned;
+        row.updatedAt = Date.now();
+        await state.db.followedMarkets.put(row);
+        await refreshCaches();
+        queueRender();
+      }
+
+      function bindDynamicButtons() {
+        document.querySelectorAll("[data-follow]").forEach(btn => btn.onclick = () => state.followed.has(btn.dataset.follow) ? removeFollow(btn.dataset.follow) : addFollow(btn.dataset.follow));
+        document.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => removeFollow(btn.dataset.remove));
+        document.querySelectorAll("[data-detail]").forEach(btn => btn.onclick = () => { state.selectedMarketId = btn.dataset.detail; selectTab("detail"); });
+        document.querySelectorAll("[data-pin]").forEach(btn => btn.onclick = () => togglePin(btn.dataset.pin));
+        document.querySelectorAll("[data-refresh-book]").forEach(btn => btn.onclick = () => refreshOrderbook(btn.dataset.refreshBook, true));
+        document.querySelectorAll("[data-force-sub]").forEach(btn => btn.onclick = resubscribeWebSocket);
+        document.querySelectorAll("[data-open]").forEach(btn => btn.onclick = () => openMarket(btn.dataset.open));
+        document.querySelectorAll("[data-copy-json]").forEach(btn => btn.onclick = () => copyMarketJson(btn.dataset.copyJson));
+        document.querySelectorAll("[data-run-market-llm]").forEach(btn => btn.onclick = () => runLlmAnalysis("market", btn.dataset.runMarketLlm));
+        document.querySelectorAll("[data-edit-source]").forEach(btn => btn.onclick = () => editSource(btn.dataset.editSource));
+        document.querySelectorAll("[data-delete-source]").forEach(btn => btn.onclick = () => deleteSource(btn.dataset.deleteSource));
+      }
+
+      function marketCardHtml(m) {
+        const s = latestSnapshot(m);
+        const followed = state.followed.has(m.id);
+        return `<div class="card market-card">
+          <div class="toolbar">
+            <div>
+              <h3>${escapeHtml(m.question || "Untitled market")}</h3>
+              <p>${escapeHtml(m.eventTitle || m.slug || "")}</p>
+            </div>
+            <button data-follow="${attr(m.id)}" class="${followed ? "danger" : "primary"}" type="button">${followed ? "Following" : "Add to Follow Stack"}</button>
+          </div>
+          <div class="market-meta">
+            ${marketStateBadge(m)}<span class="badge">${countdownTo(m.endDate)}</span><span class="badge">Vol ${formatCurrency(num(m.volume))}</span><span class="badge">Liq ${formatCurrency(num(m.liquidity))}</span><span class="badge">Spread ${formatPercent(s.spread)}</span><span class="badge">Bid/Ask ${formatPrice(s.bestBid)} / ${formatPrice(s.bestAsk)}</span><span class="badge">Last ${formatPrice(s.lastTradePrice)}</span><span class="badge">Prob ${formatPercent(s.midpoint ?? s.lastTradePrice)}</span><span class="badge">Score ${activityScore(m).toFixed(0)}</span>
+          </div>
+          <div class="actions">
+            <button class="tiny" data-detail="${attr(m.id)}" type="button">Details</button>
+            <button class="tiny" data-refresh-book="${attr(m.id)}" type="button">Refresh orderbook</button>
+            <button class="tiny" data-open="${attr(m.id)}" type="button">Open</button>
+          </div>
+        </div>`;
+      }
+
+      function snapshotCardHtml(m) {
+        const s = latestSnapshot(m);
+        const newsCount = articlesForMarket(m).length;
+        const llm = latestLlmForMarket(m.id);
+        return `<div class="card market-card">
+          <h3>${escapeHtml(short(m.question || "Untitled market", 95))}</h3>
+          <div class="price-big">${formatPercent(s.midpoint ?? s.lastTradePrice)}</div>
+          <div class="market-meta">
+            <span class="badge">YES ${formatPrice(s.bestBid)} / ${formatPrice(s.bestAsk)}</span><span class="badge">Spread ${formatPercent(s.spread)}</span><span class="badge">${countdownTo(m.endDate)}</span><span class="badge">Vol ${formatCurrency(num(m.volume))}</span><span class="badge">Liq ${formatCurrency(num(m.liquidity))}</span><span class="badge">News ${newsCount}</span><span class="badge">LLM ${llm ? "flag" : "none"}</span>
+          </div>
+          <div class="chart-wrap"><canvas data-sparkline="${attr(m.id)}"></canvas></div>
+          <div class="actions"><button class="tiny" data-detail="${attr(m.id)}" type="button">Details</button><button class="tiny danger" data-remove="${attr(m.id)}" type="button">Remove</button></div>
+        </div>`;
+      }
+
+      function articleCardHtml(a) {
+        return `<div class="card news-card">
+          <div>
+            <h3><a href="${attr(a.url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(a.title || "Untitled")}</a></h3>
+            <p>${escapeHtml(short(stripHtml(a.summary || ""), 220))}</p>
+          </div>
+          <div class="market-meta"><span class="badge">${escapeHtml(a.sourceName || "source")}</span><span class="badge">${relativeTime(a.publishedAt || a.fetchedAt)}</span><span class="badge">Relevance ${Math.round(num(a.relevance))}</span>${badges(a.matchedTerms || [])}</div>
+        </div>`;
+      }
+
+      function llmCardHtml(row) {
+        const parsed = row.parsed || {};
+        const opps = Array.isArray(parsed.opportunities) ? parsed.opportunities : [];
+        return `<div class="card">
+          <div class="market-meta"><span class="badge">${formatDate(row.createdAt)}</span><span class="badge">model ${escapeHtml(row.model || "")}</span><span class="badge">mood ${escapeHtml(parsed.overallMood || row.overallMood || "")}</span><span class="badge">research only</span></div>
+          <p>${escapeHtml(parsed.summary || row.inputSummary || "")}</p>
+          <div class="grid">${opps.map(o => `<div class="card"><strong>${escapeHtml(o.classification || "watch")}: ${escapeHtml(short(o.question || o.marketId || "", 110))}</strong><p>${escapeHtml(o.why || "")}</p><div class="market-meta"><span class="badge">confidence ${formatPercent(o.confidence)}</span><span class="badge">${escapeHtml(o.timeSensitivity || "")}</span></div></div>`).join("")}</div>
+          <pre>${escapeHtml(row.rawText || JSON.stringify(parsed, null, 2))}</pre>
+        </div>`;
+      }
+
+      function activityScore(m) {
+        const s = latestSnapshot(m);
+        const spreadScore = s.spread == null ? 4 : Math.max(0, 25 * (1 - Math.min(0.25, s.spread) / 0.25));
+        const soon = quickResolveScore(m);
+        const crypto = isCryptoMarket(m) ? 16 : 0;
+        const volume = Math.min(22, Math.log10(num(m.volume) + 1) * 4.4);
+        const liq = Math.min(22, Math.log10(num(m.liquidity) + 1) * 4.8);
+        const news = Math.min(12, marketNewsScore(m));
+        const ws = state.providerStatus.websocket.lastMessage && Date.now() - state.providerStatus.websocket.lastMessage < 120000 ? 6 : 0;
+        const move = recentMovementScore(m);
+        return volume + liq + spreadScore + soon + crypto + news + ws + move;
+      }
+
+      function quickResolveScore(m) {
+        if (!isLiveMarket(m)) return -999;
+        const mins = msUntil(m.endDate) / 60000;
+        if (mins < 0) return -999;
+        if (mins <= 15) return 30;
+        if (mins <= 60) return 18;
+        if (mins <= 1440) return 7;
+        return 0;
+      }
+
+      function newsRelevanceScore(article, market, source = {}) {
+        if (!article || !market) return 0;
+        const lower = haystack(article);
+        let score = 0;
+        for (const term of keywordTerms(market)) if (term.length > 2 && lower.includes(term)) score += cryptoTerms().includes(term) ? 5 : 3;
+        if (isCryptoMarket(market) && /\b(btc|bitcoin|eth|ethereum|crypto|liquidation|spot|etf)\b/i.test(lower)) score += 6;
+        const ageH = Math.max(0, (Date.now() - num(article.publishedAt || article.fetchedAt)) / 3600000);
+        score += Math.max(0, 12 - ageH * 0.5);
+        score *= num(source.credibility, 1);
+        if (/\b(best|top|guide|casino|bonus|airdrop|presale)\b/i.test(lower)) score *= 0.55;
+        return score;
+      }
+
+      function marketNewsScore(m) {
+        return articlesForMarket(m).slice(0, 10).reduce((sum, a) => sum + Math.min(8, num(a.relevance) / 10), 0);
+      }
+
+      function articlesForMarket(m) {
+        return state.news.filter(a => (a.matchedMarkets || []).includes(m.id)).sort((a,b) => newsRelevanceScore(b, m) - newsRelevanceScore(a, m));
+      }
+
+      function topTailoredNews(limit) {
+        const followed = new Set(getFollowedMarkets().map(m => m.id));
+        return [...state.news].map(a => ({ ...a, tailoredScore: num(a.relevance) + (a.matchedMarkets || []).filter(id => followed.has(id)).length * 20 })).filter(a => a.tailoredScore > 0).sort((a,b) => b.tailoredScore - a.tailoredScore).slice(0, limit);
+      }
+
+      function recentMovementScore(m) {
+        const s = latestSnapshot(m);
+        if (s.lastTradePrice == null || s.midpoint == null) return 0;
+        return Math.min(8, Math.abs(s.lastTradePrice - s.midpoint) * 80);
+      }
+
+      function rebuildAssetMap() {
+        state.assetToMarket.clear();
+        for (const m of getFollowedMarkets()) {
+          if (m.yesTokenId) state.assetToMarket.set(String(m.yesTokenId), { marketId: m.id, outcome: "YES" });
+          if (m.noTokenId) state.assetToMarket.set(String(m.noTokenId), { marketId: m.id, outcome: "NO" });
+        }
+      }
+
+      function subscribedAssets() {
+        const assets = [];
+        for (const m of getFollowedMarkets()) for (const id of assetIdsForMarket(m)) assets.push(String(id));
+        return [...new Set(assets)].slice(0, state.settings.maxWebSocketAssetIds);
+      }
+
+      function assetIdsForMarket(m) {
+        return [m.yesTokenId, m.noTokenId, ...(Array.isArray(m.clobTokenIds) ? m.clobTokenIds : [])].filter(Boolean).map(String).filter((v, i, arr) => arr.indexOf(v) === i);
+      }
+
+      function getFollowedMarkets() {
+        return [...state.followed.keys()].map(id => state.markets.get(id)).filter(Boolean);
+      }
+
+      function latestSnapshot(m) {
+        return state.snapshots.get(m.id) || { marketId: m.id, bestBid: null, bestAsk: null, spread: null, midpoint: null, lastTradePrice: nullableNum(Array.isArray(m.raw?.outcomePrices) ? m.raw.outcomePrices[0] : null), volume: m.volume, liquidity: m.liquidity };
+      }
+
+      function latestLlmForMarket(marketId) {
+        for (const row of state.llmAnalyses) {
+          const opp = row.parsed?.opportunities?.find?.(o => o.marketId === marketId);
+          if (opp) return opp;
+          if ((row.marketIds || []).includes(marketId)) return row.parsed || row;
+        }
+        return null;
+      }
+
+      function isLiveMarket(m) { return !!m && m.active !== false && !m.closed && !m.resolved && msUntil(m.endDate) >= 0; }
+      function isCryptoMarket(m) { return /\b(crypto|bitcoin|btc|ethereum|eth|solana|sol|xrp|doge|binance|coinbase|candle|spot|etf|liquidation)\b/i.test(marketHaystack(m)); }
+      function isBitcoinMarket(m) { return /\b(bitcoin|btc|xbt)\b/i.test(marketHaystack(m)); }
+      function isEthereumMarket(m) { return /\b(ethereum|ether|eth)\b/i.test(marketHaystack(m)); }
+      function keywordTerms(m) { return [...new Set((marketHaystack(m).match(/[a-z0-9]{3,}/g) || []).concat(cryptoTerms()))].slice(0, 80); }
+      function cryptoTerms() { return ["bitcoin","btc","ethereum","eth","crypto","spot","etf","liquidation","binance","coinbase","polymarket"]; }
+      function marketHaystack(m) { return [m.question, m.eventTitle, m.slug, m.category, m.resolutionSource, ...(m.tags || []), ...(m.outcomes || [])].join(" ").toLowerCase(); }
+      function haystack(a) { return [a.title, a.summary, a.sourceName, a.url, ...(a.matchedTerms || [])].join(" ").toLowerCase(); }
+
+      async function pruneStaleData() {
+        await pruneNews();
+        const cutoff = Date.now() - state.settings.priceRetentionDays * 86400000;
+        await state.db.marketTicks.where("timestamp").below(cutoff).delete().catch(() => {});
+        await state.db.marketSnapshots.where("timestamp").below(cutoff).delete().catch(() => {});
+        await state.db.orderBooks.where("timestamp").below(cutoff).delete().catch(() => {});
+        const resolvedCutoff = Date.now() - state.settings.resolvedRetentionDays * 86400000;
+        const followed = new Set(state.followed.keys());
+        const oldResolved = [...state.markets.values()].filter(m => !followed.has(m.id) && (m.resolved || m.closed) && num(m.updatedAt) < resolvedCutoff);
+        await state.db.markets.bulkDelete(oldResolved.map(m => m.id));
+        await refreshCaches();
+        showToast("Old market/news data pruned");
+        queueRender();
+      }
+
+      async function pruneNews() {
+        const cutoff = Date.now() - state.settings.newsRetentionDays * 86400000;
+        await state.db.newsArticles.where("fetchedAt").below(cutoff).delete().catch(() => {});
+      }
+
+      function selectTab(id) {
+        document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === id));
+        document.querySelectorAll(".section").forEach(s => s.classList.toggle("active", s.id === id));
+        if (id === "detail") renderDetail();
+        if (id === "debug") renderDebug();
+      }
+
+      function fillSettingsForm() {
+        setVal("settingTheme", state.settings.theme);
+        setVal("settingAutoWs", String(state.settings.autoStartWebSocket));
+        setVal("settingRestSeconds", state.settings.restPollingSeconds);
+        setVal("settingTickSeconds", state.settings.persistTickSeconds);
+        setVal("settingDiscoveryMinutes", state.settings.discoveryRefreshMinutes);
+        setVal("settingNewsMinutes", state.settings.newsRefreshMinutes);
+        setVal("settingPriceDays", state.settings.priceRetentionDays);
+        setVal("settingNewsDays", state.settings.newsRetentionDays);
+        setVal("settingResolvedDays", state.settings.resolvedRetentionDays);
+        setVal("settingPreset", state.settings.defaultExplorerPreset);
+        setVal("settingMaxFollowed", state.settings.maxFollowedMarkets);
+        setVal("settingMaxAssets", state.settings.maxWebSocketAssetIds);
+        setVal("settingProxy", state.settings.rssProxyTemplate);
+        setVal("settingOpenAiEnabled", String(state.settings.openAiEnabled));
+        setVal("settingOpenAiModel", state.settings.openAiModel);
+        setVal("settingLlmInterval", state.settings.llmIntervalMinutes);
+        setVal("settingLlmWindow", state.settings.llmMarketWindowMinutes);
+        setVal("settingLlmNewsMax", state.settings.maxNewsArticlesInLlm);
+        setVal("settingRememberKey", String(state.settings.rememberOpenAiKey));
+        setVal("openAiKey", state.openAiKeyMemory || "");
+      }
+
+      function readSettingsForm() {
+        Object.assign(state.settings, {
+          theme: val("settingTheme"),
+          autoStartWebSocket: val("settingAutoWs") === "true",
+          restPollingSeconds: num(val("settingRestSeconds"), 30),
+          persistTickSeconds: num(val("settingTickSeconds"), 6),
+          discoveryRefreshMinutes: num(val("settingDiscoveryMinutes"), 5),
+          newsRefreshMinutes: num(val("settingNewsMinutes"), 20),
+          priceRetentionDays: num(val("settingPriceDays"), 3),
+          newsRetentionDays: num(val("settingNewsDays"), 7),
+          resolvedRetentionDays: num(val("settingResolvedDays"), 2),
+          defaultExplorerPreset: val("settingPreset"),
+          maxFollowedMarkets: num(val("settingMaxFollowed"), 24),
+          maxWebSocketAssetIds: num(val("settingMaxAssets"), 80),
+          rssProxyTemplate: val("settingProxy") || DEFAULT_SETTINGS.rssProxyTemplate
+        });
+      }
+
+      function readLlmSettingsForm() {
+        Object.assign(state.settings, {
+          openAiEnabled: val("settingOpenAiEnabled") === "true",
+          openAiModel: val("settingOpenAiModel") || DEFAULT_SETTINGS.openAiModel,
+          llmIntervalMinutes: num(val("settingLlmInterval"), 30),
+          llmMarketWindowMinutes: num(val("settingLlmWindow"), 60),
+          maxNewsArticlesInLlm: num(val("settingLlmNewsMax"), 8),
+          rememberOpenAiKey: val("settingRememberKey") === "true"
+        });
+        state.openAiKeyMemory = val("openAiKey");
+        state.providerStatus.llm.state = state.settings.openAiEnabled ? "ready" : "disabled";
+      }
+
+      function applyTheme() {
+        document.body.dataset.theme = state.settings.theme;
+        text("themeToggle", state.settings.theme === "dark" ? "Light mode" : "Dark mode");
+      }
+
+      async function saveNewsSourceFromForm() {
+        const id = normalizeTitle(val("sourceName") || val("sourceUrl"));
+        if (!id || !val("sourceUrl")) return showToast("Source name and URL are required", "warn");
+        await state.db.newsSources.put({ id, name: val("sourceName"), url: val("sourceUrl"), enabled: val("sourceEnabled") === "true", useProxy: val("sourceProxy") === "true", credibility: num(val("sourceCredibility"), 1), type: "rss", updatedAt: Date.now() });
+        clearSourceForm();
+        await refreshCaches();
+        showToast("News source saved");
+        queueRender();
+      }
+
+      function clearSourceForm() { ["sourceName","sourceUrl"].forEach(id => setVal(id, "")); setVal("sourceCredibility", 1); }
+      function editSource(id) { const s = state.newsSources.find(x => x.id === id); if (!s) return; setVal("sourceName", s.name); setVal("sourceUrl", s.url); setVal("sourceEnabled", String(!!s.enabled)); setVal("sourceProxy", String(!!s.useProxy)); setVal("sourceCredibility", s.credibility ?? 1); selectTab("admin"); }
+      async function deleteSource(id) { await state.db.newsSources.delete(id); await refreshCaches(); queueRender(); }
+
+      async function exportAllData() {
+        const data = {};
+        for (const table of state.db.tables) data[table.name] = await table.toArray();
+        data.settings = state.settings;
+        text("importExportBox", JSON.stringify(data, null, 2));
+        showToast("Export ready in text area");
+      }
+
+      async function importAllData() {
+        let data;
+        try { data = JSON.parse(val("importExportBox")); } catch (err) { return showToast("Import JSON is invalid", "bad"); }
+        for (const table of state.db.tables) if (Array.isArray(data[table.name])) await table.bulkPut(data[table.name]);
+        if (data.settings) { state.settings = { ...DEFAULT_SETTINGS, ...data.settings }; saveSettings(); fillSettingsForm(); applyTheme(); }
+        await refreshCaches();
+        showToast("Import complete");
+        queueRender();
+      }
+
+      async function clearMarketHistory() { await Promise.all([state.db.marketSnapshots.clear(), state.db.orderBooks.clear(), state.db.marketTicks.clear()]); await refreshCaches(); queueRender(); showToast("Market history cleared"); }
+      async function clearNewsCache() { await state.db.newsArticles.clear(); await refreshCaches(); queueRender(); showToast("News cache cleared"); }
+      async function clearLlmHistory() { await state.db.llmAnalyses.clear(); await refreshCaches(); queueRender(); showToast("LLM history cleared"); }
+      async function clearAllDb() { await Promise.all(state.db.tables.map(t => t.clear())); await seedDefaultsIfNeeded(); await refreshCaches(); queueRender(); showToast("IndexedDB cleared"); }
+      function clearLocalStorage() { localStorage.removeItem(LS_SETTINGS); localStorage.removeItem(LS_KEY); loadSettings(); fillSettingsForm(); applyTheme(); showToast("localStorage cleared"); }
+      function clearOpenAiKey() { state.openAiKeyMemory = ""; localStorage.removeItem(LS_KEY); setVal("openAiKey", ""); showToast("OpenAI key cleared"); }
+      function exportLlmHistory() { text("importExportBox", JSON.stringify(state.llmAnalyses, null, 2)); selectTab("admin"); showToast("LLM history exported to Admin text area"); }
+
+      function openMarket(id) {
+        const m = state.markets.get(id);
+        if (!m) return;
+        const url = m.slug ? `https://polymarket.com/market/${encodeURIComponent(m.slug)}` : `https://polymarket.com/search?query=${encodeURIComponent(m.question || m.id)}`;
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+
+      async function copyMarketJson(id) {
+        const m = state.markets.get(id);
+        if (!m) return;
+        await navigator.clipboard?.writeText(JSON.stringify(m, null, 2));
+        showToast("Market JSON copied");
+      }
+
+      function maybeAutoLlm() {
+        if (!state.settings.openAiEnabled) return;
+        const latest = state.llmAnalyses[0]?.createdAt || 0;
+        if (Date.now() - latest >= state.settings.llmIntervalMinutes * 60000) runLlmAnalysis("follow-stack");
+      }
+
+      function renderSparklines() {
+        if (!window.Chart) return;
+        document.querySelectorAll("canvas[data-sparkline]").forEach(async canvas => {
+          const marketId = canvas.dataset.sparkline;
+          const since = Date.now() - 6 * 3600000;
+          const ticks = await state.db.marketTicks.where("[marketId+timestamp]").between([marketId, since], [marketId, Date.now()]).toArray().catch(() => []);
+          const key = `spark-${marketId}`;
+          if (state.charts[key]) state.charts[key].destroy();
+          state.charts[key] = new Chart(canvas, {
+            type: "line",
+            data: {
+              labels: ticks.map(t => new Date(t.timestamp).toLocaleTimeString()),
+              datasets: [{ data: ticks.map(t => t.price), borderColor: "#63e8ff", backgroundColor: "rgba(99,232,255,.10)", fill: true, tension: 0.25, pointRadius: 0 }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false }, tooltip: { enabled: false } },
+              scales: { x: { display: false }, y: { display: false, min: 0, max: 1 } }
+            }
+          });
+        });
+      }
+
+      function renderDetailCharts(m) {
+        setTimeout(async () => {
+          const priceEl = document.getElementById("detailPriceChart");
+          const depthEl = document.getElementById("detailDepthChart");
+          if (!priceEl || !window.Chart) return;
+          const since = Date.now() - 24 * 3600000;
+          const ticks = await state.db.marketTicks.where("[marketId+timestamp]").between([m.id, since], [m.id, Date.now()]).toArray().catch(() => []);
+          chart("detailPrice", priceEl, "line", {
+            labels: ticks.map(t => new Date(t.timestamp).toLocaleTimeString()),
+            datasets: [{ label: "YES price", data: ticks.map(t => t.price), borderColor: "#34f59c", tension: 0.25, pointRadius: 0 }]
+          });
+          const book = state.orderBooks.get(m.id)?.YES;
+          const bids = normalizeLevels(book?.bids || []).slice(0, 20);
+          const asks = normalizeLevels(book?.asks || []).slice(0, 20);
+          if (depthEl) chart("detailDepth", depthEl, "bar", {
+            labels: [...bids.map(x => x.price), ...asks.map(x => x.price)],
+            datasets: [{ label: "Depth", data: [...bids.map(x => x.size), ...asks.map(x => x.size)], backgroundColor: [...bids.map(() => "rgba(52,245,156,.55)"), ...asks.map(() => "rgba(255,97,122,.55)")] }]
+          });
+        }, 0);
+      }
+
+      function chart(key, el, type, data) {
+        if (state.charts[key]) state.charts[key].destroy();
+        state.charts[key] = new Chart(el, { type, data, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: getComputedStyle(document.body).getPropertyValue("--text") } } }, scales: { x: { ticks: { color: "#91a8b2", maxTicksLimit: 8 }, grid: { color: "rgba(145,168,178,.12)" } }, y: { ticks: { color: "#91a8b2" }, grid: { color: "rgba(145,168,178,.12)" } } } } });
+      }
+
+      async function fetchJson(url, options) {
+        const res = await fetch(url, options);
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${url}`);
+        return res.json();
+      }
+      async function fetchText(url) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${url}`);
+        return res.text();
+      }
+      function unwrapArray(value) { return Array.isArray(value) ? value : Array.isArray(value?.data) ? value.data : Array.isArray(value?.markets) ? value.markets : Array.isArray(value?.events) ? value.events : value?.results || []; }
+      function parseMaybeJson(v) { if (Array.isArray(v)) return v; if (typeof v !== "string") return v || []; try { return JSON.parse(v); } catch { return String(v).split(",").map(x => x.trim()).filter(Boolean); } }
+      function normalizeTags(v) { if (!v) return []; if (Array.isArray(v)) return v.map(t => typeof t === "string" ? t : t?.label || t?.name || t?.slug).filter(Boolean).map(String); return String(v).split(",").map(s => s.trim()).filter(Boolean); }
+      function normalizeLevels(levels) { return (Array.isArray(levels) ? levels : []).map(x => ({ price: num(x.price ?? x[0]), size: num(x.size ?? x.quantity ?? x[1]) })).filter(x => Number.isFinite(x.price)); }
+      function normalizeTokenIds(tokens) { return (Array.isArray(tokens) ? tokens : []).map(t => typeof t === "string" || typeof t === "number" ? t : t?.token_id || t?.tokenId || t?.asset_id || t?.assetId || t?.id).filter(Boolean).map(String); }
+      function textOf(node, selector) { return node.querySelector(selector)?.textContent?.trim() || ""; }
+      function text(id, value) { if (state.els[id]) state.els[id].textContent = value; }
+      function html(id, value) { if (state.els[id]) state.els[id].innerHTML = value; }
+      function val(id) { return state.els[id]?.value ?? ""; }
+      function setVal(id, value) { if (state.els[id]) state.els[id].value = value; }
+      function num(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
+      function nullableNum(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+      function str(v) { return v == null ? "" : String(v); }
+      function bool(v, fallback) { if (v == null || v === "") return fallback; if (typeof v === "boolean") return v; return !["false","0","no"].includes(String(v).toLowerCase()); }
+      function parseDate(v) { const t = v ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null; }
+      function msUntil(t) { return t ? t - Date.now() : Infinity; }
+      function sameLocalDay(a,b) { return a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+      function formatCurrency(v) { if (!Number.isFinite(v)) return "—"; return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: Math.abs(v) >= 100000 ? "compact" : "standard", maximumFractionDigits: Math.abs(v) >= 1000 ? 0 : 2 }).format(v); }
+      function formatPercent(v) { return v == null || !Number.isFinite(Number(v)) ? "—" : `${(Number(v) * 100).toFixed(1)}%`; }
+      function formatPrice(v) { return v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(3); }
+      function formatDate(v) { return v ? new Date(v).toLocaleString() : "unknown"; }
+      function relativeTime(v) { if (!v) return "never"; const sec = Math.round((Date.now() - num(v)) / 1000); if (Math.abs(sec) < 60) return `${sec}s ago`; const min = Math.round(sec / 60); if (Math.abs(min) < 60) return `${min}m ago`; const hr = Math.round(min / 60); if (Math.abs(hr) < 48) return `${hr}h ago`; return `${Math.round(hr / 24)}d ago`; }
+      function countdownTo(v) { if (!v) return "unknown"; const ms = v - Date.now(); if (ms < 0) return "ended"; const min = Math.floor(ms / 60000); if (min < 60) return `${min}m ${Math.floor((ms % 60000) / 1000)}s`; const hr = Math.floor(min / 60); if (hr < 24) return `${hr}h ${min % 60}m`; return `${Math.floor(hr / 24)}d ${hr % 24}h`; }
+      function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+      function attr(s) { return escapeHtml(s); }
+      function stripHtml(s) { return String(s || "").replace(/<[^>]+>/g, " "); }
+      function short(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+      function normalizeTitle(s) { return String(s || "").toLowerCase().replace(/https?:\/\//, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 120); }
+      function canonicalUrl(u) { try { const x = new URL(u); x.hash = ""; x.searchParams.sort?.(); return x.toString(); } catch { return ""; } }
+      function marketStateBadge(m) { const label = m.resolved ? "resolved" : m.closed ? "closed" : m.active ? "active" : "inactive"; return `<span class="badge ${m.resolved || m.closed ? "resolved" : ""}">${label}</span>`; }
+      function badges(items) { return (items || []).slice(0, 6).map(x => `<span class="badge">${escapeHtml(x)}</span>`).join(""); }
+      function cryptoRandom() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
+      function summarizeLlmInput(input) { return `${input.followedMarkets.length} followed markets, ${input.topExplorerQuickMarkets.length} quick explorer markets, ${input.tailoredNewsStories.length} news stories`; }
+      function showToast(message, tone = "") { const el = document.createElement("div"); el.className = "toast " + tone; el.textContent = message; state.els.toastStack?.appendChild(el); setTimeout(() => el.remove(), 4200); }
+      async function logEvent(level, type, message, extra) { try { await state.db?.fetchLogs.add({ timestamp: Date.now(), level, type, message: extra ? `${message}\n${JSON.stringify(extra, null, 2)}` : message }); } catch {} }
+      function logError(type, err, extra) { logEvent("error", type, String(err?.stack || err?.message || err), extra); }
+    })();
+  </script>
+</body>
+</html>
