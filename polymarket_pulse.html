@@ -385,6 +385,7 @@
           <label>Default explorer preset <select id="settingPreset"><option value="none">None</option><option value="chaos">Scalp-ish Chaos</option><option value="btc5">5-Minute BTC Spot Hunter</option></select></label>
           <label>Max followed markets <input id="settingMaxFollowed" type="number" min="1"></label>
           <label>Max WebSocket asset IDs <input id="settingMaxAssets" type="number" min="2"></label>
+          <label class="span6">Market API proxy template <input id="settingApiProxy" type="text" placeholder="https://api.codetabs.com/v1/proxy?quest={url}"></label>
           <label class="span6">RSS proxy template <input id="settingProxy" type="text" placeholder="https://api.allorigins.win/raw?url={url}"></label>
         </div>
         <div class="actions" style="margin-top: 0.8rem;">
@@ -447,7 +448,7 @@
         <h2>Help</h2>
         <p>Polymarket Pulse is a browser-only research dashboard. It never places trades, never connects wallets, and never asks for Polymarket credentials.</p>
         <div class="grid two">
-          <div class="callout"><strong>API limitations</strong><br>Gamma, CLOB, Data API, RSS, and WebSocket endpoints may change shape, rate-limit, or fail CORS checks. Each provider failure is logged and isolated so the rest of the UI keeps working.</div>
+          <div class="callout"><strong>API limitations</strong><br>Gamma, CLOB, Data API, RSS, and WebSocket endpoints may change shape, rate-limit, or fail CORS checks. Browser REST calls retry through the Market API proxy template when direct fetch is blocked.</div>
           <div class="callout"><strong>Browser key risk</strong><br>OpenAI calls run from your browser. Remembered API keys are stored in localStorage, which is convenient but not secure storage.</div>
           <div class="callout"><strong>Research-only labels</strong><br>LLM output is constrained to educational classifications such as watch, possible mispricing, news-sensitive, too wide, avoid, and stale.</div>
           <div class="callout"><strong>RSS proxy behavior</strong><br>Many news sites block browser RSS fetches. Configure a proxy template containing <code>{url}</code> to fetch those feeds.</div>
@@ -503,6 +504,7 @@
         defaultExplorerPreset: "none",
         maxFollowedMarkets: 24,
         maxWebSocketAssetIds: 80,
+        apiProxyTemplate: "https://api.codetabs.com/v1/proxy?quest={url}",
         rssProxyTemplate: "https://api.allorigins.win/raw?url={url}",
         openAiEnabled: false,
         openAiModel: "gpt-4.1-mini",
@@ -947,6 +949,7 @@
             `${GAMMA}/events?active=true&closed=false&limit=250&order=volume&ascending=false`
           ];
           const payloads = await Promise.allSettled(queries.map(fetchJson));
+          if (payloads.every(p => p.status === "rejected")) throw new Error(payloads.map(p => p.reason?.message || p.reason).join("; "));
           const raw = payloads.flatMap(p => p.status === "fulfilled" ? unwrapArray(p.value) : []);
           const markets = [];
           for (const item of raw) {
@@ -954,6 +957,7 @@
             else markets.push(normalizeMarket(item, item.event || null));
           }
           const deduped = [...new Map(markets.filter(Boolean).map(m => [m.conditionId || m.id, m])).values()];
+          if (!deduped.length) throw new Error("Gamma returned no parseable markets");
           if (deduped.length) await state.db.markets.bulkPut(deduped);
           localStorage.setItem("polymarketPulse.lastDiscovery", String(Date.now()));
           state.providerStatus.gamma = { state: "ok", lastOk: Date.now(), lastError: null };
@@ -1744,6 +1748,7 @@
         setVal("settingPreset", state.settings.defaultExplorerPreset);
         setVal("settingMaxFollowed", state.settings.maxFollowedMarkets);
         setVal("settingMaxAssets", state.settings.maxWebSocketAssetIds);
+        setVal("settingApiProxy", state.settings.apiProxyTemplate);
         setVal("settingProxy", state.settings.rssProxyTemplate);
         setVal("settingOpenAiEnabled", String(state.settings.openAiEnabled));
         setVal("settingOpenAiModel", state.settings.openAiModel);
@@ -1768,6 +1773,7 @@
           defaultExplorerPreset: val("settingPreset"),
           maxFollowedMarkets: num(val("settingMaxFollowed"), 24),
           maxWebSocketAssetIds: num(val("settingMaxAssets"), 80),
+          apiProxyTemplate: val("settingApiProxy") || DEFAULT_SETTINGS.apiProxyTemplate,
           rssProxyTemplate: val("settingProxy") || DEFAULT_SETTINGS.rssProxyTemplate
         });
       }
@@ -1901,14 +1907,43 @@
       }
 
       async function fetchJson(url, options) {
-        const res = await fetch(url, options);
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${url}`);
-        return res.json();
+        try {
+          return await fetchJsonDirect(url, options);
+        } catch (directErr) {
+          if (!shouldProxyApiUrl(url) || !state.settings.apiProxyTemplate) throw directErr;
+          const proxyUrl = applyProxyTemplate(state.settings.apiProxyTemplate, url);
+          try {
+            const value = await fetchJsonDirect(proxyUrl, options);
+            logEvent("warn", "api-proxy", `Direct fetch failed; used proxy for ${url}`, { directError: String(directErr) });
+            return value;
+          } catch (proxyErr) {
+            throw new Error(`Direct and proxy fetch failed for ${url}. Direct: ${directErr?.message || directErr}. Proxy: ${proxyErr?.message || proxyErr}`);
+          }
+        }
       }
+
+      async function fetchJsonDirect(url, options) {
+        const res = await fetch(url, options);
+        const text = await res.text();
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${url}: ${text.slice(0, 240)}`);
+        return parseJsonText(text, url);
+      }
+
       async function fetchText(url) {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${url}`);
         return res.text();
+      }
+      function shouldProxyApiUrl(url) { return String(url).startsWith(GAMMA) || String(url).startsWith(CLOB) || String(url).startsWith(DATA); }
+      function applyProxyTemplate(template, url) { return String(template).replace("{url}", encodeURIComponent(url)).replace("{rawUrl}", url); }
+      function parseJsonText(text, url) {
+        try { return JSON.parse(text); } catch (err) {
+          const trimmed = String(text || "").trim();
+          const start = Math.min(...["[","{"].map(ch => { const idx = trimmed.indexOf(ch); return idx < 0 ? Infinity : idx; }));
+          const end = Math.max(trimmed.lastIndexOf("]"), trimmed.lastIndexOf("}"));
+          if (Number.isFinite(start) && end > start) return JSON.parse(trimmed.slice(start, end + 1));
+          throw new Error(`Invalid JSON from ${url}: ${trimmed.slice(0, 240)}`);
+        }
       }
       function unwrapArray(value) { return Array.isArray(value) ? value : Array.isArray(value?.data) ? value.data : Array.isArray(value?.markets) ? value.markets : Array.isArray(value?.events) ? value.events : value?.results || []; }
       function parseMaybeJson(v) { if (Array.isArray(v)) return v; if (typeof v !== "string") return v || []; try { return JSON.parse(v); } catch { return String(v).split(",").map(x => x.trim()).filter(Boolean); } }
