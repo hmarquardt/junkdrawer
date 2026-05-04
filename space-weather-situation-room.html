@@ -1,0 +1,1115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!--
+    Space Weather Situation Room is a static GitHub Pages compatible app.
+    NASA API keys are stored only in this browser's localStorage under nasaDonki.apiKey.v1.
+    DONKI endpoints used: CME, FLR, GST, SEP, IPS, HSS, RBE, MPC, and notifications.
+  -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Space Weather Situation Room</title>
+  <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="shortcut icon" href="favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Space WX">
+  <link rel="manifest" href="site.webmanifest">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #030711;
+      --bg2: #07111f;
+      --panel: rgba(11, 22, 38, 0.78);
+      --panel2: rgba(17, 34, 55, 0.88);
+      --line: rgba(139, 213, 255, 0.18);
+      --text: #edf8ff;
+      --muted: #9ab1c8;
+      --cyan: #27d7ff;
+      --amber: #ffbf45;
+      --red: #ff4f6d;
+      --violet: #9d7cff;
+      --green: #58e6a6;
+      --shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+      --radius: 8px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 16% 12%, rgba(39, 215, 255, 0.16), transparent 28rem),
+        radial-gradient(circle at 85% 8%, rgba(157, 124, 255, 0.13), transparent 26rem),
+        linear-gradient(135deg, var(--bg), var(--bg2) 48%, #02040a);
+      line-height: 1.45;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        radial-gradient(circle, rgba(255,255,255,0.7) 0 1px, transparent 1.4px),
+        radial-gradient(circle, rgba(39,215,255,0.38) 0 1px, transparent 1.5px);
+      background-size: 120px 120px, 190px 190px;
+      background-position: 0 0, 35px 60px;
+      opacity: 0.2;
+      animation: starDrift 36s linear infinite;
+    }
+
+    @keyframes starDrift {
+      from { transform: translate3d(0, 0, 0); }
+      to { transform: translate3d(-120px, 70px, 0); }
+    }
+
+    .sun {
+      position: fixed;
+      right: min(8vw, 90px);
+      top: 105px;
+      width: 170px;
+      height: 170px;
+      pointer-events: none;
+      border-radius: 50%;
+      background: radial-gradient(circle, #fff5a6 0 9%, #ffc247 19%, #ff5d38 39%, rgba(255, 89, 56, 0.2) 60%, transparent 72%);
+      filter: blur(0.2px);
+      opacity: 0.42;
+      box-shadow: 0 0 45px rgba(255, 100, 50, 0.45), 0 0 110px rgba(255, 191, 69, 0.2);
+      animation: solarPulse 4.8s ease-in-out infinite;
+    }
+
+    @keyframes solarPulse {
+      0%, 100% { transform: scale(1); opacity: 0.38; }
+      50% { transform: scale(1.08); opacity: 0.52; }
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem;
+      border-bottom: 1px solid var(--line);
+      background: rgba(3, 7, 17, 0.82);
+      backdrop-filter: blur(18px);
+    }
+
+    h1, h2, h3 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: clamp(1.35rem, 2.8vw, 2.2rem); text-shadow: 0 0 28px rgba(39, 215, 255, 0.36); }
+    h2 { font-size: 1.12rem; }
+    h3 { font-size: 0.98rem; }
+    p { margin: 0.3rem 0 0; color: var(--muted); }
+    button, input, select {
+      font: inherit;
+    }
+
+    main {
+      width: min(1540px, 100%);
+      margin: 0 auto;
+      padding: 1rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .status-strip, .tabs, .row {
+      display: flex;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.85rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(13, 29, 48, 0.74);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .badge.ok { color: var(--green); border-color: rgba(88,230,166,0.32); }
+    .badge.warn { color: var(--amber); border-color: rgba(255,191,69,0.35); }
+    .badge.bad { color: var(--red); border-color: rgba(255,79,109,0.38); }
+    .badge.hot { color: var(--cyan); border-color: rgba(39,215,255,0.35); }
+
+    .panel, .card {
+      background: linear-gradient(180deg, rgba(14, 30, 51, 0.84), rgba(7, 16, 31, 0.78));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+    .panel { padding: 1rem; }
+    .card { padding: 0.9rem; }
+    .stack { display: grid; gap: 1rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.85rem;
+    }
+    .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+    .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.85rem; }
+
+    label { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.88rem; }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(2, 8, 19, 0.82);
+      color: var(--text);
+      padding: 0.66rem 0.72rem;
+      outline: none;
+    }
+    input:focus, select:focus { border-color: rgba(39, 215, 255, 0.72); box-shadow: 0 0 0 3px rgba(39, 215, 255, 0.1); }
+
+    button, .button {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(25, 49, 75, 0.88);
+      color: var(--text);
+      min-height: 2.35rem;
+      padding: 0.56rem 0.78rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      text-decoration: none;
+    }
+    button:hover, .button:hover { border-color: rgba(39, 215, 255, 0.48); background: rgba(32, 67, 100, 0.9); }
+    button.primary {
+      background: linear-gradient(135deg, rgba(39,215,255,0.95), rgba(88,230,166,0.9));
+      color: #03131c;
+      border-color: transparent;
+      font-weight: 800;
+    }
+    button.danger { color: var(--red); }
+
+    .tabs { margin: 1rem 0; }
+    .tab {
+      min-height: 2.35rem;
+      padding: 0.55rem 0.75rem;
+    }
+    .tab.active {
+      color: #03131c;
+      background: var(--cyan);
+      border-color: transparent;
+      font-weight: 800;
+    }
+
+    .section { display: none; }
+    .section.active { display: grid; gap: 1rem; }
+    .small { font-size: 0.84rem; }
+    .muted { color: var(--muted); }
+    .mono { font-family: var(--mono); }
+    .metric strong {
+      display: block;
+      font-size: clamp(1.55rem, 3vw, 2.35rem);
+      line-height: 1.05;
+    }
+    .metric span { color: var(--muted); font-size: 0.85rem; }
+    .glow-cyan { box-shadow: 0 0 28px rgba(39, 215, 255, 0.12); }
+    .glow-amber { box-shadow: 0 0 28px rgba(255, 191, 69, 0.12); }
+    .glow-red { box-shadow: 0 0 32px rgba(255, 79, 109, 0.14); }
+    .glow-violet { box-shadow: 0 0 28px rgba(157, 124, 255, 0.13); }
+
+    .endpoint-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.45rem;
+    }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.45rem;
+      color: var(--text);
+      background: rgba(2, 8, 19, 0.45);
+    }
+    .check input { width: auto; }
+
+    .chart {
+      width: 100%;
+      min-height: 210px;
+      display: grid;
+      gap: 0.48rem;
+      align-content: center;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr) 44px;
+      gap: 0.55rem;
+      align-items: center;
+      font-size: 0.84rem;
+    }
+    .bar-track {
+      height: 0.75rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--cyan);
+      box-shadow: 0 0 16px currentColor;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 0.7rem;
+      position: relative;
+    }
+    .event-card {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 0.7rem;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--cyan);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+      background: rgba(5, 14, 27, 0.7);
+      cursor: pointer;
+    }
+    .event-card:hover { background: rgba(10, 27, 48, 0.92); }
+    .event-dot {
+      width: 0.9rem;
+      height: 0.9rem;
+      border-radius: 50%;
+      margin-top: 0.28rem;
+      background: var(--cyan);
+      box-shadow: 0 0 16px currentColor;
+    }
+    .event-title { font-weight: 800; }
+    .event-summary {
+      color: var(--muted);
+      margin-top: 0.15rem;
+      overflow-wrap: anywhere;
+    }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th, td { text-align: left; padding: 0.62rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); background: rgba(255,255,255,0.04); }
+    tr:last-child td { border-bottom: 0; }
+
+    .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 0.45rem;
+    }
+    .day {
+      min-height: 78px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(7, 18, 33, 0.74);
+      padding: 0.45rem;
+      cursor: pointer;
+    }
+    .day.empty { opacity: 0.25; cursor: default; }
+    .day.active { outline: 2px solid var(--cyan); }
+    .heat-1 { box-shadow: inset 0 0 20px rgba(39,215,255,0.13); }
+    .heat-2 { box-shadow: inset 0 0 28px rgba(255,191,69,0.2); }
+    .heat-3 { box-shadow: inset 0 0 35px rgba(255,79,109,0.28); }
+
+    pre, .json-box {
+      margin: 0;
+      max-height: 540px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(1, 6, 15, 0.88);
+      color: #d9f5ff;
+      padding: 0.85rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .notice {
+      display: none;
+      border-left: 3px solid var(--amber);
+      background: rgba(255, 191, 69, 0.08);
+      color: var(--muted);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 0.75rem;
+    }
+    .notice.active { display: block; }
+
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      background: rgba(0,0,0,0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+    }
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      z-index: 100;
+      width: min(620px, 100%);
+      height: 100vh;
+      overflow: auto;
+      padding: 1rem;
+      background: rgba(4, 11, 22, 0.96);
+      border-left: 1px solid var(--line);
+      box-shadow: -30px 0 80px rgba(0,0,0,0.45);
+      transform: translateX(100%);
+      transition: transform 0.2s ease;
+    }
+    body.drawer-open .drawer { transform: translateX(0); }
+    body.drawer-open .drawer-backdrop { opacity: 1; pointer-events: auto; }
+
+    .toast-wrap {
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      z-index: 120;
+      display: grid;
+      gap: 0.55rem;
+      max-width: min(420px, calc(100vw - 2rem));
+    }
+    .toast {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(8, 18, 32, 0.96);
+      box-shadow: var(--shadow);
+      padding: 0.8rem 0.9rem;
+    }
+    .toast.error { border-color: rgba(255,79,109,0.48); }
+    .empty {
+      border: 1px dashed var(--line);
+      border-radius: var(--radius);
+      padding: 1.1rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .body-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+    mark {
+      background: rgba(255, 191, 69, 0.25);
+      color: var(--text);
+      border-radius: 4px;
+      padding: 0 0.2rem;
+    }
+
+    @media (max-width: 1060px) {
+      .grid { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      header { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      main { padding: 0.75rem; }
+      .cards, .two, .three { grid-template-columns: 1fr; }
+      .endpoint-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .event-card { grid-template-columns: auto minmax(0, 1fr); }
+      .event-card .badge { grid-column: 2; width: max-content; }
+      .bar-row { grid-template-columns: 68px minmax(0, 1fr) 34px; }
+      .sun { width: 110px; height: 110px; right: 1rem; top: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sun" aria-hidden="true"></div>
+  <header>
+    <div>
+      <h1>Space Weather Situation Room</h1>
+      <p>Real-time-ish solar drama from NASA DONKI</p>
+    </div>
+    <div class="status-strip">
+      <span id="apiStatus" class="badge warn">API idle</span>
+      <span id="lastFetch" class="badge">Last fetch: never</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <aside class="panel stack">
+        <h2>Mission Controls</h2>
+        <label>NASA API key
+          <input id="apiKey" type="password" autocomplete="off" placeholder="DEMO_KEY">
+        </label>
+        <div class="row">
+          <button id="saveKeyBtn" type="button">Save API key</button>
+          <button id="useDemoBtn" type="button">Use DEMO_KEY</button>
+        </div>
+        <div class="two">
+          <label>Start date
+            <input id="startDate" type="date">
+          </label>
+          <label>End date
+            <input id="endDate" type="date">
+          </label>
+        </div>
+        <div class="row">
+          <button class="quick" type="button" data-range="1">Last 24 hours</button>
+          <button class="quick" type="button" data-range="7">Last 7 days</button>
+          <button class="quick" type="button" data-range="30">Last 30 days</button>
+          <button class="quick" type="button" data-range="month">This month</button>
+        </div>
+        <div>
+          <h3>DONKI endpoints</h3>
+          <div id="endpointSelector" class="endpoint-list"></div>
+        </div>
+        <div class="row">
+          <button id="fetchBtn" class="primary" type="button">Fetch / Refresh</button>
+          <button id="clearCacheBtn" type="button">Clear cache</button>
+          <button id="exportBtn" type="button">Export JSON</button>
+        </div>
+        <div id="endpointStatus" class="stack"></div>
+        <div id="errorPanel" class="notice"></div>
+      </aside>
+
+      <section class="stack">
+        <nav class="tabs" aria-label="Views">
+          <button class="tab active" type="button" data-tab="dashboard">Dashboard</button>
+          <button class="tab" type="button" data-tab="timeline">Timeline</button>
+          <button class="tab" type="button" data-tab="cme">CME Tracker</button>
+          <button class="tab" type="button" data-tab="flare">Solar Flare</button>
+          <button class="tab" type="button" data-tab="calendar">Storm Calendar</button>
+          <button class="tab" type="button" data-tab="notifications">Notifications</button>
+          <button class="tab" type="button" data-tab="raw">Raw Explorer</button>
+        </nav>
+
+        <section id="dashboard" class="section active"></section>
+
+        <section id="timeline" class="section">
+          <div class="panel stack">
+            <div class="three">
+              <label>Search timeline
+                <input id="timelineSearch" type="search" placeholder="flare, CME, warning, region...">
+              </label>
+              <label>Filter type
+                <select id="typeFilter"></select>
+              </label>
+              <label>Sort
+                <select id="sortOrder">
+                  <option value="desc">Newest first</option>
+                  <option value="asc">Oldest first</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <span id="selectedDayBadge" class="badge">No day filter</span>
+              <button id="clearDayBtn" type="button">Clear day filter</button>
+            </div>
+          </div>
+          <div id="timelineList" class="timeline"></div>
+        </section>
+
+        <section id="cme" class="section"></section>
+        <section id="flare" class="section"></section>
+        <section id="calendar" class="section"></section>
+        <section id="notifications" class="section"></section>
+        <section id="raw" class="section"></section>
+      </section>
+    </div>
+  </main>
+
+  <div id="drawerBackdrop" class="drawer-backdrop"></div>
+  <aside id="drawer" class="drawer" aria-label="Event details"></aside>
+  <div id="toastWrap" class="toast-wrap" aria-live="polite"></div>
+
+  <script>
+    "use strict";
+
+    const API_KEY_STORAGE = "nasaDonki.apiKey.v1";
+    const CACHE_PREFIX = "nasaDonki.cache.v1";
+    const CACHE_TTL_MS = 30 * 60 * 1000;
+    const BASE_URL = "https://api.nasa.gov/DONKI";
+
+    const DONKI_ENDPOINTS = {
+      CME: { key: "CME", label: "Coronal Mass Ejection", color: "#27d7ff", icon: "CME", timeFields: ["startTime"], idFields: ["activityID", "id"] },
+      FLR: { key: "FLR", label: "Solar Flare", color: "#ffbf45", icon: "FLR", timeFields: ["beginTime", "peakTime"], idFields: ["flrID", "activityID", "id"] },
+      GST: { key: "GST", label: "Geomagnetic Storm", color: "#ff4f6d", icon: "GST", timeFields: ["startTime"], idFields: ["gstID", "activityID", "id"] },
+      SEP: { key: "SEP", label: "Solar Energetic Particle", color: "#9d7cff", icon: "SEP", timeFields: ["eventTime", "startTime"], idFields: ["sepID", "activityID", "id"] },
+      IPS: { key: "IPS", label: "Interplanetary Shock", color: "#58e6a6", icon: "IPS", timeFields: ["eventTime", "shockTime"], idFields: ["ipsID", "activityID", "id"] },
+      HSS: { key: "HSS", label: "High Speed Stream", color: "#6ab7ff", icon: "HSS", timeFields: ["eventTime", "startTime"], idFields: ["hssID", "activityID", "id"] },
+      RBE: { key: "RBE", label: "Radiation Belt Enhancement", color: "#ff8ad4", icon: "RBE", timeFields: ["eventTime"], idFields: ["rbeID", "activityID", "id"] },
+      MPC: { key: "MPC", label: "Magnetopause Crossing", color: "#c7ff72", icon: "MPC", timeFields: ["eventTime"], idFields: ["mpcID", "activityID", "id"] },
+      notifications: { key: "notifications", label: "Notifications", color: "#ffffff", icon: "NOTE", timeFields: ["messageIssueTime"], idFields: ["messageID", "id"] }
+    };
+
+    const state = {
+      apiKey: "DEMO_KEY",
+      selectedEndpoints: Object.keys(DONKI_ENDPOINTS),
+      rawByEndpoint: {},
+      events: [],
+      endpointStatus: {},
+      errors: [],
+      lastFetch: null,
+      selectedDay: "",
+      activeTab: "dashboard"
+    };
+
+    const el = {};
+    document.addEventListener("DOMContentLoaded", initApp);
+
+    function initApp() {
+      document.querySelectorAll("[id]").forEach(node => { el[node.id] = node; });
+      state.apiKey = localStorage.getItem(API_KEY_STORAGE) || "DEMO_KEY";
+      el.apiKey.value = state.apiKey;
+      setDefaultDates();
+      renderEndpointSelector();
+      populateTypeFilter();
+      bindEvents();
+      renderAll();
+      updateStatus("idle", "API idle");
+    }
+
+    function bindEvents() {
+      el.saveKeyBtn.addEventListener("click", saveApiKey);
+      el.useDemoBtn.addEventListener("click", () => { el.apiKey.value = "DEMO_KEY"; saveApiKey(); });
+      el.fetchBtn.addEventListener("click", () => fetchAll(true));
+      el.clearCacheBtn.addEventListener("click", clearCache);
+      el.exportBtn.addEventListener("click", exportJson);
+      el.timelineSearch.addEventListener("input", () => { renderTimeline(); renderNotifications(); });
+      el.typeFilter.addEventListener("change", renderTimeline);
+      el.sortOrder.addEventListener("change", renderTimeline);
+      el.clearDayBtn.addEventListener("click", () => { state.selectedDay = ""; renderTimeline(); renderStormCalendar(); });
+      el.drawerBackdrop.addEventListener("click", closeDrawer);
+      document.addEventListener("keydown", event => { if (event.key === "Escape") closeDrawer(); });
+      document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
+      document.querySelectorAll(".quick").forEach(btn => btn.addEventListener("click", () => setQuickRange(btn.dataset.range)));
+      el.endpointSelector.addEventListener("change", () => {
+        state.selectedEndpoints = [...el.endpointSelector.querySelectorAll("input:checked")].map(input => input.value);
+      });
+    }
+
+    function setDefaultDates() {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 7);
+      el.startDate.value = toISODate(start);
+      el.endDate.value = toISODate(end);
+    }
+
+    function setQuickRange(range) {
+      const end = new Date();
+      const start = new Date();
+      if (range === "month") {
+        start.setDate(1);
+      } else {
+        start.setDate(end.getDate() - Number(range));
+      }
+      el.startDate.value = toISODate(start);
+      el.endDate.value = toISODate(end);
+    }
+
+    function saveApiKey() {
+      state.apiKey = (el.apiKey.value || "DEMO_KEY").trim() || "DEMO_KEY";
+      try {
+        localStorage.setItem(API_KEY_STORAGE, state.apiKey);
+        showToast("API key saved locally.");
+      } catch (error) {
+        showToast("Could not save API key locally.", true);
+      }
+    }
+
+    function renderEndpointSelector() {
+      el.endpointSelector.innerHTML = Object.values(DONKI_ENDPOINTS).map(meta => (
+        '<label class="check"><input type="checkbox" value="' + meta.key + '" checked> <span style="color:' + meta.color + '">' + meta.icon + '</span> ' + meta.key + '</label>'
+      )).join("");
+    }
+
+    function populateTypeFilter() {
+      el.typeFilter.innerHTML = '<option value="all">All event types</option>' + Object.values(DONKI_ENDPOINTS).map(meta => (
+        '<option value="' + meta.key + '">' + meta.key + " - " + meta.label + '</option>'
+      )).join("");
+    }
+
+    function switchTab(id) {
+      state.activeTab = id;
+      document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.tab === id));
+      document.querySelectorAll(".section").forEach(section => section.classList.toggle("active", section.id === id));
+      renderAll();
+    }
+
+    async function fetchAll(forceRefresh) {
+      const startDate = el.startDate.value;
+      const endDate = el.endDate.value;
+      if (!isValidDateRange(startDate, endDate)) {
+        showToast("Invalid date range. Mission control refuses to time travel badly.", true);
+        return;
+      }
+      saveApiKey();
+      state.selectedEndpoints = [...el.endpointSelector.querySelectorAll("input:checked")].map(input => input.value);
+      if (!state.selectedEndpoints.length) {
+        showToast("Select at least one DONKI endpoint.", true);
+        return;
+      }
+      updateStatus("loading", "Fetching DONKI telemetry");
+      state.errors = [];
+      state.endpointStatus = {};
+      renderEndpointStatus();
+
+      const results = await Promise.allSettled(state.selectedEndpoints.map(key => fetchEndpoint(key, startDate, endDate, forceRefresh)));
+      results.forEach((result, index) => {
+        const key = state.selectedEndpoints[index];
+        if (result.status === "fulfilled") {
+          state.rawByEndpoint[key] = result.value.records;
+          state.endpointStatus[key] = { status: result.value.fromCache ? "cached" : (result.value.records.length ? "loaded" : "empty"), count: result.value.records.length, fetchedAt: result.value.fetchedAt };
+        } else {
+          state.rawByEndpoint[key] = state.rawByEndpoint[key] || [];
+          state.endpointStatus[key] = { status: "failed", count: 0, message: result.reason.message };
+          state.errors.push({ endpoint: key, message: result.reason.message });
+        }
+      });
+      rebuildEvents();
+      state.lastFetch = new Date().toISOString();
+      el.lastFetch.textContent = "Last fetch: " + formatDate(state.lastFetch);
+      updateStatus(state.errors.length ? "warn" : "ok", state.errors.length ? "Partial data loaded" : "DONKI data loaded");
+      renderAll();
+      showToast(state.errors.length ? "Solar drama loaded with a few static bursts." : "Solar drama detected.");
+    }
+
+    async function fetchEndpoint(endpoint, startDate, endDate, forceRefresh) {
+      const cached = readCache(endpoint, startDate, endDate);
+      if (cached && !forceRefresh) return { records: cached.records, fromCache: true, fetchedAt: cached.fetchedAt };
+      const url = BASE_URL + "/" + endpoint + "?startDate=" + encodeURIComponent(startDate) + "&endDate=" + encodeURIComponent(endDate) + "&api_key=" + encodeURIComponent(state.apiKey || "DEMO_KEY");
+      const response = await fetch(url);
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        let message = "HTTP " + response.status;
+        if (response.status === 403 || response.status === 429) message += " - API key limit or access problem";
+        throw new Error(message + (text ? ": " + text.slice(0, 180) : ""));
+      }
+      const data = await response.json();
+      const records = Array.isArray(data) ? data : [];
+      writeCache(endpoint, startDate, endDate, records);
+      return { records, fromCache: false, fetchedAt: new Date().toISOString() };
+    }
+
+    function rebuildEvents() {
+      state.events = Object.entries(state.rawByEndpoint)
+        .flatMap(([type, records]) => (records || []).map(record => normalizeEvent(type, record)))
+        .sort((a, b) => parseDonkiTime(a.time) - parseDonkiTime(b.time));
+    }
+
+    function normalizeEvent(type, raw) {
+      const meta = DONKI_ENDPOINTS[type] || DONKI_ENDPOINTS.CME;
+      const time = getEventTime(type, raw);
+      const id = getEventId(type, raw) || type + "-" + hashText(JSON.stringify(raw).slice(0, 500));
+      const severity = estimateSeverity(type, raw);
+      return {
+        id,
+        type,
+        label: meta.label,
+        time,
+        endTime: raw.endTime || raw.endTimeUTC || "",
+        title: buildTitle(type, raw, id),
+        summary: buildSummary(type, raw),
+        severity,
+        raw,
+        linkedEvents: Array.isArray(raw.linkedEvents) ? raw.linkedEvents : []
+      };
+    }
+
+    function getEventTime(type, raw) {
+      const meta = DONKI_ENDPOINTS[type];
+      for (const field of meta.timeFields) if (raw && raw[field]) return raw[field];
+      return raw && (raw.startTime || raw.eventTime || raw.beginTime || raw.messageIssueTime || raw.peakTime) || "";
+    }
+
+    function getEventId(type, raw) {
+      const meta = DONKI_ENDPOINTS[type];
+      for (const field of meta.idFields) if (raw && raw[field]) return String(raw[field]);
+      return "";
+    }
+
+    function buildTitle(type, raw, id) {
+      if (type === "FLR") return "Solar flare " + (raw.classType || id);
+      if (type === "CME") return "CME " + (raw.activityID || id);
+      if (type === "GST") return "Geomagnetic storm " + (raw.gstID || id);
+      if (type === "notifications") return raw.messageType || "DONKI notification";
+      return DONKI_ENDPOINTS[type].label + " " + id;
+    }
+
+    function buildSummary(type, raw) {
+      if (type === "FLR") return joinParts([raw.classType, raw.sourceLocation, raw.activeRegionNum && "AR " + raw.activeRegionNum, raw.note]);
+      if (type === "CME") return joinParts([raw.sourceLocation, raw.activeRegionNum && "AR " + raw.activeRegionNum, fastestAnalysis(raw) && fastestAnalysis(raw).speed + " km/s", raw.note]);
+      if (type === "notifications") return (raw.messageBody || "").slice(0, 260);
+      return raw.note || raw.messageBody || raw.link || "No summary supplied. Plasma gossip is sparse.";
+    }
+
+    function estimateSeverity(type, raw) {
+      if (type === "FLR") return classifyFlare(raw.classType).score;
+      if (type === "CME") return Math.min(10, Math.round(((fastestAnalysis(raw)?.speed || 0) / 220)));
+      if (type === "GST") return 6;
+      if (type === "SEP") return 5;
+      if (type === "notifications" && /warning|alert|watch|major|severe/i.test(raw.messageBody || raw.messageType || "")) return 7;
+      return 2;
+    }
+
+    function classifyFlare(classType) {
+      const text = String(classType || "").trim().toUpperCase();
+      const letter = text[0] || "";
+      const value = parseFloat(text.slice(1)) || 1;
+      const base = { X: 80, M: 50, C: 25, B: 10, A: 4 }[letter] || 1;
+      return { classLetter: letter || "Unknown", rank: base + value, score: Math.min(10, Math.round((base + value) / 10)) };
+    }
+
+    function computeDramaScore(events) {
+      // Transparent scoring: every event adds a small baseline; severity-ish extracted fields add heat.
+      // Flares use class rank, CMEs use speed, warnings/alerts get extra weight.
+      const base = events.length * 1.5;
+      const severity = events.reduce((sum, event) => sum + (event.severity || 0), 0);
+      const score = Math.round(base + severity);
+      let mood = "Quiet";
+      let copy = "The Sun is chill.";
+      if (score >= 15) { mood = "Active"; copy = "Solar drama detected."; }
+      if (score >= 35) { mood = "Spicy"; copy = "Plasma gossip from the angry star."; }
+      if (score >= 70) { mood = "Angry Star Mode"; copy = "Angry Star Mode. Keep the dashboards glowing."; }
+      return { score, mood, copy };
+    }
+
+    function renderAll() {
+      renderEndpointStatus();
+      renderErrors();
+      renderDashboard();
+      renderTimeline();
+      renderCmeTracker();
+      renderFlareTab();
+      renderStormCalendar();
+      renderNotifications();
+      renderRawExplorer();
+    }
+
+    function renderDashboard() {
+      const counts = countBy(state.events, "type");
+      const daily = countByDay(state.events);
+      const mostActive = Object.entries(daily).sort((a, b) => b[1] - a[1])[0];
+      const drama = computeDramaScore(state.events);
+      el.dashboard.innerHTML = [
+        '<div class="cards">',
+        metric("Total events", state.events.length, "All selected DONKI records", "glow-cyan"),
+        metric("Solar flares", counts.FLR || 0, "FLR endpoint", "glow-amber"),
+        metric("CMEs", counts.CME || 0, "Coronal mass ejections", "glow-violet"),
+        metric("Geomagnetic storms", counts.GST || 0, "GST endpoint", "glow-red"),
+        metric("Notifications", counts.notifications || 0, "DONKI dispatches", "glow-cyan"),
+        metric("Most active day", mostActive ? mostActive[0] : "n/a", mostActive ? mostActive[1] + " events" : "No activity", "glow-amber"),
+        metric("Drama score", drama.score, "Highest current score", "glow-red"),
+        '<div class="card metric glow-violet"><span>Sun Mood</span><strong>' + esc(drama.mood) + '</strong><p>' + esc(drama.copy) + '</p></div>',
+        '</div>',
+        '<div class="two">',
+        '<div class="panel"><h2>Event counts by type</h2><div class="chart">' + renderBars(counts, DONKI_ENDPOINTS) + '</div></div>',
+        '<div class="panel"><h2>Event counts by day</h2><div class="chart">' + renderBars(daily) + '</div></div>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderTimeline() {
+      const events = getFilteredEvents();
+      el.selectedDayBadge.textContent = state.selectedDay ? "Day filter: " + state.selectedDay : "No day filter";
+      if (!events.length) {
+        el.timelineList.innerHTML = '<div class="empty">No timeline events. The Sun is chill, or the filters are too strict.</div>';
+        return;
+      }
+      el.timelineList.innerHTML = events.map(eventCardHtml).join("");
+      el.timelineList.querySelectorAll("[data-event-id]").forEach(card => card.addEventListener("click", () => openEventDrawer(card.dataset.eventId)));
+    }
+
+    function renderCmeTracker() {
+      const cmes = state.events.filter(event => event.type === "CME");
+      const speedRows = cmes.map(event => ({ event, analysis: fastestAnalysis(event.raw) })).filter(item => item.analysis && item.analysis.speed).sort((a, b) => b.analysis.speed - a.analysis.speed);
+      el.cme.innerHTML = [
+        '<div class="panel stack"><h2>CME Tracker</h2>',
+        speedRows.length ? '<h3>Fastest CMEs</h3><div class="chart">' + renderBars(Object.fromEntries(speedRows.slice(0, 8).map(item => [item.event.id, item.analysis.speed]))) + '</div>' : '<div class="empty">No CME speed data in the current range.</div>',
+        '<div class="table-wrap"><table><thead><tr><th>Activity ID</th><th>Start</th><th>Source</th><th>Active Region</th><th>Fastest Analysis</th><th>Note</th></tr></thead><tbody>',
+        cmes.length ? cmes.map(event => {
+          const a = fastestAnalysis(event.raw) || {};
+          return '<tr data-row-event="' + esc(event.id) + '"><td>' + esc(event.raw.activityID || event.id) + '</td><td>' + esc(formatDate(event.raw.startTime)) + '</td><td>' + esc(event.raw.sourceLocation || "n/a") + '</td><td>' + esc(event.raw.activeRegionNum || "n/a") + '</td><td>' + esc(joinParts([a.catalog, a.type, a.speed && a.speed + " km/s", a.latitude && "lat " + a.latitude, a.longitude && "lon " + a.longitude, a.halfAngle && "half-angle " + a.halfAngle])) + '</td><td>' + esc(event.raw.note || "") + '</td></tr>';
+        }).join("") : '<tr><td colspan="6" class="muted">No CMEs loaded.</td></tr>',
+        '</tbody></table></div></div>'
+      ].join("");
+      el.cme.querySelectorAll("[data-row-event]").forEach(row => row.addEventListener("click", () => openEventDrawer(row.dataset.rowEvent)));
+    }
+
+    function renderFlareTab() {
+      const flares = state.events.filter(event => event.type === "FLR");
+      const distribution = {};
+      flares.forEach(event => {
+        const letter = classifyFlare(event.raw.classType).classLetter;
+        distribution[letter] = (distribution[letter] || 0) + 1;
+      });
+      const sorted = flares.slice().sort((a, b) => classifyFlare(b.raw.classType).rank - classifyFlare(a.raw.classType).rank);
+      el.flare.innerHTML = [
+        '<div class="two">',
+        '<div class="panel"><h2>Flare class distribution</h2><div class="chart">' + renderBars(distribution) + '</div></div>',
+        '<div class="panel"><h2>Top flares</h2><div class="timeline">' + (sorted.slice(0, 8).map(eventCardHtml).join("") || '<div class="empty">No flares loaded.</div>') + '</div></div>',
+        '</div>',
+        '<div class="panel"><h2>Solar Flare Table</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Class</th><th>Begin</th><th>Peak</th><th>End</th><th>Source</th><th>Instruments</th></tr></thead><tbody>',
+        flares.length ? flares.map(event => '<tr data-row-event="' + esc(event.id) + '"><td>' + esc(event.raw.flrID || event.id) + '</td><td>' + esc(event.raw.classType || "n/a") + '</td><td>' + esc(formatDate(event.raw.beginTime)) + '</td><td>' + esc(formatDate(event.raw.peakTime)) + '</td><td>' + esc(formatDate(event.raw.endTime)) + '</td><td>' + esc(event.raw.sourceLocation || "n/a") + '</td><td>' + esc(formatInstruments(event.raw.instruments)) + '</td></tr>').join("") : '<tr><td colspan="7" class="muted">No solar flares loaded.</td></tr>',
+        '</tbody></table></div></div>'
+      ].join("");
+      el.flare.querySelectorAll("[data-event-id], [data-row-event]").forEach(node => node.addEventListener("click", () => openEventDrawer(node.dataset.eventId || node.dataset.rowEvent)));
+    }
+
+    function renderStormCalendar() {
+      const start = parseDateOnly(el.startDate.value) || new Date();
+      const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+      const monthEnd = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+      const stormish = state.events.filter(event => ["GST", "SEP", "IPS", "HSS", "MPC"].includes(event.type));
+      const daily = countByDay(stormish);
+      const blanks = monthStart.getDay();
+      const cells = [];
+      for (let i = 0; i < blanks; i += 1) cells.push('<div class="day empty"></div>');
+      for (let day = 1; day <= monthEnd.getDate(); day += 1) {
+        const date = toISODate(new Date(monthStart.getFullYear(), monthStart.getMonth(), day));
+        const count = daily[date] || 0;
+        const heat = count >= 4 ? "heat-3" : count >= 2 ? "heat-2" : count ? "heat-1" : "";
+        cells.push('<button class="day ' + heat + (state.selectedDay === date ? " active" : "") + '" type="button" data-day="' + date + '"><strong>' + day + '</strong><p>' + count + ' event' + (count === 1 ? "" : "s") + '</p></button>');
+      }
+      el.calendar.innerHTML = '<div class="panel stack"><div class="row"><h2>Storm Calendar</h2><span class="badge">GST and related activity</span></div><div class="calendar">' + cells.join("") + '</div></div>';
+      el.calendar.querySelectorAll("[data-day]").forEach(day => day.addEventListener("click", () => { state.selectedDay = day.dataset.day; switchTab("timeline"); renderTimeline(); }));
+    }
+
+    function renderNotifications() {
+      const query = (el.timelineSearch.value || "").toLowerCase();
+      const notes = state.events.filter(event => event.type === "notifications").filter(event => !query || JSON.stringify(event.raw).toLowerCase().includes(query));
+      el.notifications.innerHTML = '<div class="panel stack"><h2>Notifications</h2>' + (notes.length ? notes.map(event => {
+        const body = highlightTerms(esc(event.raw.messageBody || "No message body."));
+        return '<article class="card stack" data-event-id="' + esc(event.id) + '"><div class="row"><span class="badge hot">' + esc(event.raw.messageType || "Notification") + '</span><span class="badge">' + esc(formatDate(event.raw.messageIssueTime)) + '</span><span class="badge">' + esc(event.raw.messageID || event.id) + '</span></div><div class="body-text">' + body + '</div></article>';
+      }).join("") : '<div class="empty">No DONKI notifications in this range.</div>') + '</div>';
+      el.notifications.querySelectorAll("[data-event-id]").forEach(card => card.addEventListener("click", () => openEventDrawer(card.dataset.eventId)));
+    }
+
+    function renderRawExplorer() {
+      const merged = JSON.stringify(state.events, null, 2);
+      const raw = JSON.stringify(state.rawByEndpoint, null, 2);
+      el.raw.innerHTML = '<div class="panel stack"><div class="row"><h2>Raw Explorer</h2><button id="copyMergedBtn" type="button">Copy JSON</button><button id="exportRawBtn" type="button">Export JSON</button></div><h3>Normalized merged event JSON</h3><pre id="mergedJson">' + esc(merged) + '</pre><h3>Endpoint-specific raw JSON</h3><pre>' + esc(raw) + '</pre></div>';
+      document.getElementById("copyMergedBtn").addEventListener("click", () => copyJson(merged));
+      document.getElementById("exportRawBtn").addEventListener("click", exportJson);
+    }
+
+    function openEventDrawer(id) {
+      const event = state.events.find(item => item.id === id);
+      if (!event) return;
+      const important = extractImportantFields(event);
+      el.drawer.innerHTML = '<div class="stack"><div class="row"><button id="closeDrawerBtn" type="button">Close</button><span class="badge" style="color:' + DONKI_ENDPOINTS[event.type].color + '">' + event.type + '</span></div><h2>' + esc(event.title) + '</h2><p>' + esc(event.summary) + '</p><div class="card"><h3>Normalized Summary</h3><p><strong>Time:</strong> ' + esc(formatDate(event.time)) + '</p><p><strong>Severity-ish:</strong> ' + esc(event.severity) + '/10</p><p><strong>Linked events:</strong> ' + esc(formatLinkedEvents(event.linkedEvents)) + '</p></div><div class="card"><h3>Important Fields</h3>' + important + '</div><details class="card"><summary>Raw JSON</summary><pre>' + esc(JSON.stringify(event.raw, null, 2)) + '</pre></details></div>';
+      document.body.classList.add("drawer-open");
+      document.getElementById("closeDrawerBtn").addEventListener("click", closeDrawer);
+    }
+
+    function closeDrawer() {
+      document.body.classList.remove("drawer-open");
+    }
+
+    function getFilteredEvents() {
+      const query = (el.timelineSearch.value || "").toLowerCase();
+      const type = el.typeFilter.value || "all";
+      const sort = el.sortOrder.value || "desc";
+      return state.events.filter(event => {
+        if (type !== "all" && event.type !== type) return false;
+        if (state.selectedDay && toISODate(parseDonkiTime(event.time)) !== state.selectedDay) return false;
+        if (query && !JSON.stringify({ title: event.title, summary: event.summary, raw: event.raw }).toLowerCase().includes(query)) return false;
+        return true;
+      }).sort((a, b) => sort === "asc" ? parseDonkiTime(a.time) - parseDonkiTime(b.time) : parseDonkiTime(b.time) - parseDonkiTime(a.time));
+    }
+
+    function eventCardHtml(event) {
+      const meta = DONKI_ENDPOINTS[event.type];
+      return '<article class="event-card" data-event-id="' + esc(event.id) + '" style="border-left-color:' + meta.color + '"><span class="event-dot" style="color:' + meta.color + ';background:' + meta.color + '"></span><div><div class="event-title">' + esc(event.title) + '</div><div class="small muted">' + esc(formatDate(event.time)) + '</div><div class="event-summary">' + esc(event.summary) + '</div></div><span class="badge">S' + esc(event.severity) + '</span></article>';
+    }
+
+    function metric(label, value, sub, klass) {
+      return '<div class="card metric ' + klass + '"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong><p>' + esc(sub) + '</p></div>';
+    }
+
+    function renderBars(data, metadata) {
+      const entries = Object.entries(data || {}).sort((a, b) => b[1] - a[1]).slice(0, 12);
+      if (!entries.length) return '<div class="empty">No chart data yet.</div>';
+      const max = Math.max(...entries.map(entry => entry[1]), 1);
+      return entries.map(([key, value]) => {
+        const color = metadata && metadata[key] ? metadata[key].color : "var(--cyan)";
+        return '<div class="bar-row"><span class="mono">' + esc(key) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(4, value / max * 100) + '%;background:' + color + ';color:' + color + '"></div></div><strong>' + value + '</strong></div>';
+      }).join("");
+    }
+
+    function renderEndpointStatus() {
+      el.endpointStatus.innerHTML = Object.keys(DONKI_ENDPOINTS).filter(key => state.selectedEndpoints.includes(key)).map(key => {
+        const status = state.endpointStatus[key] || { status: "idle", count: 0 };
+        const klass = status.status === "failed" ? "bad" : status.status === "cached" ? "warn" : status.status === "loaded" ? "ok" : "";
+        return '<span class="badge ' + klass + '">' + key + ': ' + status.status + (Number.isFinite(status.count) ? " (" + status.count + ")" : "") + '</span>';
+      }).join("");
+    }
+
+    function renderErrors() {
+      if (!state.errors.length) {
+        el.errorPanel.classList.remove("active");
+        el.errorPanel.innerHTML = "";
+        return;
+      }
+      el.errorPanel.classList.add("active");
+      el.errorPanel.innerHTML = '<strong>Endpoint static bursts</strong><ul>' + state.errors.map(error => '<li>' + esc(error.endpoint + ": " + error.message) + '</li>').join("") + '</ul>';
+    }
+
+    function getCacheKey(endpoint, startDate, endDate) {
+      return CACHE_PREFIX + "." + endpoint + "." + startDate + "." + endDate;
+    }
+
+    function readCache(endpoint, startDate, endDate) {
+      try {
+        const item = JSON.parse(localStorage.getItem(getCacheKey(endpoint, startDate, endDate)) || "null");
+        if (!item || !item.fetchedAt || Date.now() - new Date(item.fetchedAt).getTime() > CACHE_TTL_MS) return null;
+        return item;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function writeCache(endpoint, startDate, endDate, records) {
+      try {
+        localStorage.setItem(getCacheKey(endpoint, startDate, endDate), JSON.stringify({ fetchedAt: new Date().toISOString(), records }));
+      } catch (error) {
+        showToast("Cache write failed. Local storage may be full.", true);
+      }
+    }
+
+    function clearCache() {
+      Object.keys(localStorage).filter(key => key.startsWith(CACHE_PREFIX)).forEach(key => localStorage.removeItem(key));
+      showToast("DONKI cache cleared.");
+    }
+
+    function exportJson() {
+      const payload = { exportedAt: new Date().toISOString(), dateRange: { startDate: el.startDate.value, endDate: el.endDate.value }, endpointStatus: state.endpointStatus, events: state.events, rawByEndpoint: state.rawByEndpoint };
+      downloadTextFile("space-weather-donki-export.json", JSON.stringify(payload, null, 2), "application/json");
+    }
+
+    function copyJson(text) {
+      navigator.clipboard?.writeText(text).then(() => showToast("JSON copied.")).catch(() => showToast("Copy failed.", true));
+    }
+
+    function parseDonkiTime(value) {
+      const date = value ? new Date(value) : new Date(0);
+      return Number.isNaN(date.getTime()) ? new Date(0) : date;
+    }
+
+    function formatDate(value) {
+      if (!value) return "n/a";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    function toISODate(date) {
+      return date.toISOString().slice(0, 10);
+    }
+
+    function parseDateOnly(value) {
+      const date = value ? new Date(value + "T00:00:00") : null;
+      return date && !Number.isNaN(date.getTime()) ? date : null;
+    }
+
+    function isValidDateRange(startDate, endDate) {
+      const start = parseDateOnly(startDate);
+      const end = parseDateOnly(endDate);
+      return start && end && start <= end;
+    }
+
+    function countBy(events, field) {
+      return events.reduce((acc, event) => {
+        const key = event[field] || "Unknown";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+    }
+
+    function countByDay(events) {
+      return events.reduce((acc, event) => {
+        const key = toISODate(parseDonkiTime(event.time));
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+    }
+
+    function fastestAnalysis(raw) {
+      const analyses = Array.isArray(raw.cmeAnalyses) ? raw.cmeAnalyses : [];
+      return analyses.slice().sort((a, b) => (b.speed || 0) - (a.speed || 0))[0] || null;
+    }
+
+    function formatInstruments(instruments) {
+      if (!Array.isArray(instruments)) return "n/a";
+      return instruments.map(item => item.displayName || item.name || JSON.stringify(item)).join(", ");
+    }
+
+    function formatLinkedEvents(events) {
+      if (!Array.isArray(events) || !events.length) return "none";
+      return events.map(item => item.activityID || item).join(", ");
+    }
+
+    function extractImportantFields(event) {
+      const raw = event.raw;
+      const fields = ["activityID", "catalog", "startTime", "sourceLocation", "activeRegionNum", "flrID", "beginTime", "peakTime", "endTime", "classType", "messageType", "messageIssueTime", "messageID"];
+      const rows = fields.filter(field => raw[field] !== undefined && raw[field] !== null && raw[field] !== "").map(field => '<p><strong>' + esc(field) + ':</strong> ' + esc(Array.isArray(raw[field]) ? JSON.stringify(raw[field]) : raw[field]) + '</p>');
+      if (raw.instruments) rows.push('<p><strong>instruments:</strong> ' + esc(formatInstruments(raw.instruments)) + '</p>');
+      if (raw.cmeAnalyses) rows.push('<p><strong>cmeAnalyses:</strong> ' + esc(JSON.stringify(raw.cmeAnalyses, null, 2)) + '</p>');
+      return rows.join("") || '<p class="muted">No common fields found. The raw JSON has the full story.</p>';
+    }
+
+    function highlightTerms(text) {
+      return text.replace(/\b(warning|alert|watch|severe|major|impact|storm)\b/gi, "<mark>$1</mark>");
+    }
+
+    function updateStatus(kind, text) {
+      el.apiStatus.textContent = text;
+      el.apiStatus.className = "badge " + (kind === "ok" ? "ok" : kind === "warn" || kind === "loading" ? "warn" : kind === "bad" ? "bad" : "");
+    }
+
+    function showToast(message, isError) {
+      const toast = document.createElement("div");
+      toast.className = "toast" + (isError ? " error" : "");
+      toast.textContent = message;
+      el.toastWrap.appendChild(toast);
+      setTimeout(() => toast.remove(), 4200);
+    }
+
+    function downloadTextFile(filename, content, mimeType) {
+      const blob = new Blob([content], { type: mimeType + ";charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 800);
+    }
+
+    function hashText(text) {
+      let hash = 0;
+      for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+      return Math.abs(hash).toString(36);
+    }
+
+    function joinParts(parts) {
+      return parts.filter(Boolean).join(" - ");
+    }
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+  </script>
+</body>
+</html>
