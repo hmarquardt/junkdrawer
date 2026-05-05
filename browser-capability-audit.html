@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Browser Capability Audit</title>
+<link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="shortcut icon" href="favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<link rel="manifest" href="site.webmanifest" />
+<style>
+  :root {
+    --bg: #f7f7f7;
+    --fg: #111;
+    --muted: #555;
+    --card-bg: #fff;
+    --border: #ddd;
+    --accent: #2563eb;
+    --accent-text: #fff;
+    --badge-available: #16a34a;
+    --badge-perm: #d97706;
+    --badge-unavailable: #6b7280;
+    --badge-unsupported: #9ca3af;
+    --badge-blocked: #dc2626;
+    --badge-experimental: #7c3aed;
+    --badge-unknown: #9ca3af;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.05);
+    --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  }
+  html.dark {
+    --bg: #0f0f0f;
+    --fg: #eee;
+    --muted: #999;
+    --card-bg: #1a1a1a;
+    --border: #2a2a2a;
+    --accent: #60a5fa;
+    --accent-text: #000;
+    --badge-available: #4ade80;
+    --badge-perm: #fbbf24;
+    --badge-unavailable: #9ca3af;
+    --badge-unsupported: #6b7280;
+    --badge-blocked: #f87171;
+    --badge-experimental: #a78bfa;
+    --badge-unknown: #6b7280;
+    --shadow: 0 1px 3px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.3);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+    transition: background .2s, color .2s;
+  }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+  header { margin-bottom: 24px; }
+  h1 { margin: 0 0 6px; font-size: clamp(24px, 4vw, 40px); letter-spacing: -0.02em; }
+  .subtitle { margin: 0 0 16px; color: var(--muted); font-size: 16px; }
+  .topbar {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  }
+  .summary-bar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 999px;
+    padding: 6px 12px; font-size: 13px; color: var(--muted); box-shadow: var(--shadow);
+  }
+  .pill strong { color: var(--fg); }
+  .btn {
+    appearance: none; border: 1px solid var(--border); background: var(--card-bg); color: var(--fg);
+    padding: 8px 14px; border-radius: 8px; font-family: inherit; font-weight: 600; cursor: pointer;
+    box-shadow: var(--shadow); font-size: 13px; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .btn.warn { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0;
+  }
+  .search {
+    flex: 1 1 260px; min-width: 200px;
+    border: 1px solid var(--border); background: var(--card-bg); color: var(--fg);
+    padding: 10px 12px; border-radius: 8px; font-family: inherit; font-size: 14px;
+  }
+  .search:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  .filters {
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .chip {
+    appearance: none; border: 1px solid var(--border); background: var(--card-bg); color: var(--fg);
+    padding: 6px 10px; border-radius: 999px; font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
+  }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+  html.dark .card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+  .card-header {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  }
+  .card-title { font-weight: 700; font-size: 15px; margin: 0; }
+  .card-category { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-top: 2px; }
+  .badge {
+    display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; flex-shrink: 0;
+  }
+  .badge.available { background: var(--badge-available); color: #fff; }
+  .badge.available_with_permission { background: var(--badge-perm); color: #000; }
+  .badge.unavailable { background: var(--badge-unavailable); color: #fff; }
+  .badge.unsupported { background: var(--badge-unsupported); color: #fff; }
+  .badge.blocked { background: var(--badge-blocked); color: #fff; }
+  .badge.experimental_or_flagged { background: var(--badge-experimental); color: #fff; }
+  .badge.unknown { background: var(--badge-unknown); color: #fff; }
+  .card-body { font-size: 13px; color: var(--muted); }
+  .card-body p { margin: 0 0 6px; }
+  .card-body strong { color: var(--fg); }
+  .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
+  .card-meta { font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(127,127,127,0.08); padding: 8px; border-radius: 8px; word-break: break-word; }
+  .card-error { font-family: var(--mono); font-size: 11px; color: #b91c1c; background: #fef2f2; padding: 8px; border-radius: 8px; margin-top: 4px; }
+  html.dark .card-error { color: #fca5a5; background: #450a0a; }
+  .toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--card-bg); color: var(--fg); border: 1px solid var(--border);
+    padding: 12px 16px; border-radius: 10px; box-shadow: var(--shadow); z-index: 9999;
+    font-size: 13px; opacity: 0; transform: translateY(10px); transition: opacity .3s, transform .3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .warning-bar {
+    background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 16px; font-size: 13px; display: flex; align-items: center; gap: 10px;
+  }
+  html.dark .warning-bar { background: #451a03; color: #fde68a; border-color: #b45309; }
+  .hidden { display: none !important; }
+  .count-pill { font-weight: 700; color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>Browser Capability Audit</h1>
+        <p class="subtitle">What can this browser actually do?</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn" id="theme-btn" title="Toggle dark/light">Theme</button>
+      </div>
+    </div>
+
+    <div id="secure-warning" class="warning-bar hidden">
+      <span>⚠️</span>
+      <span><strong>Not a secure context.</strong> Many APIs require HTTPS or localhost. Results may differ after serving over HTTPS.</span>
+    </div>
+
+    <div class="summary-bar" id="summary-bar"></div>
+  </header>
+
+  <div class="controls">
+    <input type="text" class="search" id="search" placeholder="Search APIs, use cases, descriptions…" />
+    <div class="filters" id="filters"></div>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn primary" id="btn-audit">Run Audit</button>
+      <button class="btn" id="btn-copy">Copy Report JSON</button>
+      <button class="btn" id="btn-download">Download Report JSON</button>
+    </div>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="grid" id="cards"></div>
+
+  <div style="margin-top:24px;color:var(--muted);font-size:12px;text-align:center;">
+    No build tools. No external libraries. No analytics. Single-file HTML.
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================================================
+  // Theme
+  // ============================================================
+  const savedTheme = localStorage.getItem('bca-theme');
+  if (savedTheme === 'dark') document.documentElement.classList.add('dark');
+  document.getElementById('theme-btn').addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark');
+    localStorage.setItem('bca-theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+  });
+
+  // ============================================================
+  // State
+  // ============================================================
+  let results = [];
+  let currentFilter = 'All';
+  let searchQuery = '';
+  const report = {
+    scannedAt: null,
+    url: location.href,
+    secureContext: false,
+    userAgent: '',
+    platform: '',
+    online: navigator.onLine,
+    storageEstimate: null,
+    capabilities: []
+  };
+
+  // ============================================================
+  // Capability Definitions
+  // ============================================================
+  const CAPABILITY_DEFINITIONS = [
+    // AI
+    {
+      id: 'ai-language-model',
+      name: 'Prompt API / LanguageModel',
+      category: 'AI',
+      description: 'On-device language model API for local prompting/generation in supported Chrome builds.',
+      useCase: 'Private local assistant, summarizer, classifier, page helper, or offline-ish writing tool.',
+      docs: 'https://developer.chrome.com/docs/ai/get-started',
+      detect: async () => {
+        const present = typeof window.LanguageModel !== 'undefined';
+        if (!present) return { status: 'unsupported', raw: false };
+        let avail = 'unknown';
+        try { avail = await LanguageModel.availability(); } catch (e) {}
+        const status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+        return { status, raw: { exposed: true, availability: avail } };
+      },
+      tests: [{ label: 'Refresh availability', action: async (def, result) => {
+        if (typeof window.LanguageModel === 'undefined') return;
+        const avail = await LanguageModel.availability();
+        result.raw.availability = avail;
+        result.status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+      }}]
+    },
+    {
+      id: 'ai-summarizer',
+      name: 'Summarizer API',
+      category: 'AI',
+      description: 'Browser-provided summarization API backed by local AI where supported.',
+      useCase: 'Summarize articles, notes, transcripts, support tickets, or selected page text locally.',
+      docs: 'https://developer.chrome.com/docs/ai/summarizer-api',
+      detect: async () => {
+        const present = typeof window.Summarizer !== 'undefined';
+        if (!present) return { status: 'unsupported', raw: false };
+        let avail = 'unknown';
+        try { avail = await Summarizer.availability(); } catch (e) {}
+        const status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+        return { status, raw: { exposed: true, availability: avail } };
+      },
+      tests: [{ label: 'Refresh availability', action: async (def, result) => {
+        if (typeof window.Summarizer === 'undefined') return;
+        const avail = await Summarizer.availability();
+        result.raw.availability = avail;
+        result.status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+      }}]
+    },
+    {
+      id: 'ai-translator',
+      name: 'Translator API',
+      category: 'AI',
+      description: 'Built-in browser translation API for translating text with browser-provided AI models.',
+      useCase: 'Translate selected text, chat messages, form input, or page snippets before sending data to a server.',
+      docs: 'https://developer.chrome.com/docs/ai/translator-api',
+      detect: async () => {
+        const present = typeof window.Translator !== 'undefined';
+        if (!present) return { status: 'unsupported', raw: false };
+        let avail = 'unknown';
+        try { avail = await Translator.availability(); } catch (e) {}
+        const status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+        return { status, raw: { exposed: true, availability: avail } };
+      },
+      tests: [{ label: 'Refresh availability', action: async (def, result) => {
+        if (typeof window.Translator === 'undefined') return;
+        const avail = await Translator.availability();
+        result.raw.availability = avail;
+        result.status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+      }}]
+    },
+    {
+      id: 'ai-language-detector',
+      name: 'Language Detector API',
+      category: 'AI',
+      description: 'Detects the likely language of a text string using a browser-provided model.',
+      useCase: 'Auto-route multilingual content, choose a translator source language, or tag imported notes.',
+      docs: 'https://developer.chrome.com/docs/ai/language-detection',
+      detect: async () => {
+        const present = typeof window.LanguageDetector !== 'undefined';
+        if (!present) return { status: 'unsupported', raw: false };
+        let avail = 'unknown';
+        try { avail = await LanguageDetector.availability(); } catch (e) {}
+        const status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+        return { status, raw: { exposed: true, availability: avail } };
+      },
+      tests: [{ label: 'Refresh availability', action: async (def, result) => {
+        if (typeof window.LanguageDetector === 'undefined') return;
+        const avail = await LanguageDetector.availability();
+        result.raw.availability = avail;
+        result.status = avail === 'available' ? 'available' : avail === 'downloadable' ? 'experimental_or_flagged' : avail === 'downloading' ? 'experimental_or_flagged' : 'unavailable';
+      }}]
+    },
+    {
+      id: 'ai-writer-rewriter',
+      name: 'Writer / Rewriter APIs',
+      category: 'AI',
+      description: 'Experimental browser-provided writing and rewriting helpers.',
+      useCase: 'Tone adjustment, simplification, cleanup, repurposing text for email/social/docs.',
+      docs: 'https://developer.chrome.com/docs/ai/get-started',
+      detect: async () => {
+        const writer = typeof window.Writer !== 'undefined';
+        const rewriter = typeof window.Rewriter !== 'undefined';
+        let wAvail = 'unknown', rAvail = 'unknown';
+        if (writer) try { wAvail = await Writer.availability(); } catch (e) {}
+        if (rewriter) try { rAvail = await Rewriter.availability(); } catch (e) {}
+        const status = (writer || rewriter) ? 'experimental_or_flagged' : 'unsupported';
+        return { status, raw: { writer, rewriter, writerAvail: wAvail, rewriterAvail: rAvail } };
+      }
+    },
+
+    // Hardware
+    {
+      id: 'webusb',
+      name: 'WebUSB',
+      category: 'Hardware',
+      description: 'Allows websites to communicate with permitted USB devices.',
+      useCase: 'USB device explorers, firmware tools, lab devices, custom controllers.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/WebUSB_API',
+      detect: async () => ({ status: 'available_with_permission', raw: { usb: !!navigator.usb } }),
+      tests: [{ label: 'Request USB device', action: async () => {
+        if (!navigator.usb) return toast('WebUSB not available');
+        try { await navigator.usb.requestDevice({ filters: [] }); toast('USB device selected'); }
+        catch (e) { toast('USB request cancelled or failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'web-serial',
+      name: 'Web Serial',
+      category: 'Hardware',
+      description: 'Allows websites to communicate with serial devices after user permission.',
+      useCase: 'Arduino/ESP32 dashboards, sensor monitors, terminal tools, microcontroller control panels.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API',
+      detect: async () => ({ status: 'available_with_permission', raw: { serial: !!navigator.serial } }),
+      tests: [{ label: 'Request serial port', action: async () => {
+        if (!navigator.serial) return toast('Web Serial not available');
+        try { await navigator.serial.requestPort(); toast('Serial port selected'); }
+        catch (e) { toast('Serial request cancelled or failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'webhid',
+      name: 'WebHID',
+      category: 'Hardware',
+      description: 'Allows websites to communicate with Human Interface Devices such as macro pads, barcode scanners, custom keyboards, and controllers.',
+      useCase: 'Browser-based control decks, raw input logging, custom device dashboards.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/WebHID_API',
+      detect: async () => ({ status: 'available_with_permission', raw: { hid: !!navigator.hid } }),
+      tests: [{ label: 'Request HID device', action: async () => {
+        if (!navigator.hid) return toast('WebHID not available');
+        try { await navigator.hid.requestDevice({ filters: [] }); toast('HID device selected'); }
+        catch (e) { toast('HID request cancelled or failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'web-bluetooth',
+      name: 'Web Bluetooth',
+      category: 'Hardware',
+      description: 'Allows sites to connect to nearby Bluetooth Low Energy devices with user permission.',
+      useCase: 'BLE sensors, health devices, trackers, small hardware dashboards.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API',
+      detect: async () => ({ status: 'available_with_permission', raw: { bluetooth: !!navigator.bluetooth } }),
+      tests: [{ label: 'Request BLE device', action: async () => {
+        if (!navigator.bluetooth) return toast('Web Bluetooth not available');
+        try { await navigator.bluetooth.requestDevice({ acceptAllDevices: true }); toast('BLE device selected'); }
+        catch (e) { toast('BLE request cancelled or failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'gamepad-api',
+      name: 'Gamepad API',
+      category: 'Hardware',
+      description: 'Reads connected game controllers.',
+      useCase: 'Browser games, physical control panels, joystick-driven dashboards.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API',
+      detect: async () => ({ status: typeof navigator.getGamepads === 'function' ? 'available' : 'unsupported', raw: { getGamepads: typeof navigator.getGamepads } })
+    },
+
+    // Graphics
+    {
+      id: 'webgpu',
+      name: 'WebGPU',
+      category: 'Graphics',
+      description: 'Modern GPU API for high-performance graphics and general-purpose GPU compute.',
+      useCase: 'Particle systems, scientific visualizations, local ML acceleration experiments, rich data visualization.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API',
+      detect: async () => ({ status: !!navigator.gpu ? 'available' : 'unsupported', raw: { gpu: !!navigator.gpu } }),
+      tests: [{ label: 'Request adapter', action: async (def, result) => {
+        if (!navigator.gpu) return toast('WebGPU not available');
+        try { const adapter = await navigator.gpu.requestAdapter(); result.raw.adapter = !!adapter; toast('Adapter: ' + (adapter ? 'found' : 'none')); }
+        catch (e) { toast('Adapter request failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'webgl',
+      name: 'WebGL',
+      category: 'Graphics',
+      description: 'GPU-accelerated 2D/3D graphics through canvas.',
+      useCase: 'Maps, visualizers, games, shader effects, 3D data displays.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API',
+      detect: async () => {
+        const c = document.createElement('canvas');
+        const gl = c.getContext('webgl');
+        return { status: !!gl ? 'available' : 'unavailable', raw: { webgl: !!gl } };
+      }
+    },
+    {
+      id: 'webgl2',
+      name: 'WebGL 2',
+      category: 'Graphics',
+      description: 'GPU-accelerated 2D/3D graphics through canvas (version 2).',
+      useCase: 'Advanced maps, visualizers, games, shader effects, 3D data displays.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/WebGL2RenderingContext',
+      detect: async () => {
+        const c = document.createElement('canvas');
+        const gl = c.getContext('webgl2');
+        return { status: !!gl ? 'available' : 'unavailable', raw: { webgl2: !!gl } };
+      }
+    },
+
+    // Storage
+    {
+      id: 'file-system-access',
+      name: 'File System Access API',
+      category: 'Storage',
+      description: 'Lets web apps open, edit, and save local files/directories with user permission.',
+      useCase: 'Local markdown editors, image contact sheets, CSV cleaners, desktop-like browser tools.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/File_System_API',
+      detect: async () => {
+        const raw = { showOpenFilePicker: !!window.showOpenFilePicker, showDirectoryPicker: !!window.showDirectoryPicker, showSaveFilePicker: !!window.showSaveFilePicker };
+        const ok = !!window.showOpenFilePicker;
+        return { status: ok ? 'available_with_permission' : 'unsupported', raw };
+      },
+      tests: [{ label: 'Open file picker', action: async () => {
+        if (!window.showOpenFilePicker) return toast('File System Access not available');
+        try { await window.showOpenFilePicker(); toast('File selected'); } catch (e) { toast('Picker cancelled'); }
+      }}]
+    },
+    {
+      id: 'origin-private-fs',
+      name: 'Origin Private File System',
+      category: 'Storage',
+      description: 'Private origin-scoped filesystem for storing app data without exposing normal local files.',
+      useCase: 'Offline-capable apps, local caches, generated assets, large project storage.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system',
+      detect: async () => {
+        const ok = !!(navigator.storage && navigator.storage.getDirectory);
+        return { status: ok ? 'available' : 'unsupported', raw: { getDirectory: ok } };
+      }
+    },
+    {
+      id: 'indexeddb',
+      name: 'IndexedDB',
+      category: 'Storage',
+      description: 'Browser database for structured client-side storage.',
+      useCase: 'Offline apps, saved records, cached API responses, local-first dashboards.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API',
+      detect: async () => ({ status: !!window.indexedDB ? 'available' : 'unsupported', raw: { indexedDB: !!window.indexedDB } })
+    },
+    {
+      id: 'cache-api',
+      name: 'Cache API',
+      category: 'Storage',
+      description: 'Stores request/response pairs, commonly used by service workers.',
+      useCase: 'Offline app shells, cached datasets, resilient public API demos.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Cache',
+      detect: async () => ({ status: !!window.caches ? 'available' : 'unsupported', raw: { caches: !!window.caches } })
+    },
+    {
+      id: 'storage-estimate',
+      name: 'Storage Estimate / Persistent Storage',
+      category: 'Storage',
+      description: 'Reports storage usage/quota and can request more durable storage.',
+      useCase: 'Local-first apps that need to warn before running out of browser storage.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/StorageManager',
+      detect: async () => {
+        const ok = !!(navigator.storage && navigator.storage.estimate);
+        let est = null;
+        if (ok) try { est = await navigator.storage.estimate(); } catch (e) {}
+        return { status: ok ? 'available' : 'unsupported', raw: { estimate: est } };
+      },
+      tests: [{ label: 'Refresh estimate', action: async (def, result) => {
+        if (!navigator.storage || !navigator.storage.estimate) return;
+        const est = await navigator.storage.estimate();
+        result.raw.estimate = est;
+        renderCards();
+      }}]
+    },
+
+    // Media
+    {
+      id: 'getusermedia',
+      name: 'Camera & Microphone',
+      category: 'Media',
+      description: 'Accesses camera and microphone with permission.',
+      useCase: 'Camera tools, audio recorders, webcam monitoring, QR scanners, voice notes.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia',
+      detect: async () => {
+        const ok = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        return { status: ok ? 'available_with_permission' : 'unsupported', raw: { getUserMedia: ok } };
+      },
+      tests: [{ label: 'Test camera/mic', action: async () => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return toast('Not available');
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          stream.getTracks().forEach(t => t.stop());
+          toast('Camera/mic accessible (tracks stopped)');
+        } catch (e) { toast('Camera/mic test failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'getdisplaymedia',
+      name: 'Screen Capture',
+      category: 'Media',
+      description: 'Captures a screen, window, or tab with user permission.',
+      useCase: 'Screen recorders, remote support tools, browser-based demos.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia',
+      detect: async () => {
+        const ok = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+        return { status: ok ? 'available_with_permission' : 'unsupported', raw: { getDisplayMedia: ok } };
+      },
+      tests: [{ label: 'Test screen capture', action: async () => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return toast('Not available');
+        try {
+          const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          stream.getTracks().forEach(t => t.stop());
+          toast('Screen capture accessible (tracks stopped)');
+        } catch (e) { toast('Screen capture test failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'media-recorder',
+      name: 'MediaRecorder',
+      category: 'Media',
+      description: 'Records audio/video streams in the browser.',
+      useCase: 'Voice notes, webcam clips, screen recordings, local media capture.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder',
+      detect: async () => ({ status: !!window.MediaRecorder ? 'available' : 'unsupported', raw: { MediaRecorder: !!window.MediaRecorder } })
+    },
+    {
+      id: 'web-audio',
+      name: 'Web Audio API',
+      category: 'Media',
+      description: 'Processes, analyzes, and synthesizes audio in the browser.',
+      useCase: 'Audio visualizers, sound detection, music tools, waveform analysis.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API',
+      detect: async () => {
+        const ok = !!(window.AudioContext || window.webkitAudioContext);
+        return { status: ok ? 'available' : 'unsupported', raw: { AudioContext: !!window.AudioContext, webkitAudioContext: !!window.webkitAudioContext } };
+      }
+    },
+    {
+      id: 'geolocation',
+      name: 'Geolocation',
+      category: 'Media',
+      description: 'Gets the user’s location with permission.',
+      useCase: 'Approximate field notes, maps, check-ins, wildlife sightings, local utility apps.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Geolocation_API',
+      detect: async () => ({ status: !!navigator.geolocation ? 'available_with_permission' : 'unsupported', raw: { geolocation: !!navigator.geolocation } }),
+      tests: [{ label: 'Test geolocation', action: async () => {
+        if (!navigator.geolocation) return toast('Not available');
+        navigator.geolocation.getCurrentPosition(
+          p => toast('Location: ' + p.coords.latitude.toFixed(4) + ', ' + p.coords.longitude.toFixed(4)),
+          e => toast('Geolocation failed: ' + e.message)
+        );
+      }}]
+    },
+    {
+      id: 'generic-sensor',
+      name: 'Generic Sensor APIs',
+      category: 'Media',
+      description: 'Exposes motion, orientation, light, and environmental sensor data where supported.',
+      useCase: 'Device motion demos, AR-like interfaces, physical interaction experiments.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Sensor_APIs',
+      detect: async () => {
+        const sensors = {
+          Accelerometer: !!window.Accelerometer,
+          Gyroscope: !!window.Gyroscope,
+          AmbientLightSensor: !!window.AmbientLightSensor,
+          Magnetometer: !!window.Magnetometer
+        };
+        const ok = Object.values(sensors).some(Boolean);
+        return { status: ok ? 'available' : 'unsupported', raw: sensors };
+      }
+    },
+
+    // UI
+    {
+      id: 'view-transition',
+      name: 'View Transition API',
+      category: 'UI',
+      description: 'Creates animated transitions between DOM states or page views.',
+      useCase: 'Polished single-page apps, galleries, dashboards, animated route changes.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API',
+      detect: async () => ({ status: typeof document.startViewTransition === 'function' ? 'available' : 'unsupported', raw: { startViewTransition: typeof document.startViewTransition } })
+    },
+    {
+      id: 'popover-api',
+      name: 'Popover API',
+      category: 'UI',
+      description: 'Native popover behavior for menus, tooltips, command palettes, and overlays.',
+      useCase: 'Framework-free menus, inspectors, command palettes, bookmarklet UIs.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Popover_API',
+      detect: async () => ({ status: HTMLElement.prototype.hasOwnProperty('showPopover') ? 'available' : 'unsupported', raw: { showPopover: HTMLElement.prototype.hasOwnProperty('showPopover') } })
+    },
+    {
+      id: 'css-anchor',
+      name: 'CSS Anchor Positioning',
+      category: 'UI',
+      description: 'Positions floating UI relative to an anchor element.',
+      useCase: 'Tooltips, context menus, floating side panels, inspector overlays.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_anchor_positioning',
+      detect: async () => {
+        const ok = CSS.supports && CSS.supports('anchor-name: --a');
+        return { status: ok ? 'available' : 'unsupported', raw: { supportsAnchor: ok } };
+      }
+    },
+    {
+      id: 'dialog-element',
+      name: 'Dialog Element',
+      category: 'UI',
+      description: 'Native modal and non-modal dialogs.',
+      useCase: 'Settings panels, confirmations, modal forms without a UI framework.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/HTML/Element/dialog',
+      detect: async () => ({ status: typeof HTMLDialogElement !== 'undefined' ? 'available' : 'unsupported', raw: { HTMLDialogElement: typeof HTMLDialogElement } })
+    },
+    {
+      id: 'clipboard-api',
+      name: 'Clipboard API',
+      category: 'UI',
+      description: 'Reads/writes clipboard data with permission and secure context requirements.',
+      useCase: 'Text transformers, report copying, markdown cleanup, productivity tools.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API',
+      detect: async () => {
+        const ok = !!(navigator.clipboard && navigator.clipboard.writeText);
+        const read = !!(navigator.clipboard && navigator.clipboard.readText);
+        return { status: ok ? 'available_with_permission' : 'unsupported', raw: { writeText: ok, readText: read } };
+      },
+      tests: [{ label: 'Copy test text', action: async () => {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) return toast('Clipboard write not available');
+        try { await navigator.clipboard.writeText('Browser Capability Audit test'); toast('Copied test text to clipboard'); }
+        catch (e) { toast('Copy failed: ' + e.message); }
+      }}]
+    },
+
+    // Background / System
+    {
+      id: 'service-worker',
+      name: 'Service Worker',
+      category: 'Background',
+      description: 'Runs background-ish web app logic for caching, offline support, and push handling.',
+      useCase: 'PWAs, offline shells, resilient API dashboards.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API',
+      detect: async () => ({ status: !!navigator.serviceWorker ? 'available' : 'unsupported', raw: { serviceWorker: !!navigator.serviceWorker } })
+    },
+    {
+      id: 'web-workers',
+      name: 'Web Workers',
+      category: 'Background',
+      description: 'Runs JavaScript off the main UI thread.',
+      useCase: 'Large parsing jobs, local search indexes, data cleaning, AI-adjacent preprocessing.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API',
+      detect: async () => ({ status: !!window.Worker ? 'available' : 'unsupported', raw: { Worker: !!window.Worker } })
+    },
+    {
+      id: 'shared-workers',
+      name: 'Shared Workers',
+      category: 'Background',
+      description: 'Worker shared between multiple tabs from the same origin.',
+      useCase: 'Cross-tab coordination, shared connections, shared local state.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/SharedWorker',
+      detect: async () => ({ status: !!window.SharedWorker ? 'available' : 'unsupported', raw: { SharedWorker: !!window.SharedWorker } })
+    },
+    {
+      id: 'web-locks',
+      name: 'Web Locks API',
+      category: 'Background',
+      description: 'Coordinates work across tabs/workers from the same origin.',
+      useCase: 'Prevent duplicate sync jobs, coordinate IndexedDB writes, single active tab leader election.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API',
+      detect: async () => ({ status: !!navigator.locks ? 'available' : 'unsupported', raw: { locks: !!navigator.locks } })
+    },
+    {
+      id: 'broadcast-channel',
+      name: 'BroadcastChannel',
+      category: 'Background',
+      description: 'Messaging between tabs, windows, frames, and workers on the same origin.',
+      useCase: 'Multi-tab dashboards, shared login state, cross-tab notifications.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Broadcast_Channel_API',
+      detect: async () => ({ status: !!window.BroadcastChannel ? 'available' : 'unsupported', raw: { BroadcastChannel: !!window.BroadcastChannel } })
+    },
+    {
+      id: 'notifications',
+      name: 'Notifications API',
+      category: 'Background',
+      description: 'Displays system notifications with user permission.',
+      useCase: 'Timer alerts, background task updates, monitoring dashboards.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API',
+      detect: async () => {
+        const ok = !!window.Notification;
+        return { status: ok ? 'available_with_permission' : 'unsupported', raw: { Notification: ok, permission: ok ? Notification.permission : 'n/a' } };
+      },
+      tests: [{ label: 'Test notification', action: async () => {
+        if (!window.Notification) return toast('Notifications not available');
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') return toast('Notification permission: ' + perm);
+        new Notification('Browser Capability Audit', { body: 'Notifications are working.' });
+        toast('Notification sent');
+      }}]
+    },
+    {
+      id: 'wake-lock',
+      name: 'Wake Lock API',
+      category: 'Background',
+      description: 'Keeps the screen awake while a page is active.',
+      useCase: 'Timers, dashboards, recipe pages, kiosk displays, monitoring tools.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API',
+      detect: async () => ({ status: !!navigator.wakeLock ? 'available' : 'unsupported', raw: { wakeLock: !!navigator.wakeLock } })
+    },
+    {
+      id: 'web-share',
+      name: 'Web Share API',
+      category: 'Background',
+      description: 'Invokes the native OS share sheet where available.',
+      useCase: 'Share reports, links, snippets, or generated content from a PWA-like page.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Share_API',
+      detect: async () => ({ status: !!navigator.share ? 'available' : 'unsupported', raw: { share: !!navigator.share } }),
+      tests: [{ label: 'Test share', action: async () => {
+        if (!navigator.share) return toast('Web Share not available');
+        try { await navigator.share({ title: 'Browser Capability Audit', text: 'Check what your browser can do!' }); }
+        catch (e) { toast('Share cancelled or failed: ' + e.message); }
+      }}]
+    },
+    {
+      id: 'payment-request',
+      name: 'Payment Request API',
+      category: 'Background',
+      description: 'Standardized payment flow through browser-supported payment methods.',
+      useCase: 'Checkout experiments, payment UX testing, donation flows.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Payment_Request_API',
+      detect: async () => ({ status: !!window.PaymentRequest ? 'available' : 'unsupported', raw: { PaymentRequest: !!window.PaymentRequest } })
+    },
+    {
+      id: 'credentials-webauthn',
+      name: 'Credential Management / WebAuthn',
+      category: 'Background',
+      description: 'Credential storage and passkey / hardware-backed authentication primitives.',
+      useCase: 'Passkey login demos, passwordless auth experiments, secure local admin pages.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API',
+      detect: async () => {
+        const cred = !!navigator.credentials;
+        const webauthn = !!window.PublicKeyCredential;
+        return { status: (cred || webauthn) ? 'available' : 'unsupported', raw: { credentials: cred, PublicKeyCredential: webauthn } };
+      }
+    },
+    {
+      id: 'permissions-api',
+      name: 'Permissions API',
+      category: 'Background',
+      description: 'Queries permission states for supported browser features.',
+      useCase: 'Preflight diagnostics and user-friendly permission troubleshooting.',
+      docs: 'https://developer.mozilla.org/en-US/docs/Web/API/Permissions_API',
+      detect: async () => {
+        const ok = !!navigator.permissions;
+        let querySupport = false;
+        if (ok) {
+          try { await navigator.permissions.query({ name: 'geolocation' }); querySupport = true; } catch (e) {}
+        }
+        return { status: ok ? 'available' : 'unsupported', raw: { permissions: ok, querySupport } };
+      }
+    }
+  ];
+
+  // ============================================================
+  // Helpers
+  // ============================================================
+  function toast(message) {
+    const el = document.getElementById('toast');
+    el.textContent = message;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2500);
+  }
+
+  function formatStatus(status) {
+    return status.replace(/_/g, ' ');
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ============================================================
+  // Audit
+  // ============================================================
+  async function detectCapability(def) {
+    const out = {
+      id: def.id,
+      name: def.name,
+      category: def.category,
+      status: 'unknown',
+      supported: false,
+      passiveDetection: true,
+      description: def.description,
+      useCase: def.useCase,
+      docs: def.docs,
+      notes: '',
+      errors: [],
+      raw: null
+    };
+    try {
+      const res = await def.detect();
+      out.status = res.status || 'unknown';
+      out.raw = res.raw;
+      out.supported = out.status === 'available' || out.status === 'available_with_permission' || out.status === 'experimental_or_flagged';
+      if (out.status === 'experimental_or_flagged') {
+        out.notes = 'This API is experimental, behind a flag, or may require a specific Chrome channel or origin trial.';
+      }
+    } catch (err) {
+      out.status = 'unknown';
+      out.errors.push(err.message || String(err));
+      out.notes = 'Detection threw an error. This may indicate a partially implemented or restricted API.';
+    }
+    return out;
+  }
+
+  async function runAudit() {
+    results = [];
+    document.getElementById('cards').innerHTML = '<div class="card" style="grid-column:1/-1;text-align:center;color:var(--muted);">Running audit…</div>';
+    const defs = CAPABILITY_DEFINITIONS;
+    for (let i = 0; i < defs.length; i++) {
+      const r = await detectCapability(defs[i]);
+      results.push(r);
+    }
+    report.scannedAt = new Date().toISOString();
+    report.userAgent = navigator.userAgent || 'unknown';
+    report.platform = navigator.platform || 'unknown';
+    report.secureContext = !!window.isSecureContext;
+    report.online = navigator.onLine;
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        report.storageEstimate = await navigator.storage.estimate();
+      }
+    } catch (e) { report.storageEstimate = null; }
+    report.capabilities = results;
+    renderSummary();
+    renderCards();
+  }
+
+  // ============================================================
+  // Render
+  // ============================================================
+  function renderSummary() {
+    const bar = document.getElementById('summary-bar');
+    const counts = { available: 0, available_with_permission: 0, unsupported: 0, unavailable: 0, blocked: 0, experimental_or_flagged: 0, unknown: 0 };
+    results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+    const secure = !!window.isSecureContext;
+    document.getElementById('secure-warning').classList.toggle('hidden', secure);
+    let storageText = 'N/A';
+    if (report.storageEstimate) {
+      const used = report.storageEstimate.usage || 0;
+      const quota = report.storageEstimate.quota || 0;
+      const usedMB = Math.round(used / 1024 / 1024);
+      const quotaMB = quota ? Math.round(quota / 1024 / 1024) : '?';
+      storageText = usedMB + ' MB / ' + quotaMB + ' MB';
+    }
+    bar.innerHTML = [
+      '<span class="pill"><strong>Secure context:</strong> ' + (secure ? 'Yes' : 'No') + '</span>',
+      '<span class="pill"><strong>Online:</strong> ' + (navigator.onLine ? 'Yes' : 'No') + '</span>',
+      '<span class="pill"><strong>Storage:</strong> ' + storageText + '</span>',
+      '<span class="pill"><strong>Available:</strong> <span class="count-pill">' + (counts.available || 0) + '</span></span>',
+      '<span class="pill"><strong>Permission:</strong> <span class="count-pill">' + (counts.available_with_permission || 0) + '</span></span>',
+      '<span class="pill"><strong>Unsupported:</strong> <span class="count-pill">' + (counts.unsupported || 0) + '</span></span>',
+      '<span class="pill"><strong>Experimental:</strong> <span class="count-pill">' + (counts.experimental_or_flagged || 0) + '</span></span>',
+    ].join('');
+  }
+
+  function createCard(result, def) {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.dataset.category = result.category;
+    el.dataset.id = result.id;
+
+    const actionsHtml = (def.tests || []).map((t, idx) => {
+      return '<button class="btn test-btn" data-id="' + escapeHtml(result.id) + '" data-test-idx="' + idx + '">' + escapeHtml(t.label) + '</button>';
+    }).join('');
+
+    const rawHtml = result.raw ? '<div class="card-meta">' + escapeHtml(JSON.stringify(result.raw, null, 2)) + '</div>' : '';
+    const errorHtml = result.errors.length ? '<div class="card-error">' + escapeHtml(result.errors.join('\n')) + '</div>' : '';
+    const notesHtml = result.notes ? '<p style="margin-top:6px;"><strong>Note:</strong> ' + escapeHtml(result.notes) + '</p>' : '';
+
+    el.innerHTML = `
+      <div class="card-header">
+        <div>
+          <div class="card-title">${escapeHtml(result.name)}</div>
+          <div class="card-category">${escapeHtml(result.category)}</div>
+        </div>
+        <div class="badge ${result.status}">${escapeHtml(formatStatus(result.status))}</div>
+      </div>
+      <div class="card-body">
+        <p><strong>What it is:</strong> ${escapeHtml(result.description)}</p>
+        <p><strong>Use case:</strong> ${escapeHtml(result.useCase)}</p>
+        ${notesHtml}
+        ${rawHtml}
+        ${errorHtml}
+      </div>
+      <div class="card-actions" style="${actionsHtml ? '' : 'display:none;'}">
+        ${actionsHtml}
+        <a class="btn" href="${escapeHtml(result.docs)}" target="_blank" rel="noopener">Docs</a>
+      </div>
+    `;
+    return el;
+  }
+
+  function shouldShow(result) {
+    if (currentFilter !== 'All') {
+      if (currentFilter === 'Available') {
+        if (result.status !== 'available' && result.status !== 'available_with_permission') return false;
+      } else if (currentFilter === 'Permission Required') {
+        if (result.status !== 'available_with_permission') return false;
+      } else if (currentFilter === 'Unsupported') {
+        if (result.status !== 'unsupported' && result.status !== 'unavailable') return false;
+      } else if (currentFilter === 'Experimental / Chrome-first') {
+        if (result.status !== 'experimental_or_flagged') return false;
+      } else if (currentFilter === 'AI') {
+        if (result.category !== 'AI') return false;
+      } else if (currentFilter === 'Hardware') {
+        if (result.category !== 'Hardware') return false;
+      } else if (currentFilter === 'Storage') {
+        if (result.category !== 'Storage') return false;
+      } else if (currentFilter === 'Media') {
+        if (result.category !== 'Media') return false;
+      } else if (currentFilter === 'UI') {
+        if (result.category !== 'UI') return false;
+      } else if (currentFilter === 'Background / System') {
+        if (result.category !== 'Background') return false;
+      }
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const hay = (result.name + ' ' + result.description + ' ' + result.useCase + ' ' + result.category).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }
+
+  function renderCards() {
+    const grid = document.getElementById('cards');
+    grid.innerHTML = '';
+    results.forEach((r, i) => {
+      if (!shouldShow(r)) return;
+      const def = CAPABILITY_DEFINITIONS[i];
+      const card = createCard(r, def);
+      grid.appendChild(card);
+    });
+    if (!grid.children.length) {
+      grid.innerHTML = '<div class="card" style="grid-column:1/-1;text-align:center;color:var(--muted);">No capabilities match the current filter.</div>';
+    }
+
+    // Wire test buttons
+    grid.querySelectorAll('.test-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.dataset.id;
+        const idx = parseInt(e.currentTarget.dataset.testIdx, 10);
+        const def = CAPABILITY_DEFINITIONS.find(d => d.id === id);
+        const result = results.find(r => r.id === id);
+        if (def && def.tests && def.tests[idx]) {
+          try {
+            await def.tests[idx].action(def, result);
+            renderCards();
+          } catch (err) {
+            toast('Test error: ' + (err.message || err));
+          }
+        }
+      });
+    });
+  }
+
+  function buildFilters() {
+    const filters = ['All', 'Available', 'Permission Required', 'Unsupported', 'Experimental / Chrome-first', 'AI', 'Hardware', 'Storage', 'Media', 'UI', 'Background / System'];
+    const container = document.getElementById('filters');
+    container.innerHTML = filters.map(f => {
+      return '<button class="chip ' + (f === currentFilter ? 'active' : '') + '" data-filter="' + escapeHtml(f) + '">' + escapeHtml(f) + '</button>';
+    }).join('');
+    container.querySelectorAll('.chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentFilter = btn.dataset.filter;
+        buildFilters();
+        applyViewTransition(renderCards);
+      });
+    });
+  }
+
+  function buildLegend() {
+    const statuses = [
+      { label: 'Available', cls: 'available' },
+      { label: 'Permission required', cls: 'available_with_permission' },
+      { label: 'Unsupported', cls: 'unsupported' },
+      { label: 'Unavailable', cls: 'unavailable' },
+      { label: 'Blocked', cls: 'blocked' },
+      { label: 'Experimental / flagged', cls: 'experimental_or_flagged' },
+      { label: 'Unknown', cls: 'unknown' },
+    ];
+    document.getElementById('legend').innerHTML = statuses.map(s => {
+      return '<span class="legend-item"><span class="dot" style="background:var(--badge-' + s.cls + ')"></span>' + escapeHtml(s.label) + '</span>';
+    }).join('');
+  }
+
+  function applyViewTransition(fn) {
+    if (typeof document.startViewTransition === 'function') {
+      document.startViewTransition(fn);
+    } else {
+      fn();
+    }
+  }
+
+  // ============================================================
+  // Report
+  // ============================================================
+  function copyReport() {
+    const text = JSON.stringify(report, null, 2);
+    navigator.clipboard.writeText(text).then(() => toast('Report copied to clipboard'));
+  }
+
+  function downloadReport() {
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'browser-capability-audit-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('Report downloaded');
+  }
+
+  // ============================================================
+  // Init
+  // ============================================================
+  document.getElementById('btn-audit').addEventListener('click', runAudit);
+  document.getElementById('btn-copy').addEventListener('click', copyReport);
+  document.getElementById('btn-download').addEventListener('click', downloadReport);
+  document.getElementById('search').addEventListener('input', (e) => {
+    searchQuery = e.target.value;
+    renderCards();
+  });
+
+  buildFilters();
+  buildLegend();
+  runAudit();
+})();
+</script>
+</body>
+</html>
