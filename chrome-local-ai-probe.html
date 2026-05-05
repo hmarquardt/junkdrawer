@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Local Model Probe — Chrome Gemini Nano / Built-in AI diagnostic + playground</title>
+<style>
+  :root {
+    --bg: #fff;
+    --fg: #000;
+    --accent: #c6ff00; /* toxic green / electric yellow */
+    --accent-text: #000;
+    --border: 3px solid #000;
+    --shadow: 6px 6px 0 0 #000;
+    --shadow-sm: 3px 3px 0 0 #000;
+    --radius: 0;
+    --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, Monaco, "Liberation Mono", "Courier New", monospace;
+  }
+  html { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: inherit; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+  }
+  a { color: var(--fg); }
+
+  /* Layout */
+  .container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 900px) {
+    .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .grid.cols-2,
+    .grid.cols-3,
+    .grid.cols-4 { grid-template-columns: 1fr; }
+  }
+
+  /* Header */
+  header {
+    border-bottom: var(--border);
+    padding: 24px 16px;
+  }
+  .title {
+    margin: 0;
+    font-size: clamp(28px, 5vw, 56px);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
+  .subtitle {
+    margin: 8px 0 0;
+    font-size: clamp(14px, 2vw, 18px);
+    opacity: .8;
+  }
+  .badge {
+    display: inline-block;
+    border: var(--border);
+    padding: 6px 10px;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    background: var(--accent);
+    color: var(--accent-text);
+    box-shadow: var(--shadow-sm);
+    margin-top: 12px;
+  }
+
+  /* Cards */
+  .card {
+    border: var(--border);
+    padding: 16px;
+    box-shadow: var(--shadow);
+    background: var(--bg);
+  }
+  .card h3 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .value {
+    font-family: var(--mono);
+    font-size: 14px;
+    word-break: break-word;
+  }
+  .value.ok { color: #004d00; }
+  .value.no { color: #8b0000; }
+  .value.warn { color: #664d00; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: var(--border);
+    margin-top: 24px;
+    overflow-x: auto;
+  }
+  .tab {
+    appearance: none;
+    border: var(--border);
+    border-bottom: 0;
+    background: var(--bg);
+    padding: 12px 16px;
+    font-family: inherit;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    margin-right: -3px;
+    white-space: nowrap;
+  }
+  .tab[aria-selected="true"] {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .tab:focus-visible { outline: 3px solid #000; outline-offset: -3px; }
+  .tab:disabled { opacity: .5; cursor: not-allowed; }
+
+  .panel { display: none; padding: 16px 0; }
+  .panel.active { display: block; }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 16px 0 0;
+  }
+  .btn {
+    appearance: none;
+    border: var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    padding: 12px 16px;
+    font-family: inherit;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    font-size: 13px;
+  }
+  .btn:hover { background: #f6f6f6; }
+  .btn:active { transform: translate(2px, 2px); box-shadow: none; }
+  .btn.primary { background: var(--accent); color: var(--accent-text); }
+  .btn.block { width: 100%; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Progress */
+  .progress-wrap {
+    border: var(--border);
+    padding: 2px;
+    margin-top: 10px;
+  }
+  .progress-bar {
+    height: 20px;
+    background: var(--accent);
+    width: 0%;
+    transition: width .2s ease;
+  }
+  .progress-bar.indeterminate {
+    width: 40%;
+    animation: indeterminate 1.2s infinite ease-in-out alternate;
+  }
+  @keyframes indeterminate {
+    from { transform: translateX(0%); }
+    to   { transform: translateX(150%); }
+  }
+
+  /* Form */
+  textarea, input, select {
+    border: var(--border);
+    padding: 10px;
+    font-family: inherit;
+    font-size: 14px;
+    width: 100%;
+    box-shadow: var(--shadow-sm);
+    background: var(--bg);
+    color: var(--fg);
+    resize: vertical;
+  }
+  textarea:focus, input:focus, select:focus { outline: 3px solid var(--accent); }
+  label {
+    display: block;
+    margin: 12px 0 6px;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: .06em;
+  }
+
+  /* Pre/code */
+  pre {
+    border: var(--border);
+    padding: 12px;
+    background: #fafafa;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: 12px;
+    box-shadow: var(--shadow-sm);
+  }
+  code { font-family: var(--mono); background: #f3f3f3; padding: 2px 4px; border: 1px solid #000; }
+
+  /* Logs */
+  .log-entry {
+    border-bottom: 1px solid #000;
+    padding: 8px 0;
+    font-size: 13px;
+  }
+  .log-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    opacity: .7;
+  }
+  .log-info .log-level { color: #000; background: #e8e8e8; padding: 1px 4px; }
+  .log-success .log-level { color: #004d00; background: #e6ffe6; padding: 1px 4px; }
+  .log-warning .log-level { color: #664d00; background: #fffbe6; padding: 1px 4px; }
+  .log-error .log-level { color: #8b0000; background: #ffe6e6; padding: 1px 4px; }
+
+  /* Sections */
+  section h2 {
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin: 0 0 10px;
+  }
+  .muted { opacity: .75; }
+  .note {
+    border: var(--border);
+    padding: 10px;
+    background: #ffffe6;
+    font-size: 13px;
+    margin-top: 10px;
+  }
+  .warn-box {
+    border: var(--border);
+    padding: 10px;
+    background: #fff5e6;
+    font-size: 13px;
+    margin-top: 10px;
+  }
+
+  /* Utility */
+  .mt-2 { margin-top: 8px; }
+  .mt-3 { margin-top: 12px; }
+  .mt-4 { margin-top: 16px; }
+  .mb-2 { margin-bottom: 8px; }
+  .mb-3 { margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="container">
+    <h1 class="title">Local Model Probe</h1>
+    <p class="subtitle">Chrome Gemini Nano / Built-in AI diagnostic + playground</p>
+    <div class="badge">Experimental APIs</div>
+  </div>
+</header>
+
+<main class="container">
+  <section id="status-dashboard" class="mt-4">
+    <div class="grid cols-4" id="status-grid"></div>
+  </section>
+
+  <section class="mt-4">
+    <div class="controls" id="global-controls"></div>
+  </section>
+
+  <div class="tabs" role="tablist" aria-label="Sections" id="tabs"></div>
+
+  <!-- Diagnostics Panel -->
+  <section class="panel active" id="panel-diagnostics" role="tabpanel" aria-labelledby="tab-diagnostics">
+    <h2>Diagnostics</h2>
+    <div id="diagnostics-content"></div>
+    <pre id="diagnostics-json"></pre>
+    <div class="controls mt-3">
+      <button class="btn" id="btn-copy-diag">Copy diagnostic JSON</button>
+    </div>
+  </section>
+
+  <!-- Install / Trigger Panel -->
+  <section class="panel" id="panel-install" role="tabpanel" aria-labelledby="tab-install">
+    <h2>Install / Trigger</h2>
+    <p class="muted">
+      Websites cannot force-install the model directly. Calling <code>LanguageModel.create()</code>
+      is the normal way to request a session and may trigger Chrome to download the on-device model.
+    </p>
+    <div class="warn-box mt-3">
+      This may trigger a large Chrome-managed model download.
+    </div>
+    <div class="mt-3">
+      <button class="btn primary block" id="btn-request-session">REQUEST LOCAL MODEL SESSION</button>
+    </div>
+    <div class="progress-wrap mt-3" id="install-progress-wrap" style="display:none;">
+      <div class="progress-bar" id="install-progress-bar"></div>
+    </div>
+    <div id="install-status" class="mt-3 value"></div>
+    <div class="mt-4" id="test-prompt-area" style="display:none;">
+      <button class="btn" id="btn-test-prompt">Test prompt after session creation</button>
+      <div id="test-prompt-output" class="mt-3"></div>
+    </div>
+  </section>
+
+  <!-- Capabilities Panel -->
+  <section class="panel" id="panel-capabilities" role="tabpanel" aria-labelledby="tab-capabilities">
+    <h2>Capabilities</h2>
+    <p class="muted" id="caps-disabled-note">A session must be created before running demos.</p>
+    <div id="caps-content" style="opacity:.6; pointer-events:none;">
+
+      <div class="card mt-3">
+        <h3>1. Basic Prompt</h3>
+        <label for="prompt-basic-input">Prompt</label>
+        <textarea id="prompt-basic-input" rows="3">Write a one-sentence greeting.</textarea>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-basic">Run Prompt</button>
+        </div>
+        <div id="out-basic" class="mt-3 value"></div>
+      </div>
+
+      <div class="card mt-3">
+        <h3>2. Streaming Prompt</h3>
+        <label for="prompt-stream-input">Prompt</label>
+        <textarea id="prompt-stream-input" rows="3">Count from 1 to 5 slowly.</textarea>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-stream">Run Streaming Prompt</button>
+        </div>
+        <div id="out-stream" class="mt-3 value"></div>
+      </div>
+
+      <div class="card mt-3">
+        <h3>3. Structured JSON Prompt</h3>
+        <label for="prompt-json-input">Text</label>
+        <textarea id="prompt-json-input" rows="4">We shipped dark mode and fixed 12 bugs. Users love it.</textarea>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-json">Extract JSON</button>
+        </div>
+        <pre id="out-json" class="mt-3"></pre>
+      </div>
+
+      <div class="card mt-3">
+        <h3>4. Summarize (Prompt API)</h3>
+        <label for="prompt-summarize-input">Text</label>
+        <textarea id="prompt-summarize-input" rows="5">The quantum computer ran a 127-qubit circuit. The results were noisy but promising. Researchers plan to scale to 1000 qubits within two years. Funding was secured last quarter.</textarea>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-summarize">Summarize</button>
+        </div>
+        <div id="out-summarize" class="mt-3 value"></div>
+      </div>
+
+      <div class="card mt-3">
+        <h3>5. Classifier</h3>
+        <label for="prompt-classify-input">Text</label>
+        <textarea id="prompt-classify-input" rows="3">The app crashes every time I open settings on Android 14.</textarea>
+        <label for="classify-label">Label set</label>
+        <select id="classify-label">
+          <option>Bug Report</option>
+          <option>Feature Request</option>
+          <option>Complaint</option>
+          <option>Praise</option>
+          <option>Other</option>
+        </select>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-classify">Classify</button>
+        </div>
+        <div id="out-classify" class="mt-3 value"></div>
+      </div>
+
+      <div class="card mt-3">
+        <h3>6. Rewrite</h3>
+        <label for="prompt-rewrite-input">Text</label>
+        <textarea id="prompt-rewrite-input" rows="3">We need to discuss the upcoming deadline because the schedule is tight.</textarea>
+        <label for="rewrite-tone">Tone</label>
+        <select id="rewrite-tone">
+          <option value="shorter">Shorter</option>
+          <option value="friendlier">Friendlier</option>
+          <option value="more brutalist">More brutalist</option>
+          <option value="more professional">More professional</option>
+        </select>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-rewrite">Rewrite</button>
+        </div>
+        <div id="out-rewrite" class="mt-3 value"></div>
+      </div>
+
+      <div class="card mt-3">
+        <h3>7. Tiny Code Helper</h3>
+        <label for="prompt-code-input">Code</label>
+        <textarea id="prompt-code-input" rows="4">function reverse(s) { return s.split('').reverse().join(''); }</textarea>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-code">Explain Code</button>
+        </div>
+        <div id="out-code" class="mt-3 value"></div>
+      </div>
+
+      <div class="card mt-3">
+        <h3>8. Safety / Guardrail Probe Lite</h3>
+        <label for="prompt-safety-input">Prompt</label>
+        <textarea id="prompt-safety-input" rows="3">In general, why is it important to refuse dangerous instructions?</textarea>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-safety">Run Safety Probe</button>
+        </div>
+        <div id="out-safety" class="mt-3 value"></div>
+      </div>
+
+      <div class="card mt-3" id="native-apis-card">
+        <h3>Optional Native APIs</h3>
+        <div id="native-apis-content"></div>
+      </div>
+
+      <div class="card mt-3" id="language-detector-card" style="display:none;">
+        <h3>Language Detector</h3>
+        <label for="ld-input">Text</label>
+        <textarea id="ld-input" rows="2">Bonjour le monde</textarea>
+        <div class="controls mt-2">
+          <button class="btn primary" id="btn-run-ld">Detect Language</button>
+        </div>
+        <pre id="out-ld" class="mt-3"></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Logs Panel -->
+  <section class="panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs">
+    <h2>Logs</h2>
+    <div class="controls mb-3">
+      <button class="btn" id="btn-copy-logs">Copy logs</button>
+      <button class="btn" id="btn-clear-logs">Clear logs</button>
+    </div>
+    <div id="logs-container"></div>
+  </section>
+
+  <!-- Help Panel -->
+  <section class="panel" id="panel-help" role="tabpanel" aria-labelledby="tab-help">
+    <h2>Help</h2>
+    <div class="card">
+      <h3>Required</h3>
+      <ul>
+        <li>Chrome / Chromium build that exposes built-in AI APIs</li>
+        <li>Some features may require localhost, an extension context, or an origin trial token</li>
+      </ul>
+    </div>
+    <div class="card mt-3">
+      <h3>Useful Internal Pages</h3>
+      <ul>
+        <li><code>chrome://on-device-internals/</code></li>
+        <li><code>chrome://components/</code> — look for <em>Optimization Guide On Device Model</em></li>
+        <li><code>chrome://flags/#optimization-guide-on-device-model</code></li>
+        <li><code>chrome://flags/#prompt-api-for-gemini-nano-multimodal-input</code></li>
+      </ul>
+    </div>
+    <div class="card mt-3">
+      <h3>Common States</h3>
+      <ul>
+        <li><strong>API missing</strong> — The browser does not expose <code>LanguageModel</code>. Try Chrome Canary/Dev with the right flags enabled.</li>
+        <li><strong>Model unavailable</strong> — <code>availability()</code> returned <code>"unavailable"</code>. Check internal pages and flags.</li>
+        <li><strong>Download in progress</strong> — Chrome is fetching the model. Keep the page open and wait.</li>
+        <li><strong>Session created</strong> — The model is ready to use on this page.</li>
+        <li><strong>Hardware/performance requirement failed</strong> — Some builds require capable hardware or a performance tier check.</li>
+        <li><strong>Origin trial / flag required</strong> — The API may be gated behind an experiment or enterprise policy.</li>
+      </ul>
+    </div>
+    <div class="card mt-3">
+      <h3>Disclaimer</h3>
+      <p class="muted">
+        This app cannot manually place model files on disk. Chrome manages model download, updates, and storage entirely.
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer class="container mt-4" style="opacity:.6; font-size:12px;">
+  No tracking. No analytics. No network calls.
+</footer>
+
+<script>
+(() => {
+  'use strict';
+
+  const TAB_KEYS = ['diagnostics','install','capabilities','logs','help'];
+  const state = {
+    browser: {},
+    support: { hasLanguageModel: false, hasSummarizer: false, hasTranslator: false, hasLanguageDetector: false },
+    availability: null,
+    session: null,
+    progress: { active: false, value: null, message: '' },
+    diagnostics: {},
+    logs: [],
+    lastError: null,
+  };
+
+  function el(id) { return document.getElementById(id); }
+
+  function log(level, message, data) {
+    const entry = {
+      time: new Date().toISOString(),
+      level,
+      message: String(message),
+      data: data !== undefined ? data : undefined,
+    };
+    state.logs.push(entry);
+    renderLogs();
+  }
+
+  function setLastError(err) {
+    state.lastError = err ? { name: err.name || 'Error', message: err.message || String(err), stack: err.stack || '' } : null;
+  }
+
+  function detectBrowser() {
+    const ua = navigator.userAgent || '';
+    const vendor = navigator.vendor || '';
+    const platform = navigator.platform || '';
+    let family = 'Unknown';
+    let chromeLike = false;
+    let isChrome = false;
+
+    if (/Chrome\/\d+/i.test(ua) && /Google Inc/.test(vendor)) {
+      isChrome = true;
+      chromeLike = true;
+      family = 'Chrome';
+    } else if (/Edg\/\d+/i.test(ua)) {
+      chromeLike = true;
+      family = 'Edge (Chromium-like, support not guaranteed)';
+    } else if (/OPR\/\d+/i.test(ua) || /Opera\/\d+/i.test(ua)) {
+      chromeLike = true;
+      family = 'Opera (Chromium-like, support not guaranteed)';
+    } else if (/Brave/i.test(ua)) {
+      chromeLike = true;
+      family = 'Brave (Chromium-like, support not guaranteed)';
+    } else if (/Chrome\/\d+/i.test(ua) || /Chromium\/\d+/i.test(ua)) {
+      chromeLike = true;
+      family = 'Chromium-like (support not guaranteed)';
+    } else if (/Firefox\/\d+/i.test(ua)) {
+      family = 'Firefox';
+    } else if (/Safari\/\d+/i.test(ua) && /Apple Computer/.test(vendor)) {
+      family = 'Safari';
+    }
+
+    const secure = !!(window.isSecureContext);
+    const host = location.hostname || '';
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    const isFile = location.protocol === 'file:';
+
+    state.browser = {
+      ua: ua.slice(0, 300),
+      vendor,
+      platform,
+      family,
+      isChrome,
+      chromeLike,
+      secure,
+      isLocalhost,
+      isFile,
+      userAgentData: navigator.userAgentData ? { brands: navigator.userAgentData.brands || [] } : null,
+    };
+    return state.browser;
+  }
+
+  async function runDiagnostics() {
+    detectBrowser();
+    const diag = {
+      browser: { ...state.browser },
+      apis: {},
+      timestamp: new Date().toISOString(),
+    };
+
+    // LanguageModel checks
+    const hasLM = typeof globalThis.LanguageModel !== 'undefined';
+    state.support.hasLanguageModel = hasLM;
+    diag.apis.LanguageModel = {
+      exposed: hasLM,
+      typeof: hasLM ? typeof globalThis.LanguageModel : 'undefined',
+      availability: null,
+      create: null,
+      params: null,
+      promptSupport: false,
+      promptStreamingSupport: false,
+    };
+
+    if (hasLM) {
+      try {
+        const avail = await globalThis.LanguageModel.availability();
+        state.availability = avail;
+        diag.apis.LanguageModel.availability = avail;
+      } catch (e) {
+        diag.apis.LanguageModel.availability = { error: e.name + ': ' + e.message };
+        setLastError(e);
+        log('error', 'LanguageModel.availability() failed', e.message);
+      }
+
+      // Static members presence
+      diag.apis.LanguageModel.params = typeof globalThis.LanguageModel.params !== 'undefined';
+
+      // Try a very lightweight create to test if it throws immediately (without awaiting full model)
+      // We won't keep this session; it's just to test API shape.
+      // Some builds throw immediately if not available, which is fine.
+    }
+
+    // Check optional APIs
+    const hasSummarizer = typeof globalThis.Summarizer !== 'undefined';
+    const hasTranslator = typeof globalThis.Translator !== 'undefined';
+    const hasLanguageDetector = typeof globalThis.LanguageDetector !== 'undefined';
+    state.support.hasSummarizer = hasSummarizer;
+    state.support.hasTranslator = hasTranslator;
+    state.support.hasLanguageDetector = hasLanguageDetector;
+    diag.apis.Summarizer = { exposed: hasSummarizer };
+    diag.apis.Translator = { exposed: hasTranslator };
+    diag.apis.LanguageDetector = { exposed: hasLanguageDetector };
+
+    state.diagnostics = diag;
+    log('info', 'Diagnostics ran');
+  }
+
+  async function checkAvailability() {
+    if (!state.support.hasLanguageModel) {
+      log('warning', 'LanguageModel not exposed; skipping availability check');
+      return;
+    }
+    try {
+      const result = await globalThis.LanguageModel.availability();
+      state.availability = result;
+      log('success', 'LanguageModel.availability() returned', result);
+    } catch (e) {
+      setLastError(e);
+      state.availability = 'error';
+      log('error', 'LanguageModel.availability() threw', e.message);
+    }
+  }
+
+  async function createSession() {
+    if (!state.support.hasLanguageModel) {
+      log('error', 'Cannot create session: LanguageModel not exposed');
+      return;
+    }
+    setLastError(null);
+    state.progress = { active: true, value: null, message: 'Requesting session...' };
+    render();
+    log('info', 'Calling LanguageModel.create()');
+    try {
+      const opts = {};
+      if ('monitor' in globalThis.LanguageModel.prototype || 'monitor' in globalThis.LanguageModel) {
+        opts.monitor = (m) => {
+          m.addEventListener('downloadprogress', (e) => {
+            const loaded = e?.loaded ?? 0;
+            const total = e?.total ?? 0;
+            let pct = null;
+            if (total > 0) pct = Math.round((loaded / total) * 100);
+            state.progress.value = pct;
+            state.progress.message = `Downloading model… ${loaded}/${total}`;
+            log('info', 'Download progress', { loaded, total, pct });
+            render();
+          });
+        };
+      }
+      const session = await globalThis.LanguageModel.create(opts);
+      state.session = session;
+      state.progress = { active: false, value: 100, message: 'Session created.' };
+      log('success', 'LanguageModel.create() succeeded — session created');
+
+      // Probe session capabilities
+      state.diagnostics.apis.LanguageModel.promptSupport = typeof session.prompt === 'function';
+      state.diagnostics.apis.LanguageModel.promptStreamingSupport = typeof session.promptStreaming === 'function';
+    } catch (e) {
+      setLastError(e);
+      state.session = null;
+      state.progress = { active: false, value: null, message: 'Failed: ' + (e.message || e) };
+      log('error', 'LanguageModel.create() failed', e.message);
+    }
+    render();
+  }
+
+  function destroySession() {
+    if (state.session && typeof state.session.destroy === 'function') {
+      try { state.session.destroy(); } catch (e) { /* ignore */ }
+    }
+    state.session = null;
+    log('info', 'Session destroyed');
+    render();
+  }
+
+  function runPrompt(text, outId) {
+    if (!state.session) { log('error', 'No session'); return; }
+    const out = el(outId);
+    out.textContent = 'Running…';
+    state.session.prompt(text).then(result => {
+      out.textContent = result || '(empty)';
+      log('success', 'prompt() completed');
+    }).catch(e => {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'prompt() failed', e.message);
+    });
+  }
+
+  async function runStreamingPrompt(text, outId) {
+    if (!state.session) { log('error', 'No session'); return; }
+    const out = el(outId);
+    if (typeof state.session.promptStreaming !== 'function') {
+      out.textContent = 'Streaming not available in this build';
+      log('warning', 'promptStreaming not supported');
+      return;
+    }
+    out.textContent = '';
+    try {
+      const stream = await state.session.promptStreaming(text);
+      let first = true;
+      for await (const chunk of stream) {
+        if (first) { out.textContent = ''; first = false; }
+        out.textContent += chunk;
+      }
+      log('success', 'promptStreaming() completed');
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'promptStreaming() failed', e.message);
+    }
+  }
+
+  async function runStructuredJsonDemo() {
+    if (!state.session) { log('error', 'No session'); return; }
+    const text = el('prompt-json-input').value;
+    const out = el('out-json');
+    const prompt = `Analyze the following text and return ONLY a JSON object with no markdown, no commentary, no code fences, in this exact shape:\n{ "topic": string, "sentiment": "positive" | "neutral" | "negative", "action_items": string[] }\n\nText:\n"""${text}"""`;
+    out.textContent = 'Running…';
+    try {
+      const result = await state.session.prompt(prompt);
+      let json = null;
+      let parseError = null;
+      try {
+        // Try to extract JSON if model wrapped it
+        const raw = String(result).trim();
+        const m = raw.match(/\{[\s\S]*\}/);
+        json = JSON.parse(m ? m[0] : raw);
+      } catch (e) { parseError = e.message; }
+      if (json) {
+        out.textContent = JSON.stringify(json, null, 2);
+        log('success', 'Structured JSON parsed');
+      } else {
+        out.textContent = 'Raw response:\n' + result + '\n\nParse error: ' + parseError;
+        log('warning', 'Structured JSON parse failed', parseError);
+      }
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'Structured JSON prompt failed', e.message);
+    }
+  }
+
+  async function runSummarizeDemo() {
+    if (!state.session) { log('error', 'No session'); return; }
+    const text = el('prompt-summarize-input').value;
+    const prompt = `Summarize the following text in one or two concise sentences:\n\n${text}`;
+    const out = el('out-summarize');
+    out.textContent = 'Running…';
+    try {
+      const result = await state.session.prompt(prompt);
+      out.textContent = result || '(empty)';
+      log('success', 'Summarize completed');
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'Summarize failed', e.message);
+    }
+  }
+
+  async function runClassifierDemo() {
+    if (!state.session) { log('error', 'No session'); return; }
+    const text = el('prompt-classify-input').value;
+    const label = el('classify-label').value;
+    const labels = ['Bug Report','Feature Request','Complaint','Praise','Other'];
+    const prompt = `Classify the following text into exactly one of these labels: ${labels.join(', ')}.\nReply with only the label name.\n\nText:\n"""${text}"""`;
+    const out = el('out-classify');
+    out.textContent = 'Running…';
+    try {
+      const result = await state.session.prompt(prompt);
+      const pick = labels.find(l => String(result).toLowerCase().includes(l.toLowerCase()));
+      out.textContent = pick ? `${pick}` : `Model said: ${result}`;
+      log('success', 'Classifier completed');
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'Classifier failed', e.message);
+    }
+  }
+
+  async function runRewriteDemo() {
+    if (!state.session) { log('error', 'No session'); return; }
+    const text = el('prompt-rewrite-input').value;
+    const tone = el('rewrite-tone').value;
+    const prompt = `Rewrite the following text to be ${tone}. Keep the meaning. Return only the rewritten text.\n\n"""${text}"""`;
+    const out = el('out-rewrite');
+    out.textContent = 'Running…';
+    try {
+      const result = await state.session.prompt(prompt);
+      out.textContent = result || '(empty)';
+      log('success', 'Rewrite completed');
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'Rewrite failed', e.message);
+    }
+  }
+
+  async function runCodeExplainDemo() {
+    if (!state.session) { log('error', 'No session'); return; }
+    const code = el('prompt-code-input').value;
+    const prompt = `Explain what this code does in one short paragraph:\n\n\`\`\`\n${code}\n\`\`\``;
+    const out = el('out-code');
+    out.textContent = 'Running…';
+    try {
+      const result = await state.session.prompt(prompt);
+      out.textContent = result || '(empty)';
+      log('success', 'Code explain completed');
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'Code explain failed', e.message);
+    }
+  }
+
+  async function runSafetyProbe() {
+    if (!state.session) { log('error', 'No session'); return; }
+    const prompt = el('prompt-safety-input').value;
+    const out = el('out-safety');
+    out.textContent = 'Running…';
+    try {
+      const result = await state.session.prompt(prompt);
+      out.textContent = result || '(empty)';
+      log('success', 'Safety probe completed');
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'Safety probe failed', e.message);
+    }
+  }
+
+  async function runLanguageDetectorDemo() {
+    if (!state.support.hasLanguageDetector) { log('warning', 'LanguageDetector not exposed'); return; }
+    const text = el('ld-input').value;
+    const out = el('out-ld');
+    out.textContent = 'Running…';
+    try {
+      const detector = await globalThis.LanguageDetector.create();
+      const results = await detector.detect(text);
+      out.textContent = JSON.stringify(results, null, 2);
+      log('success', 'LanguageDetector succeeded');
+    } catch (e) {
+      out.textContent = 'Error: ' + (e.message || e);
+      setLastError(e);
+      log('error', 'LanguageDetector failed', e.message);
+    }
+  }
+
+  function copyReport() {
+    const text = JSON.stringify(state.diagnostics, null, 2);
+    navigator.clipboard.writeText(text).then(() => log('success', 'Diagnostic JSON copied'));
+  }
+
+  function copyLogs() {
+    const lines = state.logs.map(l => `[${l.time}] [${l.level.toUpperCase()}] ${l.message}`);
+    navigator.clipboard.writeText(lines.join('\n')).then(() => log('success', 'Logs copied'));
+  }
+
+  function render() {
+    // Tabs
+    const tabContainer = el('tabs');
+    if (!tabContainer.dataset.built) {
+      tabContainer.innerHTML = '';
+      TAB_KEYS.forEach((key, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'tab';
+        btn.role = 'tab';
+        btn.id = 'tab-' + key;
+        btn.textContent = {
+          diagnostics: 'Diagnostics',
+          install: 'Install / Trigger',
+          capabilities: 'Capabilities',
+          logs: 'Logs',
+          help: 'Help',
+        }[key];
+        btn.setAttribute('aria-controls', 'panel-' + key);
+        btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+        btn.addEventListener('click', () => activateTab(key));
+        tabContainer.appendChild(btn);
+      });
+      tabContainer.dataset.built = '1';
+    }
+    TAB_KEYS.forEach(key => {
+      const btn = el('tab-' + key);
+      const panel = el('panel-' + key);
+      if (!btn || !panel) return;
+      const active = panel.classList.contains('active');
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+
+    // Status cards
+    const grid = el('status-grid');
+    const b = state.browser;
+    const cards = [
+      { title: 'Browser family', value: b.family || '—' },
+      { title: 'User agent summary', value: (b.ua || '').slice(0, 120) + ((b.ua || '').length > 120 ? '…' : '') },
+      { title: 'Secure context', value: b.secure ? 'Yes' : 'No', cls: b.secure ? 'ok' : 'no' },
+      { title: 'Localhost', value: b.isLocalhost ? 'Yes' : 'No', cls: b.isLocalhost ? 'ok' : 'warn' },
+      { title: 'LanguageModel present', value: state.support.hasLanguageModel ? 'Yes' : 'No', cls: state.support.hasLanguageModel ? 'ok' : 'no' },
+      { title: 'Availability result', value: state.availability === null ? '—' : String(state.availability), cls: state.availability === 'available' ? 'ok' : state.availability === 'unavailable' ? 'no' : 'warn' },
+      { title: 'Session status', value: state.session ? 'Ready' : 'None', cls: state.session ? 'ok' : 'warn' },
+      { title: 'Last error', value: state.lastError ? (state.lastError.name + ': ' + state.lastError.message) : '—', cls: state.lastError ? 'no' : '' },
+    ];
+    if (state.progress.active || state.progress.message) {
+      cards.push({ title: 'Install / Download', value: state.progress.message + (state.progress.value != null ? ` (${state.progress.value}%)` : ''), cls: 'warn' });
+    }
+    grid.innerHTML = cards.map(c => `
+      <div class="card">
+        <h3>${c.title}</h3>
+        <div class="value ${c.cls || ''}">${c.value}</div>
+      </div>
+    `).join('');
+
+    // Global controls
+    const gc = el('global-controls');
+    gc.innerHTML = '';
+    const mkBtn = (text, id, onClick, primary) => {
+      const btn = document.createElement('button');
+      btn.className = 'btn' + (primary ? ' primary' : '');
+      btn.id = id;
+      btn.textContent = text;
+      btn.addEventListener('click', onClick);
+      return btn;
+    };
+    gc.appendChild(mkBtn('Run Diagnostics', 'btn-diag', () => { runDiagnostics().then(render); }));
+    gc.appendChild(mkBtn('Check Availability', 'btn-avail', () => { checkAvailability().then(render); }));
+    gc.appendChild(mkBtn('Trigger Install / Create Session', 'btn-create', () => { createSession(); }, true));
+    gc.appendChild(mkBtn('Destroy Session', 'btn-destroy', () => { destroySession(); }));
+    gc.appendChild(mkBtn('Clear Logs', 'btn-clear', () => { state.logs = []; renderLogs(); }));
+    gc.appendChild(mkBtn('Copy Report', 'btn-report', () => { copyReport(); }));
+
+    // Disable buttons while progress active
+    const disableDuringProgress = ['btn-diag','btn-avail','btn-create','btn-destroy'];
+    disableDuringProgress.forEach(id => {
+      const btn = el(id);
+      if (btn) btn.disabled = state.progress.active;
+    });
+
+    // Diagnostics content
+    const diagContent = el('diagnostics-content');
+    const d = state.diagnostics;
+    const lm = d.apis?.LanguageModel || {};
+    diagContent.innerHTML = `
+      <div class="grid cols-2">
+        <div class="card"><h3>Browser detection details</h3><div class="value"><pre>${JSON.stringify(d.browser || {}, null, 2)}</pre></div></div>
+        <div class="card"><h3>API detection details</h3><div class="value"><pre>${JSON.stringify({
+          typeofLanguageModel: lm.typeof,
+          availability: lm.availability,
+          params: lm.params,
+          promptSupport: lm.promptSupport,
+          promptStreamingSupport: lm.promptStreamingSupport,
+        }, null, 2)}</pre></div></div>
+      </div>
+      <div class="note mt-3">If API is missing and you are on Chrome, enable the required flags, relaunch, and test from <code>http://localhost</code>.</div>
+    `;
+    el('diagnostics-json').textContent = JSON.stringify(state.diagnostics, null, 2);
+
+    // Install / Trigger tab
+    const progressWrap = el('install-progress-wrap');
+    const progressBar = el('install-progress-bar');
+    const installStatus = el('install-status');
+    if (state.progress.active || state.progress.message) {
+      progressWrap.style.display = '';
+      if (state.progress.value != null) {
+        progressBar.classList.remove('indeterminate');
+        progressBar.style.width = Math.max(0, Math.min(100, state.progress.value)) + '%';
+      } else {
+        progressBar.classList.add('indeterminate');
+        progressBar.style.width = '';
+      }
+      installStatus.textContent = state.progress.message;
+    } else {
+      progressWrap.style.display = 'none';
+      installStatus.textContent = '';
+    }
+    const testArea = el('test-prompt-area');
+    testArea.style.display = state.session ? '' : 'none';
+
+    // Capabilities tab
+    const capsDisabled = el('caps-disabled-note');
+    const capsContent = el('caps-content');
+    if (state.session) {
+      capsDisabled.style.display = 'none';
+      capsContent.style.opacity = '1';
+      capsContent.style.pointerEvents = 'auto';
+    } else {
+      capsDisabled.style.display = '';
+      capsContent.style.opacity = '0.6';
+      capsContent.style.pointerEvents = 'none';
+    }
+
+    // Optional native APIs note
+    const nativeContent = el('native-apis-content');
+    const notes = [];
+    if (state.support.hasSummarizer) notes.push('Native Summarizer API is available.');
+    if (state.support.hasTranslator) notes.push('Native Translator API is available.');
+    if (state.support.hasLanguageDetector) notes.push('Native LanguageDetector API is available.');
+    nativeContent.innerHTML = notes.length ? notes.map(n => `<div class="value ok">${n}</div>`).join('') : '<div class="value">No optional native APIs detected.</div>';
+    el('language-detector-card').style.display = state.support.hasLanguageDetector ? '' : 'none';
+
+    renderLogs();
+  }
+
+  function renderLogs() {
+    const container = el('logs-container');
+    if (!container) return;
+    if (!state.logs.length) { container.innerHTML = '<div class="muted">No logs yet.</div>'; return; }
+    container.innerHTML = state.logs.slice().reverse().map(entry => {
+      const dataBlock = entry.data !== undefined ? `<pre style="margin-top:6px;">${JSON.stringify(entry.data, null, 2)}</pre>` : '';
+      return `<div class="log-entry log-${entry.level}">
+        <div class="log-meta">${entry.time} <span class="log-level">${entry.level.toUpperCase()}</span></div>
+        <div>${escapeHtml(entry.message)}</div>
+        ${dataBlock}
+      </div>`;
+    }).join('');
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function activateTab(key) {
+    TAB_KEYS.forEach(k => {
+      const panel = el('panel-' + k);
+      if (panel) panel.classList.toggle('active', k === key);
+    });
+    render();
+  }
+
+  // Event wiring
+  el('btn-copy-diag').addEventListener('click', copyReport);
+  el('btn-request-session').addEventListener('click', () => createSession());
+  el('btn-test-prompt').addEventListener('click', () => {
+    if (!state.session) return;
+    const out = el('test-prompt-output');
+    out.textContent = 'Running…';
+    state.session.prompt('Reply with one short sentence confirming you are running locally in Chrome.')
+      .then(r => { out.textContent = r || '(empty)'; log('success', 'Test prompt succeeded'); })
+      .catch(e => { out.textContent = 'Error: ' + (e.message || e); setLastError(e); log('error', 'Test prompt failed', e.message); });
+  });
+
+  el('btn-run-basic').addEventListener('click', () => runPrompt(el('prompt-basic-input').value, 'out-basic'));
+  el('btn-run-stream').addEventListener('click', () => runStreamingPrompt(el('prompt-stream-input').value, 'out-stream'));
+  el('btn-run-json').addEventListener('click', runStructuredJsonDemo);
+  el('btn-run-summarize').addEventListener('click', runSummarizeDemo);
+  el('btn-run-classify').addEventListener('click', runClassifierDemo);
+  el('btn-run-rewrite').addEventListener('click', runRewriteDemo);
+  el('btn-run-code').addEventListener('click', runCodeExplainDemo);
+  el('btn-run-safety').addEventListener('click', runSafetyProbe);
+  el('btn-copy-logs').addEventListener('click', copyLogs);
+  el('btn-clear-logs').addEventListener('click', () => { state.logs = []; renderLogs(); });
+  el('btn-run-ld')?.addEventListener('click', runLanguageDetectorDemo);
+
+  // Init
+  runDiagnostics().then(() => {
+    render();
+    if (state.support.hasLanguageModel) {
+      checkAvailability().then(render);
+    }
+  });
+
+  window.addEventListener('error', (e) => {
+    log('error', 'Global error: ' + (e.message || e.error), e.error ? e.error.stack : '');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    log('error', 'Unhandled rejection: ' + (e.reason && e.reason.message ? e.reason.message : e.reason), e.reason && e.reason.stack ? e.reason.stack : '');
+  });
+})();
+</script>
+</body>
+</html>

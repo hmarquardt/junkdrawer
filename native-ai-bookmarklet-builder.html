@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Native AI Bookmarklet — Drag local Gemini Nano tools into your browser bar</title>
+<style>
+  :root {
+    --bg: #fff;
+    --fg: #000;
+    --accent: #ccff00;
+    --border: 3px solid #000;
+    --shadow: 6px 6px 0 0 #000;
+    --shadow-sm: 3px 3px 0 0 #000;
+    --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  }
+  html { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: inherit; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+  }
+  .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+  header {
+    border-bottom: var(--border);
+    padding: 24px 0;
+  }
+  .title {
+    margin: 0;
+    font-size: clamp(28px, 5vw, 56px);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
+  .subtitle {
+    margin: 8px 0 0;
+    font-size: clamp(14px, 2vw, 18px);
+    opacity: .8;
+  }
+  .badge {
+    display: inline-block;
+    border: var(--border);
+    padding: 6px 10px;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    background: var(--accent);
+    color: var(--fg);
+    box-shadow: var(--shadow-sm);
+    margin-top: 12px;
+  }
+  section { margin-top: 28px; }
+  h2 {
+    margin: 0 0 12px;
+    font-size: 20px;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+  }
+  .card {
+    border: var(--border);
+    padding: 16px;
+    box-shadow: var(--shadow);
+    background: var(--bg);
+  }
+  .grid {
+    display: grid;
+    gap: 16px;
+  }
+  .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 900px) {
+    .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .grid.cols-3,
+    .grid.cols-4 { grid-template-columns: 1fr; }
+  }
+  .btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    padding: 12px 16px;
+    font-family: inherit;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    font-size: 13px;
+    text-decoration: none;
+  }
+  .btn:hover { background: #f6f6f6; }
+  .btn:active { transform: translate(2px, 2px); box-shadow: none; }
+  .btn.primary { background: var(--accent); }
+  .btn.big { font-size: 18px; padding: 18px 24px; }
+  textarea, input, select {
+    border: var(--border);
+    padding: 10px;
+    font-family: var(--mono);
+    font-size: 13px;
+    width: 100%;
+    box-shadow: var(--shadow-sm);
+    background: var(--bg);
+    color: var(--fg);
+    resize: vertical;
+  }
+  textarea:focus, input:focus, select:focus { outline: 3px solid var(--accent); }
+  .value {
+    font-family: var(--mono);
+    font-size: 14px;
+    word-break: break-word;
+  }
+  .value.ok { color: #004d00; }
+  .value.no { color: #8b0000; }
+  .value.warn { color: #664d00; }
+  .muted { opacity: .75; }
+  .note {
+    border: var(--border);
+    padding: 12px;
+    background: #ffffe6;
+    font-size: 13px;
+    margin-top: 12px;
+  }
+  .warn-box {
+    border: var(--border);
+    padding: 12px;
+    background: #fff5e6;
+    font-size: 13px;
+    margin-top: 12px;
+  }
+  code {
+    font-family: var(--mono);
+    background: #f3f3f3;
+    padding: 2px 4px;
+    border: 1px solid #000;
+    font-size: 12px;
+  }
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  .mt-2 { margin-top: 8px; }
+  .mt-3 { margin-top: 12px; }
+  .mt-4 { margin-top: 16px; }
+  .mb-2 { margin-bottom: 8px; }
+  .mb-3 { margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="container">
+    <h1 class="title">Native AI Bookmarklet</h1>
+    <p class="subtitle">Drag local Gemini Nano tools into your browser bar</p>
+    <div class="badge">Experimental Chrome APIs</div>
+  </div>
+</header>
+
+<main class="container">
+  <section id="hero">
+    <h2>What it does</h2>
+    <p class="muted">
+      This page generates a bookmarklet. Once saved to your bookmarks bar, you can click it on any webpage to open a right-edge AI palette powered by Chrome’s native built-in AI APIs (Gemini Nano / Prompt API). No cloud calls. No accounts. No tracking.
+    </p>
+    <div class="mt-4" style="text-align:center;">
+      <a class="btn primary big" id="bookmarklet-link" href="javascript:void(0);" draggable="true">LOCAL AI TOOLS</a>
+    </div>
+    <div class="note mt-3">
+      <strong>To install:</strong> Drag the button above to your bookmarks bar. If your browser hides the bar, press <code>Ctrl+Shift+B</code> (Windows/Linux) or <code>Cmd+Shift+B</code> (Mac) to show it.
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="card">
+      <h2>Install instructions</h2>
+      <ol>
+        <li>Drag the <strong>LOCAL AI TOOLS</strong> button to your bookmarks bar.</li>
+        <li>Open any article or webpage you want to analyze.</li>
+        <li>Click the <strong>LOCAL AI TOOLS</strong> bookmark.</li>
+        <li>Use the right-edge AI palette that appears.</li>
+      </ol>
+      <p class="muted mt-2">
+        The palette can summarize pages, extract key points, translate, answer questions about the page, explain or rewrite your selection, and more.
+      </p>
+    </div>
+  </section>
+
+  <section id="diagnostics">
+    <h2>Builder page diagnostics</h2>
+    <div class="grid cols-4" id="diag-grid"></div>
+    <div class="warn-box mt-3" id="diag-warn"></div>
+  </section>
+
+  <section id="source">
+    <h2>Bookmarklet source</h2>
+    <label class="mt-3" style="display:block;font-weight:700;text-transform:uppercase;font-size:12px;letter-spacing:.06em;">Pretty source</label>
+    <textarea id="bookmarklet-pretty" rows="10" readonly></textarea>
+    <div class="mt-2" style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn" id="btn-copy-pretty">Copy Pretty Source</button>
+      <button class="btn" id="btn-copy-href">Copy Bookmarklet</button>
+    </div>
+
+    <label class="mt-3" style="display:block;font-weight:700;text-transform:uppercase;font-size:12px;letter-spacing:.06em;">Bookmarklet href</label>
+    <textarea id="bookmarklet-href" rows="4" readonly></textarea>
+  </section>
+
+  <section id="help">
+    <div class="card mt-4">
+      <h2>Help / Troubleshooting</h2>
+      <h3 class="mt-3">Required browser setup</h3>
+      <ul>
+        <li>Chrome / Chromium build that exposes built-in AI APIs.</li>
+        <li>Some features may require localhost, an extension context, or an origin trial token.</li>
+      </ul>
+      <h3 class="mt-3">Useful internal pages</h3>
+      <ul>
+        <li><code>chrome://on-device-internals/</code></li>
+        <li><code>chrome://components/</code> — look for <em>Optimization Guide On Device Model</em></li>
+        <li><code>chrome://flags/#optimization-guide-on-device-model</code></li>
+        <li><code>chrome://flags/#prompt-api-for-gemini-nano-multimodal-input</code></li>
+      </ul>
+      <h3 class="mt-3">Common states</h3>
+      <ul>
+        <li><strong>Unsupported</strong> — Not a Chrome/Chromium browser, or APIs are not exposed.</li>
+        <li><strong>API missing</strong> — The browser does not expose <code>LanguageModel</code>. Try Chrome Canary/Dev with the right flags.</li>
+        <li><strong>Downloadable</strong> — The model can be requested; clicking a task may trigger Chrome to download it.</li>
+        <li><strong>Downloading</strong> — Chrome is fetching the model. Keep the page open and retry shortly.</li>
+        <li><strong>Ready</strong> — The local model session is active and tasks will run on-device.</li>
+        <li><strong>Unavailable</strong> — The model is not available on this device/channel. Check flags and components.</li>
+      </ul>
+      <h3 class="mt-3">Important limitations</h3>
+      <ul>
+        <li>Bookmarklets may not run on Chrome internal pages (e.g., <code>chrome://</code>), the Web Store, or sites with strict CSP.</li>
+        <li>Native AI APIs may be unavailable depending on Chrome channel, flags, hardware, origin, and rollout status.</li>
+        <li>A bookmarklet has fewer permissions than a Chrome extension. For production use, consider building an extension.</li>
+        <li>This utility cannot force-install model files; Chrome manages model download, updates, and storage.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer class="container mt-4" style="opacity:.6; font-size:12px;">
+  No build tools. No external libraries. No analytics. No tracking. No remote AI calls.
+</footer>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================================================
+  // Bookmarklet source function
+  // ============================================================
+  const bookmarkletFn = function() {
+    'use strict';
+
+    const HOST_ID = '__native_ai_tools_host__';
+    let host = document.getElementById(HOST_ID);
+
+    const state = {
+      session: null,
+      logs: [],
+      currentView: 'default',
+      output: '',
+      meta: '',
+      status: 'Checking',
+      lastPrompt: '',
+      lastOpts: null,
+      rewriteStyle: 'shorter',
+      native: {},
+      browser: {},
+      panelOpen: false
+    };
+
+    const TEXT_LANGUAGE_OPTIONS = {
+      expectedInputs: [
+        { type: 'text', languages: ['en', 'es', 'ja'] }
+      ],
+      expectedOutputs: [
+        { type: 'text', languages: ['en'] }
+      ],
+      outputLanguage: 'en'
+    };
+
+    function getLanguageModelOptions(extra) {
+      const opts = {
+        expectedInputs: TEXT_LANGUAGE_OPTIONS.expectedInputs,
+        expectedOutputs: TEXT_LANGUAGE_OPTIONS.expectedOutputs,
+        outputLanguage: TEXT_LANGUAGE_OPTIONS.outputLanguage
+      };
+      if (extra) {
+        Object.keys(extra).forEach(function(key) {
+          opts[key] = extra[key];
+        });
+      }
+      return opts;
+    }
+
+    function log(level, message, data) {
+      const time = new Date().toISOString();
+      state.logs.push({ time, level, message: String(message), data });
+      if (state.logs.length > 200) state.logs.shift();
+    }
+
+    function render() {
+      if (!host || !host.shadowRoot) return;
+      const root = host.shadowRoot.getElementById('nai-root');
+      if (root) {
+        root.classList.toggle('nai-open', state.panelOpen);
+        root.classList.toggle('nai-has-output', !!state.output);
+      }
+      const toggleBtn = host.shadowRoot.getElementById('nai-toggle');
+      if (toggleBtn) {
+        toggleBtn.textContent = state.panelOpen ? '-' : '+';
+        toggleBtn.title = state.panelOpen ? 'Minimize local AI tools' : 'Open local AI tools';
+      }
+      const statusPill = host.shadowRoot.getElementById('nai-status');
+      if (statusPill) {
+        statusPill.textContent = state.status;
+        statusPill.className = 'nai-status-pill nai-status-' + state.status.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      }
+      const views = ['default','output','ask','rewrite','status'];
+      views.forEach(function(v) {
+        const el = host.shadowRoot.getElementById('nai-view-' + v);
+        if (el) el.style.display = (state.currentView === v) ? '' : 'none';
+      });
+      const out = host.shadowRoot.getElementById('nai-output');
+      if (out) out.textContent = state.output;
+      const meta = host.shadowRoot.getElementById('nai-meta');
+      if (meta) meta.textContent = state.meta;
+      const logsEl = host.shadowRoot.getElementById('nai-logs');
+      if (logsEl) {
+        logsEl.textContent = state.logs.map(function(l) {
+          return '[' + l.time + '] ' + l.level.toUpperCase() + ': ' + l.message;
+        }).join('\n');
+      }
+    }
+
+    function openPanel(view) {
+      state.panelOpen = true;
+      if (view) state.currentView = view;
+      render();
+    }
+
+    function minimizePanel() {
+      state.panelOpen = false;
+      render();
+    }
+
+    function showOutput(text, meta) {
+      state.output = text || '';
+      if (typeof meta === 'string') state.meta = meta;
+      state.currentView = 'output';
+      state.panelOpen = true;
+      render();
+    }
+
+    function detectNativeAI() {
+      const ua = navigator.userAgent || '';
+      const vendor = navigator.vendor || '';
+      const isChromeLike = /Chrome\/\d+/i.test(ua) && /Google Inc/.test(vendor);
+      state.browser = { chromeLike: isChromeLike, ua: ua.slice(0, 120) };
+      state.native = {
+        LanguageModel: typeof globalThis.LanguageModel !== 'undefined',
+        Summarizer: typeof globalThis.Summarizer !== 'undefined',
+        Translator: typeof globalThis.Translator !== 'undefined',
+        LanguageDetector: typeof globalThis.LanguageDetector !== 'undefined',
+        Writer: typeof globalThis.Writer !== 'undefined',
+        Rewriter: typeof globalThis.Rewriter !== 'undefined',
+      };
+      if (!isChromeLike) state.status = 'Unsupported';
+      else if (!state.native.LanguageModel) state.status = 'API missing';
+      else state.status = 'Checking';
+    }
+
+    async function checkStatus() {
+      detectNativeAI();
+      if (!state.native.LanguageModel) { render(); return; }
+      try {
+        const avail = await LanguageModel.availability(TEXT_LANGUAGE_OPTIONS);
+        if (avail === 'available') state.status = 'Ready';
+        else if (avail === 'downloadable') state.status = 'Downloadable';
+        else if (avail === 'downloading') state.status = 'Downloading';
+        else state.status = 'Unavailable';
+        log('info', 'Availability: ' + avail);
+      } catch (e) {
+        state.status = 'Error';
+        log('error', e.message || e);
+      }
+      render();
+    }
+
+    function getPageText() {
+      let el = document.querySelector('article') || document.querySelector('main') || document.querySelector('[role="main"]') || document.body;
+      if (!el) return '';
+      const clone = el.cloneNode(true);
+      ['script','style','nav','footer','header','aside','noscript'].forEach(function(tag) {
+        clone.querySelectorAll(tag).forEach(function(n) { n.remove(); });
+      });
+      let text = clone.textContent || '';
+      text = text.replace(/\s+/g, ' ').trim();
+      const header = 'Title: ' + document.title + '\nURL: ' + location.href + '\n\n';
+      const max = 16000;
+      if (text.length > max) {
+        text = text.slice(0, max);
+        state.meta = 'Text truncated to ' + max + ' characters';
+      }
+      return header + text;
+    }
+
+    function getSelectionText() {
+      const sel = window.getSelection ? window.getSelection() : null;
+      return sel ? sel.toString().trim() : '';
+    }
+
+    async function ensureSession() {
+      if (state.session) return state.session;
+      if (!state.native.LanguageModel) throw new Error('LanguageModel not available');
+      state.status = 'Checking';
+      render();
+      const avail = await LanguageModel.availability(TEXT_LANGUAGE_OPTIONS);
+      log('info', 'ensureSession availability: ' + avail);
+      if (avail === 'available' || avail === 'downloadable') {
+        state.status = 'Creating session...';
+        render();
+        const opts = getLanguageModelOptions();
+        try {
+          opts.monitor = function(m) {
+            m.addEventListener('downloadprogress', function(e) {
+              const loaded = e.loaded || 0;
+              const total = e.total || 0;
+              const pct = total > 0 ? Math.round((loaded / total) * 100) + '%' : '';
+              state.status = 'Downloading ' + pct;
+              log('info', 'Progress ' + loaded + '/' + total);
+              render();
+            });
+          };
+        } catch (e) {}
+        state.session = await LanguageModel.create(opts);
+        state.status = 'Ready';
+        log('success', 'Session created');
+        render();
+        return state.session;
+      } else if (avail === 'downloading') {
+        state.status = 'Downloading';
+        render();
+        throw new Error('Model is downloading. Please wait and retry.');
+      } else {
+        state.status = 'Unavailable';
+        render();
+        throw new Error('Model unavailable: ' + avail);
+      }
+    }
+
+    async function askPrompt(text, opts) {
+      opts = opts || {};
+      state.lastPrompt = text;
+      state.lastOpts = opts;
+      state.status = 'Requesting';
+      state.output = '';
+      state.meta = '';
+      render();
+      try {
+        const session = await ensureSession();
+        state.status = 'Generating';
+        render();
+        if (opts.streaming && typeof session.promptStreaming === 'function') {
+          const stream = await session.promptStreaming(text, { outputLanguage: 'en' });
+          if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+            for await (const chunk of stream) {
+              if (!state.output) showOutput(chunk);
+              else state.output += chunk;
+              render();
+            }
+          } else if (stream && stream.getReader) {
+            const reader = stream.getReader();
+            while (true) {
+              const r = await reader.read();
+              if (r.done) break;
+              if (!state.output) showOutput(r.value);
+              else state.output += r.value;
+              render();
+            }
+          } else {
+            showOutput('Streaming returned an unsupported type.');
+          }
+        } else {
+          const result = await session.prompt(text, { outputLanguage: 'en' }) || '(empty)';
+          showOutput(result);
+        }
+        state.status = 'Ready';
+        log('success', 'Prompt completed');
+      } catch (err) {
+        showOutput('Error: ' + (err && err.message ? err.message : err));
+        log('error', state.output);
+      }
+      render();
+    }
+
+    async function summarizePage() {
+      state.status = 'Reading page';
+      state.output = '';
+      render();
+      const text = getPageText();
+      state.meta = 'Characters: ' + text.length;
+      render();
+      if (state.native.Summarizer) {
+        try {
+          const summarizer = await Summarizer.create();
+          const summary = await summarizer.summarize(text);
+          showOutput(summary);
+          log('success', 'Native Summarizer used');
+          render();
+          return;
+        } catch (e) {
+          log('warning', 'Native Summarizer failed, using prompt fallback', e.message || e);
+        }
+      }
+      const prompt = 'Summarize the following page in 5 concise bullets, then add a one-sentence takeaway.\n\n' + text;
+      await askPrompt(prompt);
+    }
+
+    async function submitAsk() {
+      const inputEl = host.shadowRoot.getElementById('nai-ask-input');
+      if (!inputEl) return;
+      const question = inputEl.value.trim();
+      if (!question) return;
+      const text = getPageText();
+      const prompt = 'Answer the question using only the provided page text. If the answer is not present, say so clearly.\n\nPage title: ' + document.title + '\nPage URL: ' + location.href + '\n\nPage text:\n"""' + text + '"""\n\nQuestion: ' + question;
+      await askPrompt(prompt);
+    }
+
+    async function translateToEnglish() {
+      state.status = 'Preparing';
+      state.output = '';
+      render();
+      const sel = getSelectionText();
+      const source = sel || getPageText();
+      state.meta = 'Characters: ' + source.length + (sel ? ' (selection)' : ' (page)');
+      render();
+      if (state.native.Translator) {
+        try {
+          let sourceLang = 'und';
+          if (state.native.LanguageDetector) {
+            try {
+              const detector = await LanguageDetector.create();
+              const results = await detector.detect(source);
+              if (results && results.length) sourceLang = results[0].detectedLanguage || results[0].language || 'und';
+            } catch (e) { log('warning', 'LanguageDetector failed', e.message || e); }
+          }
+          const translator = await Translator.create({ sourceLanguage: sourceLang, targetLanguage: 'en' });
+          const translation = await translator.translate(source);
+          showOutput(translation);
+          log('success', 'Native Translator used');
+          render();
+          return;
+        } catch (e) {
+          log('warning', 'Native Translator failed, using prompt fallback', e.message || e);
+        }
+      }
+      const prompt = 'Translate the following text to English. Preserve meaning and formatting as much as possible.\n\n"""' + source + '"""';
+      await askPrompt(prompt);
+    }
+
+    async function keyPoints() {
+      const text = getPageText();
+      state.meta = 'Characters: ' + text.length;
+      const prompt = 'Extract the 7 most important points from this page. Use short bullets. No fluff.\n\nTitle: ' + document.title + '\nText:\n"""' + text + '"""';
+      await askPrompt(prompt);
+    }
+
+    async function extractActionItems() {
+      const sel = getSelectionText();
+      const text = sel || getPageText();
+      state.meta = 'Characters: ' + text.length + (sel ? ' (selection)' : ' (page)');
+      const prompt = 'Extract action items, deadlines, people, and follow-up questions from the text. Return a compact checklist.\n\n"""' + text + '"""';
+      await askPrompt(prompt);
+    }
+
+    async function explainSelection() {
+      const sel = getSelectionText();
+      if (!sel) {
+        showOutput('Please select some text on the page first.');
+        return;
+      }
+      state.meta = 'Characters: ' + sel.length;
+      const prompt = 'Explain this selected text in plain English. Include any important context implied by the passage.\n\n"""' + sel + '"""';
+      await askPrompt(prompt);
+    }
+
+    async function rewriteSelection() {
+      const sel = getSelectionText();
+      if (!sel) {
+        showOutput('Please select some text on the page first.');
+        return;
+      }
+      openPanel('rewrite');
+    }
+
+    async function submitRewrite() {
+      const sel = getSelectionText();
+      const style = state.rewriteStyle;
+      if (state.native.Rewriter) {
+        try {
+          const rewriter = await Rewriter.create({ tone: style });
+          const result = await rewriter.rewrite(sel);
+          showOutput(result);
+          log('success', 'Native Rewriter used');
+          render();
+          return;
+        } catch (e) {
+          log('warning', 'Native Rewriter failed, using prompt fallback', e.message || e);
+        }
+      }
+      const prompt = 'Rewrite the following text to be ' + style + '. Keep the meaning. Return only the rewritten text.\n\n"""' + sel + '"""';
+      await askPrompt(prompt);
+    }
+
+    async function copyResult() {
+      if (!state.output) {
+        log('warning', 'Nothing to copy yet');
+        render();
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(state.output);
+        log('success', 'Copied to clipboard');
+      } catch (e) {
+        log('error', 'Copy failed', e.message || e);
+      }
+      render();
+    }
+
+    function retryLast() {
+      if (state.lastPrompt) askPrompt(state.lastPrompt, state.lastOpts);
+    }
+
+    // Toggle existing host
+    if (host) {
+      const toggleBtn = host.shadowRoot.getElementById('nai-toggle');
+      if (toggleBtn) {
+        toggleBtn.click();
+      } else {
+        const root = host.shadowRoot.getElementById('nai-root');
+        if (root) root.classList.toggle('nai-open');
+      }
+      return;
+    }
+
+    // Create host and shadow DOM
+    host = document.createElement('div');
+    host.id = HOST_ID;
+    host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:2147483647;';
+    (document.body || document.documentElement).appendChild(host);
+
+    const shadow = host.attachShadow({ mode: 'open' });
+
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      #nai-root,
+      #nai-root * {
+        box-sizing: border-box;
+      }
+      #nai-root {
+        position: fixed;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: stretch;
+        width: 54px;
+        height: 54px;
+        background: #fff;
+        color: #000;
+        border: 3px solid #000;
+        box-shadow: -6px 6px 0 0 #000;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        line-height: 1.4;
+        z-index: 2147483647;
+        overflow: hidden;
+      }
+      #nai-root.nai-open {
+        top: 16px;
+        transform: none;
+        width: min(760px, calc(100vw - 24px));
+        height: auto;
+        max-height: calc(100vh - 32px);
+      }
+      .nai-strip {
+        width: 54px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 4px;
+        border-right: 3px solid #000;
+        background: #fff;
+        flex-shrink: 0;
+      }
+      #nai-root:not(.nai-open) .nai-strip {
+        border-right: 0;
+        padding: 5px;
+      }
+      #nai-root:not(.nai-open) .nai-strip .nai-tool {
+        display: none;
+      }
+      #nai-root:not(.nai-has-output) .nai-output-toggle {
+        display: none;
+      }
+      .nai-panel {
+        display: none;
+        width: calc(100% - 54px);
+        flex-direction: column;
+        background: #fff;
+        overflow: hidden;
+      }
+      #nai-root.nai-open .nai-panel { display: flex; }
+      .nai-btn {
+        appearance: none;
+        border: 2px solid #000;
+        background: #fff;
+        color: #000;
+        width: 38px;
+        height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+        padding: 0;
+        margin: 0;
+      }
+      #nai-toggle {
+        background: #ccff00;
+        font-size: 24px;
+      }
+      .nai-btn:hover { background: #ccff00; }
+      .nai-btn.nai-btn-primary { background: #ccff00; }
+      .nai-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px;
+        border-bottom: 3px solid #000;
+        flex-shrink: 0;
+      }
+      .nai-title { font-weight: 800; text-transform: uppercase; letter-spacing: .04em; font-size: 13px; }
+      .nai-status-pill {
+        margin-left: auto;
+        font-size: 10px;
+        font-weight: 700;
+        border: 2px solid #000;
+        padding: 2px 6px;
+        text-transform: uppercase;
+        background: #fff;
+      }
+      .nai-status-ready { background: #ccff00; }
+      .nai-status-downloading { background: #ffe6cc; }
+      .nai-status-error { background: #ffe6e6; }
+      .nai-status-unavailable { background: #e6e6e6; }
+      .nai-status-api-missing { background: #e6e6e6; }
+      .nai-status-unsupported { background: #e6e6e6; }
+      .nai-status-downloadable { background: #ffffe6; }
+      .nai-body {
+        padding: 14px;
+        overflow-y: auto;
+        max-height: calc(100vh - 92px);
+        min-height: 240px;
+        display: flex;
+        flex-direction: column;
+      }
+      .nai-output {
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+        padding: 12px;
+        border: 2px solid #000;
+        background: #fafafa;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        max-height: calc(100vh - 190px);
+        min-height: 260px;
+        overflow: auto;
+        flex-shrink: 0;
+      }
+      .nai-textarea {
+        width: 100%;
+        height: 80px;
+        border: 2px solid #000;
+        padding: 8px;
+        font-family: inherit;
+        font-size: 13px;
+        resize: vertical;
+        margin-bottom: 8px;
+      }
+      .nai-meta {
+        font-size: 11px;
+        opacity: .7;
+        margin-bottom: 6px;
+        flex-shrink: 0;
+      }
+      .nai-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+        flex-shrink: 0;
+      }
+      .nai-controls .nai-btn,
+      .nai-form-actions .nai-btn {
+        width: auto;
+        min-width: 82px;
+        height: 34px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .nai-logs {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 320px;
+        max-height: calc(100vh - 190px);
+        overflow: auto;
+        border: 2px solid #000;
+        padding: 12px;
+        background: #fafafa;
+      }
+      .nai-rewrite-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .nai-rewrite-options .nai-btn {
+        width: auto;
+        height: auto;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+      .nai-small { font-size: 12px; opacity: .8; }
+      .nai-form-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      @media (max-width: 520px) {
+        #nai-root.nai-open {
+          right: 8px;
+          top: 8px;
+          width: calc(100vw - 16px);
+          max-height: calc(100vh - 16px);
+        }
+        .nai-body {
+          padding: 10px;
+        }
+        .nai-output,
+        .nai-logs {
+          min-height: 220px;
+        }
+      }
+    `;
+    shadow.appendChild(styleEl);
+
+    const root = document.createElement('div');
+    root.id = 'nai-root';
+    root.innerHTML = `
+      <div class="nai-strip">
+        <button class="nai-btn" id="nai-toggle" data-action="toggle" title="Open local AI tools">+</button>
+        <button class="nai-btn nai-tool" data-action="status" title="Status / Logs">◎</button>
+        <button class="nai-btn nai-tool nai-output-toggle" data-action="output" title="Show model answer">▣</button>
+        <button class="nai-btn nai-tool" data-action="summarize" title="Summarize page">Σ</button>
+        <button class="nai-btn nai-tool" data-action="ask" title="Ask page">?</button>
+        <button class="nai-btn nai-tool" data-action="translate" title="Translate to English">EN</button>
+        <button class="nai-btn nai-tool" data-action="keypoints" title="Key points">◆</button>
+        <button class="nai-btn nai-tool" data-action="actions" title="Action items">☑</button>
+        <button class="nai-btn nai-tool" data-action="explain" title="Explain selection">ⓘ</button>
+        <button class="nai-btn nai-tool" data-action="rewrite" title="Rewrite selection">✎</button>
+        <button class="nai-btn nai-tool" data-action="copy" title="Copy result">⧉</button>
+      </div>
+      <div class="nai-panel">
+        <div class="nai-header">
+          <span class="nai-title">LOCAL AI</span>
+          <span class="nai-status-pill" id="nai-status">Checking</span>
+          <button class="nai-btn" data-action="toggle" style="width:28px;height:28px;font-size:18px;" title="Minimize">-</button>
+        </div>
+        <div class="nai-body">
+          <div id="nai-view-default">
+            <div class="nai-small">Click an icon to run a local AI task.</div>
+          </div>
+          <div id="nai-view-output" style="display:none;">
+            <div class="nai-meta" id="nai-meta"></div>
+            <pre class="nai-output" id="nai-output"></pre>
+            <div class="nai-controls">
+              <button class="nai-btn nai-btn-primary" data-action="copy">Copy</button>
+              <button class="nai-btn" data-action="clear">Clear</button>
+              <button class="nai-btn" data-action="retry">Retry</button>
+            </div>
+          </div>
+          <div id="nai-view-ask" style="display:none;">
+            <textarea class="nai-textarea" id="nai-ask-input" placeholder="Ask a question about this page..."></textarea>
+            <div class="nai-form-actions">
+              <button class="nai-btn nai-btn-primary" data-action="ask-submit">Ask</button>
+              <button class="nai-btn" data-action="back">Back</button>
+            </div>
+          </div>
+          <div id="nai-view-rewrite" style="display:none;">
+            <div class="nai-rewrite-options">
+              <button class="nai-btn" data-style="shorter">Shorter</button>
+              <button class="nai-btn" data-style="clearer">Clearer</button>
+              <button class="nai-btn" data-style="more professional">Professional</button>
+              <button class="nai-btn" data-style="more casual">Casual</button>
+              <button class="nai-btn" data-style="more direct">Direct</button>
+              <button class="nai-btn" data-style="more brutalist">Brutalist</button>
+            </div>
+            <div class="nai-form-actions">
+              <button class="nai-btn nai-btn-primary" data-action="rewrite-submit">Rewrite</button>
+              <button class="nai-btn" data-action="back">Back</button>
+            </div>
+          </div>
+          <div id="nai-view-status" style="display:none;">
+            <div class="nai-meta">Diagnostics / Logs</div>
+            <pre class="nai-logs" id="nai-logs"></pre>
+            <div class="nai-controls">
+              <button class="nai-btn" data-action="refresh-status">Refresh</button>
+              <button class="nai-btn" data-action="clear-logs">Clear logs</button>
+              <button class="nai-btn" data-action="back">Back</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    shadow.appendChild(root);
+
+    root.addEventListener('click', function(e) {
+      const btn = e.target.closest('.nai-btn');
+      if (!btn) return;
+      const action = btn.getAttribute('data-action');
+      const style = btn.getAttribute('data-style');
+      if (style) state.rewriteStyle = style;
+      switch (action) {
+        case 'toggle': state.panelOpen ? minimizePanel() : openPanel(); break;
+        case 'status': openPanel('status'); break;
+        case 'output': if (state.output) openPanel('output'); break;
+        case 'summarize': summarizePage(); break;
+        case 'ask': openPanel('ask'); break;
+        case 'translate': translateToEnglish(); break;
+        case 'keypoints': keyPoints(); break;
+        case 'actions': extractActionItems(); break;
+        case 'explain': explainSelection(); break;
+        case 'rewrite': rewriteSelection(); break;
+        case 'copy': copyResult(); break;
+        case 'ask-submit': submitAsk(); break;
+        case 'rewrite-submit': submitRewrite(); break;
+        case 'clear': state.output = ''; state.meta = ''; state.currentView = 'default'; render(); break;
+        case 'retry': retryLast(); break;
+        case 'refresh-status': checkStatus(); break;
+        case 'clear-logs': state.logs = []; render(); break;
+        case 'back': state.currentView = 'default'; render(); break;
+      }
+    });
+
+    detectNativeAI();
+    checkStatus();
+  };
+
+  // ============================================================
+  // Builder page logic
+  // ============================================================
+
+  function toJavascriptHref(source) {
+    return 'javascript:' + encodeURIComponent('(' + source + ')()');
+  }
+
+  const bmString = bookmarkletFn.toString();
+  const bmHref = toJavascriptHref(bmString);
+
+  document.getElementById('bookmarklet-link').href = bmHref;
+  document.getElementById('bookmarklet-pretty').value = bmString;
+  document.getElementById('bookmarklet-href').value = bmHref;
+
+  document.getElementById('btn-copy-pretty').addEventListener('click', function() {
+    navigator.clipboard.writeText(bmString).then(function() {
+      alert('Pretty source copied to clipboard');
+    });
+  });
+  document.getElementById('btn-copy-href').addEventListener('click', function() {
+    navigator.clipboard.writeText(bmHref).then(function() {
+      alert('Bookmarklet copied to clipboard');
+    });
+  });
+
+  function runDiagnostics() {
+    const ua = navigator.userAgent || '';
+    const vendor = navigator.vendor || '';
+    let family = 'Unknown';
+    let chromeLike = false;
+    if (/Chrome\/\d+/i.test(ua) && /Google Inc/.test(vendor)) {
+      family = 'Chrome';
+      chromeLike = true;
+    } else if (/Edg\/\d+/i.test(ua)) {
+      family = 'Edge (Chromium-like)';
+      chromeLike = true;
+    } else if (/OPR\/\d+/i.test(ua)) {
+      family = 'Opera (Chromium-like)';
+      chromeLike = true;
+    } else if (/Brave/i.test(ua)) {
+      family = 'Brave (Chromium-like)';
+      chromeLike = true;
+    } else if (/Chrome\/\d+/i.test(ua) || /Chromium\/\d+/i.test(ua)) {
+      family = 'Chromium-like';
+      chromeLike = true;
+    } else if (/Firefox/i.test(ua)) {
+      family = 'Firefox';
+    } else if (/Safari/i.test(ua)) {
+      family = 'Safari';
+    }
+
+    const secure = !!window.isSecureContext;
+    const apis = {
+      'LanguageModel': typeof globalThis.LanguageModel !== 'undefined',
+      'Summarizer': typeof globalThis.Summarizer !== 'undefined',
+      'Translator': typeof globalThis.Translator !== 'undefined',
+      'LanguageDetector': typeof globalThis.LanguageDetector !== 'undefined',
+      'Writer': typeof globalThis.Writer !== 'undefined',
+      'Rewriter': typeof globalThis.Rewriter !== 'undefined',
+    };
+
+    const grid = document.getElementById('diag-grid');
+    const cards = [
+      { title: 'Browser family', value: family, cls: chromeLike ? 'ok' : 'warn' },
+      { title: 'Secure context', value: secure ? 'Yes' : 'No', cls: secure ? 'ok' : 'no' },
+      { title: 'LanguageModel present', value: apis.LanguageModel ? 'Yes' : 'No', cls: apis.LanguageModel ? 'ok' : 'no' },
+      { title: 'Summarizer present', value: apis.Summarizer ? 'Yes' : 'No', cls: apis.Summarizer ? 'ok' : 'warn' },
+      { title: 'Translator present', value: apis.Translator ? 'Yes' : 'No', cls: apis.Translator ? 'ok' : 'warn' },
+      { title: 'LanguageDetector present', value: apis.LanguageDetector ? 'Yes' : 'No', cls: apis.LanguageDetector ? 'ok' : 'warn' },
+      { title: 'Writer present', value: apis.Writer ? 'Yes' : 'No', cls: apis.Writer ? 'ok' : 'warn' },
+      { title: 'Rewriter present', value: apis.Rewriter ? 'Yes' : 'No', cls: apis.Rewriter ? 'ok' : 'warn' },
+    ];
+
+    grid.innerHTML = cards.map(function(c) {
+      return '<div class="card"><h3 style="margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;">' + c.title + '</h3><div class="value ' + (c.cls || '') + '">' + c.value + '</div></div>';
+    }).join('');
+
+    // Availability check
+    const warnEl = document.getElementById('diag-warn');
+    if (!chromeLike) {
+      warnEl.textContent = 'Your browser does not appear to be Chrome/Chromium. Built-in AI APIs are unlikely to be available.';
+      warnEl.style.display = '';
+    } else if (!apis.LanguageModel) {
+      warnEl.innerHTML = 'LanguageModel is missing. Try Chrome Canary or Chrome Dev, enable <code>chrome://flags/#optimization-guide-on-device-model</code> and <code>chrome://flags/#prompt-api-for-gemini-nano-multimodal-input</code>, then relaunch.';
+      warnEl.style.display = '';
+    } else {
+      warnEl.style.display = 'none';
+      globalThis.LanguageModel.availability({
+        expectedInputs: [
+          { type: 'text', languages: ['en', 'es', 'ja'] }
+        ],
+        expectedOutputs: [
+          { type: 'text', languages: ['en'] }
+        ],
+        outputLanguage: 'en'
+      }).then(function(avail) {
+        const el = document.createElement('div');
+        el.className = 'card';
+        el.innerHTML = '<h3 style="margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;">LanguageModel.availability()</h3><div class="value ' + (avail === 'available' ? 'ok' : avail === 'unavailable' ? 'no' : 'warn') + '">' + avail + '</div>';
+        grid.appendChild(el);
+      }).catch(function(e) {
+        const el = document.createElement('div');
+        el.className = 'card';
+        el.innerHTML = '<h3 style="margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;">LanguageModel.availability()</h3><div class="value no">Error: ' + (e.message || e) + '</div>';
+        grid.appendChild(el);
+      });
+    }
+  }
+
+  runDiagnostics();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gibson County Wildlife & Wetlands Explorer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+<style>
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111827; background: #f3f4f6; }
+.app-header { background: #0f172a; color: #fff; padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.header-title h1 { margin: 0; font-size: 1.15rem; line-height: 1.2; }
+.header-title p { margin: 0.2rem 0 0; font-size: 0.78rem; opacity: 0.85; }
+.header-actions { display: flex; align-items: center; gap: 0.5rem; }
+.status-pill { font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 999px; background: #10b981; color: #fff; }
+.status-pill.warn { background: #f59e0b; }
+.status-pill.err { background: #ef4444; }
+.icon-btn { background: rgba(255,255,255,0.15); border: none; color: #fff; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; }
+.app-body { display: flex; flex: 1; height: calc(100% - 56px); overflow: hidden; position: relative; }
+.sidebar { width: 380px; background: #fff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-header { padding: 0.75rem 1rem; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+.sidebar-header h2 { margin: 0; font-size: 1rem; }
+.sidebar-content { flex: 1; overflow-y: auto; padding: 0.75rem; }
+.card { background: #fff; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 0.75rem; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+.card h3 { margin: 0 0 0.5rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: #374151; display: flex; justify-content: space-between; align-items: center; }
+.map-container { flex: 1; position: relative; }
+#map { width: 100%; height: 100%; }
+.fab-group { position: absolute; top: 0.75rem; right: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; z-index: 1000; }
+.fab { width: 44px; height: 44px; border-radius: 50%; border: none; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.12); cursor: pointer; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; transition: transform .1s ease; }
+.fab:active { transform: scale(0.96); }
+.fab.active { background: #0f172a; color: #fff; }
+.btn { padding: 0.4rem 0.6rem; border: 1px solid #d1d5db; background: #fff; border-radius: 0.375rem; cursor: pointer; font-size: 0.85rem; line-height: 1.2; }
+.btn:hover { background: #f9fafb; }
+.btn.primary { background: #0f172a; color: #fff; border-color: #0f172a; }
+.btn.primary:hover { background: #1e293b; }
+.btn.small { padding: 0.25rem 0.4rem; font-size: 0.78rem; }
+.btn-group { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.hint { font-size: 0.75rem; color: #6b7280; margin: 0.4rem 0 0; line-height: 1.3; }
+.layer-item { display: flex; align-items: center; justify-content: space-between; padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
+.layer-item:last-child { border-bottom: none; }
+.layer-status { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 999px; background: #e5e7eb; color: #374151; white-space: nowrap; }
+.layer-status.ok { background: #d1fae5; color: #065f46; }
+.layer-status.err { background: #fee2e2; color: #991b1b; }
+.layer-status.loading { background: #dbeafe; color: #1e40af; }
+.legend-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; font-size: 0.8rem; }
+.legend-box { width: 16px; height: 16px; display: inline-block; border-radius: 2px; }
+.legend-line { width: 24px; height: 3px; display: inline-block; border-radius: 1px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.leaflet-grayscale { filter: grayscale(100%) brightness(1.05) contrast(1.1); }
+input[type="text"], input[type="number"], input[type="url"], select, textarea { font-family: inherit; font-size: 0.9rem; padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; }
+.score-panel { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 0.375rem; padding: 0.5rem; margin-top: 0.5rem; }
+.score-big { font-size: 1.5rem; font-weight: 700; color: #b45309; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.data-table th, .data-table td { padding: 0.3rem 0.2rem; text-align: left; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+.data-table th { color: #6b7280; font-weight: 600; }
+.sightings-section { margin-bottom: 0.5rem; }
+.sightings-section:last-child { margin-bottom: 0; }
+
+@media (max-width: 768px) {
+  .sidebar { position: absolute; top: 0; left: 0; height: 100%; z-index: 2000; transform: translateX(-100%); transition: transform .2s ease; }
+  .sidebar.open { transform: translateX(0); }
+  .fab-group { top: auto; bottom: 0.75rem; right: 0.75rem; }
+  .app-header { padding: 0.4rem 0.75rem; }
+  .header-title h1 { font-size: 1rem; }
+}
+@media (min-width: 769px) {
+  .sidebar.hidden-desktop { transform: translateX(-100%); width: 0; border: none; overflow: hidden; }
+}
+</style>
+</head>
+<body>
+<header class="app-header">
+  <div class="header-title">
+    <h1>Gibson County Wildlife & Wetlands Explorer</h1>
+    <p>Wetlands, waterways, roads, habitat clues, and field notes</p>
+  </div>
+  <div class="header-actions">
+    <span id="statusPill" class="status-pill">Initializing…</span>
+    <button id="menuBtn" class="icon-btn" title="Toggle tools">☰</button>
+  </div>
+</header>
+
+<div class="app-body">
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <h2>Explorer Tools</h2>
+      <button id="closeSidebarBtn" class="icon-btn" style="background:#e5e7eb;color:#111">✕</button>
+    </div>
+    <div class="sidebar-content">
+
+      <div class="card">
+        <h3>Data Setup</h3>
+        <p class="hint">Quick-start real data. Wetlands dynamic loads automatically when possible.</p>
+        <div class="btn-group">
+          <button class="btn small primary" id="btnLoadPublic">Load public services</button>
+          <button class="btn small" id="btnTryCountyZIPs">Try county ZIPs</button>
+          <button class="btn small" id="btnQueryWetlandsView">Query wetlands in view</button>
+          <button class="btn small" id="btnQueryStreamsView">Query streams in view</button>
+          <label class="btn small" style="cursor:pointer">
+            Import local file
+            <input type="file" id="btnImportLocal" accept=".zip,.geojson,.json,.csv" style="display:none">
+          </label>
+          <button class="btn small" id="btnClearCache">Clear cached GIS</button>
+        </div>
+        <div id="dataSetupStatus" class="hint" style="margin-top:0.4rem"></div>
+      </div>
+
+      <div class="card">
+        <h3>Wildlife Sightings</h3>
+
+        <div class="sightings-section">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="font-size:0.85rem">iNaturalist</strong>
+            <label class="layer-status ok" style="cursor:pointer;background:#d1fae5">
+              <input type="checkbox" id="inatToggle" checked> Show
+            </label>
+          </div>
+          <input type="text" id="inatPlaceSlug" placeholder="Place slug (e.g., gibson-county-in-us)" value="gibson-county-in-us" style="width:100%;margin:0.25rem 0;font-size:0.8rem">
+          <div class="btn-group">
+            <button class="btn small" id="btnResolveInatPlace">Resolve Place</button>
+            <button class="btn small primary" id="btnLoadInat">Load Sightings</button>
+            <button class="btn small" id="btnRefreshInat">Refresh</button>
+          </div>
+          <select id="inatFilter" style="width:100%;margin-top:0.25rem;font-size:0.8rem">
+            <option value="all">All life</option>
+            <option value="Aves">Birds</option>
+            <option value="Mammalia">Mammals</option>
+            <option value="Reptilia">Reptiles</option>
+            <option value="Amphibia">Amphibians</option>
+            <option value="Insecta">Insects</option>
+            <option value="Plantae">Plants</option>
+            <option value="Fungi">Fungi</option>
+          </select>
+          <div id="inatStatus" class="hint"></div>
+        </div>
+
+        <div class="sightings-section" style="margin-top:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.5rem">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="font-size:0.85rem">GBIF</strong>
+            <label class="layer-status ok" style="cursor:pointer;background:#d1fae5">
+              <input type="checkbox" id="gbifToggle"> Show
+            </label>
+          </div>
+          <div class="btn-group">
+            <button class="btn small primary" id="btnLoadGbif">Load Gibson County</button>
+            <button class="btn small" id="btnLoadGbifView">In Current View</button>
+            <button class="btn small" id="btnRefreshGbif">Refresh</button>
+          </div>
+          <select id="gbifFilter" style="width:100%;margin-top:0.25rem;font-size:0.8rem">
+            <option value="all">All</option>
+            <option value="HUMAN_OBSERVATION">Human Observations</option>
+            <option value="OBSERVATION">Observations</option>
+            <option value="Aves">Birds</option>
+            <option value="Mammalia">Mammals</option>
+            <option value="Reptilia">Reptiles</option>
+            <option value="Amphibia">Amphibians</option>
+            <option value="Insecta">Insects</option>
+            <option value="Plantae">Plants</option>
+          </select>
+          <div id="gbifStatus" class="hint"></div>
+        </div>
+
+        <div class="sightings-section" style="margin-top:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.5rem">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="font-size:0.85rem">eBird</strong>
+            <label class="layer-status ok" style="cursor:pointer;background:#d1fae5">
+              <input type="checkbox" id="ebirdToggle"> Show
+            </label>
+          </div>
+          <input type="text" id="ebirdApiKey" placeholder="eBird API key (optional)" style="width:100%;margin:0.25rem 0;font-size:0.8rem">
+          <div class="hint" style="font-size:0.7rem">
+            <a href="https://ebird.org/api/keygen" target="_blank">Get a free eBird API key</a>. Key stored locally only.
+          </div>
+          <div class="btn-group">
+            <button class="btn small primary" id="btnLoadEbird">Load Region (US-IN-051)</button>
+            <button class="btn small" id="btnLoadEbirdNearby">Nearby (25km)</button>
+            <button class="btn small" id="btnRefreshEbird">Refresh</button>
+          </div>
+          <div id="ebirdStatus" class="hint"></div>
+        </div>
+
+        <div class="sightings-section" style="margin-top:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.5rem">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <strong style="font-size:0.85rem">Manual Herp Data</strong>
+            <label class="layer-status ok" style="cursor:pointer;background:#d1fae5">
+              <input type="checkbox" id="herpToggle"> Show
+            </label>
+          </div>
+          <div class="btn-group">
+            <label class="btn small" style="cursor:pointer">
+              Import CSV/GeoJSON
+              <input type="file" id="btnImportHerp" accept=".csv,.geojson,.json" style="display:none">
+            </label>
+            <button class="btn small" id="btnClearHerp">Clear</button>
+          </div>
+          <div class="hint" style="font-size:0.7rem;margin-top:0.25rem">
+            Import Indiana Herp Atlas or HerpMapper exports. Fields: species, lat, lon, date.
+          </div>
+          <div id="herpStatus" class="hint"></div>
+        </div>
+
+        <div style="margin-top:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.5rem">
+          <div id="sightingSummary" class="hint"></div>
+          <div class="btn-group" style="margin-top:0.25rem">
+            <button class="btn small" id="btnExportSightingsGeoJSON">Export GeoJSON</button>
+            <button class="btn small" id="btnExportSightingsCSV">Export CSV</button>
+            <button class="btn small" id="btnClearAllSightingsCache">Clear All Cache</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Sightings Analytics</h3>
+        <div id="sightingsChartContainer" style="height:150px">
+          <canvas id="sightingsChart"></canvas>
+        </div>
+        <div id="speciesCountSummary" class="hint" style="margin-top:0.25rem"></div>
+        <div id="unusualSightings" class="hint" style="margin-top:0.25rem"></div>
+        <p class="hint" style="margin-top:0.4rem">
+          <strong>Bias warning:</strong> Observation density often reflects where people go, not just where wildlife lives.
+          Sensitive species may be hidden or generalized. Respect obscured/private coordinates.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Basemap</h3>
+        <div class="btn-group">
+          <button class="btn small active" id="btnBaseOsm">Street</button>
+          <button class="btn small" id="btnBaseTopo">Topo</button>
+          <button class="btn small" id="btnBaseGray">Gray</button>
+        </div>
+        <p class="hint">Free satellite imagery requires a key and is not included by default.</p>
+      </div>
+
+      <div class="card">
+        <h3>Layers <button class="btn small" id="btnLoadAll">Load Enabled</button></h3>
+        <div id="layerList"></div>
+        <p class="hint">Toggle to show/hide. Click Load Enabled to fetch data.</p>
+      </div>
+
+      <div class="card">
+        <h3>GIS Data Status</h3>
+        <div id="gisStatusTable" style="overflow-x:auto"></div>
+        <p class="hint">Per-layer health, counts, and manual controls.</p>
+      </div>
+
+      <div class="card">
+        <h3>Wildlife Scoring</h3>
+        <p class="hint">Click a map spot for a heuristic 0–100 wildlife interest score. Improves when layers are loaded.</p>
+        <button class="btn" id="btnScoreMode">Enable Score Mode</button>
+        <div id="scoreResult"></div>
+      </div>
+
+      <div class="card">
+        <h3>Observations</h3>
+        <div id="obsForm" style="display:none">
+          <input type="hidden" id="obsId">
+          <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+            <input type="number" step="any" id="obsLat" placeholder="Latitude" style="flex:1">
+            <input type="number" step="any" id="obsLon" placeholder="Longitude" style="flex:1">
+          </div>
+          <select id="obsCategory" style="width:100%;margin-bottom:0.5rem">
+            <option value="bird">Bird</option>
+            <option value="mammal">Mammal</option>
+            <option value="reptile/amphibian">Reptile / Amphibian</option>
+            <option value="insect">Insect</option>
+            <option value="plant">Plant</option>
+            <option value="track/sign">Track / Sign</option>
+            <option value="unknown">Unknown</option>
+            <option value="other">Other</option>
+          </select>
+          <input type="text" id="obsTitle" placeholder="Title / species" style="width:100%;margin-bottom:0.5rem">
+          <textarea id="obsNotes" placeholder="Field notes" rows="2" style="width:100%;margin-bottom:0.5rem"></textarea>
+          <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+            <input type="number" id="obsCount" placeholder="Count" style="flex:1">
+            <input type="text" id="obsPhoto" placeholder="Photo URL" style="flex:2">
+          </div>
+          <div style="display:flex;gap:0.5rem">
+            <button class="btn primary" id="btnSaveObs">Save</button>
+            <button class="btn" id="btnCancelObs">Cancel</button>
+          </div>
+        </div>
+        <div id="obsControls">
+          <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+            <button class="btn small" id="btnAddObs">Add Observation</button>
+            <select id="obsFilter" style="flex:1">
+              <option value="all">All categories</option>
+              <option value="bird">Bird</option>
+              <option value="mammal">Mammal</option>
+              <option value="reptile/amphibian">Reptile / Amphibian</option>
+              <option value="insect">Insect</option>
+              <option value="plant">Plant</option>
+              <option value="track/sign">Track / Sign</option>
+              <option value="unknown">Unknown</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div id="obsList" style="max-height:220px;overflow-y:auto"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Route Planning</h3>
+        <p class="hint">Click the map to drop waypoints. Distances are straight-line.</p>
+        <div id="routeInfo">0 waypoints</div>
+        <div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin:0.5rem 0">
+          <button class="btn small" id="btnRouteMode">Add Waypoints</button>
+          <button class="btn small" id="btnRouteUndo">Undo</button>
+          <button class="btn small" id="btnRouteClear">Clear</button>
+        </div>
+        <div id="routeSaveForm" style="display:none;margin-bottom:0.5rem">
+          <input type="text" id="routeName" placeholder="Route name" style="width:100%;margin-bottom:0.25rem">
+          <button class="btn small primary" id="btnSaveRoute">Save Named Route</button>
+        </div>
+        <div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-bottom:0.5rem">
+          <button class="btn small" id="btnExportRouteJSON">Export JSON</button>
+          <button class="btn small" id="btnExportRouteGPX">Export GPX</button>
+          <button class="btn small" id="btnGoogleMaps">Google Maps</button>
+        </div>
+        <div id="savedRoutesList"></div>
+      </div>
+
+      <div class="card">
+        <h3>Measurement</h3>
+        <div id="measureInfo">Click map to measure.</div>
+        <div style="display:flex;gap:0.25rem;margin-top:0.5rem">
+          <button class="btn small" id="btnMeasureMode">Measure</button>
+          <button class="btn small" id="btnMeasureClear">Clear</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Data Sources Admin</h3>
+        <p class="hint">Paste URLs for GeoJSON, ArcGIS REST /query, CSV, or zipped shapefile. Test before loading all.</p>
+        <div id="adminSourceList"></div>
+        <div style="display:flex;gap:0.25rem;margin-top:0.5rem;flex-wrap:wrap">
+          <button class="btn small" id="btnResetSources">Reset Defaults</button>
+          <button class="btn small primary" id="btnLoadAllAdmin">Load All Enabled</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Sources & Caveats</h3>
+        <ul class="hint" style="padding-left:1.2rem;margin:0">
+          <li><strong>Gibson County GIS/Mapping:</strong> parcels, roads, addresses, boundary.</li>
+          <li><strong>Indiana DNR:</strong> Best Available Floodplain county downloads.</li>
+          <li><strong>USFWS NWI:</strong> Wetlands REST services.</li>
+          <li><strong>IndianaMap / IN GIS:</strong> Statewide roads and streams.</li>
+          <li><strong>OpenStreetMap:</strong> Basemap.</li>
+          <li><strong>iNaturalist:</strong> Citizen-science observations.</li>
+          <li><strong>GBIF:</strong> Biodiversity occurrence records.</li>
+          <li><strong>eBird:</strong> Cornell Lab of Ornithology bird sightings.</li>
+          <li><strong>Indiana Herp Atlas / HerpMapper:</strong> Herp records (manual import).</li>
+        </ul>
+        <p class="hint" style="margin-top:0.4rem">This app is for planning and visualization only. Not legal, property, or ecological advice. Respect private property, access laws, and protected species. Do not trespass to reach obscured coordinates.</p>
+      </div>
+
+      <div class="card">
+        <h3>Legend</h3>
+        <div class="legend-row"><span class="legend-box" style="background:#2dd4bf;opacity:0.35;border:1px solid #2dd4bf"></span> Wetlands</div>
+        <div class="legend-row"><span class="legend-line" style="background:#3b82f6"></span> Waterways</div>
+        <div class="legend-row"><span class="legend-box" style="background:#8b5cf6;opacity:0.25;border:1px solid #8b5cf6"></span> Floodplain</div>
+        <div class="legend-row"><span class="legend-line" style="background:#9ca3af"></span> Roads</div>
+        <div class="legend-row"><span class="legend-box" style="border:2px solid #d97706"></span> Parcels</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#ef4444"></span> Addresses</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#22c55e"></span> iNaturalist</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#3b82f6"></span> GBIF</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#f97316"></span> eBird</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#a855f7"></span> Herp import</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#3b82f6"></span> Bird obs</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#d97706"></span> Mammal obs</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#10b981"></span> Herp obs</div>
+        <div class="legend-row"><span class="legend-line" style="background:#0f172a;border-style:dashed"></span> Route</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#f59e0b"></span> Scored spot</div>
+      </div>
+
+      <div class="card">
+        <h3>Backup / Restore</h3>
+        <div style="display:flex;gap:0.25rem;flex-wrap:wrap">
+          <button class="btn small" id="btnExportAll">Export All Data</button>
+          <label class="btn small" style="cursor:pointer">
+            Import All
+            <input type="file" id="btnImportAll" accept=".json" style="display:none">
+          </label>
+        </div>
+        <p class="hint">Includes sources, observations, routes, and preferences.</p>
+      </div>
+    </div>
+  </aside>
+
+  <main class="map-container">
+    <div id="map"></div>
+    <div class="fab-group">
+      <button class="fab" id="fabMenu" title="Menu">☰</button>
+      <button class="fab" id="fabSightings" title="Wildlife sightings">🔭</button>
+      <button class="fab" id="fabScore" title="Score this spot">🎯</button>
+      <button class="fab" id="fabRoute" title="Plan route">🗺️</button>
+      <button class="fab" id="fabMeasure" title="Measure">📏</button>
+      <button class="fab" id="fabObs" title="Add observation">📝</button>
+      <button class="fab" id="fabLocate" title="My location">📍</button>
+    </div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/esri-leaflet/dist/esri-leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@latest/papaparse.min.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dexie@latest/dist/dexie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@latest/dist/chart.umd.min.js"></script>
+
+<script>
+(function(){
+  'use strict';
+  const COUNTY_CENTER = [38.355, -87.577];
+  const DEFAULT_ZOOM = 11;
+  const GIBSON_BBOX = { west: -87.95, south: 38.15, east: -87.30, north: 38.60 };
+  const SCORE_RADIUS_KM = 1.0;
+  const MAX_RENDER_POINTS = 2000;
+  const CHUNK_SIZE = 500;
+  const hasTurf = typeof turf !== 'undefined';
+  const hasPapa = typeof Papa !== 'undefined';
+  const hasShp = typeof shp !== 'undefined';
+  const hasDexie = typeof Dexie !== 'undefined';
+  const hasMarkerCluster = typeof L !== 'undefined' && L.markerClusterGroup;
+  const hasEsriLeaflet = typeof L !== 'undefined' && L.esri;
+  const hasChart = typeof Chart !== 'undefined';
+
+  const DEFAULT_SOURCES = [
+    { id:'gc_boundary_zip', name:'Gibson County Boundary 2024', type:'zipped_shapefile', url:'https://gibsoncounty-in.gov/wp-content/uploads/2024/09/Gibson-County-Boundary-_8-6-24.zip', enabled:false, visible:true, geometryRole:'boundary', purpose:'Project boundary and fit-bounds layer', corsRisk:true, description:'County boundary shapefile. Direct fetch may fail due to CORS.' },
+    { id:'gc_roads_zip', name:'Gibson County Roads 2024', type:'zipped_shapefile', url:'https://gibsoncounty-in.gov/wp-content/uploads/2024/09/Gibson_Ceneterlines_8-12-24.zip', enabled:false, visible:true, geometryRole:'road', purpose:'Road network and access scoring', corsRisk:true, description:'Road centerlines. Filename typo preserved exactly.' },
+    { id:'gc_addresses_zip', name:'Gibson County Addresses 2024', type:'zipped_shapefile', url:'https://gibsoncounty-in.gov/wp-content/uploads/2024/09/Address_Points_8-6-24.zip', enabled:false, visible:true, geometryRole:'address', purpose:'Human-density proxy for scoring', corsRisk:true, description:'Address points. May be large; capped rendering.' },
+    { id:'gc_parcels_zip', name:'Gibson County Parcels 2024', type:'zipped_shapefile', url:'https://gibsoncounty-in.gov/wp-content/uploads/2024/09/Gibson_Parcels_1-2-24.zip', enabled:false, visible:true, geometryRole:'parcel', purpose:'Land pattern and parcel context', corsRisk:true, description:'Potentially large. Not loaded by default.' },
+    { id:'in_dnr_floodplain', name:'IN DNR Best Available Floodplain', type:'zipped_shapefile', url:'https://www.in.gov/dnr/water/files/fp/Gibson.zip', enabled:false, visible:true, geometryRole:'floodplain', purpose:'Floodplain and lowland habitat context', corsRisk:true, description:'DNR county floodplain ZIP. May require manual import.' },
+    { id:'nwi_wetlands_dyn', name:'NWI Wetlands Dynamic', type:'arcgis_dynamic', serviceUrl:'https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer', layerIds:[0], enabled:true, visible:true, geometryRole:'wetland', opacity:0.6, purpose:'Primary wetland overlay', corsRisk:false, description:'USFWS NWI dynamic map layer. Usually loads without CORS issues.' },
+    { id:'nwi_wetlands_query', name:'NWI Wetlands Query', type:'arcgis_feature_query', url:'https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0/query', enabled:false, visible:true, geometryRole:'wetland', maxFeatures:2000, purpose:'Query wetland polygons near a point or view', corsRisk:false, description:'Queryable wetland polygons. Use current view only.' },
+    { id:'nwi_data_source', name:'NWI Data Source', type:'arcgis_dynamic', serviceUrl:'https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Data_Source/MapServer', layerIds:[0,1,2,3,4], enabled:false, visible:true, geometryRole:'reference', opacity:0.4, purpose:'Wetland mapping metadata', corsRisk:false, description:'Optional metadata overlay.' },
+    { id:'in_streams', name:'Indiana Stream Drainage', type:'arcgis_feature_query', url:'https://gisdata.in.gov/server/rest/services/Hosted/Stream_Drainage_Areas_1/FeatureServer/1/query', enabled:false, visible:true, geometryRole:'water', maxFeatures:2000, purpose:'Streams and drainage for water proximity', corsRisk:false, description:'Statewide stream layer. Query limited to Gibson area.' },
+    { id:'in_roads', name:'Indiana Road Centerlines', type:'arcgis_feature_query', url:'https://gisdata.in.gov/server/rest/services/Hosted/Road_Centerlines_of_Indiana_Current/FeatureServer/0/query', enabled:false, visible:true, geometryRole:'road', maxFeatures:2000, purpose:'Statewide fallback roads', corsRisk:false, description:'Statewide roads. Query limited to Gibson area.' },
+    { id:'usgs_nhd', name:'USGS NHD', type:'arcgis_dynamic', serviceUrl:'https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer', layerIds:[0], enabled:false, visible:true, geometryRole:'water', opacity:0.5, purpose:'National Hydrography display', corsRisk:false, description:'USGS NHD dynamic overlay. Off by default.' }
+  ];
+
+  const App = {
+    map:null, basemapLayer:null, basemapName:'osm',
+    layers:{},
+    sources:[],
+    observations:[],
+    savedRoutes:[],
+    mode:'navigate',
+    currentRoute:[], measurePoints:[],
+    db:null,
+    observationLayer:null, routeLayer:null, measureLayer:null, scoreLayer:null,
+    sightings: {
+      inat: { data:[], markers:null, visible:true, placeId:null, placeSlug:'gibson-county-in-us', lastLoad:null, filter:'all' },
+      gbif: { data:[], markers:null, visible:false, lastLoad:null, filter:'all' },
+      ebird: { data:[], markers:null, visible:false, apiKey:null, lastLoad:null, regionCode:'US-IN-051' },
+      herp: { data:[], markers:null, visible:false, lastLoad:null }
+    },
+    chart:null
+  };
+
+  function escapeHtml(t){ if(t==null)return''; return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function escapeXml(t){ return escapeHtml(t).replace(/'/g,'&apos;'); }
+  function updateStatus(t, cls){ const p=document.getElementById('statusPill'); p.textContent=t; p.className='status-pill '+(cls==='ok'?'':cls||''); }
+  function downloadJSON(data, fn){ const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=fn; a.click(); URL.revokeObjectURL(u); }
+  function downloadText(text, fn, mime){ const blob=new Blob([text],{type:mime||'text/plain'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=fn; a.click(); URL.revokeObjectURL(u); }
+  function defaultStyleByRole(role){ const m={boundary:{color:'#1f2937',weight:3,fillOpacity:0.05},parcel:{color:'#d97706',weight:0.8,fillOpacity:0.03},road:{color:'#9ca3af',weight:1.5},address:{radius:3,color:'#ef4444',fillOpacity:0.6},wetland:{color:'#2dd4bf',weight:1,fillOpacity:0.35},water:{color:'#3b82f6',weight:2},floodplain:{color:'#8b5cf6',weight:1,fillOpacity:0.25},reference:{color:'#6366f1',weight:2,fillOpacity:0.2},other:{color:'#6366f1',weight:2,fillOpacity:0.2}}; return m[role]||m.other; }
+  function guessNameField(props){ const c=['NAME','Name','GNIS_NAME','FULLNAME','STREETNAME','ROAD_NAME','FENAME','WETLAND_TYPE','PARCEL_ID','PARCELID','OBJECTID','ID','TYPE','CLASS','ROADCLASS']; for(const k of c){ if(props[k]!=null) return k; } return null; }
+  function buildPopup(feature, sourceName){ const props=feature.properties||{}; const nf=guessNameField(props); let h='<div style="min-width:180px">'; if(nf) h+='<div style="font-size:0.9rem;font-weight:700;margin-bottom:0.2rem">'+escapeHtml(String(props[nf]))+'</div>'; h+='<div style="font-size:0.75rem;color:#6b7280;margin-bottom:0.3rem">'+escapeHtml(sourceName||'Feature')+'</div>'; const rows=Object.entries(props).slice(0,12).map(([k,v])=>'<tr><td style="font-weight:600;padding-right:6px;white-space:nowrap">'+escapeHtml(k)+'</td><td>'+escapeHtml(String(v))+'</td></tr>').join(''); h+='<table style="font-size:0.8rem;border-collapse:collapse">'+rows+'</table></div>'; return h; }
+
+  function taxonColor(taxon){ const map={'Aves':'#3b82f6','Mammalia':'#d97706','Reptilia':'#10b981','Amphibia':'#06b6d4','Insecta':'#eab308','Plantae':'#22c55e','Fungi':'#8b5cf6','Arachnida':'#78716c'}; return map[taxon]||'#6b7280'; }
+
+  async function initDB(){ if(!hasDexie)return; try{ App.db=new Dexie('GCWWE_DB'); App.db.version(3).stores({observations:'++id,category,date,lat,lon',routes:'++id,name',kv:'key',cachedLayers:'++id,sourceId,importedAt',sightingsCache:'source'}); await App.db.open(); }catch(e){ console.warn('Dexie failed',e); App.db=null; } }
+  async function dbGet(table, fb){ if(App.db){ try{ return await App.db[table].toArray(); }catch(e){} } try{ const r=localStorage.getItem('gibson_wetlands_'+table); return r?JSON.parse(r):fb; }catch(e){ return fb; } }
+  async function dbSet(table, data){ if(App.db){ try{ await App.db[table].clear(); if(data&&data.length) await App.db[table].bulkAdd(data); return; }catch(e){} } localStorage.setItem('gibson_wetlands_'+table, JSON.stringify(data)); }
+  async function kvGet(key, fb){ if(App.db){ try{ const r=await App.db.kv.get(key); return r?r.value:fb; }catch(e){} } try{ const r=localStorage.getItem('gibson_wetlands_'+key); return r!==null?JSON.parse(r):fb; }catch(e){ return fb; } }
+  async function kvSet(key, value){ if(App.db){ try{ await App.db.kv.put({key,value}); return; }catch(e){} } localStorage.setItem('gibson_wetlands_'+key, JSON.stringify(value)); }
+
+  async function cacheSightings(source, data){ if(!App.db)return; try{ await App.db.sightingsCache.put({source,data,ts:new Date().toISOString()}); }catch(e){ console.warn('Cache sightings failed',e); } }
+  async function getCachedSightings(source){ if(!App.db)return null; try{ const rec=await App.db.sightingsCache.get(source); return rec?rec.data:null; }catch(e){ return null; } }
+  async function clearSightingsCache(source){ if(!App.db)return; try{ if(source) await App.db.sightingsCache.delete(source); else await App.db.sightingsCache.clear(); }catch(e){} }
+
+  async function cacheLayerData(sourceId, geojson){ if(!App.db)return; try{ await App.db.cachedLayers.where({sourceId}).delete(); const blob=JSON.stringify(geojson); if(blob.length>10*1024*1024) console.warn('Caching large layer ('+Math.round(blob.length/1024/1024)+'MB)'); await App.db.cachedLayers.add({sourceId,data:blob,importedAt:new Date().toISOString()}); }catch(e){ console.warn('Cache failed',e); } }
+  async function getCachedLayerData(sourceId){ if(!App.db)return null; try{ const rec=await App.db.cachedLayers.where({sourceId}).first(); return rec?JSON.parse(rec.data):null; }catch(e){ return null; } }
+  async function clearCachedLayerData(sourceId){ if(!App.db)return; try{ await App.db.cachedLayers.where({sourceId}).delete(); }catch(e){} }
+
+  function initMap(){ App.map=L.map('map',{zoomControl:false}).setView(COUNTY_CENTER,DEFAULT_ZOOM); L.control.zoom({position:'topright'}).addTo(App.map); setBasemap('osm'); App.map.on('click',onMapClick); App.map.on('moveend',saveMapView); App.observationLayer=(hasMarkerCluster?L.markerClusterGroup({spiderfyOnMaxZoom:true,showCoverageOnHover:false,maxClusterRadius:40}):L.layerGroup()).addTo(App.map); App.routeLayer=L.layerGroup().addTo(App.map); App.measureLayer=L.layerGroup().addTo(App.map); App.scoreLayer=L.layerGroup().addTo(App.map); }
+  function setBasemap(name){ App.basemapName=name; if(App.basemapLayer) App.map.removeLayer(App.basemapLayer); if(name==='osm'){ App.basemapLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors'}).addTo(App.map); }else if(name==='topo'){ App.basemapLayer=L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenTopoMap contributors'}).addTo(App.map); }else if(name==='gray'){ App.basemapLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors',className:'leaflet-grayscale'}).addTo(App.map); } ['btnBaseOsm','btnBaseTopo','btnBaseGray'].forEach(id=>{ const el=document.getElementById(id); if(!el)return; const active=(name==='osm'&&id==='btnBaseOsm')||(name==='topo'&&id==='btnBaseTopo')||(name==='gray'&&id==='btnBaseGray'); el.classList.toggle('active',active); }); }
+  async function saveMapView(){ const c=App.map.getCenter(); await kvSet('mapView',{lat:c.lat,lng:c.lng,zoom:App.map.getZoom()}); }
+  async function restoreMapView(){ const v=await kvGet('mapView',null); if(v) App.map.setView([v.lat,v.lng],v.zoom); }
+
+  async function loadGeoJSON(source){ const res=await fetch(source.url); if(!res.ok) throw new Error('HTTP '+res.status); const data=await res.json(); if(!data||!Array.isArray(data.features)) throw new Error('Invalid GeoJSON'); return data; }
+  async function loadArcGISFeatureQuery(source, bounds){ const b=bounds||L.latLngBounds([[GIBSON_BBOX.south,GIBSON_BBOX.west],[GIBSON_BBOX.north,GIBSON_BBOX.east]]); const base=source.url.replace(/\?.*$/,''); const url=new URL(base); const existing=new URLSearchParams(source.url.includes('?')?source.url.split('?')[1]:''); existing.forEach((v,k)=>url.searchParams.set(k,v)); url.searchParams.set('f','geojson'); url.searchParams.set('outFields','*'); url.searchParams.set('returnGeometry','true'); url.searchParams.set('outSR','4326'); const geom=JSON.stringify({xmin:b.getWest(),ymin:b.getSouth(),xmax:b.getEast(),ymax:b.getNorth(),spatialReference:{wkid:4326}}); url.searchParams.set('geometry',geom); url.searchParams.set('geometryType','esriGeometryEnvelope'); url.searchParams.set('spatialRel','esriSpatialRelIntersects'); url.searchParams.set('inSR','4326'); const max=source.maxFeatures||2000; url.searchParams.set('resultRecordCount',String(max)); const res=await fetch(url.toString()); if(!res.ok) throw new Error('HTTP '+res.status); const data=await res.json(); if(data.error) throw new Error(data.error.message||'ArcGIS error'); if(data.type==='FeatureCollection') return {data,capped:(data.features&&data.features.length>=max)}; if(data.features&&data.geometryType) throw new Error('ESRI JSON returned; this service may not support f=geojson directly.'); throw new Error('Unexpected response'); }
+  async function loadCSV(source){ if(!hasPapa) throw new Error('PapaParse not loaded'); const res=await fetch(source.url); if(!res.ok) throw new Error('HTTP '+res.status); const text=await res.text(); const parsed=Papa.parse(text,{header:true,dynamicTyping:true,skipEmptyLines:true}); if(!parsed.data.length) throw new Error('No rows in CSV'); const first=parsed.data[0]; const guess=(cands)=>{ for(const c of cands){ if(c&&c in first) return c; } const keys=Object.keys(first); for(const c of cands){ if(!c)continue; const m=keys.find(k=>k.toLowerCase().trim()===c.toLowerCase()); if(m) return m; } return null; }; const latField=guess([source.latField,'lat','latitude','y','Lat','Latitude','Y'].filter(Boolean)); const lonField=guess([source.lonField,'lon','lng','longitude','x','Lon','Lng','Longitude','X'].filter(Boolean)); if(!latField||!lonField) throw new Error('Could not detect lat/lon columns'); const features=parsed.data.filter(r=>{ const lat=parseFloat(r[latField]); const lon=parseFloat(r[lonField]); return !isNaN(lat)&&!isNaN(lon); }).map(r=>({type:'Feature',geometry:{type:'Point',coordinates:[parseFloat(r[lonField]),parseFloat(r[latField])]},properties:r})); return {type:'FeatureCollection',features,meta:{latField,lonField,totalRows:parsed.data.length,validRows:features.length}}; }
+  async function loadZippedShapefile(source){ if(!hasShp) throw new Error('shpjs not loaded'); let buf; try{ const res=await fetch(source.url); if(!res.ok) throw new Error('HTTP '+res.status); buf=await res.arrayBuffer(); }catch(e){ if(e instanceof TypeError||e.message.includes('Failed to fetch')) throw new Error('Browser blocked cross-origin fetch. Please download the file manually, then use Import local file.'); throw e; } const parsed=await shp(buf); if(Array.isArray(parsed)){ const all=parsed.reduce((acc,g)=>acc.concat(g.features||[]),[]); return {type:'FeatureCollection',features:all}; } if(!parsed||!Array.isArray(parsed.features)) throw new Error('Could not parse shapefile'); return parsed; }
+
+  function renderLayerToMap(sourceId){ const entry=App.layers[sourceId]; if(!entry)return; if(entry.leafletLayer){ try{ App.map.removeLayer(entry.leafletLayer); }catch(e){} entry.leafletLayer=null; } if(entry.source.type==='arcgis_dynamic'){ if(!hasEsriLeaflet) return; entry.leafletLayer=L.esri.dynamicMapLayer({url:entry.source.serviceUrl||entry.source.url,layers:entry.source.layerIds||[0],opacity:entry.source.opacity??0.6}); }else if(entry.source.type==='geojson'||entry.source.type==='arcgis_feature_query'||entry.source.type==='csv'||entry.source.type==='zipped_shapefile'||entry.source.type==='local_import'){ if(!entry.data) return; const geojson=entry.data; const isPointy=geojson.features.length>0&&geojson.features[0].geometry&&geojson.features[0].geometry.type==='Point'; if(isPointy&&geojson.features.length>MAX_RENDER_POINTS){ if(hasMarkerCluster){ entry.leafletLayer=L.markerClusterGroup({spiderfyOnMaxZoom:true,showCoverageOnHover:false,maxClusterRadius:40}); addPointsChunked(entry.leafletLayer,geojson.features,entry.source); }else{ entry.leafletLayer=L.layerGroup(); addPointsChunked(entry.leafletLayer,geojson.features,entry.source); } }else{ const style=entry.source.style||defaultStyleByRole(entry.source.geometryRole)||{}; entry.leafletLayer=L.geoJSON(geojson,{style:style,pointToLayer:(feat,latlng)=>{ return L.circleMarker(latlng,{radius:style.radius||5,color:style.color||'#6366f1',fillOpacity:style.fillOpacity??0.5,weight:style.weight||2}); },onEachFeature:(feat,layer)=>{ layer.bindPopup(buildPopup(feat,entry.source.name)); }}); } } if(entry.source.enabled&&entry.source.visible!==false){ if(entry.leafletLayer) App.map.addLayer(entry.leafletLayer); } }
+
+  async function addPointsChunked(group, features, source){ return new Promise(resolve=>{ let i=0; function chunk(){ const end=Math.min(i+CHUNK_SIZE,features.length); for(;i<end;i++){ const f=features[i]; if(!f||!f.geometry||f.geometry.type!=='Point') continue; const s=source.style||defaultStyleByRole(source.geometryRole)||{}; const m=L.circleMarker([f.geometry.coordinates[1],f.geometry.coordinates[0]],{radius:s.radius||3,color:s.color||'#6366f1',fillOpacity:s.fillOpacity??0.6,weight:s.weight||1}); m.bindPopup(buildPopup(f,source.name)); group.addLayer(m); } if(i<features.length) requestAnimationFrame(chunk); else resolve(); } chunk(); }); }
+
+  async function loadSource(sourceId, optBounds){ const entry=App.layers[sourceId]; if(!entry)return; entry.status='loading'; entry.error=null; entry.corsBlocked=false; updateLayerUI(sourceId); renderGISStatus(); try{ let geojson=null; let isDynamic=false; if(entry.source.type==='geojson') geojson=await loadGeoJSON(entry.source); else if(entry.source.type==='arcgis_feature_query'){ const res=await loadArcGISFeatureQuery(entry.source,optBounds); geojson=res.data; entry.capped=res.capped; } else if(entry.source.type==='arcgis_dynamic') isDynamic=true; else if(entry.source.type==='csv') geojson=await loadCSV(entry.source); else if(entry.source.type==='zipped_shapefile'){ try{ geojson=await loadZippedShapefile(entry.source); }catch(e){ if(e.message&&e.message.includes('cross-origin')){ entry.corsBlocked=true; throw e; } throw e; } } else if(entry.source.type==='local_import'){ geojson=await getCachedLayerData(sourceId); if(!geojson) throw new Error('No cached local data found'); } else throw new Error('Unknown type: '+entry.source.type); if(isDynamic){ entry.data=null; entry.featureCount=null; entry.status='loaded'; renderLayerToMap(sourceId); }else{ if(!geojson||!Array.isArray(geojson.features)) throw new Error('No features'); entry.data=geojson; entry.featureCount=geojson.features.length; entry.status='loaded'; renderLayerToMap(sourceId); } }catch(err){ console.error(err); entry.status='error'; entry.error=err.message||'Failed'; if(entry.source.type==='zipped_shapefile'&&(err.message&&err.message.includes('cross-origin'))) entry.corsBlocked=true; } updateLayerUI(sourceId); renderGISStatus(); }
+
+  function unloadSource(sourceId){ const entry=App.layers[sourceId]; if(!entry)return; if(entry.leafletLayer){ try{ App.map.removeLayer(entry.leafletLayer); }catch(e){} entry.leafletLayer=null; } entry.status='idle'; renderLayerList(); renderGISStatus(); }
+
+  async function toggleLayer(id){ const src=App.sources.find(s=>s.id===id); if(!src)return; src.enabled=!src.enabled; await saveSettings(); renderLayerList(); renderGISStatus(); if(src.enabled){ if(App.layers[id].status!=='loaded') await loadSource(id); else if(App.layers[id].leafletLayer&&!App.map.hasLayer(App.layers[id].leafletLayer)) App.map.addLayer(App.layers[id].leafletLayer); }else{ if(App.layers[id].leafletLayer) App.map.removeLayer(App.layers[id].leafletLayer); } }
+
+  function initSourcesFromList(){ App.sources.forEach(src=>{ if(!App.layers[src.id]) App.layers[src.id]={source:src,leafletLayer:null,data:null,status:'idle',error:null,featureCount:null,corsBlocked:false,capped:false}; else App.layers[src.id].source=src; }); }
+  async function loadAllEnabledSources(){ updateStatus('Loading layers…','warn'); for(const src of App.sources){ if(src.enabled&&App.layers[src.id].status!=='loaded'){ await loadSource(src.id); }else if(src.enabled&&App.layers[src.id].status==='loaded'){ if(App.layers[src.id].leafletLayer&&!App.map.hasLayer(App.layers[src.id].leafletLayer)) App.map.addLayer(App.layers[src.id].leafletLayer); }else if(!src.enabled&&App.layers[src.id].leafletLayer){ App.map.removeLayer(App.layers[src.id].leafletLayer); } } updateStatus('Ready','ok'); }
+
+  function renderLayerList(){ const container=document.getElementById('layerList'); container.innerHTML=''; App.sources.forEach(src=>{ if(src.type==='tile')return; const entry=App.layers[src.id]; const div=document.createElement('div'); div.className='layer-item'; let statusHtml='<span class="layer-status">Idle</span>'; if(entry){ if(entry.status==='loading') statusHtml='<span class="layer-status loading">Loading</span>'; else if(entry.status==='loaded') statusHtml=`<span class="layer-status ok">${entry.featureCount!=null?entry.featureCount+' feat':'Active'}</span>`; else if(entry.status==='error') statusHtml=`<span class="layer-status err" title="${escapeHtml(entry.error||'')}">Error</span>`; } div.innerHTML=`<label style="display:flex;align-items:center;gap:0.5rem;flex:1;cursor:pointer;font-size:0.9rem"><input type="checkbox" ${src.enabled?'checked':''} data-id="${src.id}" class="layer-toggle"> <span>${escapeHtml(src.name)}</span></label> ${statusHtml}`; container.appendChild(div); }); container.querySelectorAll('.layer-toggle').forEach(ch=>{ ch.addEventListener('change',()=>toggleLayer(ch.dataset.id)); }); }
+  function updateLayerUI(sourceId){ renderLayerList(); }
+
+  function renderGISStatus(){ const container=document.getElementById('gisStatusTable'); if(!container)return; let html='<table class="data-table"><thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Count</th><th>Actions</th></tr></thead><tbody>'; App.sources.forEach(src=>{ if(src.type==='tile')return; const entry=App.layers[src.id]; let status='idle', count='-', actions=''; if(entry){ status=entry.status; count=entry.featureCount!=null?String(entry.featureCount):(entry.status==='loaded'?'OK':'-'); if(entry.capped) count+='+'; } const badge=status==='loaded'?'<span class="layer-status ok">Loaded</span>':status==='loading'?'<span class="layer-status loading">Loading</span>':status==='error'?`<span class="layer-status err" title="${escapeHtml(entry.error||'')}">Error</span>`:'<span class="layer-status">Idle</span>'; actions=`<button class="btn small" onclick="App.manualLoad('${src.id}')">Load</button>`; if(entry&&entry.status==='loaded') actions+=` <button class="btn small" onclick="App.manualUnload('${src.id}')">Unload</button>`; if(src.type==='zipped_shapefile') actions+=` <a class="btn small" href="${escapeHtml(src.url)}" target="_blank" download>DL</a>`; if(src.type==='local_import') actions+=` <button class="btn small" onclick="App.deleteLocalSource('${src.id}')">Delete</button>`; html+=`<tr><td>${escapeHtml(src.name)}</td><td>${escapeHtml(src.geometryRole||'-')}</td><td>${badge}</td><td>${count}</td><td>${actions}</td></tr>`; }); html+='</tbody></table>'; container.innerHTML=html; }
+
+  function renderAdminPanel(){ const container=document.getElementById('adminSourceList'); container.innerHTML=''; App.sources.forEach(src=>{ if(src.type==='tile')return; const div=document.createElement('div'); div.className='card'; div.style.padding='0.6rem'; div.innerHTML=`<div style="display:flex;gap:0.5rem;margin-bottom:0.25rem;flex-wrap:wrap;align-items:center"><strong style="font-size:0.85rem;flex:1">${escapeHtml(src.name)}</strong><span style="font-size:0.7rem;color:#6b7280">${src.type}</span></div><div style="font-size:0.75rem;color:#374151;margin-bottom:0.4rem">${escapeHtml(src.purpose||src.description||'')}</div><input type="text" value="${escapeHtml(src.url||src.serviceUrl||'')}" placeholder="URL" class="admin-url" data-id="${src.id}" style="width:100%;margin-bottom:0.4rem;font-size:0.8rem"><div style="display:flex;gap:0.5rem;margin-bottom:0.4rem"><select class="admin-role" data-id="${src.id}" style="flex:1;font-size:0.8rem"><option value="boundary" ${src.geometryRole==='boundary'?'selected':''}>boundary</option><option value="road" ${src.geometryRole==='road'?'selected':''}>road</option><option value="address" ${src.geometryRole==='address'?'selected':''}>address</option><option value="parcel" ${src.geometryRole==='parcel'?'selected':''}>parcel</option><option value="wetland" ${src.geometryRole==='wetland'?'selected':''}>wetland</option><option value="water" ${src.geometryRole==='water'?'selected':''}>water</option><option value="floodplain" ${src.geometryRole==='floodplain'?'selected':''}>floodplain</option><option value="reference" ${src.geometryRole==='reference'?'selected':''}>reference</option><option value="other" ${src.geometryRole==='other'?'selected':''}>other</option></select><select class="admin-type" data-id="${src.id}" style="flex:1;font-size:0.8rem"><option value="geojson" ${src.type==='geojson'?'selected':''}>GeoJSON</option><option value="arcgis_feature_query" ${src.type==='arcgis_feature_query'?'selected':''}>ArcGIS Query</option><option value="arcgis_dynamic" ${src.type==='arcgis_dynamic'?'selected':''}>ArcGIS Dynamic</option><option value="csv" ${src.type==='csv'?'selected':''}>CSV</option><option value="zipped_shapefile" ${src.type==='zipped_shapefile'?'selected':''}>Zipped Shapefile</option><option value="local_import" ${src.type==='local_import'?'selected':''}>Local Import</option></select></div><div style="display:flex;gap:0.25rem;flex-wrap:wrap;align-items:center"><label style="font-size:0.78rem;cursor:pointer;display:flex;align-items:center;gap:0.25rem"><input type="checkbox" class="admin-enabled" data-id="${src.id}" ${src.enabled?'checked':''}> Enabled</label><button class="btn small" onclick="App.testSource('${src.id}')">Test</button><button class="btn small primary" onclick="App.updateSource('${src.id}')">Save</button>${src.type==='zipped_shapefile'?`<a class="btn small" href="${escapeHtml(src.url)}" target="_blank" download>DL</a>`:''}${src.type==='local_import'?`<button class="btn small" onclick="App.deleteLocalSource('${src.id}')">Delete</button>`:''}</div><p class="hint">${escapeHtml(src.description||'')}</p>`; container.appendChild(div); }); }
+
+  async function updateSource(sourceId){ const src=App.sources.find(s=>s.id===sourceId); if(!src)return; const container=document.getElementById('adminSourceList'); src.url=container.querySelector(`.admin-url[data-id="${src.id}"]`).value; src.geometryRole=container.querySelector(`.admin-role[data-id="${src.id}"]`).value; src.type=container.querySelector(`.admin-type[data-id="${src.id}"]`).value; src.enabled=container.querySelector(`.admin-enabled[data-id="${src.id}"]`).checked; initSourcesFromList(); await saveSettings(); renderLayerList(); renderGISStatus(); updateStatus('Source saved','ok'); }
+  async function testSource(sourceId){ updateStatus('Testing '+sourceId+'…','warn'); try{ await loadSource(sourceId); if(App.layers[sourceId].status==='loaded') updateStatus('Test OK','ok'); else updateStatus('Test failed','err'); }catch(e){ updateStatus('Test failed','err'); alert('Test failed: '+e.message); } }
+  App.manualLoad=async function(id){ const src=App.sources.find(s=>s.id===id); if(!src)return; src.enabled=true; await saveSettings(); renderLayerList(); await loadSource(id); };
+  App.manualUnload=function(id){ const src=App.sources.find(s=>s.id===id); if(src) src.enabled=false; saveSettings(); unloadSource(id); renderLayerList(); };
+  App.deleteLocalSource=async function(id){ if(!confirm('Delete this imported layer and its cached data?'))return; App.sources=App.sources.filter(s=>s.id!==id); if(App.layers[id]){ if(App.layers[id].leafletLayer)try{App.map.removeLayer(App.layers[id].leafletLayer);}catch(e){} delete App.layers[id]; } await clearCachedLayerData(id); await saveSettings(); renderLayerList(); renderAdminPanel(); renderGISStatus(); };
+
+  function renderObservations(){ const list=document.getElementById('obsList'); list.innerHTML=''; const filter=document.getElementById('obsFilter').value||'all'; const filtered=App.observations.filter(o=>filter==='all'||o.category===filter); if(filtered.length===0){ list.innerHTML='<p class="hint">No observations yet.</p>'; return; } filtered.forEach(o=>{ const div=document.createElement('div'); div.className='card'; div.style.padding='0.5rem'; div.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:start"><strong style="font-size:0.85rem">${escapeHtml(o.title||'Untitled')}</strong><span style="font-size:0.75rem;color:#6b7280">${escapeHtml(o.category)}</span></div><p style="font-size:0.8rem;margin:0.25rem 0">${escapeHtml(o.notes||'')}</p><div style="display:flex;gap:0.5rem;justify-content:space-between;align-items:center"><span class="hint">${escapeHtml(o.date?new Date(o.date).toLocaleString():'')}</span><div style="display:flex;gap:0.25rem"><button class="btn small" onclick="App.panToObs(${o.id})">Zoom</button><button class="btn small" onclick="App.deleteObs(${o.id})">Delete</button></div></div>`; list.appendChild(div); }); }
+  function refreshObservationMarkers(){ App.observationLayer.clearLayers(); const obsColors={bird:'#3b82f6',mammal:'#d97706','reptile/amphibian':'#10b981',insect:'#8b5cf6',plant:'#22c55e','track/sign':'#78716c',unknown:'#9ca3af',other:'#6366f1'}; App.observations.forEach(o=>{ if(o.lat==null||o.lon==null)return; const color=obsColors[o.category]||obsColors.other; const icon=L.divIcon({className:'',html:`<div style="background:${color};width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>`,iconSize:[12,12],iconAnchor:[6,6]}); const m=L.marker([o.lat,o.lon],{icon}).addTo(App.observationLayer); m.bindPopup(`<b>${escapeHtml(o.title||'Observation')}</b><br>${escapeHtml(o.category)}<br>${escapeHtml(o.notes||'')}<br><em>${escapeHtml(o.date?new Date(o.date).toLocaleString():'')}</em>`); }); }
+  async function saveObservation(){ const idVal=document.getElementById('obsId').value; const obs={ lat:parseFloat(document.getElementById('obsLat').value), lon:parseFloat(document.getElementById('obsLon').value), category:document.getElementById('obsCategory').value, title:document.getElementById('obsTitle').value, notes:document.getElementById('obsNotes').value, count:parseInt(document.getElementById('obsCount').value)||null, photo:document.getElementById('obsPhoto').value, date:new Date().toISOString() }; if(isNaN(obs.lat)||isNaN(obs.lon)){ alert('Valid latitude and longitude are required.'); return; } if(idVal){ const existing=App.observations.find(o=>o.id===parseInt(idVal)); if(existing){ Object.assign(existing,obs); existing.id=parseInt(idVal); } }else{ obs.id=Date.now(); App.observations.push(obs); } await dbSet('observations',App.observations); refreshObservationMarkers(); renderObservations(); document.getElementById('obsForm').style.display='none'; }
+  function deleteObs(id){ if(!confirm('Delete this observation?'))return; App.observations=App.observations.filter(o=>o.id!==id); dbSet('observations',App.observations); refreshObservationMarkers(); renderObservations(); }
+  function panToObs(id){ const o=App.observations.find(x=>x.id===id); if(o) App.map.setView([o.lat,o.lon],16); }
+
+  function renderCurrentRoute(){ App.routeLayer.clearLayers(); const info=document.getElementById('routeInfo'); if(App.currentRoute.length===0){ info.textContent='0 waypoints'; document.getElementById('routeSaveForm').style.display='none'; return; } App.currentRoute.forEach((pt,i)=>{ L.circleMarker(pt,{radius:6,color:'#0f172a',fillOpacity:1,weight:2}).addTo(App.routeLayer).bindPopup('Waypoint '+(i+1)); }); if(App.currentRoute.length>1){ L.polyline(App.currentRoute,{color:'#0f172a',weight:3,dashArray:'6,6'}).addTo(App.routeLayer); let miles=0; if(hasTurf){ const coords=App.currentRoute.map(pt=>[pt[1],pt[0]]); const line=turf.lineString(coords); miles=turf.length(line,{units:'miles'}); } info.textContent=App.currentRoute.length+' waypoints • '+(miles?miles.toFixed(2)+' mi':''); }else{ info.textContent='1 waypoint'; } document.getElementById('routeSaveForm').style.display=App.currentRoute.length>1?'block':'none'; }
+  async function saveCurrentRoute(){ const name=document.getElementById('routeName').value.trim(); if(!name){ alert('Enter a route name'); return; } if(App.currentRoute.length<2){ alert('Need at least 2 waypoints'); return; } let miles=0,km=0; if(hasTurf){ const coords=App.currentRoute.map(pt=>[pt[1],pt[0]]); const line=turf.lineString(coords); miles=turf.length(line,{units:'miles'}); km=turf.length(line,{units:'kilometers'}); } const route={id:Date.now(),name,waypoints:JSON.parse(JSON.stringify(App.currentRoute)),distanceMiles:miles,distanceKm:km}; App.savedRoutes.push(route); await dbSet('routes',App.savedRoutes); renderSavedRoutes(); document.getElementById('routeName').value=''; }
+  function renderSavedRoutes(){ const container=document.getElementById('savedRoutesList'); container.innerHTML=''; if(App.savedRoutes.length===0){ container.innerHTML='<p class="hint">No saved routes.</p>'; return; } App.savedRoutes.forEach(r=>{ const div=document.createElement('div'); div.className='layer-item'; div.innerHTML=`<span style="font-size:0.85rem">${escapeHtml(r.name)} ${r.distanceMiles?'('+r.distanceMiles.toFixed(1)+' mi)':''}</span><div style="display:flex;gap:0.25rem"><button class="btn small" onclick="App.loadRoute(${r.id})">Load</button><button class="btn small" onclick="App.deleteRoute(${r.id})">Delete</button></div>`; container.appendChild(div); }); }
+  function loadRoute(id){ const r=App.savedRoutes.find(x=>x.id===id); if(!r)return; App.currentRoute=JSON.parse(JSON.stringify(r.waypoints)); renderCurrentRoute(); }
+  function deleteRoute(id){ if(!confirm('Delete this route?'))return; App.savedRoutes=App.savedRoutes.filter(r=>r.id!==id); dbSet('routes',App.savedRoutes); renderSavedRoutes(); }
+  function exportCurrentRouteJSON(){ if(App.currentRoute.length<2)return; downloadJSON({waypoints:App.currentRoute,exportedAt:new Date().toISOString()},'route.json'); }
+  function exportCurrentRouteGPX(){ if(App.currentRoute.length<2)return; const name=document.getElementById('routeName').value.trim()||'Route'; const pts=App.currentRoute.map(pt=>`    <trkpt lat="${pt[0]}" lon="${pt[1]}"></trkpt>`).join('\n'); const gpx=`<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="GibsonWetlandsExplorer">\n  <trk>\n    <name>${escapeXml(name)}</name>\n    <trkseg>\n${pts}\n    </trkseg>\n  </trk>\n</gpx>`; downloadText(gpx,'route.gpx','application/gpx+xml'); }
+  function openGoogleMaps(){ if(App.currentRoute.length<2)return; const pts=App.currentRoute.map(pt=>`${pt[0]},${pt[1]}`).join('/'); window.open('https://www.google.com/maps/dir/'+pts,'_blank'); }
+
+  function renderMeasurement(){ App.measureLayer.clearLayers(); const info=document.getElementById('measureInfo'); if(App.measurePoints.length===0){ info.textContent='Click map to measure.'; return; } App.measurePoints.forEach((pt,i)=>{ L.circleMarker(pt,{radius:5,color:'#ef4444',fillOpacity:1}).addTo(App.measureLayer).bindPopup('Point '+(i+1)); }); if(App.measurePoints.length>1){ L.polyline(App.measurePoints,{color:'#ef4444',weight:2}).addTo(App.measureLayer); if(hasTurf){ const line=turf.lineString(App.measurePoints.map(pt=>[pt[1],pt[0]])); const miles=turf.length(line,{units:'miles'}); const km=turf.length(line,{units:'kilometers'}); info.textContent=miles.toFixed(2)+' mi / '+km.toFixed(2)+' km'; }else{ info.textContent=App.measurePoints.length+' points'; } }else{ info.textContent='1 point'; } }
+
+  function calculateScore(latlng){ if(!hasTurf) return {score:0,label:'Unavailable',error:'Turf.js not loaded'}; const center=[latlng.lng,latlng.lat]; let b800; try{ b800=turf.circle(center,0.8,{units:'kilometers',steps:32}); }catch(e){ return {score:0,label:'Error',error:e.message}; } let wetlandCount=0,waterCount=0,floodplainIntersect=false,addressCount=0,nearestRoad=Infinity; let missing=[]; let hasWetlandData=false,hasWaterData=false,hasFloodData=false,hasAddressData=false,hasRoadData=false; Object.values(App.layers).forEach(entry=>{ if(!entry.data||entry.status!=='loaded'||!entry.source.enabled) return; const role=entry.source.geometryRole; const feats=(entry.data.features||[]).slice(0,2000); if(!feats.length) return; try{ if(role==='wetland'){ hasWetlandData=true; const pts=turf.pointsWithinPolygon(turf.featureCollection(feats),b800); wetlandCount=pts.features.length; }else if(role==='water'){ hasWaterData=true; feats.forEach(f=>{ if(!f.geometry) return; if(f.geometry.type.includes('Line')||f.geometry.type.includes('Poly')){ try{ if(turf.booleanIntersects(b800,f)) waterCount++; }catch(e){} } }); }else if(role==='floodplain'){ hasFloodData=true; feats.forEach(f=>{ try{ if(turf.booleanIntersects(b800,f)) floodplainIntersect=true; }catch(e){} }); }else if(role==='address'){ hasAddressData=true; const pts=turf.pointsWithinPolygon(turf.featureCollection(feats),b800); addressCount=pts.features.length; }else if(role==='road'){ hasRoadData=true; feats.forEach(f=>{ if(!f.geometry||!f.geometry.type.includes('Line')) return; try{ const pt=turf.nearestPointOnLine(f,turf.point(center)); if(pt&&pt.properties&&pt.properties.dist!=null){ const dm=pt.properties.dist*1000; if(dm<nearestRoad) nearestRoad=dm; } }catch(e){} }); } }catch(e){ console.warn('Scoring error for '+entry.source.id,e); } }); if(!hasWetlandData) missing.push('wetlands'); if(!hasWaterData) missing.push('streams'); if(!hasFloodData) missing.push('floodplain'); if(!hasAddressData) missing.push('addresses'); if(!hasRoadData) missing.push('roads'); let sightingCount=0,sightingTaxa=new Set(),hasSightings=false; ['inat','gbif','ebird','herp'].forEach(key=>{ const src=App.sightings[key]; if(!src.data||!src.data.length||!src.visible) return; hasSightings=true; src.data.forEach(o=>{ if(o.lat==null||o.lon==null)return; try{ const pt=turf.point([o.lon,o.lat]); if(turf.booleanPointInPolygon(pt,b800)){ sightingCount++; if(o.taxon) sightingTaxa.add(o.taxon); else if(o.species) sightingTaxa.add(o.species); } }catch(e){} }); }); if(!hasSightings) missing.push('sightings'); let score=0; score+=Math.min(wetlandCount*8,30); score+=Math.min(waterCount*8,20); score+=floodplainIntersect?15:0; score+=Math.max(0,15-(addressCount*1.5)); if(nearestRoad!==Infinity){ if(nearestRoad>50&&nearestRoad<3000) score+=10; else if(nearestRoad>=3000&&nearestRoad<8000) score+=5; }else{ score+=2; } if(wetlandCount>0&&nearestRoad!==Infinity&&nearestRoad<2000) score+=10; else if(wetlandCount>0) score+=5; score+=Math.min(sightingCount*0.5,10); score+=Math.min(sightingTaxa.size*2,10); score=Math.min(100,Math.max(0,Math.round(score))); let label='Low'; if(score>=30) label='Moderate'; if(score>=55) label='Promising'; if(score>=75) label='Very Promising'; return {score,label,wetlandCount,waterCount,floodplainIntersect,addressCount,nearestRoad,missing,sightingCount,sightingTaxa:sightingTaxa.size}; }
+  function showScore(latlng){ const r=calculateScore(latlng); if(r.error){ L.popup().setLatLng(latlng).setContent('<p>'+escapeHtml(r.error)+'</p>').openOn(App.map); return; } const roadText=r.nearestRoad===Infinity?'N/A':Math.round(r.nearestRoad)+' m'; let missingHtml=''; if(r.missing&&r.missing.length){ missingHtml=`<div style="font-size:0.75rem;color:#6b7280;margin-top:0.3rem">Missing data: ${escapeHtml(r.missing.join(', '))}</div>`; } const html=`<div style="min-width:220px"><div class="score-panel"><div class="score-big">${r.score}</div><div style="font-weight:600">${r.label}</div></div><ul style="font-size:0.85rem;padding-left:1.2rem;margin:0.4rem 0"><li>Wetlands nearby: ${r.wetlandCount}</li><li>Waterways nearby: ${r.waterCount}</li><li>Floodplain: ${r.floodplainIntersect?'Yes':'No'}</li><li>Addresses nearby: ${r.addressCount}</li><li>Nearest road: ${roadText}</li><li>Observations nearby: ${r.sightingCount} (${r.sightingTaxa} taxa)</li></ul>${missingHtml}<p class="hint">Heuristic field-planning aid. Not ecological advice. Observation density often reflects where people go, not just where wildlife lives.</p></div>`; L.popup().setLatLng(latlng).setContent(html).openOn(App.map); const marker=L.circleMarker(latlng,{radius:10,color:'#f59e0b',fillOpacity:0.5,weight:2}).addTo(App.scoreLayer); setTimeout(()=>{App.scoreLayer.removeLayer(marker);},12000); }
+
+  function onMapClick(e){ if(App.mode==='score') showScore(e.latlng); else if(App.mode==='route'){ App.currentRoute.push([e.latlng.lat,e.latlng.lng]); renderCurrentRoute(); } else if(App.mode==='measure'){ App.measurePoints.push([e.latlng.lat,e.latlng.lng]); renderMeasurement(); } }
+  function toggleMode(mode){ if(App.mode===mode) App.mode='navigate'; else App.mode=mode; document.getElementById('map').style.cursor=App.mode==='navigate'?'':'crosshair'; updateModeButtons(); const msg=App.mode==='score'?'Score mode: click the map':App.mode==='route'?'Route mode: click to add waypoints':App.mode==='measure'?'Measure mode: click points':''; if(msg) updateStatus(msg,'warn'); else updateStatus('Ready','ok'); }
+  function updateModeButtons(){ const map={score:['btnScoreMode','fabScore'],route:['btnRouteMode','fabRoute'],measure:['btnMeasureMode','fabMeasure']}; Object.entries(map).forEach(([m,ids])=>{ ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.toggle('active',App.mode===m); }); }); }
+  function toggleSidebar(){ const sb=document.getElementById('sidebar'); if(window.innerWidth<=768) sb.classList.toggle('open'); else sb.classList.toggle('hidden-desktop'); }
+
+  async function queryLayerInView(sourceId){ const src=App.sources.find(s=>s.id===sourceId); if(!src)return; const entry=App.layers[src.id]; if(!entry)return; entry.status='loading'; entry.error=null; updateLayerUI(src.id); renderGISStatus(); try{ const bounds=App.map.getBounds(); const res=await loadArcGISFeatureQuery(src,bounds); entry.data=res.data; entry.featureCount=res.data.features.length; entry.capped=res.capped; entry.status='loaded'; src.enabled=true; await saveSettings(); renderLayerToMap(src.id); renderLayerList(); }catch(e){ entry.status='error'; entry.error=e.message||'Failed'; } updateLayerUI(src.id); renderGISStatus(); }
+  async function loadPublicServices(){ updateStatus('Loading public services…','warn'); const ids=['nwi_wetlands_dyn']; for(const id of ids){ const src=App.sources.find(s=>s.id===id); if(!src)continue; src.enabled=true; src.visible=true; await loadSource(id); } await saveSettings(); renderLayerList(); renderGISStatus(); updateStatus('Public services loaded','ok'); document.getElementById('dataSetupStatus').textContent='NWI wetlands dynamic loaded. Try county ZIPs or import local files next.'; }
+  async function tryCountyZIPs(){ updateStatus('Trying county ZIPs…','warn'); const order=['gc_boundary_zip','gc_roads_zip','gc_addresses_zip']; for(const id of order){ const src=App.sources.find(s=>s.id===id); if(!src)continue; src.enabled=true; await loadSource(id); if(App.layers[id].status==='error'&&App.layers[id].corsBlocked){ src.enabled=false; } } const parcels=App.sources.find(s=>s.id==='gc_parcels_zip'); if(parcels&&confirm('Load Gibson County Parcels? This may be large and slow.')){ parcels.enabled=true; await loadSource(parcels.id); if(App.layers[parcels.id].status==='error'&&App.layers[parcels.id].corsBlocked) parcels.enabled=false; } await saveSettings(); renderLayerList(); renderGISStatus(); updateStatus('County ZIP attempt done','ok'); document.getElementById('dataSetupStatus').textContent='Direct ZIP loading attempted. If CORS blocked, download each ZIP and use Import local file.'; }
+  async function importLocalFile(file){ if(!file)return; const ext=file.name.split('.').pop().toLowerCase(); let geojson=null; try{ if(ext==='zip'){ if(!hasShp) throw new Error('shpjs not loaded'); const buf=await file.arrayBuffer(); const parsed=await shp(buf); if(Array.isArray(parsed)){ const all=parsed.reduce((acc,g)=>acc.concat(g.features||[]),[]); geojson={type:'FeatureCollection',features:all}; }else{ geojson=parsed; } }else if(ext==='geojson'||ext==='json'){ const text=await file.text(); geojson=JSON.parse(text); }else if(ext==='csv'){ if(!hasPapa) throw new Error('PapaParse not loaded'); const text=await file.text(); const parsed=Papa.parse(text,{header:true,dynamicTyping:true,skipEmptyLines:true}); if(!parsed.data.length) throw new Error('Empty CSV'); const first=parsed.data[0]; const guess=(cands)=>{ for(const c of cands){ if(c in first) return c; } const keys=Object.keys(first); for(const c of cands){ const m=keys.find(k=>k.toLowerCase().trim()===c.toLowerCase()); if(m) return m; } return null; }; const latField=guess(['lat','latitude','y','Lat','Latitude','Y']); const lonField=guess(['lon','lng','longitude','x','Lon','Lng','Longitude','X']); if(!latField||!lonField) throw new Error('Could not detect lat/lon columns in CSV'); const features=parsed.data.filter(r=>{ const lat=parseFloat(r[latField]); const lon=parseFloat(r[lonField]); return !isNaN(lat)&&!isNaN(lon); }).map(r=>({type:'Feature',geometry:{type:'Point',coordinates:[parseFloat(r[lonField]),parseFloat(r[latField])]},properties:r})); geojson={type:'FeatureCollection',features,meta:{latField,lonField,totalRows:parsed.data.length,validRows:features.length}}; }else{ throw new Error('Unsupported file type: '+ext); } }catch(e){ alert('Import failed: '+e.message); return; } if(!geojson||!Array.isArray(geojson.features)){ alert('No features found'); return; } const role=prompt('Choose geometry role:\nboundary, road, address, parcel, wetland, water, floodplain, reference, other','reference'); if(!role)return; const name=prompt('Layer name',file.name.replace(/\.[^.]+$/,''))||file.name; const id='local_'+Date.now(); const source={id,name,type:'local_import',url:'',enabled:true,visible:true,geometryRole:role,description:'Imported from '+file.name,style:defaultStyleByRole(role),importedAt:new Date().toISOString()}; App.sources.push(source); App.layers[id]={source,leafletLayer:null,data:geojson,status:'loaded',error:null,featureCount:geojson.features.length,corsBlocked:false,capped:false}; await cacheLayerData(id,geojson); await saveSettings(); renderLayerToMap(id); renderLayerList(); renderAdminPanel(); renderGISStatus(); document.getElementById('dataSetupStatus').textContent='Imported '+geojson.features.length+' features as '+name; }
+  async function clearAllCachedGIS(){ if(!confirm('Clear all cached imported GIS data? This cannot be undone.'))return; const toRemove=App.sources.filter(s=>s.type==='local_import').map(s=>s.id); for(const id of toRemove){ App.sources=App.sources.filter(s=>s.id!==id); if(App.layers[id]){ if(App.layers[id].leafletLayer)try{App.map.removeLayer(App.layers[id].leafletLayer);}catch(e){} delete App.layers[id]; } await clearCachedLayerData(id); } await saveSettings(); renderLayerList(); renderAdminPanel(); renderGISStatus(); document.getElementById('dataSetupStatus').textContent='Cached GIS data cleared.'; }
+  function exportAll(){ const data={version:2,exportedAt:new Date().toISOString(),sources:App.sources,observations:App.observations,routes:App.savedRoutes,settings:{lastBasemap:App.basemapName||'osm'}}; downloadJSON(data,'gibson_wetlands_backup_'+new Date().toISOString().slice(0,10)+'.json'); }
+  async function importAll(file){ if(!file)return; try{ const text=await file.text(); const data=JSON.parse(text); if(data.sources){ App.sources=data.sources; initSourcesFromList(); } if(Array.isArray(data.observations)){ App.observations=data.observations; await dbSet('observations',App.observations); refreshObservationMarkers(); } if(Array.isArray(data.routes)){ App.savedRoutes=data.routes; await dbSet('routes',App.savedRoutes); renderSavedRoutes(); } await saveSettings(); renderLayerList(); renderAdminPanel(); renderGISStatus(); renderObservations(); updateStatus('Import complete','ok'); alert('Import complete. Use Load Enabled or Data Setup buttons to refresh layers.'); }catch(e){ alert('Import failed: '+e.message); } }
+
+  // ===================== SIGHTINGS =====================
+  function initSightingsLayers(){ if(hasMarkerCluster){ App.sightings.inat.markers=L.markerClusterGroup({spiderfyOnMaxZoom:true,showCoverageOnHover:false,maxClusterRadius:40}); App.sightings.gbif.markers=L.markerClusterGroup({spiderfyOnMaxZoom:true,showCoverageOnHover:false,maxClusterRadius:40}); App.sightings.ebird.markers=L.markerClusterGroup({spiderfyOnMaxZoom:true,showCoverageOnHover:false,maxClusterRadius:40}); App.sightings.herp.markers=L.markerClusterGroup({spiderfyOnMaxZoom:true,showCoverageOnHover:false,maxClusterRadius:40}); }else{ App.sightings.inat.markers=L.layerGroup(); App.sightings.gbif.markers=L.layerGroup(); App.sightings.ebird.markers=L.layerGroup(); App.sightings.herp.markers=L.layerGroup(); } }
+  function syncSightingsVisibility(){ ['inat','gbif','ebird','herp'].forEach(key=>{ const s=App.sightings[key]; if(!s.markers)return; if(s.visible&&App.map){ App.map.addLayer(s.markers); }else if(App.map){ try{ App.map.removeLayer(s.markers); }catch(e){} } }); }
+
+  async function resolveInatPlace(){ const slug=document.getElementById('inatPlaceSlug').value.trim(); if(!slug){ alert('Enter a place slug'); return; } document.getElementById('inatStatus').textContent='Resolving place…'; try{ const res=await fetch('https://api.inaturalist.org/v1/places/autocomplete?q='+encodeURIComponent(slug)+'&per_page=5'); if(!res.ok) throw new Error('HTTP '+res.status); const data=await res.json(); const place=data.results&&data.results.find(p=>p.slug===slug||p.name.toLowerCase().includes(slug.replace(/-/g,' '))); if(place&&place.id){ App.sightings.inat.placeId=place.id; document.getElementById('inatStatus').textContent='Resolved to place_id '+place.id; }else{ document.getElementById('inatStatus').textContent='Could not auto-resolve. Visit iNaturalist, find the place, and paste its numeric place_id below.'; const manual=prompt('Enter numeric iNaturalist place_id (or leave blank to skip):'); if(manual) App.sightings.inat.placeId=parseInt(manual); } }catch(e){ document.getElementById('inatStatus').textContent='Auto-resolve failed. Enter numeric place_id manually.'; const manual=prompt('Enter numeric iNaturalist place_id:'); if(manual) App.sightings.inat.placeId=parseInt(manual); } }
+
+  async function loadInat(){ const s=App.sightings.inat; const placeId=s.placeId; if(!placeId){ alert('Resolve or enter a place_id first'); return; } document.getElementById('inatStatus').textContent='Loading iNaturalist…'; updateStatus('Loading iNaturalist…','warn'); try{ let url='https://api.inaturalist.org/v1/observations?place_id='+encodeURIComponent(placeId)+'&per_page=200&order_by=observed_on&order=desc&geo=true'; const filter=document.getElementById('inatFilter').value; if(filter!=='all') url+='&iconic_taxon_name='+encodeURIComponent(filter); const res=await fetch(url); if(!res.ok) throw new Error('HTTP '+res.status); const data=await res.json(); s.data=(data.results||[]).map(r=>({ lat:r.geojson&&r.geojson.coordinates?r.geojson.coordinates[1]:null, lon:r.geojson&&r.geojson.coordinates?r.geojson.coordinates[0]:null, species:r.species_guess||r.taxon&&r.taxon.name||'Unknown', scientificName:r.taxon&&r.taxon.name||'', commonName:r.taxon&&r.taxon.preferred_common_name||r.species_guess||'', observer:r.user&&r.user.login||'', date:r.observed_on||'', quality:r.quality_grade||'', uri:r.uri||'', photo:r.photos&&r.photos[0]&&r.photos[0].url||'', taxon:r.taxon&&r.taxon.iconic_taxon_name||'Unknown', obscured:!!r.obscured, private_location:r.private_location||null })).filter(o=>o.lat!=null&&o.lon!=null&&!o.obscured); s.lastLoad=new Date().toISOString(); await cacheSightings('inat',s.data); renderSightingsMarkers('inat'); renderSightingsSummary(); document.getElementById('inatStatus').textContent='Loaded '+s.data.length+' observations'; updateStatus('iNaturalist loaded','ok'); }catch(e){ document.getElementById('inatStatus').textContent='Error: '+e.message; updateStatus('iNaturalist failed','err'); } }
+  async function refreshInat(){ await loadInat(); }
+
+  async function loadGbif(useView){ const s=App.sightings.gbif; document.getElementById('gbifStatus').textContent='Loading GBIF…'; updateStatus('Loading GBIF…','warn'); try{ let url='https://api.gbif.org/v1/occurrence/search?country=US&stateProvince=Indiana&hasCoordinate=true&limit=300'; if(useView&&App.map){ const b=App.map.getBounds(); url+='&decimalLongitude='+b.getWest()+','+b.getEast()+'&decimalLatitude='+b.getSouth()+','+b.getNorth(); }else{ url+='&decimalLongitude='+GIBSON_BBOX.west+','+GIBSON_BBOX.east+'&decimalLatitude='+GIBSON_BBOX.south+','+GIBSON_BBOX.north; } const filter=document.getElementById('gbifFilter').value; if(filter==='HUMAN_OBSERVATION'||filter==='OBSERVATION'){ url+='&basisOfRecord='+filter; }else if(filter!=='all'){ url+='&class='+filter; } const res=await fetch(url); if(!res.ok) throw new Error('HTTP '+res.status); const data=await res.json(); s.data=(data.results||[]).map(r=>({ lat:r.decimalLatitude, lon:r.decimalLongitude, species:r.species||r.scientificName||'Unknown', scientificName:r.scientificName||'', date:r.eventDate||'', dataset:r.datasetName||'', basis:r.basisOfRecord||'', uncertainty:r.coordinateUncertaintyInMeters||null, key:r.key||'', taxon:r.class||r.phylum||'Unknown' })).filter(o=>o.lat!=null&&o.lon!=null); s.lastLoad=new Date().toISOString(); await cacheSightings('gbif',s.data); renderSightingsMarkers('gbif'); renderSightingsSummary(); document.getElementById('gbifStatus').textContent='Loaded '+s.data.length+' occurrences'; updateStatus('GBIF loaded','ok'); }catch(e){ document.getElementById('gbifStatus').textContent='Error: '+e.message; updateStatus('GBIF failed','err'); } }
+  async function refreshGbif(){ await loadGbif(false); }
+
+  async function loadEbird(region){ const s=App.sightings.ebird; const key=document.getElementById('ebirdApiKey').value.trim(); if(!key){ alert('Enter an eBird API key first. Get one free at ebird.org/api/keygen'); return; } s.apiKey=key; await kvSet('ebirdApiKey',key); document.getElementById('ebirdStatus').textContent='Loading eBird…'; updateStatus('Loading eBird…','warn'); try{ let url; if(region){ url='https://api.ebird.org/v2/data/obs/'+encodeURIComponent(s.regionCode)+'/recent?maxResults=100&includeProvisional=true'; }else{ const c=App.map.getCenter(); url='https://api.ebird.org/v2/data/obs/geo/recent?lat='+c.lat+'&lng='+c.lng+'&dist=25&maxResults=100'; } const res=await fetch(url,{headers:{'X-eBirdApiToken':key}}); if(!res.ok) throw new Error('HTTP '+res.status); const data=await res.json(); s.data=(data||[]).map(r=>({ lat:r.lat, lon:r.lng, species:r.comName||'Unknown', scientificName:r.sciName||'', date:r.obsDt||'', count:r.howMany||'', location:r.locName||'', locId:r.locId||'', subId:r.subId||'', notable:!!r.obsValid })); s.lastLoad=new Date().toISOString(); await cacheSightings('ebird',s.data); renderSightingsMarkers('ebird'); renderSightingsSummary(); document.getElementById('ebirdStatus').textContent='Loaded '+s.data.length+' checklists'; updateStatus('eBird loaded','ok'); }catch(e){ document.getElementById('ebirdStatus').textContent='Error: '+e.message; updateStatus('eBird failed','err'); } }
+  async function refreshEbird(){ await loadEbird(true); }
+
+  async function importHerpFile(file){ if(!file)return; const ext=file.name.split('.').pop().toLowerCase(); let data=[]; try{ if(ext==='csv'){ if(!hasPapa) throw new Error('PapaParse not loaded'); const text=await file.text(); const parsed=Papa.parse(text,{header:true,dynamicTyping:true,skipEmptyLines:true}); const first=parsed.data[0]; const latField=Object.keys(first).find(k=>/lat/i.test(k)); const lonField=Object.keys(first).find(k=>/lon|lng/i.test(k)); const speciesField=Object.keys(first).find(k=>/species|taxon|name/i.test(k)); const dateField=Object.keys(first).find(k=>/date/i.test(k)); if(!latField||!lonField) throw new Error('Could not find lat/lon columns'); data=parsed.data.filter(r=>r[latField]!=null&&r[lonField]!=null).map(r=>({ lat:parseFloat(r[latField]), lon:parseFloat(r[lonField]), species:r[speciesField]||'Unknown', scientificName:r[speciesField]||'', date:r[dateField]||'', source:'herp_import', taxon:'Reptilia' })); }else if(ext==='geojson'||ext==='json'){ const text=await file.text(); const geojson=JSON.parse(text); data=(geojson.features||[]).map(f=>({ lat:f.geometry&&f.geometry.coordinates?f.geometry.coordinates[1]:null, lon:f.geometry&&f.geometry.coordinates?f.geometry.coordinates[0]:null, species:f.properties&&f.properties.species||f.properties.name||'Unknown', scientificName:f.properties&&f.properties.species||'', date:f.properties&&f.properties.date||'', source:'herp_import', taxon:'Reptilia' })).filter(o=>o.lat!=null&&o.lon!=null); }else{ throw new Error('Unsupported file type: '+ext); } }catch(e){ alert('Import failed: '+e.message); return; } App.sightings.herp.data=data; await cacheSightings('herp',data); renderSightingsMarkers('herp'); renderSightingsSummary(); document.getElementById('herpStatus').textContent='Imported '+data.length+' herp records'; }
+  async function clearHerp(){ App.sightings.herp.data=[]; await clearSightingsCache('herp'); renderSightingsMarkers('herp'); renderSightingsSummary(); document.getElementById('herpStatus').textContent='Cleared'; }
+
+  function renderSightingsMarkers(key){ const s=App.sightings[key]; if(!s.markers)return; s.markers.clearLayers(); s.data.forEach(o=>{ if(o.lat==null||o.lon==null)return; const color=taxonColor(o.taxon); const icon=L.divIcon({className:'',html:`<div style="background:${color};width:10px;height:10px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>`,iconSize:[10,10],iconAnchor:[5,5]}); const m=L.marker([o.lat,o.lon],{icon}).addTo(s.markers); let popup='<div style="min-width:180px;font-size:0.85rem">'; if(o.species) popup+='<div style="font-weight:700">'+escapeHtml(o.species)+'</div>'; if(o.scientificName&&o.scientificName!==o.species) popup+='<div style="font-style:italic;color:#6b7280">'+escapeHtml(o.scientificName)+'</div>'; if(o.date) popup+='<div>'+escapeHtml(o.date)+'</div>'; if(o.observer) popup+='<div>Observer: '+escapeHtml(o.observer)+'</div>'; if(o.location) popup+='<div>Location: '+escapeHtml(o.location)+'</div>'; if(o.quality) popup+='<div>Quality: '+escapeHtml(o.quality)+'</div>'; if(o.basis) popup+='<div>Basis: '+escapeHtml(o.basis)+'</div>'; if(o.uncertainty) popup+='<div>Uncertainty: '+escapeHtml(String(o.uncertainty))+'m</div>'; if(o.uri) popup+='<a href="'+escapeHtml(o.uri)+'" target="_blank">View on iNaturalist</a>'; if(o.key) popup+='<a href="https://www.gbif.org/occurrence/'+escapeHtml(o.key)+'" target="_blank">View on GBIF</a>'; if(o.subId) popup+='<a href="https://ebird.org/checklist/'+escapeHtml(o.subId)+'" target="_blank">View on eBird</a>'; if(o.photo) popup+='<img src="'+escapeHtml(o.photo.replace('square','medium'))+'" style="max-width:120px;margin-top:0.25rem;border-radius:4px">'; popup+='</div>'; m.bindPopup(popup); }); syncSightingsVisibility(); }
+
+  function renderSightingsSummary(){ const counts={inat:App.sightings.inat.data.length,gbif:App.sightings.gbif.data.length,ebird:App.sightings.ebird.data.length,herp:App.sightings.herp.data.length}; const total=counts.inat+counts.gbif+counts.ebird+counts.herp; document.getElementById('sightingSummary').textContent='iNat: '+counts.inat+' | GBIF: '+counts.gbif+' | eBird: '+counts.ebird+' | Herp: '+counts.herp+' | Total: '+total; updateSightingsChart(); }
+
+  function updateSightingsChart(){ if(!hasChart)return; const ctx=document.getElementById('sightingsChart'); if(!ctx)return; const months={}; ['inat','gbif','ebird','herp'].forEach(key=>{ App.sightings[key].data.forEach(o=>{ if(!o.date)return; const d=new Date(o.date); if(isNaN(d))return; const m=d.getMonth(); months[m]=(months[m]||0)+1; }); }); const labels=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; const data=labels.map((_,i)=>months[i]||0); if(App.chart){ App.chart.data.datasets[0].data=data; App.chart.update(); }else{ App.chart=new Chart(ctx,{type:'bar',data:{labels:labels,datasets:[{label:'Observations by month',data:data,backgroundColor:'#0f172a'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{font:{size:10}},grid:{display:false}},x:{ticks:{font:{size:10}},grid:{display:false}}}}}); } }
+
+  function exportSightingsGeoJSON(){ const features=[]; ['inat','gbif','ebird','herp'].forEach(key=>{ App.sightings[key].data.forEach(o=>{ if(o.lat==null||o.lon==null)return; features.push({type:'Feature',geometry:{type:'Point',coordinates:[o.lon,o.lat]},properties:{species:o.species,scientificName:o.scientificName,date:o.date,source:key}}); }); }); downloadJSON({type:'FeatureCollection',features},'sightings.geojson'); }
+  function exportSightingsCSV(){ let rows=[]; ['inat','gbif','ebird','herp'].forEach(key=>{ App.sightings[key].data.forEach(o=>{ rows.push({source:key,lat:o.lat,lon:o.lon,species:o.species,scientificName:o.scientificName,date:o.date}); }); }); if(!hasPapa){ alert('PapaParse not loaded'); return; } const csv=Papa.unparse(rows); downloadText(csv,'sightings.csv','text/csv'); }
+  async function clearAllSightingsCache(){ if(!confirm('Clear all cached wildlife sightings?'))return; await clearSightingsCache(); ['inat','gbif','ebird','herp'].forEach(key=>{ App.sightings[key].data=[]; renderSightingsMarkers(key); }); renderSightingsSummary(); document.getElementById('inatStatus').textContent=''; document.getElementById('gbifStatus').textContent=''; document.getElementById('ebirdStatus').textContent=''; document.getElementById('herpStatus').textContent=''; }
+
+  // ===================== BINDINGS =====================
+  function bindUI(){ document.getElementById('menuBtn').onclick=toggleSidebar; document.getElementById('closeSidebarBtn').onclick=toggleSidebar; document.getElementById('fabMenu').onclick=toggleSidebar; document.getElementById('fabSightings').onclick=()=>{ const el=document.querySelector('.sidebar-content .card:nth-child(2)'); if(el) el.scrollIntoView({behavior:'smooth'}); toggleSidebar(); }; document.getElementById('btnBaseOsm').onclick=()=>setBasemap('osm'); document.getElementById('btnBaseTopo').onclick=()=>setBasemap('topo'); document.getElementById('btnBaseGray').onclick=()=>setBasemap('gray'); document.getElementById('btnLoadAll').onclick=()=>loadAllEnabledSources(); document.getElementById('btnScoreMode').onclick=()=>toggleMode('score'); document.getElementById('fabScore').onclick=()=>toggleMode('score'); document.getElementById('btnRouteMode').onclick=()=>toggleMode('route'); document.getElementById('fabRoute').onclick=()=>toggleMode('route'); document.getElementById('btnMeasureMode').onclick=()=>toggleMode('measure'); document.getElementById('fabMeasure').onclick=()=>toggleMode('measure'); document.getElementById('btnAddObs').onclick=()=>{ document.getElementById('obsForm').style.display='block'; const c=App.map.getCenter(); document.getElementById('obsLat').value=c.lat.toFixed(5); document.getElementById('obsLon').value=c.lng.toFixed(5); document.getElementById('obsId').value=''; }; document.getElementById('fabObs').onclick=()=>{ const form=document.getElementById('obsForm'); if(form.style.display==='none'){ form.style.display='block'; const c=App.map.getCenter(); document.getElementById('obsLat').value=c.lat.toFixed(5); document.getElementById('obsLon').value=c.lng.toFixed(5); document.getElementById('obsId').value=''; }else{ form.style.display='none'; } }; document.getElementById('btnCancelObs').onclick=()=>{ document.getElementById('obsForm').style.display='none'; }; document.getElementById('btnSaveObs').onclick=saveObservation; document.getElementById('obsFilter').onchange=()=>{ renderObservations(); }; document.getElementById('btnRouteUndo').onclick=()=>{ App.currentRoute.pop(); renderCurrentRoute(); }; document.getElementById('btnRouteClear').onclick=()=>{ App.currentRoute=[]; renderCurrentRoute(); }; document.getElementById('btnSaveRoute').onclick=saveCurrentRoute; document.getElementById('btnExportRouteJSON').onclick=exportCurrentRouteJSON; document.getElementById('btnExportRouteGPX').onclick=exportCurrentRouteGPX; document.getElementById('btnGoogleMaps').onclick=openGoogleMaps; document.getElementById('btnMeasureClear').onclick=()=>{ App.measurePoints=[]; renderMeasurement(); }; document.getElementById('btnResetSources').onclick=()=>{ if(confirm('Reset all source definitions to defaults?')){ App.sources=JSON.parse(JSON.stringify(DEFAULT_SOURCES)); App.layers={}; initSourcesFromList(); saveSettings(); renderAdminPanel(); renderLayerList(); renderGISStatus(); } }; document.getElementById('btnLoadAllAdmin').onclick=()=>loadAllEnabledSources(); document.getElementById('btnExportAll').onclick=exportAll; document.getElementById('btnImportAll').onchange=(e)=>{ if(e.target.files[0]) importAll(e.target.files[0]); }; document.getElementById('fabLocate').onclick=()=>{ if(navigator.geolocation){ navigator.geolocation.getCurrentPosition(pos=>{ App.map.setView([pos.coords.latitude,pos.coords.longitude],14); },()=>{ alert('Unable to retrieve location'); }); }else{ alert('Geolocation not supported'); } }; document.getElementById('btnLoadPublic').onclick=loadPublicServices; document.getElementById('btnTryCountyZIPs').onclick=tryCountyZIPs; document.getElementById('btnQueryWetlandsView').onclick=()=>queryLayerInView('nwi_wetlands_query'); document.getElementById('btnQueryStreamsView').onclick=()=>queryLayerInView('in_streams'); document.getElementById('btnImportLocal').onchange=(e)=>{ if(e.target.files[0]) importLocalFile(e.target.files[0]); }; document.getElementById('btnClearCache').onclick=clearAllCachedGIS;
+    // Sightings bindings
+    document.getElementById('inatToggle').onchange=function(){ App.sightings.inat.visible=this.checked; syncSightingsVisibility(); };
+    document.getElementById('gbifToggle').onchange=function(){ App.sightings.gbif.visible=this.checked; syncSightingsVisibility(); };
+    document.getElementById('ebirdToggle').onchange=function(){ App.sightings.ebird.visible=this.checked; syncSightingsVisibility(); };
+    document.getElementById('herpToggle').onchange=function(){ App.sightings.herp.visible=this.checked; syncSightingsVisibility(); };
+    document.getElementById('btnResolveInatPlace').onclick=resolveInatPlace;
+    document.getElementById('btnLoadInat').onclick=loadInat;
+    document.getElementById('btnRefreshInat').onclick=refreshInat;
+    document.getElementById('inatFilter').onchange=()=>{ App.sightings.inat.filter=document.getElementById('inatFilter').value; };
+    document.getElementById('btnLoadGbif').onclick=()=>loadGbif(false);
+    document.getElementById('btnLoadGbifView').onclick=()=>loadGbif(true);
+    document.getElementById('btnRefreshGbif').onclick=refreshGbif;
+    document.getElementById('gbifFilter').onchange=()=>{ App.sightings.gbif.filter=document.getElementById('gbifFilter').value; };
+    document.getElementById('btnLoadEbird').onclick=()=>loadEbird(true);
+    document.getElementById('btnLoadEbirdNearby').onclick=()=>loadEbird(false);
+    document.getElementById('btnRefreshEbird').onclick=refreshEbird;
+    document.getElementById('btnImportHerp').onchange=(e)=>{ if(e.target.files[0]) importHerpFile(e.target.files[0]); };
+    document.getElementById('btnClearHerp').onclick=clearHerp;
+    document.getElementById('btnExportSightingsGeoJSON').onclick=exportSightingsGeoJSON;
+    document.getElementById('btnExportSightingsCSV').onclick=exportSightingsCSV;
+    document.getElementById('btnClearAllSightingsCache').onclick=clearAllSightingsCache;
+  }
+
+  async function loadSettings(){ const saved=await kvGet('sources_v2',null); if(saved){ App.sources=saved; }else{ App.sources=JSON.parse(JSON.stringify(DEFAULT_SOURCES)); } App.observations=await dbGet('observations',[]); App.savedRoutes=await dbGet('routes',[]); const bm=await kvGet('basemap',null); if(bm) App.basemapName=bm; const ek=await kvGet('ebirdApiKey',null); if(ek){ App.sightings.ebird.apiKey=ek; document.getElementById('ebirdApiKey').value=ek; } const inatCache=await getCachedSightings('inat'); if(inatCache) App.sightings.inat.data=inatCache; const gbifCache=await getCachedSightings('gbif'); if(gbifCache) App.sightings.gbif.data=gbifCache; const ebirdCache=await getCachedSightings('ebird'); if(ebirdCache) App.sightings.ebird.data=ebirdCache; const herpCache=await getCachedSightings('herp'); if(herpCache) App.sightings.herp.data=herpCache; }
+  async function saveSettings(){ await kvSet('sources_v2',App.sources); await kvSet('basemap',App.basemapName||'osm'); }
+
+  async function init(){ await initDB(); await loadSettings(); initMap(); initSightingsLayers(); if(App.basemapName) setBasemap(App.basemapName); initSourcesFromList(); bindUI(); await restoreMapView(); renderLayerList(); renderAdminPanel(); renderGISStatus(); renderObservations(); refreshObservationMarkers(); renderSavedRoutes(); ['inat','gbif','ebird','herp'].forEach(key=>renderSightingsMarkers(key)); renderSightingsSummary(); await loadAllEnabledSources(); updateStatus('Ready','ok'); }
+
+  App.updateSource=updateSource;
+  App.testSource=testSource;
+  App.panToObs=panToObs;
+  App.deleteObs=deleteObs;
+  App.loadRoute=loadRoute;
+  App.deleteRoute=deleteRoute;
+
+  init();
+})();
+</script>
+</body>
+</html>
