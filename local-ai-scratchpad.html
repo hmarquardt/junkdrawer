@@ -1,0 +1,2298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local AI Scratchpad</title>
+<link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="shortcut icon" href="favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="Junk Drawer" />
+<link rel="manifest" href="site.webmanifest" />
+<style>
+/* ============================================================
+   Local AI Scratchpad — Single-file, zero-dependency
+   Aesthetic: Neon index-card desk / late-night lab notebook
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg-desk: #141414;
+  --bg-card: #f5f0e1;
+  --bg-card-alt: #ece6d4;
+  --bg-dark-card: #1c1c1c;
+  --text-main: #1a1a1a;
+  --text-muted: #555;
+  --text-light: #e0e0e0;
+  --text-dim: #999;
+  --neon-cyan: #00f0ff;
+  --neon-magenta: #ff00aa;
+  --neon-lime: #b8ff00;
+  --neon-amber: #ffbf00;
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --shadow-card: 0 2px 6px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.12);
+  --shadow-lift: 0 4px 14px rgba(0,0,0,0.22), 0 12px 32px rgba(0,0,0,0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg-desk);
+  color: var(--text-light);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+/* Grain overlay */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+/* Layout ---------------------------------------------------- */
+.app-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  grid-template-rows: auto auto 1fr;
+  gap: 1.5rem;
+}
+
+.header-card { grid-column: 1 / -1; }
+.status-rail { grid-column: 1 / -1; }
+.main-column { grid-column: 1; min-width: 0; }
+.side-column { grid-column: 2; min-width: 0; }
+
+@media (max-width: 960px) {
+  .app-container {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+  }
+  .main-column, .side-column { grid-column: 1; }
+}
+
+/* Cards ------------------------------------------------------ */
+.card {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border-radius: 6px;
+  padding: 1.25rem;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card:hover { box-shadow: var(--shadow-lift); }
+
+/* Neon edge accents */
+.card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.25), transparent);
+  opacity: 0.7;
+}
+.card-neon-cyan::before { background: linear-gradient(to bottom, var(--neon-cyan), transparent); }
+.card-neon-lime::before { background: linear-gradient(to bottom, var(--neon-lime), transparent); }
+.card-neon-amber::before { background: linear-gradient(to bottom, var(--neon-amber), transparent); }
+.card-neon-magenta::before { background: linear-gradient(to bottom, var(--neon-magenta), transparent); }
+.card-neon-red::before { background: linear-gradient(to bottom, #ff2a2a, transparent); }
+
+/* Slightly imperfect layered feel on desktop */
+@media (min-width: 961px) {
+  .side-column .card:nth-child(1) { transform: rotate(0.15deg); }
+  .side-column .card:nth-child(2) { transform: rotate(-0.2deg); margin-left: -1px; }
+  .side-column .card:nth-child(3) { transform: rotate(0.1deg); margin-left: 1px; }
+}
+
+/* Dark cards (header, tab bar) */
+.header-card, .tab-bar {
+  background: var(--bg-dark-card);
+  color: var(--text-light);
+  border: 1px solid #2a2a2a;
+}
+.header-card::before, .tab-bar::before { display: none; }
+
+/* Header ----------------------------------------------------- */
+.header-card h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+.header-card p {
+  margin: 0.25rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+/* Privacy badge */
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: #aaa;
+  background: rgba(0,0,0,0.25);
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #333;
+}
+
+/* LEDs ------------------------------------------------------- */
+.led {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  background: #444;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
+  flex-shrink: 0;
+}
+.led-green {
+  background: #00ff41;
+  box-shadow: 0 0 6px #00ff41, inset 0 -1px 2px rgba(0,0,0,0.3);
+}
+.led-amber {
+  background: var(--neon-amber);
+  box-shadow: 0 0 6px var(--neon-amber), inset 0 -1px 2px rgba(0,0,0,0.3);
+}
+.led-red {
+  background: #ff2a2a;
+  box-shadow: 0 0 6px #ff2a2a, inset 0 -1px 2px rgba(0,0,0,0.3);
+}
+.led-cyan {
+  background: var(--neon-cyan);
+  box-shadow: 0 0 6px var(--neon-cyan), inset 0 -1px 2px rgba(0,0,0,0.3);
+}
+.led-gray {
+  background: #777;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.4);
+}
+
+/* Pulse animation for running state */
+@keyframes pulse-dot {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.pulse-active {
+  animation: pulse-dot 1.2s infinite ease-in-out;
+}
+
+/* Status rail ------------------------------------------------ */
+.status-rail {
+  background: var(--bg-dark-card);
+  border: 1px solid #2a2a2a;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.2rem;
+  align-items: center;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.rail-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #bbb;
+}
+.rail-item strong { color: #ddd; }
+
+/* Tabs ------------------------------------------------------- */
+.tab-nav {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.tab-btn {
+  background: transparent;
+  border: 1px solid #444;
+  color: #ccc;
+  padding: 0.45rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { background: rgba(255,255,255,0.05); }
+.tab-btn.active {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border-color: var(--bg-card);
+  font-weight: 600;
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* Inputs ----------------------------------------------------- */
+textarea, input[type="text"], input[type="number"], input[type="password"], select {
+  width: 100%;
+  background: #e8e4d5;
+  border: 1px solid #c9c3b0;
+  border-radius: 4px;
+  padding: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--text-main);
+  outline: none;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  resize: vertical;
+}
+textarea:focus, input:focus, select:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.15);
+}
+label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  margin-top: 0.6rem;
+}
+select {
+  resize: none;
+  cursor: pointer;
+}
+
+/* Buttons ---------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 500;
+  background: #222;
+  color: #f5f0e1;
+  border-color: #444;
+  transition: transform 0.08s, background 0.15s, box-shadow 0.15s;
+}
+.btn:hover { background: #2e2e2e; border-color: #555; }
+.btn:active { transform: translateY(1px); }
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-primary { background: #1a1a1a; border-color: #444; }
+.btn-accent {
+  background: var(--neon-cyan);
+  color: #000;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0,240,255,0.15);
+}
+.btn-accent:hover { filter: brightness(1.08); }
+.btn-danger {
+  background: rgba(255,42,42,0.08);
+  color: #ff5f5f;
+  border-color: rgba(255,42,42,0.35);
+}
+.btn-danger:hover { background: rgba(255,42,42,0.14); }
+.btn-sm { padding: 0.35rem 0.55rem; font-size: 0.8rem; }
+.history-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.history-actions .btn {
+  min-height: 2.35rem;
+  justify-content: center;
+  line-height: 1.2;
+}
+.file-btn {
+  margin: 0;
+  appearance: none;
+}
+
+/* Output area ------------------------------------------------ */
+.output-area {
+  background: #e8e4d5;
+  border: 1px solid #c9c3b0;
+  border-radius: 4px;
+  padding: 1rem;
+  min-height: 120px;
+  max-height: 60vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: #111;
+}
+
+/* Comparison grid */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 960px) {
+  .compare-grid { grid-template-columns: 1fr; }
+}
+
+/* Template cards --------------------------------------------- */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 0.7rem;
+}
+.template-card {
+  background: #f9f6ec;
+  padding: 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #d9d3c0;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  position: relative;
+}
+.template-card:hover {
+  border-color: var(--neon-amber);
+  box-shadow: 0 0 0 1px rgba(255,191,0,0.25), 0 2px 8px rgba(0,0,0,0.08);
+  transform: translateY(-1px) rotate(0.3deg);
+}
+.template-card strong {
+  display: block;
+  font-size: 0.88rem;
+  margin-bottom: 0.2rem;
+  color: #1a1a1a;
+}
+.template-card span {
+  color: #666;
+}
+
+/* History ---------------------------------------------------- */
+.history-list {
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid #d9d3c0;
+  border-radius: 4px;
+  background: #f9f6ec;
+}
+.history-item {
+  padding: 0.6rem 0.7rem;
+  border-bottom: 1px solid #d9d3c0;
+  cursor: default;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  transition: background 0.1s;
+}
+.history-item:last-child { border-bottom: none; }
+.history-item:hover { background: #ece6d4; }
+.history-meta {
+  font-size: 0.75rem;
+  color: #777;
+  font-family: var(--font-mono);
+}
+.tag-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  background: #ddd8c8;
+  color: #444;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  margin-right: 0.2rem;
+}
+.mode-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  background: #222;
+  color: #f5f0e1;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  margin-right: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Toast ------------------------------------------------------ */
+.toast-container {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+.toast {
+  background: var(--bg-dark-card);
+  color: var(--text-light);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--neon-cyan);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  font-size: 0.9rem;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: toastIn 0.25s forwards ease;
+}
+@keyframes toastIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Scrollbars ------------------------------------------------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #999; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #777; }
+
+/* Code / pre styling inside cards */
+code {
+  font-family: var(--font-mono);
+  background: rgba(0,0,0,0.06);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+a { color: #005fcc; }
+a:hover { color: #003d99; }
+
+/* Focus accessibility */
+button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
+
+/* Toggle switch ---------------------------------------------- */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: #333;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle-switch.active {
+  background: var(--neon-cyan);
+}
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.toggle-switch.active .toggle-knob {
+  transform: translateX(20px);
+}
+.toggle-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.toggle-helper {
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 0.2rem;
+  width: 100%;
+}
+
+/* Admin / warning cards -------------------------------------- */
+.admin-warning {
+  background: #fff8e1;
+  border-left: 3px solid var(--neon-amber);
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #553d00;
+  margin-bottom: 1rem;
+}
+.admin-steps {
+  counter-reset: step;
+  list-style: none;
+  padding-left: 0;
+}
+.admin-step {
+  position: relative;
+  padding-left: 2rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  color: #333;
+}
+.admin-step::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1.4rem;
+  height: 1.4rem;
+  background: var(--neon-cyan);
+  color: #000;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.admin-card {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid #d9d3c0;
+  padding: 1.25rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  position: relative;
+  box-shadow: var(--shadow-card);
+}
+.admin-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(to bottom, var(--neon-magenta), transparent);
+  opacity: 0.7;
+}
+.admin-card h3 {
+  color: #111;
+}
+.admin-card label {
+  color: #222;
+}
+.admin-card label span,
+.admin-card .small-note {
+  color: #4a4a4a;
+}
+.admin-card input[type="checkbox"] {
+  accent-color: var(--neon-cyan);
+}
+.admin-card a {
+  color: #004fba;
+}
+
+/* Collapsible details */
+details {
+  background: rgba(0,0,0,0.04);
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+}
+summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #444;
+}
+details pre {
+  font-size: 0.78rem;
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #666;
+}
+
+/* Small helper text */
+.small-note {
+  font-size: 0.8rem;
+  color: #4a4a4a;
+  line-height: 1.5;
+}
+</style>
+</head>
+<body>
+<div class="noise-overlay"></div>
+
+<div class="app-container">
+  <!-- Header -->
+  <header class="card header-card">
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+      <div>
+        <h1>Local AI Scratchpad</h1>
+        <p>Private prompting experiments with Chrome’s on-device model.</p>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <div class="privacy-badge" aria-label="Privacy: no server calls">
+          <span class="led led-green" style="width:8px;height:8px;" aria-hidden="true"></span>
+          No server calls. No API key. Local browser API only.
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <span class="led" id="statusLed" aria-hidden="true"></span>
+          <span id="availText" style="font-family:var(--font-mono);font-size:0.9rem;min-width:8ch;">Not checked</span>
+        </div>
+        <button class="btn" id="checkBtn">Check Model</button>
+        <button class="btn btn-primary" id="createBtn" disabled>Create Session</button>
+        <button class="btn btn-danger" id="resetBtn" disabled>Reset Session</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Status Rail -->
+  <section class="status-rail" id="statusRail" aria-label="System status">
+    <div class="rail-item"><strong>Secure context:</strong> <span id="railSecure">—</span></div>
+    <div class="rail-item"><strong>Online:</strong> <span id="railOnline">—</span></div>
+    <div class="rail-item"><strong>LanguageModel:</strong> <span id="railDetected">—</span></div>
+    <div class="rail-item"><strong>Availability:</strong> <span id="railAvail">—</span></div>
+    <div class="rail-item"><strong>Session:</strong> <span id="railSession">—</span></div>
+    <div class="rail-item"><strong>Last error:</strong> <span id="railError" style="color:#ff5f5f;">None</span></div>
+    <div class="rail-item"><strong>Storage:</strong> <span id="railStorage">—</span></div>
+    <div class="rail-item" style="margin-left:auto;max-width:380px;font-size:0.8rem;color:#aaa;line-height:1.45;">
+      Some Chrome AI APIs may report unavailable, downloading, downloadable, or available depending on Chrome version, flags, origin trial status, hardware, and whether the local model has finished downloading.
+    </div>
+  </section>
+
+  <!-- Main Column -->
+  <div class="main-column">
+    <!-- Tab bar -->
+    <div class="card tab-bar" style="padding:0.6rem 1rem;margin-bottom:1rem;">
+      <div class="tab-nav" role="tablist" aria-label="Main tabs">
+        <button class="tab-btn active" role="tab" aria-selected="true" data-tab="prompt" id="tab-btn-prompt">Prompt</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="experiments" id="tab-btn-experiments">Experiments</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="diagnostics" id="tab-btn-diagnostics">Diagnostics</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="admin" id="tab-btn-admin">Admin</button>
+      </div>
+    </div>
+
+    <!-- Prompt Panel -->
+    <div id="panel-prompt" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-prompt">
+      <!-- Unavailable explanation card -->
+      <div id="unavailableCard" class="card card-neon-red" style="display:none;">
+        <h3 style="margin-top:0;">⚠ Local AI unavailable</h3>
+        <p>This Chrome build does not expose <code>window.LanguageModel</code> to this page.</p>
+        <ul style="line-height:1.7;padding-left:1.3rem;">
+          <li>Use the current stable Chrome, Chrome Beta, or <strong>Chrome Canary</strong> if needed.</li>
+          <li>Check whether the Prompt API requires flags or an origin trial for your Chrome version.</li>
+          <li>Run from <strong>HTTPS</strong> or <strong>localhost</strong>; many APIs require a secure context.</li>
+          <li>Visit the official docs:
+            <a href="https://developer.chrome.com/docs/ai/get-started" target="_blank" rel="noopener">Get Started</a>,
+            <a href="https://developer.chrome.com/docs/ai/prompt-api" target="_blank" rel="noopener">Prompt API</a>,
+            <a href="https://developer.chrome.com/docs/ai/summarizer-api" target="_blank" rel="noopener">Summarizer API</a>,
+            <a href="https://developer.chrome.com/docs/ai/translator-api" target="_blank" rel="noopener">Translator API</a>,
+            <a href="https://developer.chrome.com/docs/ai/language-detection" target="_blank" rel="noopener">Language Detection</a>.
+          </li>
+        </ul>
+        <p style="font-size:0.85rem;color:#555;margin-bottom:0;">
+          You can still use this page as a local prompt notebook. Your notes are stored entirely in the browser.
+        </p>
+      </div>
+
+      <!-- Downloading card -->
+      <div id="downloadingCard" class="card card-neon-amber" style="display:none;">
+        <h3 style="margin-top:0;">⏳ Model downloading</h3>
+        <p>The model may still be downloading in the background. Prompting is disabled until the download completes.</p>
+        <button class="btn" id="recheckBtn">Recheck Availability</button>
+      </div>
+
+      <!-- Scratchpad -->
+      <div class="card card-neon-cyan scratch-card" style="margin-top:1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+          <h2 style="margin:0;font-size:1.1rem;">Scratchpad</h2>
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <span id="runPulse" class="led led-cyan pulse-active" style="display:none;" aria-hidden="true"></span>
+            <span id="statusMessage" style="font-family:var(--font-mono);font-size:0.8rem;color:#666;">Ready</span>
+          </div>
+        </div>
+
+        <label for="promptInput">Prompt</label>
+        <textarea id="promptInput" rows="6" placeholder="Type your prompt here…" aria-label="Prompt"></textarea>
+        <div style="text-align:right;font-size:0.75rem;color:#888;font-family:var(--font-mono);margin-top:0.2rem;" id="promptCounter">0 chars / ~0 tokens</div>
+
+        <div style="display:flex;gap:1rem;margin-top:0.5rem;flex-wrap:wrap;">
+          <div style="flex:1;min-width:120px;">
+            <label for="tempInput">Temperature <span style="color:#888;font-weight:400;">(experimental)</span></label>
+            <input type="number" id="tempInput" placeholder="e.g. 0.7" step="0.1" min="0" max="1" aria-label="Temperature">
+          </div>
+          <div style="flex:1;min-width:120px;">
+            <label for="topKInput">TopK <span style="color:#888;font-weight:400;">(experimental)</span></label>
+            <input type="number" id="topKInput" placeholder="e.g. 3" step="1" min="1" aria-label="Top K">
+          </div>
+          <div style="flex:2;min-width:200px;">
+            <label for="noteTitle">Note Title</label>
+            <input type="text" id="noteTitle" placeholder="Optional title for history…" aria-label="Note title">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-accent" id="runBtn" disabled>Run Prompt</button>
+          <button class="btn btn-danger" id="stopBtn" disabled>Stop</button>
+          <button class="btn" id="copyBtn">Copy Response</button>
+          <button class="btn" id="copyMdBtn">Copy as Markdown</button>
+          <button class="btn btn-primary" id="saveNoteBtn">Save Note</button>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:0.6rem;">
+            <div class="toggle-switch" id="compareToggle" role="switch" aria-checked="false" tabindex="0" title="Ask Big Brother too">
+              <div class="toggle-knob"></div>
+            </div>
+            <div>
+              <div class="toggle-label">Ask Big Brother too</div>
+              <div class="toggle-helper">If the local model gets confused, send the same prompt to Gemini and compare.</div>
+            </div>
+          </div>
+        </div>
+        <div id="comparePrivacyCopy" class="toggle-helper" style="margin-top:0.4rem;color:#888;display:none;">
+          When Big Brother Mode is on, your prompt is sent to Google Gemini. Local-only mode does not send your prompt to Gemini.
+        </div>
+      </div>
+
+      <!-- Original Response Card (hidden when compare is on) -->
+      <div id="originalResponseCard" class="card card-neon-lime response-card" style="margin-top:1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+          <h2 style="margin:0;font-size:1.1rem;">Response</h2>
+          <div style="font-family:var(--font-mono);font-size:0.8rem;color:#666;">
+            <span id="elapsedTime">0.0s</span> • <span id="responseLength">0 chars</span>
+          </div>
+        </div>
+        <div id="outputArea" class="output-area" aria-live="polite">Output will appear here…</div>
+        <div id="errorArea" style="color:#a00;margin-top:0.5rem;font-family:var(--font-mono);font-size:0.85rem;min-height:1.2em;" aria-live="assertive"></div>
+      </div>
+
+      <!-- Comparison Grid (shown when compare is on) -->
+      <div id="comparisonContainer" class="compare-grid" style="margin-top:1rem;display:none;">
+        <div class="card card-neon-lime">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+            <h2 style="margin:0;font-size:1.1rem;">Local Model</h2>
+            <div style="display:flex;align-items:center;gap:0.4rem;">
+              <span id="localRunPulse" class="led led-cyan pulse-active" style="display:none;" aria-hidden="true"></span>
+              <span id="localElapsedTime" style="font-family:var(--font-mono);font-size:0.8rem;color:#666;">0.0s</span>
+            </div>
+          </div>
+          <div id="localOutputArea" class="output-area" aria-live="polite"></div>
+          <div id="localErrorArea" style="color:#a00;margin-top:0.5rem;font-family:var(--font-mono);font-size:0.85rem;min-height:1.2em;" aria-live="assertive"></div>
+          <div style="margin-top:0.5rem;">
+            <button class="btn btn-sm" id="localCopyBtn">Copy Local Response</button>
+          </div>
+        </div>
+        <div class="card card-neon-magenta">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;flex-wrap:wrap;gap:0.5rem;">
+            <h2 style="margin:0;font-size:1.1rem;">Big Brother Gemini</h2>
+            <div style="display:flex;align-items:center;gap:0.4rem;">
+              <span id="geminiRunPulse" class="led led-cyan pulse-active" style="display:none;" aria-hidden="true"></span>
+              <span id="geminiElapsedTime" style="font-family:var(--font-mono);font-size:0.8rem;color:#666;">0.0s</span>
+            </div>
+          </div>
+          <div id="geminiOutputArea" class="output-area" aria-live="polite"></div>
+          <div id="geminiErrorArea" style="color:#a00;margin-top:0.5rem;font-family:var(--font-mono);font-size:0.85rem;min-height:1.2em;" aria-live="assertive"></div>
+          <div style="margin-top:0.5rem;">
+            <button class="btn btn-sm" id="geminiCopyBtn">Copy Gemini Response</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Experiments Panel -->
+    <div id="panel-experiments" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-experiments">
+      <div class="card">
+        <h3 style="margin-top:0;">Experiments</h3>
+        <p style="font-size:0.9rem;color:#555;">
+          Quick tools that pre-fill the scratchpad prompt. After loading, switch to the <strong>Prompt</strong> tab and click <strong>Run Prompt</strong>.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:1rem;">
+          <button class="btn" id="expSummarize">📋 Summarize clipboard text</button>
+          <button class="btn" id="expClassify">🏷️ Classify pasted note</button>
+          <button class="btn" id="expRewrite">✏️ Rewrite selected response text</button>
+          <button class="btn" id="expJson">🧾 Generate JSON from messy text</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostics Panel -->
+    <div id="panel-diagnostics" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-diagnostics">
+      <div class="card">
+        <h3 style="margin-top:0;">Diagnostics</h3>
+        <pre id="diagnosticsPre" style="background:#e8e4d5;padding:1rem;border-radius:4px;overflow-x:auto;font-size:0.85rem;min-height:160px;">Run a check to populate diagnostics.</pre>
+      </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div id="panel-admin" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-admin">
+      <div class="admin-card">
+        <h3 style="margin-top:0;">Local Model Defaults</h3>
+        <label for="systemInput">System Instructions</label>
+        <textarea id="systemInput" rows="4" placeholder="Optional system instructions for local Chrome AI sessions…" aria-label="Local system instructions"></textarea>
+        <div style="text-align:right;font-size:0.75rem;color:#666;font-family:var(--font-mono);margin-top:0.2rem;" id="systemCounter">0 chars / ~0 tokens</div>
+        <p class="small-note" style="margin:0.5rem 0 0;">
+          Saved locally and applied only to local Chrome AI sessions. Changing this resets the local session so the next run uses the new instructions.
+        </p>
+      </div>
+
+      <div class="admin-card">
+        <h3 style="margin-top:0;">🔑 Big Brother Settings</h3>
+        <div class="admin-warning">
+          <strong>This is not Fort Knox.</strong> The Gemini API key is stored in <strong>localStorage</strong>. That is acceptable for personal/local prototypes, but not production. Anyone with access to this browser/profile or page JavaScript can read it.
+        </div>
+
+        <label for="geminiApiKey">Key goes in the locked drawer-ish</label>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <input type="password" id="geminiApiKey" placeholder="Paste Gemini API key…" style="flex:1;min-width:0;" aria-label="Gemini API key">
+          <button class="btn" id="showKeyBtn" type="button">Show</button>
+          <button class="btn btn-primary" id="saveKeyBtn" type="button">Save Key</button>
+          <button class="btn btn-danger" id="clearKeyBtn" type="button">Clear Key</button>
+        </div>
+        <div class="small-note" style="margin-top:0.3rem;">
+          Key preview: <span id="keyPreview">none</span>
+          <label style="display:inline;margin-left:1rem;font-weight:400;">
+            <input type="checkbox" id="showKeyPreview"> Show key preview
+          </label>
+        </div>
+
+        <hr style="border:0;border-top:1px solid #d9d3c0;margin:1rem 0;">
+
+        <h3 style="margin-top:0;">📡 Which Big Brother Do We Call?</h3>
+        <div class="admin-warning" style="margin-bottom:0.75rem;">
+          When Big Brother Mode is on, your prompt is sent to Google Gemini. Local-only mode does not send your prompt to Gemini.
+        </div>
+
+        <label for="geminiModelSelect">Model</label>
+        <select id="geminiModelSelect" aria-label="Gemini model">
+          <option value="">Fetch models first…</option>
+        </select>
+        <div class="small-note" style="margin-top:0.3rem;" id="modelSelectMeta"></div>
+
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+          <button class="btn" id="fetchModelsBtn">Fetch the family tree</button>
+          <button class="btn" id="refreshModelsBtn" disabled>Refresh Models</button>
+          <button class="btn btn-danger" id="clearModelsBtn">Clear Cached Model List</button>
+        </div>
+
+        <div style="margin-top:0.75rem;">
+          <label style="display:flex;align-items:center;gap:0.4rem;font-weight:400;cursor:pointer;">
+            <input type="checkbox" id="showAllModels"> Advanced: show all generateContent models
+          </label>
+        </div>
+
+        <div style="margin-top:0.75rem;">
+          <label style="display:flex;align-items:center;gap:0.4rem;font-weight:400;cursor:pointer;">
+            <input type="checkbox" id="useCustomModel"> Use custom model ID
+          </label>
+          <input type="text" id="customModelInput" placeholder="Example: gemini-2.5-flash or models/gemini-2.5-flash" style="margin-top:0.3rem;" aria-label="Custom model ID">
+        </div>
+
+        <div style="margin-top:0.75rem;">
+          <label style="display:flex;align-items:center;gap:0.4rem;font-weight:400;cursor:pointer;">
+            <input type="checkbox" id="askGeminiDefault"> Ask Big Brother too by default
+          </label>
+        </div>
+
+        <div style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap;">
+          <button class="btn btn-accent" id="testGeminiBtn">Test the hotline</button>
+          <button class="btn" id="testGeminiPromptBtn">Test prompt with Gemini only</button>
+        </div>
+
+        <div id="geminiTestResult" style="margin-top:1rem;font-family:var(--font-mono);font-size:0.85rem;min-height:2em;color:#333;"></div>
+
+        <hr style="border:0;border-top:1px solid #d9d3c0;margin:1rem 0;">
+
+        <h3 style="margin-top:0;">📖 How to get a Gemini API key</h3>
+        <ol class="admin-steps">
+          <li class="admin-step">Go to <a href="https://aistudio.google.com/" target="_blank" rel="noopener">Google AI Studio</a>.</li>
+          <li class="admin-step">Sign in with your Google account.</li>
+          <li class="admin-step">Create or select a project.</li>
+          <li class="admin-step">Open the API key section.</li>
+          <li class="admin-step">Create an API key.</li>
+          <li class="admin-step">Copy the key.</li>
+          <li class="admin-step">Paste it into this app’s Admin tab.</li>
+          <li class="admin-step">Save it locally.</li>
+          <li class="admin-step">Click <strong>Fetch the family tree</strong>.</li>
+          <li class="admin-step">Choose a model that supports generateContent.</li>
+          <li class="admin-step">Click <strong>Test the hotline</strong>.</li>
+        </ol>
+        <div style="font-size:0.8rem;line-height:1.6;margin-top:0.5rem;">
+          <a href="https://ai.google.dev/gemini-api/docs" target="_blank" rel="noopener">Gemini API docs</a> •
+          <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener">API key guide</a> •
+          <a href="https://ai.google.dev/api/models" target="_blank" rel="noopener">Models API reference</a>
+        </div>
+
+        <hr style="border:0;border-top:1px solid #d9d3c0;margin:1rem 0;">
+
+        <h3 style="margin-top:0;">💳 Billing & Quotas</h3>
+        <p class="small-note">
+          Some Gemini API usage may require billing depending on model, quota, region, or current Google policy.
+        </p>
+        <ul style="font-size:0.85rem;color:#444;padding-left:1.2rem;line-height:1.65;margin:0.5rem 0 0;">
+          <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>.</li>
+          <li>Select the same project used for the API key.</li>
+          <li>Open <a href="https://cloud.google.com/billing/docs" target="_blank" rel="noopener">Billing</a> and link or create a billing account.</li>
+          <li>Set <a href="https://cloud.google.com/billing/docs/how-to/budgets" target="_blank" rel="noopener">budgets and alerts</a>.</li>
+          <li>Set API quotas where possible.</li>
+          <li>Avoid using unrestricted high-value keys in browser-only apps.</li>
+        </ul>
+
+        <hr style="border:0;border-top:1px solid #d9d3c0;margin:1rem 0;">
+
+        <h3 style="margin-top:0;">🛡️ This is not Fort Knox</h3>
+        <ul style="font-size:0.85rem;color:#444;padding-left:1.2rem;line-height:1.65;margin:0;">
+          <li>Browser JavaScript cannot hide secrets.</li>
+          <li>localStorage is convenient, not secure.</li>
+          <li>Restrict keys where possible (quota, allowed referrers).</li>
+          <li>Set budgets/alerts.</li>
+          <li>Use a backend proxy or <a href="https://firebase.google.com/docs/ai-logic" target="_blank" rel="noopener">Firebase AI Logic</a> for production.</li>
+          <li>Use this direct-browser mode only for personal tools and prototypes.</li>
+        </ul>
+
+        <div style="margin-top:0.9rem;font-size:0.8rem;line-height:1.6;">
+          <a href="https://ai.google.dev/gemini-api/docs" target="_blank" rel="noopener">Gemini API docs</a> •
+          <a href="https://firebase.google.com/docs/ai-logic" target="_blank" rel="noopener">Firebase AI Logic</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side Column -->
+  <aside class="side-column">
+    <!-- Templates -->
+    <div class="card card-neon-amber">
+      <h3 style="margin-top:0;">Prompt Templates</h3>
+      <div class="template-grid" id="templateList"></div>
+    </div>
+
+    <!-- History -->
+    <div class="card card-neon-magenta" style="margin-top:1.25rem;">
+      <h3 style="margin-top:0;">Notebook History</h3>
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap;">
+        <input type="text" id="historySearch" placeholder="Search history…" style="flex:1;min-width:0;" aria-label="Search history">
+        <input type="text" id="tagFilter" placeholder="Filter by tag…" style="flex:1;min-width:0;" aria-label="Filter by tag">
+      </div>
+      <div class="history-list" id="historyList"></div>
+      <div class="history-actions">
+        <button class="btn" id="exportBtn">Export JSON</button>
+        <label class="btn file-btn" tabindex="0" role="button" aria-label="Import history JSON">
+          Import JSON
+          <input type="file" id="importFile" accept=".json,application/json" style="display:none;" aria-hidden="true">
+        </label>
+        <button class="btn btn-danger" id="clearBtn">Clear All</button>
+      </div>
+      <div style="margin-top:0.75rem;">
+        <label for="tagsInput">Tags (comma separated)</label>
+        <input type="text" id="tagsInput" placeholder="tag1, tag2…" aria-label="Tags">
+      </div>
+    </div>
+
+    <!-- Session Notes -->
+    <div class="card" style="margin-top:1.25rem;">
+      <h3 style="margin-top:0;">Model Behavior Notes</h3>
+      <ul style="font-size:0.85rem;color:#444;padding-left:1.2rem;line-height:1.65;margin:0;">
+        <li>Local model availability can change after download finishes.</li>
+        <li>The model may be smaller and less capable than server models.</li>
+        <li>The model may refuse, truncate, or behave differently across Chrome versions.</li>
+        <li>Private/local does not mean the page itself is trustworthy; inspect code before pasting secrets.</li>
+        <li>Running from <code>file://</code> may work for some checks but many APIs prefer HTTPS or localhost.</li>
+      </ul>
+      <div style="margin-top:0.9rem;font-size:0.8rem;line-height:1.6;">
+        <strong>Chrome AI Docs</strong><br>
+        <a href="https://developer.chrome.com/docs/ai/get-started" target="_blank" rel="noopener">Get Started</a> •
+        <a href="https://developer.chrome.com/docs/ai/prompt-api" target="_blank" rel="noopener">Prompt API</a> •
+        <a href="https://developer.chrome.com/docs/ai/summarizer-api" target="_blank" rel="noopener">Summarizer API</a> •
+        <a href="https://developer.chrome.com/docs/ai/translator-api" target="_blank" rel="noopener">Translator API</a> •
+        <a href="https://developer.chrome.com/docs/ai/language-detection" target="_blank" rel="noopener">Language Detection</a>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+/* ============================================================
+   Local AI Scratchpad — JavaScript
+   ============================================================ */
+
+const state = {
+  availability: null,
+  session: null,
+  running: false,
+  shouldStop: false,
+  lastError: null,
+  diagnostics: {},
+  activeTab: 'prompt'
+};
+
+const geminiState = {
+  apiKey: '',
+  selectedModel: '',
+  modelSource: 'listed',
+  customModel: '',
+  compareEnabled: false,
+  availableModels: [],
+  modelsLastFetchedAt: null,
+  modelsFetchError: null,
+  lastStatus: null,
+  lastError: null,
+  lastTestAt: null,
+  running: false
+};
+
+const GEMINI_LS = {
+  apiKey: 'geminiApiKey',
+  selectedModel: 'geminiSelectedModel',
+  modelSource: 'geminiModelSource',
+  customModel: 'geminiCustomModel',
+  compareEnabled: 'geminiCompareEnabled',
+  cachedModels: 'geminiCachedModels',
+  modelsLastFetchedAt: 'geminiModelsLastFetchedAt',
+  localSystemPrompt: 'localAiScratchpadSystemPrompt'
+};
+
+const TEMPLATES = [
+  { id: 'summarize', title: 'Summarize pasted text', desc: 'Condense a long piece into key points.', prompt: 'Summarize the following text concisely, preserving the main points:\n\n[PASTE TEXT HERE]' },
+  { id: 'actions', title: 'Extract action items', desc: 'Pull out tasks and next steps.', prompt: 'Read the text below and extract a clear list of action items, owners, and deadlines if mentioned:\n\n[PASTE TEXT HERE]' },
+  { id: 'classify', title: 'Classify this note', desc: 'Categorize the content.', prompt: 'Classify the following note into one or more categories. Also provide a confidence score and a one-line summary:\n\n[PASTE TEXT HERE]' },
+  { id: 'rewrite', title: 'Rewrite as clearer prose', desc: 'Simplify and clarify writing.', prompt: 'Rewrite the following text to be clearer, more concise, and easier to read. Preserve the original meaning:\n\n[PASTE TEXT HERE]' },
+  { id: 'brief', title: 'Turn rough idea into a project brief', desc: 'Structure an idea into a brief.', prompt: 'Take the rough idea below and turn it into a short project brief with Goals, Scope, Deliverables, and Constraints:\n\n[PASTE IDEA HERE]' },
+  { id: 'explain-code', title: 'Explain this code', desc: 'Describe what code does.', prompt: 'Explain what the following code does, step by step, in plain language. Mention any important caveats or edge cases:\n\n```\n[PASTE CODE HERE]\n```' },
+  { id: 'test-cases', title: 'Generate test cases', desc: 'Produce test scenarios.', prompt: 'Generate a set of test cases (including edge cases) for the following function or behavior. Use a simple table format if possible:\n\n[PASTE DESCRIPTION HERE]' },
+  { id: 'fb-post', title: 'Create a Facebook post', desc: 'Draft a social post.', prompt: 'Write an engaging Facebook post based on the following content. Keep it friendly and include a subtle call to action:\n\n[PASTE CONTENT HERE]' },
+  { id: 'yt-desc', title: 'Create a YouTube description', desc: 'Draft a video description.', prompt: 'Write a compelling YouTube video description, including a hook, summary, timestamps placeholder, and relevant hashtags:\n\n[PASTE TOPIC/TRANSCRIPT HERE]' },
+  { id: 'less-corp', title: 'Make this less corporate', desc: 'Replace jargon with human language.', prompt: 'Rewrite the following text to sound less corporate. Remove buzzwords, jargon, and passive voice. Make it sound like a real person wrote it:\n\n[PASTE TEXT HERE]' },
+  { id: 'diplomatic', title: 'Make this more diplomatic', desc: 'Soften sharp language.', prompt: 'Rewrite the following message to be more diplomatic and tactful, while still conveying the core point clearly:\n\n[PASTE TEXT HERE]' },
+  { id: 'entities', title: 'Extract entities and dates', desc: 'Pull out names, places, dates.', prompt: 'Extract all named entities (people, organizations, locations) and any dates or times mentioned in the following text. Present them as a structured list:\n\n[PASTE TEXT HERE]' },
+  { id: 'to-md', title: 'Convert notes to markdown', desc: 'Format raw notes cleanly.', prompt: 'Convert the following rough notes into clean, well-structured Markdown. Use headings, lists, and code blocks where appropriate:\n\n[PASTE NOTES HERE]' },
+  { id: 'brainstorm', title: 'Brainstorm weird but useful browser app ideas', desc: 'Creative app concepts.', prompt: 'Brainstorm 5 weird but genuinely useful single-file browser app ideas. For each, include a one-line concept, the core feature, and why it matters. Be creative but practical.' }
+];
+
+/* -----------------------------------------------------------
+   IndexedDB / localStorage helpers
+   ----------------------------------------------------------- */
+const DB_NAME = 'LocalAIScratchpadDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'history';
+
+let dbPromise = null;
+
+function getDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+        store.createIndex('timestamp', 'timestamp', { unique: false });
+        store.createIndex('tags', 'tags', { unique: false, multiEntry: true });
+      }
+    };
+  });
+  return dbPromise;
+}
+
+async function saveHistoryItem(item) {
+  try {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.add(item);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    const arr = JSON.parse(localStorage.getItem('las_history') || '[]');
+    item.id = Date.now() + Math.random().toString(36).slice(2);
+    arr.unshift(item);
+    localStorage.setItem('las_history', JSON.stringify(arr));
+    return item.id;
+  }
+}
+
+async function loadHistory() {
+  try {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const idx = store.index('timestamp');
+      const req = idx.openCursor(null, 'prev');
+      const items = [];
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          items.push(cursor.value);
+          cursor.continue();
+        } else {
+          resolve(items);
+        }
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    return JSON.parse(localStorage.getItem('las_history') || '[]');
+  }
+}
+
+async function deleteHistoryItem(id) {
+  try {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    let arr = JSON.parse(localStorage.getItem('las_history') || '[]');
+    arr = arr.filter(x => x.id !== id);
+    localStorage.setItem('las_history', JSON.stringify(arr));
+  }
+}
+
+async function clearHistory() {
+  try {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    localStorage.removeItem('las_history');
+  }
+}
+
+async function exportHistory() {
+  const items = await loadHistory();
+  const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `local-ai-scratchpad-history-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importHistory(file) {
+  const text = await file.text();
+  const imported = JSON.parse(text);
+  if (!Array.isArray(imported)) throw new Error('Invalid file format: expected array');
+  for (const item of imported) {
+    delete item.id;
+    await saveHistoryItem(item);
+  }
+}
+
+/* -----------------------------------------------------------
+   Utilities
+   ----------------------------------------------------------- */
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatBytes(b) {
+  if (!b || b === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(b) / Math.log(k));
+  return parseFloat((b / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied to clipboard.', 'success');
+  } catch(e) {
+    toast('Copy failed: ' + (e.message || ''), 'error');
+  }
+}
+
+function setStatus(message, type) {
+  const el = document.getElementById('statusMessage');
+  el.textContent = message;
+  el.dataset.type = type;
+}
+
+function toast(message, type = 'neutral') {
+  const container = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  const colors = {
+    success: 'var(--neon-lime)',
+    error: '#ff2a2a',
+    warning: 'var(--neon-amber)',
+    neutral: 'var(--neon-cyan)'
+  };
+  t.style.borderLeftColor = colors[type] || colors.neutral;
+  t.textContent = message;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.style.transition = 'opacity 0.3s, transform 0.3s';
+    t.style.opacity = '0';
+    t.style.transform = 'translateY(10px)';
+    setTimeout(() => t.remove(), 300);
+  }, 3200);
+}
+
+function updateCounters() {
+  const p = document.getElementById('promptInput').value;
+  const s = document.getElementById('systemInput').value;
+  document.getElementById('promptCounter').textContent = `${p.length} chars / ~${Math.ceil(p.length / 4)} tokens`;
+  document.getElementById('systemCounter').textContent = `${s.length} chars / ~${Math.ceil(s.length / 4)} tokens`;
+}
+
+function getLocalSystemPrompt() {
+  const input = document.getElementById('systemInput');
+  return input ? input.value.trim() : '';
+}
+
+function saveLocalSystemPrompt() {
+  localStorage.setItem(GEMINI_LS.localSystemPrompt, getLocalSystemPrompt());
+}
+
+function resetLocalSessionForSystemPromptChange() {
+  if (state.session && typeof state.session.destroy === 'function') {
+    try { state.session.destroy(); } catch (e) {}
+  }
+  state.session = null;
+  setStatus('Local system instructions saved. Session reset.', 'neutral');
+  updateUI();
+}
+
+function mergeStreamChunk(current, chunk) {
+  if (chunk == null) return current;
+  const next = (typeof chunk === 'string') ? chunk : String(chunk);
+  if (!next) return current;
+  if (!current) return next;
+  if (next.startsWith(current)) return next;
+  return current + next;
+}
+
+/* -----------------------------------------------------------
+   Gemini helpers
+   ----------------------------------------------------------- */
+function loadGeminiSettings() {
+  geminiState.apiKey = localStorage.getItem(GEMINI_LS.apiKey) || '';
+  geminiState.selectedModel = localStorage.getItem(GEMINI_LS.selectedModel) || '';
+  geminiState.modelSource = localStorage.getItem(GEMINI_LS.modelSource) || 'listed';
+  geminiState.customModel = localStorage.getItem(GEMINI_LS.customModel) || '';
+  geminiState.compareEnabled = localStorage.getItem(GEMINI_LS.compareEnabled) === 'true';
+  const systemInput = document.getElementById('systemInput');
+  if (systemInput) systemInput.value = localStorage.getItem(GEMINI_LS.localSystemPrompt) || '';
+  try {
+    const cached = localStorage.getItem(GEMINI_LS.cachedModels);
+    geminiState.availableModels = cached ? JSON.parse(cached) : [];
+  } catch (e) { geminiState.availableModels = []; }
+  const ts = localStorage.getItem(GEMINI_LS.modelsLastFetchedAt);
+  geminiState.modelsLastFetchedAt = ts ? parseInt(ts, 10) : null;
+}
+
+function saveGeminiSettings() {
+  localStorage.setItem(GEMINI_LS.apiKey, geminiState.apiKey);
+  localStorage.setItem(GEMINI_LS.selectedModel, geminiState.selectedModel);
+  localStorage.setItem(GEMINI_LS.modelSource, geminiState.modelSource);
+  localStorage.setItem(GEMINI_LS.customModel, geminiState.customModel);
+  localStorage.setItem(GEMINI_LS.compareEnabled, String(geminiState.compareEnabled));
+  localStorage.setItem(GEMINI_LS.cachedModels, JSON.stringify(geminiState.availableModels));
+  localStorage.setItem(GEMINI_LS.modelsLastFetchedAt, String(geminiState.modelsLastFetchedAt || ''));
+}
+
+function getSelectedGeminiModelResource() {
+  const id = geminiState.modelSource === 'custom' ? geminiState.customModel : geminiState.selectedModel;
+  if (!id) return '';
+  if (id.startsWith('models/')) return id;
+  return 'models/' + id;
+}
+
+async function fetchGeminiModels() {
+  const apiKey = geminiState.apiKey;
+  if (!apiKey) { toast('Enter an API key first.', 'warning'); return; }
+  geminiState.modelsFetchError = null;
+  const allModels = [];
+  let pageToken = null;
+  try {
+    do {
+      const url = new URL('https://generativelanguage.googleapis.com/v1beta/models');
+      url.searchParams.set('key', apiKey);
+      url.searchParams.set('pageSize', '1000');
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
+      if (data.models) allModels.push(...data.models);
+      pageToken = data.nextPageToken || null;
+    } while (pageToken);
+    geminiState.availableModels = allModels;
+    geminiState.modelsLastFetchedAt = Date.now();
+    saveGeminiSettings();
+    toast(`Fetched ${allModels.length} models.`, 'success');
+  } catch (e) {
+    geminiState.modelsFetchError = e.message || String(e);
+    toast('Model fetch failed: ' + geminiState.modelsFetchError, 'error');
+  }
+  renderAdminUI();
+}
+
+function filterGeminiModels(models) {
+  const showAll = document.getElementById('showAllModels').checked;
+  return models.filter(m => {
+    const methods = m.supportedGenerationMethods || [];
+    if (!methods.includes('generateContent')) return false;
+    if (methods.length === 1 && methods[0] === 'embedContent') return false;
+    if (showAll) return true;
+    const name = (m.name || '').toLowerCase();
+    const base = (m.baseModelId || '').toLowerCase();
+    return name.includes('gemini') || base.includes('gemini');
+  });
+}
+
+function formatModelOption(m) {
+  const name = m.name || '';
+  const display = m.displayName || name;
+  const inputLimit = m.inputTokenLimit ? `${m.inputTokenLimit}` : '—';
+  const outputLimit = m.outputTokenLimit ? `${m.outputTokenLimit}` : '—';
+  const thinking = m.thinking ? 'thinking' : '';
+  const label = `${display} — ${name} — ${inputLimit} input / ${outputLimit} output${thinking ? ' — ' + thinking : ''}`;
+  return label;
+}
+
+function renderAdminUI() {
+  const apiKeyInput = document.getElementById('geminiApiKey');
+  const modelSelect = document.getElementById('geminiModelSelect');
+  const customInput = document.getElementById('customModelInput');
+  const useCustom = document.getElementById('useCustomModel');
+  const showAll = document.getElementById('showAllModels');
+  const askDefault = document.getElementById('askGeminiDefault');
+  const keyPreview = document.getElementById('keyPreview');
+  const modelMeta = document.getElementById('modelSelectMeta');
+  const refreshBtn = document.getElementById('refreshModelsBtn');
+  const testResult = document.getElementById('geminiTestResult');
+
+  if (apiKeyInput) apiKeyInput.value = geminiState.apiKey;
+  if (customInput) customInput.value = geminiState.customModel;
+  if (useCustom) useCustom.checked = geminiState.modelSource === 'custom';
+  if (askDefault) askDefault.checked = geminiState.compareEnabled;
+
+  // Key preview
+  if (keyPreview) {
+    if (!geminiState.apiKey) {
+      keyPreview.textContent = 'none';
+    } else if (document.getElementById('showKeyPreview').checked) {
+      const k = geminiState.apiKey;
+      keyPreview.textContent = k.slice(0,4) + '…' + k.slice(-4);
+    } else {
+      keyPreview.textContent = 'present (hidden)';
+    }
+  }
+
+  // Model dropdown
+  if (modelSelect) {
+    const prevValue = modelSelect.value;
+    modelSelect.innerHTML = '';
+    const filtered = filterGeminiModels(geminiState.availableModels);
+    if (filtered.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = 'Fetch models from Google to populate this list.';
+      opt.value = '';
+      modelSelect.appendChild(opt);
+    } else {
+      const placeholder = document.createElement('option');
+      placeholder.textContent = 'Select a model…';
+      placeholder.value = '';
+      modelSelect.appendChild(placeholder);
+      filtered.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name || '';
+        opt.textContent = formatModelOption(m);
+        modelSelect.appendChild(opt);
+      });
+    }
+    if (geminiState.selectedModel) modelSelect.value = geminiState.selectedModel;
+    if (!modelSelect.value && prevValue) modelSelect.value = prevValue;
+  }
+
+  if (refreshBtn) refreshBtn.disabled = !geminiState.apiKey || geminiState.availableModels.length === 0;
+
+  if (modelMeta) {
+    const count = filterGeminiModels(geminiState.availableModels).length;
+    const total = geminiState.availableModels.length;
+    const when = geminiState.modelsLastFetchedAt ? new Date(geminiState.modelsLastFetchedAt).toLocaleString() : 'never';
+    modelMeta.textContent = `${count} of ${total} models shown • Last fetched: ${when}${geminiState.modelsFetchError ? ' • Error: ' + geminiState.modelsFetchError : ''}`;
+  }
+
+  if (testResult && geminiState.lastTestAt) {
+    const status = geminiState.lastError ? 'FAILED' : 'OK';
+    testResult.innerHTML = `<span style="color:${geminiState.lastError ? '#a00' : '#060'}">${status}</span> • ${geminiState.lastTestAt ? new Date(geminiState.lastTestAt).toLocaleString() : '—'} • ${escapeHtml(geminiState.lastError || 'No error')}`;
+  }
+}
+
+async function testGeminiConnection() {
+  const apiKey = geminiState.apiKey;
+  const modelResource = getSelectedGeminiModelResource();
+  if (!apiKey) { toast('No API key saved.', 'warning'); return; }
+  if (!modelResource) { toast('No model selected.', 'warning'); return; }
+
+  geminiState.lastError = null;
+  geminiState.lastTestAt = null;
+  const start = performance.now();
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/${modelResource}:generateContent?key=${apiKey}`;
+    const body = { contents: [{ role: 'user', parts: [{ text: 'Reply with only: OK' }] }] };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
+    if (data.promptFeedback && data.promptFeedback.blockReason) throw new Error(`Blocked: ${data.promptFeedback.blockReason}`);
+    const candidate = data.candidates && data.candidates[0];
+    if (!candidate || !candidate.content || !candidate.content.parts) throw new Error('Unexpected response format');
+    const text = candidate.content.parts.map(p => p.text || '').join('');
+    geminiState.lastStatus = 'OK';
+    geminiState.lastTestAt = Date.now();
+    toast(`Gemini hotline works. Model: ${modelResource} • ${text}`, 'success');
+  } catch (e) {
+    geminiState.lastError = e.message || String(e);
+    geminiState.lastTestAt = Date.now();
+    toast('Gemini hotline failed: ' + geminiState.lastError, 'error');
+  }
+  renderAdminUI();
+}
+
+async function callGemini(prompt, contextText = '') {
+  const apiKey = geminiState.apiKey;
+  const modelResource = getSelectedGeminiModelResource();
+  if (!apiKey) throw new Error('No API key configured. Go to Admin tab.');
+  if (!modelResource) throw new Error('No model selected. Go to Admin tab.');
+
+  const fullPrompt = contextText ? `Context:
+${contextText}
+
+User prompt:
+${prompt}` : prompt;
+  const url = `https://generativelanguage.googleapis.com/v1beta/${modelResource}:generateContent?key=${apiKey}`;
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: fullPrompt }] }]
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+
+  if (!res.ok) {
+    let msg = `Gemini API error ${res.status}`;
+    if (data.error && data.error.message) msg += `: ${data.error.message}`;
+    if (res.status === 400) msg += ' (Bad request — check model or prompt format)';
+    if (res.status === 401 || res.status === 403) msg += ' (Auth/billing issue — check key, API enablement, or billing)';
+    if (res.status === 404) msg += ' (Model not found — verify model name)';
+    if (res.status === 429) msg += ' (Quota/rate limit exceeded)';
+    throw new Error(msg);
+  }
+
+  if (data.promptFeedback && data.promptFeedback.blockReason) {
+    throw new Error(`Prompt blocked: ${data.promptFeedback.blockReason}`);
+  }
+
+  const candidate = data.candidates && data.candidates[0];
+  if (!candidate || !candidate.content || !candidate.content.parts) {
+    throw new Error('Unexpected Gemini response format.');
+  }
+
+  const text = candidate.content.parts.map(p => p.text || '').join('');
+  return { text, finishReason: candidate.finishReason, model: modelResource };
+}
+
+/* -----------------------------------------------------------
+   API & Session (Local)
+   ----------------------------------------------------------- */
+async function checkModelAvailability() {
+  setStatus('Checking model availability…', 'neutral');
+  state.lastError = null;
+  state.diagnostics.languageModel = typeof window.LanguageModel;
+
+  if (typeof window.LanguageModel === 'undefined') {
+    state.availability = 'unavailable';
+    setStatus('LanguageModel not detected.', 'error');
+    updateUI();
+    return;
+  }
+
+  try {
+    if (typeof LanguageModel.availability === 'function') {
+      const result = await LanguageModel.availability();
+      state.availability = result;
+      state.diagnostics.availability = result;
+      if (result === 'available') setStatus('Model is available.', 'success');
+      else if (result === 'downloading') setStatus('Model is downloading…', 'warning');
+      else if (result === 'downloadable') setStatus('Model is downloadable.', 'warning');
+      else if (result === 'unavailable') setStatus('Model unavailable.', 'error');
+      else setStatus(`Model status: ${result}`, 'neutral');
+    } else {
+      state.availability = 'unknown';
+      setStatus('LanguageModel.availability() not found.', 'warning');
+    }
+  } catch (e) {
+    state.availability = 'error';
+    state.lastError = e.message || String(e);
+    setStatus(`Availability check failed: ${e.message || e}`, 'error');
+  }
+  updateUI();
+}
+
+async function createSession() {
+  if (typeof window.LanguageModel === 'undefined') {
+    toast('LanguageModel is not available.', 'error');
+    return;
+  }
+  if (state.session) {
+    toast('Session already active. Reset first if you want a new one.', 'neutral');
+    return;
+  }
+
+  const systemText = getLocalSystemPrompt();
+  const tempVal = document.getElementById('tempInput').value.trim();
+  const topKVal = document.getElementById('topKInput').value.trim();
+
+  const options = {};
+  if (systemText) options.systemPrompt = systemText;
+  if (tempVal !== '') { const t = parseFloat(tempVal); if (!isNaN(t)) options.temperature = t; }
+  if (topKVal !== '') { const k = parseInt(topKVal, 10); if (!isNaN(k)) options.topK = k; }
+
+  try {
+    setStatus('Creating session…', 'neutral');
+    state.session = await LanguageModel.create(options);
+    setStatus('Session ready.', 'success');
+    toast('Session created.', 'success');
+  } catch (e) {
+    state.lastError = e.message || String(e);
+    setStatus(`Create session failed: ${e.message || e}`, 'error');
+    toast(`Session creation failed: ${e.message || e}`, 'error');
+  }
+  updateUI();
+}
+
+async function resetSession() {
+  if (state.session && typeof state.session.destroy === 'function') {
+    try { state.session.destroy(); } catch (e) {}
+  }
+  state.session = null;
+  setStatus('Session reset.', 'neutral');
+  updateUI();
+}
+
+/* -----------------------------------------------------------
+   Prompt execution (refactored)
+   ----------------------------------------------------------- */
+async function runLocalPrompt(promptText, contextText, options = {}) {
+  const target = options.target || 'original';
+  if (!state.session) {
+    if (typeof window.LanguageModel !== 'undefined') {
+      if (target === 'original') toast('No active session. Auto-creating…', 'neutral');
+      await createSession();
+      if (!state.session) throw new Error('Failed to create local session');
+    } else {
+      throw new Error('No session and LanguageModel is unavailable.');
+    }
+  }
+
+  const outputEl = target === 'compare' ? document.getElementById('localOutputArea') : document.getElementById('outputArea');
+  const errorEl = target === 'compare' ? document.getElementById('localErrorArea') : document.getElementById('errorArea');
+  const timeEl = target === 'compare' ? document.getElementById('localElapsedTime') : document.getElementById('elapsedTime');
+  const lenEl = target === 'compare' ? null : document.getElementById('responseLength');
+  const pulseEl = target === 'compare' ? document.getElementById('localRunPulse') : document.getElementById('runPulse');
+
+  if (outputEl) outputEl.textContent = '';
+  if (errorEl) errorEl.textContent = '';
+  if (timeEl) timeEl.textContent = '0.0s';
+  if (lenEl) lenEl.textContent = '0 chars';
+  if (pulseEl) pulseEl.style.display = 'inline-block';
+
+  const start = performance.now();
+  let finalResponse = '';
+  let streamFinished = false;
+
+  try {
+    if (typeof state.session.promptStreaming === 'function') {
+      const stream = await state.session.promptStreaming(promptText);
+      if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+        for await (const chunk of stream) {
+          if (state.shouldStop) break;
+          finalResponse = mergeStreamChunk(finalResponse, chunk);
+          if (outputEl) outputEl.textContent = finalResponse;
+          if (lenEl) lenEl.textContent = finalResponse.length + ' chars';
+          if (outputEl) outputEl.scrollTop = outputEl.scrollHeight;
+        }
+        streamFinished = true;
+      } else if (stream && typeof stream.getReader === 'function') {
+        const reader = stream.getReader();
+        while (true) {
+          if (state.shouldStop) { reader.cancel(); break; }
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = (typeof value === 'string') ? value : new TextDecoder().decode(value);
+          finalResponse = mergeStreamChunk(finalResponse, text);
+          if (outputEl) outputEl.textContent = finalResponse;
+          if (lenEl) lenEl.textContent = finalResponse.length + ' chars';
+          if (outputEl) outputEl.scrollTop = outputEl.scrollHeight;
+        }
+        streamFinished = true;
+      } else {
+        finalResponse = String(stream);
+        if (outputEl) outputEl.textContent = finalResponse;
+        streamFinished = true;
+      }
+    } else if (typeof state.session.prompt === 'function') {
+      const result = await state.session.prompt(promptText);
+      finalResponse = (typeof result === 'string') ? result : JSON.stringify(result, null, 2);
+      if (outputEl) outputEl.textContent = finalResponse;
+      streamFinished = true;
+    } else {
+      throw new Error('Session has no prompt or promptStreaming method.');
+    }
+  } catch (e) {
+    state.lastError = e.message || String(e);
+    if (errorEl) errorEl.textContent = e.message || String(e);
+    if (pulseEl) pulseEl.style.display = 'none';
+    throw e;
+  } finally {
+    if (pulseEl) pulseEl.style.display = 'none';
+    const elapsed = ((performance.now() - start) / 1000).toFixed(1);
+    if (timeEl) timeEl.textContent = elapsed + 's';
+    if (lenEl) lenEl.textContent = finalResponse.length + ' chars';
+  }
+
+  return { response: finalResponse, elapsed: parseFloat(((performance.now() - start) / 1000).toFixed(1)), streamFinished };
+}
+
+async function runGeminiPrompt(promptText, contextText, options = {}) {
+  const target = options.target || 'original';
+  const outputEl = document.getElementById('geminiOutputArea');
+  const errorEl = document.getElementById('geminiErrorArea');
+  const timeEl = document.getElementById('geminiElapsedTime');
+  const pulseEl = document.getElementById('geminiRunPulse');
+
+  if (outputEl) outputEl.textContent = '';
+  if (errorEl) errorEl.textContent = '';
+  if (timeEl) timeEl.textContent = '0.0s';
+  if (pulseEl) pulseEl.style.display = 'inline-block';
+
+  const start = performance.now();
+  try {
+    const result = await callGemini(promptText, contextText);
+    if (outputEl) outputEl.textContent = result.text;
+    if (pulseEl) pulseEl.style.display = 'none';
+    const elapsed = ((performance.now() - start) / 1000).toFixed(1);
+    if (timeEl) timeEl.textContent = elapsed + 's';
+    return { response: result.text, elapsed: parseFloat(elapsed), finishReason: result.finishReason };
+  } catch (e) {
+    geminiState.lastError = e.message || String(e);
+    if (errorEl) errorEl.textContent = e.message || String(e);
+    if (pulseEl) pulseEl.style.display = 'none';
+    const elapsed = ((performance.now() - start) / 1000).toFixed(1);
+    if (timeEl) timeEl.textContent = elapsed + 's';
+    throw e;
+  }
+}
+
+async function runPrompt() {
+  const promptText = document.getElementById('promptInput').value;
+  if (!promptText.trim()) {
+    toast('Enter a prompt first.', 'warning');
+    return;
+  }
+  const localSystemPrompt = getLocalSystemPrompt();
+
+  if (!geminiState.compareEnabled) {
+    state.shouldStop = false;
+    state.running = true;
+    updateUI();
+    try {
+      const result = await runLocalPrompt(promptText, localSystemPrompt);
+      if (result.response) {
+        await saveHistoryItem({
+          timestamp: Date.now(),
+          title: document.getElementById('noteTitle').value.trim() || 'Untitled',
+          prompt: promptText,
+          system: localSystemPrompt,
+          response: result.response,
+          mode: 'local',
+          availability: state.availability,
+          elapsed: result.elapsed,
+          tags: document.getElementById('tagsInput').value.split(',').map(t => t.trim()).filter(Boolean),
+          userAgent: navigator.userAgent
+        });
+        renderHistory();
+        toast('Saved to history.', 'success');
+      }
+    } catch (e) {
+      toast(`Prompt failed: ${e.message || e}`, 'error');
+    } finally {
+      state.running = false;
+      updateUI();
+    }
+    return;
+  }
+
+  // Compare mode
+  state.shouldStop = false;
+  state.running = true;
+  geminiState.running = true;
+  updateUI();
+
+  clearComparisonOutputs();
+
+  let localResult, geminiResult;
+  try {
+    [localResult, geminiResult] = await Promise.allSettled([
+      runLocalPrompt(promptText, localSystemPrompt, { target: 'compare' }),
+      runGeminiPrompt(promptText, '', { target: 'compare' })
+    ]);
+  } finally {
+    state.running = false;
+    geminiState.running = false;
+    updateUI();
+  }
+
+  const historyItem = {
+    timestamp: Date.now(),
+    title: document.getElementById('noteTitle').value.trim() || 'Comparison',
+    prompt: promptText,
+    system: localSystemPrompt,
+    mode: 'comparison',
+    local: {
+      response: localResult.value?.response || '',
+      elapsed: localResult.value?.elapsed || 0,
+      error: localResult.reason?.message || null,
+      availability: state.availability
+    },
+    gemini: {
+      model: getSelectedGeminiModelResource(),
+      response: geminiResult.value?.response || '',
+      elapsed: geminiResult.value?.elapsed || 0,
+      error: geminiResult.reason?.message || null
+    },
+    tags: document.getElementById('tagsInput').value.split(',').map(t => t.trim()).filter(Boolean),
+    userAgent: navigator.userAgent
+  };
+  await saveHistoryItem(historyItem);
+  renderHistory();
+  toast('Comparison saved to history.', 'success');
+}
+
+function stopPrompt() {
+  state.shouldStop = true;
+  state.running = false;
+  geminiState.running = false;
+  updateUI();
+  toast('Stopped.', 'neutral');
+}
+
+function clearComparisonOutputs() {
+  document.getElementById('localOutputArea').textContent = '';
+  document.getElementById('localErrorArea').textContent = '';
+  document.getElementById('localElapsedTime').textContent = '0.0s';
+  document.getElementById('geminiOutputArea').textContent = '';
+  document.getElementById('geminiErrorArea').textContent = '';
+  document.getElementById('geminiElapsedTime').textContent = '0.0s';
+}
+
+/* -----------------------------------------------------------
+   UI Renderers
+   ----------------------------------------------------------- */
+function updateUI() {
+  const ledEl = document.getElementById('statusLed');
+  const availEl = document.getElementById('availText');
+  const createBtn = document.getElementById('createBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const runBtn = document.getElementById('runBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const runPulse = document.getElementById('runPulse');
+
+  let ledClass = 'led-gray';
+  if (state.availability === 'available') ledClass = 'led-green';
+  else if (state.availability === 'downloading' || state.availability === 'downloadable') ledClass = 'led-amber';
+  else if (state.availability === 'unavailable' || state.availability === 'error') ledClass = 'led-red';
+
+  ledEl.className = 'led ' + ledClass;
+  availEl.textContent = state.availability || 'Not checked';
+
+  const canCreate = (state.availability === 'available' || state.availability === 'downloadable');
+  createBtn.disabled = !canCreate || !!state.session;
+  resetBtn.disabled = !state.session;
+
+  const anyRunning = state.running || geminiState.running;
+  runBtn.disabled = anyRunning || (!state.session && !canCreate && !geminiState.compareEnabled);
+  if (geminiState.compareEnabled) {
+    runBtn.disabled = anyRunning;
+  }
+  stopBtn.disabled = !anyRunning;
+  runPulse.style.display = anyRunning ? 'inline-block' : 'none';
+
+  // Status rail
+  document.getElementById('railSecure').textContent = isSecureContext ? 'Yes' : 'No';
+  document.getElementById('railOnline').textContent = navigator.onLine ? 'Online' : 'Offline';
+  document.getElementById('railDetected').textContent = typeof window.LanguageModel;
+  document.getElementById('railAvail').textContent = state.availability ?? '—';
+  document.getElementById('railSession').textContent = state.session ? 'Yes' : 'No';
+  document.getElementById('railError').textContent = state.lastError || 'None';
+
+  // Unavailable / downloading cards
+  const unavail = document.getElementById('unavailableCard');
+  const downloading = document.getElementById('downloadingCard');
+  if (typeof window.LanguageModel === 'undefined' || state.availability === 'unavailable') {
+    unavail.style.display = 'block';
+  } else {
+    unavail.style.display = 'none';
+  }
+  if (state.availability === 'downloading') {
+    downloading.style.display = 'block';
+  } else {
+    downloading.style.display = 'none';
+  }
+
+  // Compare mode visibility
+  const compareToggle = document.getElementById('compareToggle');
+  if (compareToggle) {
+    if (geminiState.compareEnabled) compareToggle.classList.add('active');
+    else compareToggle.classList.remove('active');
+    compareToggle.setAttribute('aria-checked', String(geminiState.compareEnabled));
+  }
+  const comparePrivacy = document.getElementById('comparePrivacyCopy');
+  if (comparePrivacy) comparePrivacy.style.display = geminiState.compareEnabled ? 'block' : 'none';
+  const originalCard = document.getElementById('originalResponseCard');
+  const compareContainer = document.getElementById('comparisonContainer');
+  if (originalCard && compareContainer) {
+    if (geminiState.compareEnabled) {
+      originalCard.style.display = 'none';
+      compareContainer.style.display = 'grid';
+    } else {
+      originalCard.style.display = 'block';
+      compareContainer.style.display = 'none';
+    }
+  }
+
+  renderDiagnostics();
+  renderAdminUI();
+}
+
+async function updateStorageEstimate() {
+  const el = document.getElementById('railStorage');
+  if (navigator.storage && navigator.storage.estimate) {
+    try {
+      const est = await navigator.storage.estimate();
+      el.textContent = `${formatBytes(est.usage)} / ${formatBytes(est.quota)}`;
+    } catch (e) { el.textContent = 'Error'; }
+  } else {
+    el.textContent = 'Not supported';
+  }
+}
+
+function renderTemplates() {
+  const container = document.getElementById('templateList');
+  container.innerHTML = '';
+  TEMPLATES.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'template-card';
+    div.innerHTML = `<strong>${escapeHtml(t.title)}</strong><span>${escapeHtml(t.desc)}</span>`;
+    div.title = escapeHtml(t.prompt).substring(0, 120) + '…';
+    div.addEventListener('click', () => {
+      document.getElementById('promptInput').value = t.prompt;
+      updateCounters();
+      toast(`Loaded template: ${t.title}`, 'neutral');
+    });
+    container.appendChild(div);
+  });
+}
+
+async function renderHistory() {
+  const container = document.getElementById('historyList');
+  const filter = document.getElementById('historySearch').value.toLowerCase();
+  const tagFilter = document.getElementById('tagFilter').value.toLowerCase();
+  let items = await loadHistory();
+
+  if (filter) {
+    items = items.filter(i =>
+      (i.prompt && i.prompt.toLowerCase().includes(filter)) ||
+      (i.response && i.response.toLowerCase().includes(filter)) ||
+      (i.title && i.title.toLowerCase().includes(filter)) ||
+      (i.tags && i.tags.some(t => t.toLowerCase().includes(filter)))
+    );
+  }
+  if (tagFilter) {
+    items = items.filter(i => i.tags && i.tags.some(t => t.toLowerCase().includes(tagFilter)));
+  }
+
+  container.innerHTML = '';
+  if (items.length === 0) {
+    container.innerHTML = '<div style="padding:1rem;color:#666;font-size:0.9rem;">No history items yet.</div>';
+    return;
+  }
+
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'history-item';
+    const date = new Date(item.timestamp).toLocaleString();
+    const tags = (item.tags || []).map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join(' ');
+    const mode = item.mode || 'local';
+    const modeLabel = mode === 'comparison' ? 'Compare' : mode === 'gemini' ? 'Gemini' : 'Local';
+    const modeColor = mode === 'comparison' ? 'var(--neon-magenta)' : mode === 'gemini' ? 'var(--neon-cyan)' : 'var(--neon-lime)';
+    div.innerHTML = `
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(item.title || 'Untitled')}</div>
+        <div class="history-meta">
+          <span class="mode-badge" style="background:${modeColor};">${modeLabel}</span>
+          ${date} • ${(item.elapsed != null ? item.elapsed.toFixed(1) : (item.local?.elapsed != null ? item.local.elapsed.toFixed(1) : '?'))}s • ${(item.response || item.local?.response || '').length} chars
+        </div>
+        <div style="margin-top:2px;">${tags}</div>
+      </div>
+      <div style="display:flex;gap:0.3rem;align-items:center;margin-left:0.5rem;flex-shrink:0;">
+        <button class="btn btn-sm" data-action="restore" title="Restore">↺</button>
+        <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">×</button>
+      </div>
+    `;
+    div.querySelector('[data-action="restore"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('promptInput').value = item.prompt || '';
+      document.getElementById('systemInput').value = item.system || '';
+      saveLocalSystemPrompt();
+      resetLocalSessionForSystemPromptChange();
+      document.getElementById('noteTitle').value = item.title || '';
+      document.getElementById('tagsInput').value = (item.tags || []).join(', ');
+
+      if (item.mode === 'comparison') {
+        geminiState.compareEnabled = true;
+        saveGeminiSettings();
+        document.getElementById('localOutputArea').textContent = item.local?.response || '';
+        document.getElementById('localErrorArea').textContent = item.local?.error || '';
+        document.getElementById('localElapsedTime').textContent = (item.local?.elapsed != null ? item.local.elapsed.toFixed(1) : '0') + 's';
+        document.getElementById('geminiOutputArea').textContent = item.gemini?.response || '';
+        document.getElementById('geminiErrorArea').textContent = item.gemini?.error || '';
+        document.getElementById('geminiElapsedTime').textContent = (item.gemini?.elapsed != null ? item.gemini.elapsed.toFixed(1) : '0') + 's';
+      } else {
+        geminiState.compareEnabled = false;
+        saveGeminiSettings();
+        document.getElementById('outputArea').textContent = item.response || '';
+        document.getElementById('errorArea').textContent = '';
+        document.getElementById('elapsedTime').textContent = (item.elapsed != null ? item.elapsed.toFixed(1) : '0') + 's';
+        document.getElementById('responseLength').textContent = (item.response || '').length + ' chars';
+      }
+      updateUI();
+      updateCounters();
+      toast('Restored to scratchpad.', 'success');
+    });
+    div.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete this history item?')) return;
+      await deleteHistoryItem(item.id);
+      renderHistory();
+    });
+    container.appendChild(div);
+  });
+}
+
+function renderDiagnostics() {
+  const diag = {
+    'typeof LanguageModel': typeof window.LanguageModel,
+    'typeof Summarizer': typeof window.Summarizer,
+    'typeof Translator': typeof window.Translator,
+    'typeof LanguageDetector': typeof window.LanguageDetector,
+    'typeof Writer': typeof window.Writer,
+    'typeof Rewriter': typeof window.Rewriter,
+    'availability': state.availability,
+    'sessionActive': !!state.session,
+    'sessionMethods': state.session ? Object.getOwnPropertyNames(Object.getPrototypeOf(state.session)) : [],
+    'navigator.userAgent': navigator.userAgent,
+    'isSecureContext': isSecureContext,
+    'location.protocol': location.protocol,
+    'lastError': state.lastError,
+    'timestamp': new Date().toISOString(),
+    'gemini': {
+      'apiKeySaved': !!geminiState.apiKey,
+      'selectedModel': geminiState.selectedModel,
+      'modelResource': getSelectedGeminiModelResource(),
+      'modelSource': geminiState.modelSource,
+      'cachedModelsCount': geminiState.availableModels.length,
+      'modelsLastFetchedAt': geminiState.modelsLastFetchedAt ? new Date(geminiState.modelsLastFetchedAt).toISOString() : null,
+      'compareEnabled': geminiState.compareEnabled,
+      'lastGeminiStatus': geminiState.lastStatus,
+      'lastGeminiError': geminiState.lastError,
+      'lastTestAt': geminiState.lastTestAt ? new Date(geminiState.lastTestAt).toISOString() : null,
+      'fetchAvailable': !!geminiState.apiKey,
+      'online': navigator.onLine
+    }
+  };
+  const pre = document.getElementById('diagnosticsPre');
+  if (pre) pre.textContent = JSON.stringify(diag, null, 2);
+}
+
+/* -----------------------------------------------------------
+   Clipboard helpers
+   ----------------------------------------------------------- */
+async function readClipboardText() {
+  try {
+    const text = await navigator.clipboard.readText();
+    return text;
+  } catch (e) {
+    toast('Clipboard read failed. Ensure you granted permission or paste manually.', 'error');
+    return '';
+  }
+}
+
+/* -----------------------------------------------------------
+   Event wiring
+   ----------------------------------------------------------- */
+function init() {
+  loadGeminiSettings();
+
+  document.getElementById('checkBtn').addEventListener('click', checkModelAvailability);
+  document.getElementById('createBtn').addEventListener('click', createSession);
+  document.getElementById('resetBtn').addEventListener('click', resetSession);
+  document.getElementById('runBtn').addEventListener('click', runPrompt);
+  document.getElementById('stopBtn').addEventListener('click', stopPrompt);
+  document.getElementById('copyBtn').addEventListener('click', () => copyToClipboard(document.getElementById('outputArea').textContent));
+  document.getElementById('copyMdBtn').addEventListener('click', () => {
+    const prompt = document.getElementById('promptInput').value;
+    const response = document.getElementById('outputArea').textContent;
+    copyToClipboard(`## Prompt
+
+${prompt}
+
+## Response
+
+${response}
+`);
+  });
+  document.getElementById('saveNoteBtn').addEventListener('click', async () => {
+    const prompt = document.getElementById('promptInput').value;
+    const response = document.getElementById('outputArea').textContent;
+    if (!prompt.trim() && !response.trim()) { toast('Nothing to save.', 'warning'); return; }
+    await saveHistoryItem({
+      timestamp: Date.now(),
+      title: document.getElementById('noteTitle').value.trim() || 'Manual save',
+      prompt,
+      system: getLocalSystemPrompt(),
+      response,
+      mode: 'local',
+      availability: state.availability,
+      elapsed: 0,
+      tags: document.getElementById('tagsInput').value.split(',').map(t => t.trim()).filter(Boolean),
+      userAgent: navigator.userAgent
+    });
+    renderHistory();
+    toast('Note saved.', 'success');
+  });
+
+  document.getElementById('promptInput').addEventListener('input', updateCounters);
+  document.getElementById('systemInput').addEventListener('input', () => {
+    updateCounters();
+    saveLocalSystemPrompt();
+    resetLocalSessionForSystemPromptChange();
+  });
+
+  // Tabs
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+      document.getElementById('panel-' + tab).classList.add('active');
+      state.activeTab = tab;
+    });
+  });
+
+  // History controls
+  document.getElementById('historySearch').addEventListener('input', renderHistory);
+  document.getElementById('tagFilter').addEventListener('input', renderHistory);
+  document.getElementById('exportBtn').addEventListener('click', exportHistory);
+  document.getElementById('clearBtn').addEventListener('click', async () => {
+    if (!confirm('Clear ALL history? This cannot be undone.')) return;
+    await clearHistory();
+    renderHistory();
+    toast('History cleared.', 'neutral');
+  });
+  document.getElementById('importFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await importHistory(file);
+      renderHistory();
+      toast('History imported.', 'success');
+    } catch(err) {
+      toast('Import failed: ' + err.message, 'error');
+    }
+    e.target.value = '';
+  });
+
+  // Recheck
+  document.getElementById('recheckBtn').addEventListener('click', checkModelAvailability);
+
+  // Experiments
+  document.getElementById('expSummarize').addEventListener('click', async () => {
+    const text = await readClipboardText();
+    if (!text) return;
+    document.getElementById('promptInput').value = 'Summarize the following text concisely:\n\n' + text;
+    updateCounters();
+    toast('Pasted from clipboard. Switch to Prompt tab and click Run.', 'neutral');
+  });
+  document.getElementById('expClassify').addEventListener('click', async () => {
+    const text = await readClipboardText();
+    if (!text) return;
+    document.getElementById('promptInput').value = 'Classify the following note into categories and provide a one-line summary:\n\n' + text;
+    updateCounters();
+    toast('Pasted from clipboard. Switch to Prompt tab and click Run.', 'neutral');
+  });
+  document.getElementById('expRewrite').addEventListener('click', () => {
+    const sel = window.getSelection().toString();
+    if (!sel) { toast('Select some text in the response area first.', 'warning'); return; }
+    document.getElementById('promptInput').value = 'Rewrite the following text to be clearer and more concise:\n\n' + sel;
+    updateCounters();
+    toast('Loaded selected text. Switch to Prompt tab and click Run.', 'neutral');
+  });
+  document.getElementById('expJson').addEventListener('click', async () => {
+    const text = await readClipboardText();
+    if (!text) return;
+    document.getElementById('promptInput').value = 'Convert the following messy text into clean, valid JSON with appropriate keys and structure:\n\n' + text;
+    updateCounters();
+    toast('Pasted from clipboard. Switch to Prompt tab and click Run.', 'neutral');
+  });
+
+  // Gemini controls
+  document.getElementById('compareToggle').addEventListener('click', () => {
+    geminiState.compareEnabled = !geminiState.compareEnabled;
+    saveGeminiSettings();
+    updateUI();
+  });
+  document.getElementById('compareToggle').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      geminiState.compareEnabled = !geminiState.compareEnabled;
+      saveGeminiSettings();
+      updateUI();
+    }
+  });
+
+  document.getElementById('showKeyBtn').addEventListener('click', () => {
+    const input = document.getElementById('geminiApiKey');
+    input.type = input.type === 'password' ? 'text' : 'password';
+    document.getElementById('showKeyBtn').textContent = input.type === 'password' ? 'Show' : 'Hide';
+  });
+  document.getElementById('saveKeyBtn').addEventListener('click', () => {
+    geminiState.apiKey = document.getElementById('geminiApiKey').value.trim();
+    saveGeminiSettings();
+    renderAdminUI();
+    toast('Key saved locally.', 'success');
+  });
+  document.getElementById('clearKeyBtn').addEventListener('click', () => {
+    geminiState.apiKey = '';
+    geminiState.selectedModel = '';
+    saveGeminiSettings();
+    document.getElementById('geminiApiKey').value = '';
+    renderAdminUI();
+    toast('Key cleared.', 'neutral');
+  });
+  document.getElementById('showKeyPreview').addEventListener('change', renderAdminUI);
+
+  document.getElementById('fetchModelsBtn').addEventListener('click', fetchGeminiModels);
+  document.getElementById('refreshModelsBtn').addEventListener('click', fetchGeminiModels);
+  document.getElementById('clearModelsBtn').addEventListener('click', () => {
+    geminiState.availableModels = [];
+    geminiState.modelsLastFetchedAt = null;
+    saveGeminiSettings();
+    renderAdminUI();
+    toast('Cached models cleared.', 'neutral');
+  });
+  document.getElementById('showAllModels').addEventListener('change', renderAdminUI);
+  document.getElementById('geminiModelSelect').addEventListener('change', (e) => {
+    geminiState.selectedModel = e.target.value;
+    geminiState.modelSource = 'listed';
+    saveGeminiSettings();
+    renderAdminUI();
+  });
+  document.getElementById('useCustomModel').addEventListener('change', (e) => {
+    if (e.target.checked) {
+      geminiState.modelSource = 'custom';
+    } else {
+      geminiState.modelSource = 'listed';
+    }
+    saveGeminiSettings();
+    renderAdminUI();
+  });
+  document.getElementById('customModelInput').addEventListener('input', (e) => {
+    geminiState.customModel = e.target.value.trim();
+    saveGeminiSettings();
+  });
+  document.getElementById('askGeminiDefault').addEventListener('change', (e) => {
+    geminiState.compareEnabled = e.target.checked;
+    saveGeminiSettings();
+    updateUI();
+  });
+  document.getElementById('testGeminiBtn').addEventListener('click', testGeminiConnection);
+  document.getElementById('testGeminiPromptBtn').addEventListener('click', async () => {
+    const prompt = document.getElementById('promptInput').value;
+    if (!prompt.trim()) { toast('Enter a prompt first.', 'warning'); return; }
+    try {
+      await runGeminiPrompt(prompt, '', { target: 'compare' });
+      toast('Gemini-only prompt complete.', 'success');
+    } catch (e) {
+      toast('Gemini-only prompt failed: ' + e.message, 'error');
+    }
+  });
+
+  // Comparison copy buttons
+  document.getElementById('localCopyBtn').addEventListener('click', () => copyToClipboard(document.getElementById('localOutputArea').textContent));
+  document.getElementById('geminiCopyBtn').addEventListener('click', () => copyToClipboard(document.getElementById('geminiOutputArea').textContent));
+
+  // Init renderers
+  renderTemplates();
+  renderHistory();
+  updateCounters();
+  updateUI();
+  updateStorageEstimate();
+  renderAdminUI();
+
+  // Auto-check after short delay
+  setTimeout(() => {
+    if (typeof window.LanguageModel !== 'undefined') {
+      checkModelAvailability();
+    }
+  }, 400);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
