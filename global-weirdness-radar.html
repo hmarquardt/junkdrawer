@@ -1,0 +1,1835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Global Weirdness Radar</title>
+<link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="shortcut icon" href="favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="Junk Drawer" />
+<link rel="manifest" href="site.webmanifest" />
+<style>
+/* ============================================================
+   Global Weirdness Radar — Single-file, zero-dependency
+   Aesthetic: Dark control-room / paranormal radar station
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg-desk: #0b0f0b;
+  --bg-panel: #121712;
+  --bg-card: #0f140f;
+  --text-main: #d8e8d8;
+  --text-muted: #7a8f7a;
+  --text-dim: #556655;
+  --neon-green: #00ff41;
+  --neon-cyan: #00f0ff;
+  --neon-amber: #ffbf00;
+  --neon-red: #ff2a2a;
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --shadow-card: 0 0 8px rgba(0,255,65,0.08), 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lift: 0 0 16px rgba(0,255,65,0.12), 0 8px 24px rgba(0,0,0,0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg-desk);
+  color: var(--text-main);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+/* Noise & scanlines */
+.noise-overlay {
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+.scanlines {
+  position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.12) 2px,
+    rgba(0,0,0,0.12) 4px
+  );
+}
+
+/* Layout */
+.app-container {
+  max-width: 1600px; margin: 0 auto; padding: 1rem;
+  display: grid; grid-template-columns: 1fr; gap: 1rem;
+}
+
+/* Header */
+.header-card {
+  background: var(--bg-panel);
+  border: 1px solid #1f2a1f;
+  border-radius: 6px; padding: 1rem 1.25rem;
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  box-shadow: var(--shadow-card);
+}
+.header-card h1 {
+  margin: 0; font-size: 1.5rem; letter-spacing: -0.02em;
+  color: var(--neon-green); text-shadow: 0 0 8px rgba(0,255,65,0.25);
+}
+.header-card p {
+  margin: 0.15rem 0 0; color: var(--text-muted); font-size: 0.9rem;
+}
+
+/* LEDs */
+.led {
+  width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  background: #333; box-shadow: inset 0 1px 2px rgba(0,0,0,0.5); flex-shrink: 0;
+}
+.led-green { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green), inset 0 -1px 2px rgba(0,0,0,0.3); }
+.led-cyan { background: var(--neon-cyan); box-shadow: 0 0 8px var(--neon-cyan), inset 0 -1px 2px rgba(0,0,0,0.3); }
+.led-amber { background: var(--neon-amber); box-shadow: 0 0 8px var(--neon-amber), inset 0 -1px 2px rgba(0,0,0,0.3); }
+.led-red { background: var(--neon-red); box-shadow: 0 0 8px var(--neon-red), inset 0 -1px 2px rgba(0,0,0,0.3); }
+.led-gray { background: #555; box-shadow: inset 0 1px 2px rgba(0,0,0,0.4); }
+
+/* Status bar */
+.status-bar {
+  background: var(--bg-panel); border: 1px solid #1f2a1f; border-radius: 6px;
+  padding: 0.6rem 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.2rem;
+  align-items: center; font-size: 0.82rem; color: #8faa8f;
+}
+.status-bar strong { color: #b8d8b8; }
+.scan-progress {
+  background: var(--bg-panel); border: 1px solid #1f2a1f; border-radius: 6px;
+  padding: 0.65rem 1rem; display: grid; gap: 0.45rem;
+}
+.progress-head {
+  display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  color: #8faa8f; font-size: 0.82rem; font-family: var(--font-mono);
+}
+.progress-track {
+  height: 8px; background: #0a0f0a; border: 1px solid #2a3a2a;
+  border-radius: 999px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; width: 0%; background: linear-gradient(90deg, var(--neon-green), var(--neon-cyan));
+  transition: width 0.25s ease;
+}
+
+/* Controls */
+.control-panel {
+  background: var(--bg-panel); border: 1px solid #1f2a1f; border-radius: 6px;
+  padding: 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem;
+}
+.control-panel label { font-size: 0.8rem; color: #8faa8f; margin-bottom: 0.25rem; display: block; }
+.control-panel input, .control-panel select, .control-panel textarea {
+  width: 100%; background: #0a0f0a; border: 1px solid #2a3a2a; border-radius: 4px; padding: 0.45rem 0.55rem;
+  font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-main); outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s; resize: vertical;
+}
+.control-panel input:focus, .control-panel select:focus, .control-panel textarea:focus {
+  border-color: var(--neon-green); box-shadow: 0 0 0 3px rgba(0,255,65,0.08);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.5rem 0.85rem; border-radius: 4px; border: 1px solid transparent;
+  cursor: pointer; font-family: var(--font-body); font-size: 0.85rem; font-weight: 500;
+  background: #1a221a; color: #e0f0e0; border-color: #2a3a2a;
+  transition: transform 0.08s, background 0.15s, box-shadow 0.15s;
+}
+.btn:hover { background: #223022; border-color: #3a4a3a; }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+.btn-accent { background: var(--neon-green); color: #000; border-color: var(--neon-green); box-shadow: 0 0 10px rgba(0,255,65,0.15); }
+.btn-accent:hover { filter: brightness(1.08); }
+.btn-danger { background: rgba(255,42,42,0.08); color: #ff5f5f; border-color: rgba(255,42,42,0.35); }
+.btn-sm { padding: 0.35rem 0.55rem; font-size: 0.78rem; }
+
+/* Tabs */
+.tab-nav { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.tab-btn {
+  background: transparent; border: 1px solid #2a3a2a; color: #8faa8f;
+  padding: 0.45rem 1rem; border-radius: 4px; cursor: pointer;
+  font-family: var(--font-body); font-size: 0.9rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { background: rgba(0,255,65,0.05); }
+.tab-btn.active {
+  background: rgba(0,255,65,0.12); color: var(--neon-green); border-color: rgba(0,255,65,0.35);
+  font-weight: 600;
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* Cards */
+.card {
+  background: var(--bg-card); border: 1px solid #1f2a1f; border-radius: 6px;
+  padding: 1rem; position: relative; overflow: hidden;
+  box-shadow: var(--shadow-card); transition: box-shadow 0.2s, transform 0.15s;
+}
+.card:hover { box-shadow: var(--shadow-lift); }
+
+/* Article cards */
+.article-card {
+  background: #0f140f; border: 1px solid #1f2a1f; border-radius: 6px; padding: 0.9rem;
+  position: relative; overflow: hidden;
+}
+.article-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(to bottom, rgba(0,255,65,0.35), transparent); opacity: 0.8;
+}
+.article-card.weird-high::before { background: linear-gradient(to bottom, var(--neon-red), transparent); }
+.article-card.weird-mid::before { background: linear-gradient(to bottom, var(--neon-amber), transparent); }
+.article-title { font-size: 1rem; font-weight: 600; margin: 0 0 0.3rem; color: #e8f8e8; }
+.article-meta { font-size: 0.78rem; color: #6a8a6a; font-family: var(--font-mono); }
+.article-score {
+  position: absolute; top: 0.6rem; right: 0.7rem;
+  font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700;
+  color: var(--neon-green); text-shadow: 0 0 6px rgba(0,255,65,0.25);
+}
+.article-tags { margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.tag-chip {
+  display: inline-block; font-size: 0.7rem; background: #1a2a1a; color: #8faa8f;
+  padding: 0.1rem 0.4rem; border-radius: 3px; border: 1px solid #2a3a2a;
+}
+.tag-chip.accent { color: var(--neon-green); border-color: rgba(0,255,65,0.35); }
+
+/* Radar canvas */
+.radar-container {
+  position: relative; width: 100%; height: 520px; background: radial-gradient(circle at center, #0f1f0f 0%, #0a0f0a 70%);
+  border: 1px solid #1f2a1f; border-radius: 6px; overflow: hidden;
+}
+#radarCanvas { width: 100%; height: 100%; display: block; }
+
+/* Feed grid */
+.feed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.75rem; }
+
+/* Cluster list */
+.cluster-card {
+  background: #0f140f; border: 1px solid #1f2a1f; border-radius: 6px; padding: 0.9rem;
+}
+.log-list { display: grid; gap: 0.65rem; }
+.log-entry {
+  background: #0f140f; border: 1px solid #1f2a1f; border-radius: 6px;
+  padding: 0.8rem; border-left: 3px solid var(--neon-green);
+}
+.log-entry.error { border-left-color: var(--neon-red); }
+.log-entry pre {
+  margin: 0.35rem 0 0; white-space: pre-wrap; word-break: break-word;
+  color: #8faa8f; font-family: var(--font-mono); font-size: 0.78rem;
+}
+
+/* Toast */
+.toast-container {
+  position: fixed; bottom: 1rem; right: 1rem; z-index: 10000;
+  display: flex; flex-direction: column; gap: 0.5rem; pointer-events: none;
+}
+.toast {
+  background: var(--bg-panel); color: var(--text-main); padding: 0.75rem 1rem;
+  border-radius: 6px; border-left: 3px solid var(--neon-green);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45); font-size: 0.9rem; pointer-events: auto;
+  opacity: 0; transform: translateY(8px); animation: toastIn 0.25s forwards ease;
+}
+@keyframes toastIn { to { opacity: 1; transform: translateY(0); } }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334433; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #445544; }
+
+/* Utility */
+.small { font-size: 0.8rem; color: var(--text-muted); }
+.mono { font-family: var(--font-mono); }
+pre { background: #0a0f0a; padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.82rem; }
+code { font-family: var(--font-mono); background: rgba(0,255,65,0.06); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.9em; }
+a { color: var(--neon-cyan); }
+a:hover { color: #80f8ff; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--neon-green); outline-offset: 2px;
+}
+
+/* Detail drawer */
+.drawer-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 9000; display: none;
+}
+.drawer-overlay.open { display: block; }
+.drawer {
+  position: fixed; right: 0; top: 0; bottom: 0; width: min(520px, 90vw);
+  background: var(--bg-panel); border-left: 1px solid #1f2a1f;
+  padding: 1.25rem; overflow-y: auto; z-index: 9001; transform: translateX(100%);
+  transition: transform 0.25s ease;
+}
+.drawer.open { transform: translateX(0); }
+
+/* View transitions helper */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation-duration: 0.25s;
+}
+
+/* Radar sweep animation via CSS on an overlay element (optional decorative) */
+@keyframes sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+</style>
+</head>
+<body>
+<div class="noise-overlay"></div>
+<div class="scanlines"></div>
+
+<div class="app-container">
+  <!-- Header -->
+  <header class="header-card">
+    <div>
+      <h1>Global Weirdness Radar</h1>
+      <p>Tracking the world’s open-news nervous system for spikes in strange.</p>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:0.4rem;">
+        <span class="led" id="gdeltLed" aria-hidden="true"></span>
+        <span class="small mono" id="gdeltStatus">Idle</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.4rem;">
+        <span class="led" id="aiLed" aria-hidden="true"></span>
+        <span class="small mono" id="aiStatus">AI not checked</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.4rem;">
+        <span class="led" id="storageLed" aria-hidden="true"></span>
+        <span class="small mono" id="storageStatus">—</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <button class="btn btn-accent" id="runScanBtn">Run Scan</button>
+        <button class="btn" id="startAutoBtn">Start Auto-Watch</button>
+        <button class="btn" id="pauseAutoBtn" disabled>Pause Auto-Watch</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Status bar -->
+  <section class="status-bar" id="statusBar">
+    <div><strong>Last scan:</strong> <span id="lastScanTime">—</span></div>
+    <div><strong>Next scan:</strong> <span id="nextScanTime">—</span></div>
+    <div><strong>Stored items:</strong> <span id="storedCount">—</span></div>
+    <div><strong>Auto-watch:</strong> <span id="autoWatchStatus">Off</span></div>
+    <div style="margin-left:auto;max-width:340px;" class="small">
+      GDELT is a media-monitoring dataset. Coverage signals do not verify truth. AI summaries use metadata only.
+    </div>
+  </section>
+
+  <!-- file:// warning -->
+  <div id="fileWarning" class="card" style="display:none;background:rgba(255,42,42,0.06);border-color:rgba(255,42,42,0.25);">
+    <div style="display:flex;align-items:center;gap:0.6rem;">
+      <span class="led led-red" aria-hidden="true"></span>
+      <div style="font-size:0.85rem;color:#ff8f8f;">
+        <strong>Opened via file://</strong> — Browser security may block API requests.
+        Serve via localhost instead: <code>python3 -m http.server 8000</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <section class="control-panel" id="controlPanel">
+    <div style="grid-column: 1 / -1;">
+      <label for="queryInput">Query</label>
+      <textarea id="queryInput" rows="2" placeholder="GDELT query…">(bizarre OR strange OR weird OR unusual OR unexpected OR viral OR mystery)</textarea>
+    </div>
+    <div>
+      <label>Presets</label>
+      <div id="presetButtons" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+    </div>
+    <div>
+      <label for="timespanSelect">Timespan</label>
+      <select id="timespanSelect">
+        <option value="15min">Last 15 minutes</option>
+        <option value="1h">Last hour</option>
+        <option value="6h" selected>Last 6 hours</option>
+        <option value="24h">Last 24 hours</option>
+        <option value="3d">Last 3 days</option>
+        <option value="7d">Last 7 days</option>
+      </select>
+    </div>
+    <div>
+      <label for="intervalSelect">Poll interval</label>
+      <select id="intervalSelect">
+        <option value="0" selected>Manual only</option>
+        <option value="5">5 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="60">1 hour</option>
+      </select>
+    </div>
+    <div>
+      <label for="maxRecordsInput">Max records / scan</label>
+      <input type="number" id="maxRecordsInput" value="50" min="1" max="250">
+    </div>
+    <div>
+      <label for="sortSelect">Sort</label>
+      <select id="sortSelect">
+        <option value="DateDesc">Newest</option>
+        <option value="HybridRel" selected>HybridRel</option>
+        <option value="ToneDesc">Tone intensity</option>
+        <option value="ToneAsc">Tone calm</option>
+      </select>
+    </div>
+    <div>
+      <label for="langSelect">Language</label>
+      <select id="langSelect">
+        <option value="">All</option>
+        <option value="eng" selected>English preferred</option>
+      </select>
+    </div>
+    <div>
+      <label for="scoreThreshold">Score threshold</label>
+      <input type="number" id="scoreThreshold" value="0" min="0" max="100">
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:0.5rem;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-weight:400;">
+        <input type="checkbox" id="aiBriefsToggle"> Use local AI briefs
+      </label>
+      <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-weight:400;">
+        <input type="checkbox" id="resumeAutoToggle"> Resume auto-watch on open
+      </label>
+    </div>
+  </section>
+
+  <section class="scan-progress" aria-live="polite">
+    <div class="progress-head">
+      <span id="scanProgressLabel">Idle</span>
+      <span id="scanProgressCount">0 / 0</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="scanProgressFill"></div></div>
+  </section>
+
+  <!-- Tabs -->
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+    <div class="tab-nav" role="tablist" aria-label="Main tabs">
+      <button class="tab-btn active" role="tab" aria-selected="true" data-tab="radar" id="tab-btn-radar">Radar</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="feed" id="tab-btn-feed">Feed</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="clusters" id="tab-btn-clusters">Clusters</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="briefing" id="tab-btn-briefing">Briefing Desk</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="archive" id="tab-btn-archive">Archive</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="log" id="tab-btn-log">Log</button>
+      <button class="tab-btn" role="tab" aria-selected="false" data-tab="admin" id="tab-btn-admin">Admin</button>
+    </div>
+  </div>
+
+  <!-- RADAR -->
+  <div id="panel-radar" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-radar">
+    <div class="radar-container" id="radarContainer">
+      <canvas id="radarCanvas"></canvas>
+      <div style="position:absolute;top:0.5rem;left:0.6rem;font-family:var(--font-mono);font-size:0.75rem;color:#6a8a6a;pointer-events:none;">
+        RADAR • <span id="radarBlipCount">0</span> blips
+      </div>
+    </div>
+  </div>
+
+  <!-- FEED -->
+  <div id="panel-feed" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-feed">
+    <div id="feedFilters" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;"></div>
+    <div id="feedContent" class="feed-grid"></div>
+    <div id="feedEmpty" style="padding:2rem;color:#556655;text-align:center;display:none;">No articles match current filters.</div>
+  </div>
+
+  <!-- CLUSTERS -->
+  <div id="panel-clusters" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-clusters">
+    <div id="clustersContent"></div>
+  </div>
+
+  <!-- BRIEFING -->
+  <div id="panel-briefing" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-briefing">
+    <div class="card" style="margin-bottom:1rem;">
+      <h3 style="margin-top:0;">Generate Report</h3>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button class="btn" data-report="lastScan">Last scan brief</button>
+        <button class="btn" data-report="24h">Last 24h weirdness</button>
+        <button class="btn" data-report="top10">Top 10 weirdest</button>
+        <button class="btn" data-report="ideas">Content ideas</button>
+        <button class="btn" data-report="caution">“Do not touch” caution list</button>
+      </div>
+      <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button class="btn btn-sm" id="copyReportBtn">Copy Markdown</button>
+        <button class="btn btn-sm" id="saveReportBtn">Save File</button>
+      </div>
+    </div>
+    <div id="briefingOutput" class="card" style="white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);font-size:0.9rem;"></div>
+  </div>
+
+  <!-- ARCHIVE -->
+  <div id="panel-archive" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-archive">
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap;">
+      <input type="text" id="archiveSearch" placeholder="Search archive…" style="flex:1;min-width:200px;" aria-label="Search archive">
+      <button class="btn btn-sm" id="archiveExportBtn">Export JSON</button>
+      <label class="btn btn-sm" style="cursor:pointer;" tabindex="0" role="button" aria-label="Import archive JSON">
+        Import JSON
+        <input type="file" id="archiveImportFile" accept=".json,application/json" style="display:none;" aria-hidden="true">
+      </label>
+      <button class="btn btn-sm btn-danger" id="archiveClearBtn">Clear Archive</button>
+    </div>
+    <div id="archiveContent"></div>
+  </div>
+
+  <!-- LOG -->
+  <div id="panel-log" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-log">
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap;">
+      <button class="btn btn-sm" id="refreshLogBtn">Refresh Log</button>
+      <button class="btn btn-sm btn-danger" id="clearLogBtn">Clear Log</button>
+    </div>
+    <div class="log-list" id="scanLogContent"></div>
+  </div>
+
+  <!-- ADMIN -->
+  <div id="panel-admin" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-admin">
+    <div class="card" style="margin-bottom:1rem;">
+      <h3 style="margin-top:0;">Diagnostics</h3>
+      <pre id="adminDiagnostics" style="min-height:120px;"></pre>
+    </div>
+    <div class="card" style="margin-bottom:1rem;">
+      <h3 style="margin-top:0;">Local AI</h3>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button class="btn" id="checkAiBtn">Check local AI</button>
+        <button class="btn" id="createAiBtn">Create AI session</button>
+        <button class="btn btn-danger" id="resetAiBtn">Reset AI session</button>
+      </div>
+      <div id="aiDiagnostics" style="margin-top:0.75rem;font-family:var(--font-mono);font-size:0.85rem;color:#6a8a6a;"></div>
+    </div>
+    <div class="card" style="margin-bottom:1rem;">
+      <h3 style="margin-top:0;">Presets</h3>
+      <div id="presetEditor"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">About / Data Sources</h3>
+      <ul style="font-size:0.85rem;color:#8faa8f;line-height:1.65;padding-left:1.2rem;">
+        <li><a href="https://www.gdeltproject.org/" target="_blank" rel="noopener">GDELT Project</a></li>
+        <li><a href="https://www.gdeltproject.org/data.html" target="_blank" rel="noopener">GDELT data/querying</a></li>
+        <li><a href="https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/" target="_blank" rel="noopener">GDELT DOC 2.0 API</a></li>
+        <li><a href="https://gdelt.github.io/" target="_blank" rel="noopener">GDELT API Explorer</a></li>
+        <li><a href="https://developer.chrome.com/docs/ai/get-started" target="_blank" rel="noopener">Chrome built-in AI</a></li>
+      </ul>
+      <p class="small" style="margin-top:0.5rem;">
+        This app does not verify the truth of linked articles. It analyzes coverage signals and metadata only.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Drawer -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<div class="drawer" id="detailDrawer"></div>
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.05.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.05.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  <span>Copyright &copy; 2026 Hank Marquardt.</span> <span>Version 2026.05.05.1.</span>
+</footer>
+
+<script>
+/* ============================================================
+   Global Weirdness Radar — JavaScript
+   ============================================================ */
+
+const state = {
+  activeTab: 'radar',
+  scanning: false,
+  autoWatch: false,
+  nextPollAt: null,
+  lastScan: null,
+  lastRequestUrl: '',
+  aiSession: null,
+  aiAvailable: null,
+  pollTimer: null,
+  backoffMs: 0,
+  articles: [],
+  recentIds: new Set(),
+  settings: {}
+};
+
+const DB_NAME = 'globalWeirdnessRadarDB';
+const DB_VERSION = 1;
+let dbPromise = null;
+
+const DEFAULT_PRESETS = [
+  { id: 'ai-panic', label: 'AI panic', query: '(artificial intelligence OR AI OR chatbot OR "large language model") (panic OR threat OR backlash OR regulation OR lawsuit)' },
+  { id: 'crypto', label: 'Crypto chaos', query: '(bitcoin OR crypto OR cryptocurrency OR ethereum) (crash OR surge OR hack OR fraud OR ETF OR liquidation)' },
+  { id: 'political', label: 'Political absurdity', query: '(election OR senator OR president OR parliament OR mayor) (scandal OR bizarre OR viral OR outrage OR conspiracy)' },
+  { id: 'disaster', label: 'Natural disasters', query: '(earthquake OR flood OR wildfire OR volcano OR hurricane OR tornado OR landslide)' },
+  { id: 'protests', label: 'Protests', query: '(protest OR riot OR demonstration OR strike OR unrest)' },
+  { id: 'celebrity', label: 'Celebrity weirdness', query: '(celebrity OR influencer OR star OR actor) (scandal OR bizarre OR viral OR lawsuit OR leaked)' },
+  { id: 'animals', label: 'Animals being ridiculous', query: '(animal OR raccoon OR monkey OR cow OR bear OR alligator OR cat OR dog) (escaped OR stole OR attacked OR rescued OR invaded OR viral)' },
+  { id: 'tech-dystopia', label: 'Tech dystopia', query: '(surveillance OR facial recognition OR algorithm OR robot OR drone OR AI) (privacy OR banned OR lawsuit OR controversy)' },
+  { id: 'elections', label: 'Elections', query: '(election OR vote OR ballot OR campaign) (fraud OR irregularity OR recount OR turnout OR upset)' },
+  { id: 'health', label: 'Disease / health scares', query: '(outbreak OR epidemic OR virus OR disease OR health scare OR pandemic OR contamination)' },
+  { id: 'conflict', label: 'War and conflict', query: '(war OR conflict OR airstrike OR invasion OR ceasefire OR military operation OR border clash)' },
+  { id: 'climate', label: 'Climate weirdness', query: '(climate OR global warming OR extreme weather OR heatwave OR drought OR ice melt OR record temperature)' },
+  { id: 'space', label: 'UFO / space / unexplained', query: '(UFO OR UAP OR meteor OR asteroid OR satellite OR space debris OR aurora OR unexplained)' },
+  { id: 'everything', label: 'Everything weird', query: '(bizarre OR strange OR weird OR unusual OR unexpected OR viral OR mystery)' }
+];
+
+const WEIRDNESS_KEYWORDS = {
+  chaos: ['chaos','collapse','meltdown','crisis','emergency','panic','frenzy','mayhem','anarchy','bedlam'],
+  absurdity: ['absurd','bizarre','weird','strange','ridiculous','nonsensical','outrageous','preposterous','ludicrous'],
+  conflict: ['war','airstrike','invasion','ceasefire','clash','battle','combat','shelling','casualties','refugees'],
+  disaster: ['earthquake','flood','wildfire','volcano','hurricane','tornado','landslide','tsunami','avalanche','drought'],
+  techDystopia: ['surveillance','facial recognition','algorithmic','privacy breach','data leak','AI takeover','autonomous weapon','deepfake','doxxing'],
+  cryptoMarkets: ['bitcoin','crypto','cryptocurrency','ethereum','nft','blockchain','liquidation','rug pull','exchange hack','sec investigation'],
+  politicalTheater: ['scandal','impeachment','resignation','corruption probe','bribery','vote rigging','coup','parliamentary brawl','filibuster','cover-up'],
+  animalWeirdness: ['raccoon','monkey','cow','bear','alligator','cat','dog','elephant','kangaroo','escaped','stole','invaded','rescued','viral animal'],
+  spaceUnexplained: ['ufo','uap','meteor','asteroid','space debris','aurora','unexplained','alien','satellite collision','rocket failure'],
+  celebrityWeirdness: ['celebrity','influencer','star','actor','leaked','scandal','lawsuit','divorce','arrested','rehab','cancelled']
+};
+
+function getDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('articles')) {
+        const articles = db.createObjectStore('articles', { keyPath: 'id' });
+        articles.createIndex('fetchedAt', 'fetchedAt', { unique: false });
+        articles.createIndex('seendate', 'seendate', { unique: false });
+        articles.createIndex('weirdnessScore', 'weirdnessScore', { unique: false });
+        articles.createIndex('query', 'query', { unique: false });
+        articles.createIndex('domain', 'domain', { unique: false });
+        articles.createIndex('sourceCountry', 'sourceCountry', { unique: false });
+        articles.createIndex('clusterKey', 'clusterKey', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('scans')) {
+        db.createObjectStore('scans', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains('settings')) {
+        db.createObjectStore('settings', { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains('clusters')) {
+        db.createObjectStore('clusters', { keyPath: 'key' });
+      }
+    };
+  });
+  return dbPromise;
+}
+
+async function dbPut(store, value) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const s = tx.objectStore(store);
+    const req = s.put(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGet(store, key) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const s = tx.objectStore(store);
+    const req = s.get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGetAll(store) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readonly');
+    const s = tx.objectStore(store);
+    const req = s.getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbDelete(store, key) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const s = tx.objectStore(store);
+    const req = s.delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbClear(store) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const s = tx.objectStore(store);
+    const req = s.clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function loadSettings() {
+  const s = await dbGet('settings', 'main');
+  if (s && s.value) {
+    state.settings = s.value;
+  } else {
+    state.settings = {
+      query: DEFAULT_PRESETS[DEFAULT_PRESETS.length - 1].query,
+      presetId: 'everything',
+      timespan: '6h',
+      intervalMinutes: 0,
+      maxRecords: 50,
+      sort: 'HybridRel',
+      language: 'eng',
+      scoreThreshold: 0,
+      aiBriefs: false,
+      resumeAuto: false,
+      presets: JSON.parse(JSON.stringify(DEFAULT_PRESETS)),
+      maxAiPerScan: 5
+    };
+  }
+}
+
+async function saveSettings() {
+  await dbPut('settings', { key: 'main', value: state.settings });
+}
+
+/* -----------------------------------------------------------
+   Utilities
+   ----------------------------------------------------------- */
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function toast(msg, type = 'neutral') {
+  const container = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  const colors = { success: 'var(--neon-green)', error: 'var(--neon-red)', warning: 'var(--neon-amber)', neutral: 'var(--neon-cyan)' };
+  t.style.borderLeftColor = colors[type] || colors.neutral;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.style.transition = 'opacity 0.3s, transform 0.3s';
+    t.style.opacity = '0'; t.style.transform = 'translateY(10px)';
+    setTimeout(() => t.remove(), 300);
+  }, 3400);
+}
+
+function hashString(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h).toString(36);
+}
+
+function formatDate(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return isNaN(d) ? String(ts) : d.toLocaleString();
+}
+
+function setScanProgress(label, current, total) {
+  const safeTotal = Math.max(0, total || 0);
+  const safeCurrent = Math.max(0, current || 0);
+  const pct = safeTotal ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100)) : 0;
+  document.getElementById('scanProgressLabel').textContent = label || 'Idle';
+  document.getElementById('scanProgressCount').textContent = safeTotal ? `${safeCurrent} / ${safeTotal}` : '0 / 0';
+  document.getElementById('scanProgressFill').style.width = pct + '%';
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+    b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
+  state.activeTab = tab;
+  if (tab === 'feed') renderFeed();
+  if (tab === 'clusters') renderClusters();
+  if (tab === 'archive') renderArchive();
+  if (tab === 'log') renderScanLog();
+  if (tab === 'admin') renderAdminDiagnostics();
+}
+
+/* -----------------------------------------------------------
+   Fetching GDELT
+   ----------------------------------------------------------- */
+function buildGdeltUrl(options) {
+  const u = new URL('https://api.gdeltproject.org/api/v2/doc/doc');
+  u.searchParams.set('query', options.query);
+  u.searchParams.set('mode', 'artlist');
+  u.searchParams.set('format', 'json');
+  u.searchParams.set('maxrecords', String(options.maxRecords || 50));
+  if (options.sort) u.searchParams.set('sort', options.sort);
+  if (options.timespan) u.searchParams.set('timespan', options.timespan);
+  return u.toString();
+}
+
+async function fetchGdeltArticles(options) {
+  const url = buildGdeltUrl(options);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (netErr) {
+    const msg = netErr.message || '';
+    if (location.protocol === 'file:' || msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('cors')) {
+      throw new Error('Network blocked. If you opened this file directly (file://), serve it via localhost instead: python3 -m http.server 8000');
+    }
+    throw netErr;
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`GDELT HTTP ${res.status}. Response snippet: ${text.slice(0,200)}`);
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (jsonErr) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`GDELT returned non-JSON. Snippet: ${text.slice(0,200)}`);
+  }
+  if (Array.isArray(data)) return { url, articles: data };
+  if (data && Array.isArray(data.articles)) return { url, articles: data.articles };
+  if (data && Array.isArray(data.results)) return { url, articles: data.results };
+  // Empty or unexpected shape — treat as empty
+  return { url, articles: [] };
+}
+
+function normalizeGdeltRecord(raw, context) {
+  const url = raw.url || '';
+  const title = (raw.title || raw.seoTitle || '').trim();
+  const id = url ? hashString(url) : hashString(title + (raw.seendate || ''));
+  const domain = raw.domain || '';
+  const lang = raw.language || '';
+  const country = raw.sourcecountry || '';
+  const tone = parseFloat(raw.tone || raw.avgTone || 0);
+  const seendate = raw.seendate || '';
+  return {
+    id,
+    url,
+    title,
+    seendate,
+    sourceCountry: country,
+    sourceCommonName: raw.sourcecommonname || domain,
+    domain,
+    language: lang,
+    socialImage: raw.socialimage || '',
+    tone,
+    query: context.query,
+    preset: context.preset || '',
+    fetchedAt: Date.now(),
+    summary: '',
+    localAiSummary: null,
+    weirdnessScore: 0,
+    weirdnessReasons: [],
+    tags: [],
+    entities: raw.entities || [],
+    clusterKey: '',
+    raw,
+    starred: false,
+    hidden: false
+  };
+}
+
+/* -----------------------------------------------------------
+   Weirdness scoring
+   ----------------------------------------------------------- */
+function scoreWeirdness(record, recentArticles) {
+  let score = 0;
+  const reasons = [];
+  const tags = [];
+  const titleLower = (record.title || '').toLowerCase();
+  const queryLower = (record.query || '').toLowerCase();
+
+  // Tone extremity
+  const toneAbs = Math.abs(record.tone || 0);
+  if (toneAbs > 6) { score += 12; reasons.push('High emotional tone'); }
+  else if (toneAbs > 3) { score += 6; reasons.push('Elevated tone'); }
+
+  // Keyword buckets
+  for (const [bucket, words] of Object.entries(WEIRDNESS_KEYWORDS)) {
+    const matches = words.filter(w => titleLower.includes(w.toLowerCase()));
+    if (matches.length) {
+      score += matches.length * 4;
+      reasons.push(`Matches ${bucket} terms`);
+      tags.push(bucket);
+    }
+  }
+
+  // Absurdity / weirdness direct words
+  const direct = ['bizarre','strange','weird','unexpected','mystery','viral','outrage','shocking'];
+  direct.forEach(w => { if (titleLower.includes(w)) { score += 5; tags.push('weirdness'); } });
+
+  // Recency boost
+  const seen = record.seendate ? new Date(record.seendate) : null;
+  if (seen && !isNaN(seen)) {
+    const hoursAgo = (Date.now() - seen.getTime()) / 3600000;
+    if (hoursAgo < 2) { score += 8; reasons.push('Very recent'); }
+    else if (hoursAgo < 6) { score += 4; reasons.push('Recent'); }
+  }
+
+  // Source diversity / repeat
+  const repeats = recentArticles.filter(a => a.id === record.id).length;
+  if (repeats > 0) { score += repeats * 3; reasons.push('Repeated appearance'); }
+
+  // Country novelty
+  const countryRecent = recentArticles.filter(a => a.sourceCountry === record.sourceCountry).length;
+  if (countryRecent < 2) { score += 3; reasons.push('Novel region'); }
+
+  score = Math.min(100, Math.max(0, score));
+  record.weirdnessScore = score;
+  record.weirdnessReasons = reasons;
+  record.tags = [...new Set(tags)];
+  record.clusterKey = deriveClusterKey(record);
+  return record;
+}
+
+function deriveClusterKey(record) {
+  const title = (record.title || '').toLowerCase();
+  const stopwords = new Set(['the','a','an','is','are','was','were','be','been','being','to','of','and','in','on','at','for','with','as','by','from','that','this','it','has','have','had','not','but','or','so','if','out','up','about','into','through','during','before','after','above','below','between','among','within','without','against','under','over','again','further','then','once','here','there','when','where','why','how','all','any','both','each','few','more','most','other','some','such','no','nor','only','own','same','than','too','very','can','will','just','should','now','new','says','said','report','according','after','people','year','years','time','times','day','days','week','weeks','month','months']);
+  const words = title.split(/[^a-z0-9]+/).filter(w => w.length > 3 && !stopwords.has(w));
+  const top = words.slice(0, 3).sort().join('-');
+  const preset = record.preset || 'general';
+  return preset + '/' + (top || 'uncategorized');
+}
+
+/* -----------------------------------------------------------
+   AI processing
+   ----------------------------------------------------------- */
+async function checkLocalAI() {
+  const aiLed = document.getElementById('aiLed');
+  const aiStatus = document.getElementById('aiStatus');
+  if (typeof window.LanguageModel === 'undefined') {
+    state.aiAvailable = 'unavailable';
+    aiLed.className = 'led led-red';
+    aiStatus.textContent = 'AI unavailable';
+    return;
+  }
+  try {
+    if (typeof LanguageModel.availability === 'function') {
+      const result = await LanguageModel.availability();
+      state.aiAvailable = result;
+      if (result === 'available') { aiLed.className = 'led led-green'; aiStatus.textContent = 'AI ready'; }
+      else if (result === 'downloading') { aiLed.className = 'led led-amber'; aiStatus.textContent = 'AI downloading'; }
+      else { aiLed.className = 'led led-gray'; aiStatus.textContent = `AI ${result}`; }
+    } else {
+      state.aiAvailable = 'unknown';
+      aiLed.className = 'led led-gray'; aiStatus.textContent = 'AI unknown';
+    }
+  } catch (e) {
+    state.aiAvailable = 'error';
+    aiLed.className = 'led led-red'; aiStatus.textContent = 'AI error';
+  }
+}
+
+async function createLocalAISession() {
+  if (typeof window.LanguageModel === 'undefined') { toast('Local AI not available.', 'error'); return; }
+  try {
+    state.aiSession = await LanguageModel.create({});
+    toast('AI session created.', 'success');
+  } catch (e) {
+    toast('AI session failed: ' + e.message, 'error');
+  }
+}
+
+function resetLocalAISession() {
+  if (state.aiSession && typeof state.aiSession.destroy === 'function') {
+    try { state.aiSession.destroy(); } catch (e) {}
+  }
+  state.aiSession = null;
+  toast('AI session reset.', 'neutral');
+}
+
+async function generateAIBrief(record) {
+  if (!state.aiSession) return;
+  const prompt = `You are analyzing a news article metadata record from GDELT.
+Do not claim to have read the full article.
+Use only the title, source, date, tone, query, and metadata provided.
+Return compact JSON:
+{
+  "plainEnglishSummary": "...",
+  "whyItIsInteresting": "...",
+  "contentAngle": "...",
+  "suggestedTags": ["..."],
+  "confidence": "low|medium|high"
+}
+
+Article metadata:
+Title: ${record.title}
+Source: ${record.sourceCommonName || record.domain}
+Country: ${record.sourceCountry}
+Date: ${record.seendate}
+Tone: ${record.tone}
+Query: ${record.query}`;
+
+  try {
+    let text = '';
+    if (typeof state.aiSession.promptStreaming === 'function') {
+      const stream = await state.aiSession.promptStreaming(prompt);
+      if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+        for await (const chunk of stream) {
+          text = (typeof chunk === 'string') ? chunk : String(chunk);
+        }
+      } else if (stream && typeof stream.getReader === 'function') {
+        const reader = stream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          text += (typeof value === 'string') ? value : new TextDecoder().decode(value);
+        }
+      } else {
+        text = String(stream);
+      }
+    } else if (typeof state.aiSession.prompt === 'function') {
+      text = await state.aiSession.prompt(prompt);
+    } else {
+      return;
+    }
+    try {
+      const json = JSON.parse(text.replace(/```json/g,'').replace(/```/g,'').trim());
+      record.localAiSummary = json;
+    } catch (e) {
+      record.localAiSummary = { plainEnglishSummary: text, confidence: 'low' };
+    }
+  } catch (e) {
+    // fail silently per scan limit
+  }
+}
+
+/* -----------------------------------------------------------
+   Storage
+   ----------------------------------------------------------- */
+async function dedupeAndStore(records) {
+  let newCount = 0; let updatedCount = 0;
+  for (const r of records) {
+    const existing = await dbGet('articles', r.id);
+    if (existing) {
+      r.starred = existing.starred || false;
+      r.hidden = existing.hidden || false;
+      r.localAiSummary = existing.localAiSummary || null;
+      await dbPut('articles', r);
+      updatedCount++;
+    } else {
+      await dbPut('articles', r);
+      newCount++;
+    }
+  }
+  return { newCount, updatedCount };
+}
+
+async function loadAllArticles() {
+  state.articles = await dbGetAll('articles');
+  state.recentIds = new Set(state.articles.map(a => a.id));
+  document.getElementById('storedCount').textContent = String(state.articles.length);
+}
+
+async function updateStorageStatus() {
+  const led = document.getElementById('storageLed');
+  const txt = document.getElementById('storageStatus');
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const est = await navigator.storage.estimate();
+      txt.textContent = `${Math.round((est.usage||0)/1024)} KB`;
+      led.className = 'led led-green';
+    } else {
+      txt.textContent = 'OK'; led.className = 'led led-gray';
+    }
+  } catch (e) {
+    txt.textContent = 'Error'; led.className = 'led led-red';
+  }
+}
+
+/* -----------------------------------------------------------
+   Scan orchestration
+   ----------------------------------------------------------- */
+async function runScan() {
+  if (state.scanning) return;
+  state.scanning = true;
+  const gdeltLed = document.getElementById('gdeltLed');
+  const gdeltStatus = document.getElementById('gdeltStatus');
+  gdeltLed.className = 'led led-cyan pulse-active';
+  gdeltStatus.textContent = 'Scanning…';
+  setScanProgress('Preparing GDELT request', 0, 4);
+
+  const query = document.getElementById('queryInput').value.trim();
+  const timespan = document.getElementById('timespanSelect').value;
+  const maxRecords = parseInt(document.getElementById('maxRecordsInput').value, 10) || 50;
+  const sort = document.getElementById('sortSelect').value;
+  const lang = document.getElementById('langSelect').value;
+
+  const presetBtn = document.querySelector('#presetButtons .btn-accent');
+  const presetId = presetBtn ? presetBtn.dataset.preset : '';
+
+  const scanId = 'scan-' + Date.now();
+  const scanRecord = {
+    id: scanId,
+    startedAt: Date.now(),
+    finishedAt: null,
+    query,
+    preset: presetId,
+    requestUrl: '',
+    resultCount: 0,
+    newCount: 0,
+    updatedCount: 0,
+    error: null
+  };
+
+  try {
+    const options = { query, timespan, maxRecords, sort };
+    if (lang) options.query = query + ' sourcelang:' + lang;
+    setScanProgress('Fetching GDELT articles', 1, 4);
+    const { url, articles } = await fetchGdeltArticles(options);
+    state.lastRequestUrl = url;
+    scanRecord.requestUrl = url;
+    scanRecord.resultCount = articles.length;
+
+    setScanProgress(`Scoring ${articles.length} articles`, 2, 4);
+    const recentArticles = state.articles.slice(-200);
+    const normalized = articles.map(a => normalizeGdeltRecord(a, { query, preset: presetId }));
+    normalized.forEach(r => scoreWeirdness(r, recentArticles));
+
+    // AI briefs for top new high-scoring records
+    const aiEnabled = document.getElementById('aiBriefsToggle').checked && state.aiSession;
+    const maxAi = state.settings.maxAiPerScan || 5;
+    if (aiEnabled) {
+      const candidates = normalized.filter(r => !state.recentIds.has(r.id) && r.weirdnessScore >= 30)
+        .sort((a,b) => b.weirdnessScore - a.weirdnessScore).slice(0, maxAi);
+      for (const c of candidates) {
+        try { await generateAIBrief(c); } catch(e) {}
+      }
+    }
+
+    setScanProgress('Saving scan results', 3, 4);
+    const { newCount, updatedCount } = await dedupeAndStore(normalized);
+    scanRecord.newCount = newCount;
+    scanRecord.updatedCount = updatedCount;
+    scanRecord.finishedAt = Date.now();
+
+    await dbPut('scans', scanRecord);
+    await loadAllArticles();
+
+    state.lastScan = Date.now();
+    state.backoffMs = 0;
+    setScanProgress(`Scan complete: ${newCount} new`, 4, 4);
+    toast(`Scan complete. ${newCount} new, ${updatedCount} updated.`, 'success');
+  } catch (e) {
+    scanRecord.error = e.message || String(e);
+    scanRecord.finishedAt = Date.now();
+    scanRecord.requestUrl = state.lastRequestUrl || '';
+    await dbPut('scans', scanRecord);
+    setScanProgress('Scan failed', 4, 4);
+    toast('Scan failed: ' + scanRecord.error + (state.lastRequestUrl ? ' (see URL in Admin)' : ''), 'error');
+    state.backoffMs = Math.min(300000, (state.backoffMs || 0) + 60000);
+  } finally {
+    state.scanning = false;
+    gdeltLed.className = state.backoffMs > 0 ? 'led led-amber' : 'led led-green';
+    gdeltStatus.textContent = state.backoffMs > 0 ? 'Backoff' : 'Ready';
+    updateScanTimes();
+    updateStorageStatus();
+    if (state.activeTab === 'feed') renderFeed();
+    if (state.activeTab === 'clusters') renderClusters();
+    if (state.activeTab === 'archive') renderArchive();
+    if (state.activeTab === 'log') renderScanLog();
+    if (state.activeTab === 'radar') renderRadarBlips();
+  }
+}
+
+function updateScanTimes() {
+  document.getElementById('lastScanTime').textContent = state.lastScan ? formatDate(state.lastScan) : '—';
+  document.getElementById('nextScanTime').textContent = state.nextPollAt ? formatDate(state.nextPollAt) : '—';
+}
+
+function startAutoWatch() {
+  if (state.autoWatch) return;
+  const mins = parseInt(document.getElementById('intervalSelect').value, 10);
+  if (!mins || mins < 5) { toast('Select an interval of at least 5 minutes.', 'warning'); return; }
+  state.autoWatch = true;
+  document.getElementById('startAutoBtn').disabled = true;
+  document.getElementById('pauseAutoBtn').disabled = false;
+  document.getElementById('autoWatchStatus').textContent = 'On (' + mins + 'm)';
+  scheduleNextPoll();
+  toast('Auto-watch started.', 'success');
+}
+
+function pauseAutoWatch() {
+  state.autoWatch = false;
+  if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
+  document.getElementById('startAutoBtn').disabled = false;
+  document.getElementById('pauseAutoBtn').disabled = true;
+  document.getElementById('autoWatchStatus').textContent = 'Off';
+  state.nextPollAt = null;
+  updateScanTimes();
+  toast('Auto-watch paused.', 'neutral');
+}
+
+function scheduleNextPoll() {
+  if (!state.autoWatch) return;
+  const mins = parseInt(document.getElementById('intervalSelect').value, 10);
+  const delay = Math.max(300000, mins * 60000 + state.backoffMs);
+  state.nextPollAt = Date.now() + delay;
+  updateScanTimes();
+  state.pollTimer = setTimeout(async () => {
+    if (!state.autoWatch) return;
+    await runScan();
+    scheduleNextPoll();
+  }, delay);
+}
+
+/* -----------------------------------------------------------
+   Radar visualization
+   ----------------------------------------------------------- */
+let radarCtx = null;
+let radarCanvas = null;
+let radarW = 0, radarH = 0;
+let radarBlips = [];
+let radarAngle = 0;
+let radarAnimId = null;
+let webgpuDevice = null;
+let webgpuContext = null;
+let webgpuPipeline = null;
+let webgpuBindGroup = null;
+let useWebGPU = false;
+
+async function initRadar() {
+  radarCanvas = document.getElementById('radarCanvas');
+  if (!radarCanvas) return;
+
+  // Try WebGPU
+  if (navigator.gpu) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        webgpuDevice = await adapter.requestDevice();
+        webgpuContext = radarCanvas.getContext('webgpu');
+        if (webgpuContext) {
+          const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+          webgpuContext.configure({ device: webgpuDevice, format: canvasFormat });
+          useWebGPU = true;
+        }
+      }
+    } catch (e) { useWebGPU = false; }
+  }
+
+  if (!useWebGPU) {
+    radarCtx = radarCanvas.getContext('2d');
+  }
+
+  resizeRadar();
+  window.addEventListener('resize', resizeRadar);
+  startRadarLoop();
+}
+
+function resizeRadar() {
+  const container = document.getElementById('radarContainer');
+  if (!container || !radarCanvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = container.getBoundingClientRect();
+  radarW = Math.floor(rect.width);
+  radarH = Math.floor(rect.height);
+  radarCanvas.width = radarW * dpr;
+  radarCanvas.height = radarH * dpr;
+  radarCanvas.style.width = radarW + 'px';
+  radarCanvas.style.height = radarH + 'px';
+  if (!useWebGPU && radarCtx) {
+    radarCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+
+function renderRadarBlips() {
+  const articles = state.articles.filter(a => !a.hidden);
+  radarBlips = articles.slice(-300).map(a => {
+    const hash = hashString(a.clusterKey || a.id);
+    const angle = (hash % 360) * (Math.PI / 180);
+    const recencyHours = Math.max(0, (Date.now() - (a.fetchedAt || Date.now())) / 3600000);
+    const dist = Math.min(1, recencyHours / 48); // 0 = center (recent), 1 = edge (older)
+    const score = a.weirdnessScore || 0;
+    return { angle, dist, score, title: a.title, id: a.id };
+  });
+  document.getElementById('radarBlipCount').textContent = radarBlips.length;
+}
+
+function startRadarLoop() {
+  if (radarAnimId) cancelAnimationFrame(radarAnimId);
+  function loop() {
+    radarAngle = (radarAngle + 0.008) % (Math.PI * 2);
+    if (useWebGPU && webgpuDevice) {
+      drawRadarWebGPU();
+    } else if (radarCtx) {
+      drawRadarCanvas();
+    }
+    radarAnimId = requestAnimationFrame(loop);
+  }
+  radarAnimId = requestAnimationFrame(loop);
+}
+
+function drawRadarCanvas() {
+  const ctx = radarCtx;
+  const w = radarW, h = radarH;
+  const cx = w / 2, cy = h / 2;
+  const maxR = Math.min(w, h) * 0.42;
+  ctx.clearRect(0, 0, w, h);
+
+  // Background rings
+  ctx.strokeStyle = 'rgba(0,255,65,0.08)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 4; i++) {
+    ctx.beginPath(); ctx.arc(cx, cy, (maxR / 4) * i, 0, Math.PI * 2); ctx.stroke();
+  }
+  // Crosshairs
+  ctx.beginPath(); ctx.moveTo(cx - maxR, cy); ctx.lineTo(cx + maxR, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - maxR); ctx.lineTo(cx, cy + maxR); ctx.stroke();
+
+  // Blips
+  for (const b of radarBlips) {
+    const r = b.dist * maxR;
+    const x = cx + Math.cos(b.angle) * r;
+    const y = cy + Math.sin(b.angle) * r;
+    const size = 1.5 + (b.score / 100) * 3.5;
+    ctx.fillStyle = b.score > 60 ? 'rgba(255,42,42,0.85)' : b.score > 30 ? 'rgba(255,191,0,0.85)' : 'rgba(0,255,65,0.7)';
+    ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Sweep arm
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(radarAngle);
+  const grad = ctx.createLinearGradient(0, 0, maxR, 0);
+  grad.addColorStop(0, 'rgba(0,255,65,0.35)');
+  grad.addColorStop(1, 'rgba(0,255,65,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,maxR, -0.08, 0.08); ctx.fill();
+  ctx.restore();
+}
+
+function drawRadarWebGPU() {
+  // Simplified: clear and draw via compute or fallback; for MVP, use canvas fallback logic via WebGPU render if possible.
+  // Because WebGPU setup is long, we will do a minimal clear here and rely on the canvas fallback for the actual drawing
+  // to keep the file self-contained and stable. The user can still see WebGPU is "detected" in diagnostics.
+  if (!webgpuContext || !webgpuDevice) return;
+  const encoder = webgpuDevice.createCommandEncoder();
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: webgpuContext.getCurrentTexture().createView(),
+      clearValue: { r: 0.04, g: 0.06, b: 0.04, a: 1 },
+      loadOp: 'clear',
+      storeOp: 'store'
+    }]
+  });
+  pass.end();
+  webgpuDevice.queue.submit([encoder.finish()]);
+  // Fallback to canvas on same element is tricky; for robustness, switch to canvas if webgpu not fully implemented
+  useWebGPU = false;
+  radarCtx = radarCanvas.getContext('2d');
+  resizeRadar();
+}
+
+/* -----------------------------------------------------------
+   Feed renderer
+   ----------------------------------------------------------- */
+function renderFeed() {
+  const container = document.getElementById('feedContent');
+  const empty = document.getElementById('feedEmpty');
+  const threshold = parseInt(document.getElementById('scoreThreshold').value, 10) || 0;
+  const search = (document.getElementById('archiveSearch').value || '').toLowerCase();
+
+  let items = state.articles.filter(a => !a.hidden && a.weirdnessScore >= threshold);
+  if (search) {
+    items = items.filter(a =>
+      (a.title || '').toLowerCase().includes(search) ||
+      (a.domain || '').toLowerCase().includes(search) ||
+      a.tags.some(t => t.toLowerCase().includes(search)) ||
+      a.weirdnessReasons.some(r => r.toLowerCase().includes(search))
+    );
+  }
+
+  // simple sort by newest
+  items.sort((a, b) => {
+    const sa = a.seendate ? new Date(a.seendate) : new Date(0);
+    const sb = b.seendate ? new Date(b.seendate) : new Date(0);
+    return sb - sa;
+  });
+
+  container.innerHTML = '';
+  if (items.length === 0) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  items.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'article-card' + (item.weirdnessScore > 60 ? ' weird-high' : item.weirdnessScore > 30 ? ' weird-mid' : '');
+    card.innerHTML = `
+      <div class="article-score">${item.weirdnessScore}</div>
+      <div class="article-title">${escapeHtml(item.title || 'Untitled')}</div>
+      <div class="article-meta">${escapeHtml(item.domain || '')} • ${escapeHtml(item.sourceCountry || '')} • ${formatDate(item.seendate)}</div>
+      <div class="article-tags">${item.tags.map(t => `<span class="tag-chip accent">${escapeHtml(t)}</span>`).join('')} ${item.weirdnessReasons.map(r => `<span class="tag-chip">${escapeHtml(r)}</span>`).join('')}</div>
+      <div style="margin-top:0.5rem;display:flex;gap:0.4rem;flex-wrap:wrap;">
+        <button class="btn btn-sm" data-action="open" data-id="${item.id}">Open source</button>
+        <button class="btn btn-sm" data-action="detail" data-id="${item.id}">Details</button>
+        <button class="btn btn-sm" data-action="copy" data-id="${item.id}">Copy</button>
+        <button class="btn btn-sm" data-action="star" data-id="${item.id}">${item.starred ? 'Unstar' : 'Star'}</button>
+        <button class="btn btn-sm btn-danger" data-action="hide" data-id="${item.id}">Hide</button>
+      </div>
+    `;
+    card.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', (e) => handleFeedAction(e.target.dataset.action, e.target.dataset.id));
+    });
+    container.appendChild(card);
+  });
+}
+
+async function handleFeedAction(action, id) {
+  const item = state.articles.find(a => a.id === id);
+  if (!item) return;
+  if (action === 'open') { window.open(item.url, '_blank', 'noopener'); }
+  if (action === 'detail') { openDetailDrawer(id); }
+  if (action === 'copy') { await copyToClipboard(`${item.title}\n${item.url}\nScore: ${item.weirdnessScore}\nTags: ${item.tags.join(', ')}`); }
+  if (action === 'star') { item.starred = !item.starred; await dbPut('articles', item); await loadAllArticles(); renderFeed(); }
+  if (action === 'hide') { item.hidden = true; await dbPut('articles', item); await loadAllArticles(); renderFeed(); }
+}
+
+/* -----------------------------------------------------------
+   Clusters renderer
+   ----------------------------------------------------------- */
+async function renderClusters() {
+  const container = document.getElementById('clustersContent');
+  const clusters = {};
+  state.articles.filter(a => !a.hidden).forEach(a => {
+    const key = a.clusterKey || 'uncategorized';
+    if (!clusters[key]) clusters[key] = { items: [], totalScore: 0, tags: new Set(), sources: new Set() };
+    clusters[key].items.push(a);
+    clusters[key].totalScore += a.weirdnessScore || 0;
+    a.tags.forEach(t => clusters[key].tags.add(t));
+    clusters[key].sources.add(a.sourceCountry || a.domain || 'unknown');
+  });
+
+  const sorted = Object.entries(clusters).sort((a, b) => b[1].items.length - a[1].items.length);
+  container.innerHTML = '';
+  if (sorted.length === 0) { container.innerHTML = '<div style="padding:2rem;color:#556655;text-align:center;">No clusters yet.</div>'; return; }
+
+  sorted.forEach(([key, c]) => {
+    const avg = Math.round(c.totalScore / c.items.length);
+    const div = document.createElement('div');
+    div.className = 'cluster-card';
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+        <h4 style="margin:0;font-size:1rem;color:#e0f0e0;">${escapeHtml(key)}</h4>
+        <span class="mono" style="font-size:0.85rem;color:var(--neon-green);">${avg} avg • ${c.items.length} items</span>
+      </div>
+      <div class="article-tags" style="margin-top:0.4rem;">
+        ${Array.from(c.tags).map(t => `<span class="tag-chip accent">${escapeHtml(t)}</span>`).join('')}
+      </div>
+      <div class="small" style="margin-top:0.3rem;">Sources: ${Array.from(c.sources).slice(0,6).join(', ')}${c.sources.size>6?'…':''}</div>
+      <div style="margin-top:0.5rem;">
+        <button class="btn btn-sm" data-cluster="${escapeHtml(key)}">Generate brief</button>
+      </div>
+      <div class="cluster-brief" style="margin-top:0.5rem;font-size:0.85rem;color:#8faa8f;display:none;"></div>
+    `;
+    div.querySelector('button[data-cluster]').addEventListener('click', async (e) => {
+      const briefEl = div.querySelector('.cluster-brief');
+      briefEl.style.display = 'block';
+      briefEl.textContent = 'Generating…';
+      const titles = c.items.slice(0, 10).map(i => i.title).join('; ');
+      const text = `Cluster: ${key}\nArticles: ${c.items.length}\nTop titles: ${titles}\n\nWhat seems to be happening? ${titles}\nWhy it may be notable: a concentration of coverage around "${key}".\nCaveat: Based on GDELT metadata and article titles, not full-text verification.`;
+      briefEl.textContent = text;
+    });
+    container.appendChild(div);
+  });
+}
+
+/* -----------------------------------------------------------
+   Briefing Desk
+   ----------------------------------------------------------- */
+function generateReport(type) {
+  const out = document.getElementById('briefingOutput');
+  const items = state.articles.filter(a => !a.hidden);
+  let md = '';
+  if (type === 'lastScan') {
+    const recent = items.filter(a => a.fetchedAt && (Date.now() - a.fetchedAt) < 3600000);
+    md = `# Last Scan Brief\n\n${recent.length} items in the last hour.\n\n` + recent.slice(0, 20).map(a => `- **${a.title}** (${a.domain}) — score ${a.weirdnessScore}`).join('\n');
+  } else if (type === '24h') {
+    const recent = items.filter(a => a.fetchedAt && (Date.now() - a.fetchedAt) < 86400000);
+    md = `# Last 24h Weirdness\n\n` + recent.sort((a,b) => b.weirdnessScore - a.weirdnessScore).slice(0, 15).map(a => `- **${a.title}** — score ${a.weirdnessScore} — ${a.weirdnessReasons.join('; ')}`).join('\n');
+  } else if (type === 'top10') {
+    md = `# Top 10 Weirdest\n\n` + items.sort((a,b) => b.weirdnessScore - a.weirdnessScore).slice(0, 10).map((a,i) => `${i+1}. **${a.title}** — ${a.domain} — score ${a.weirdnessScore}`).join('\n');
+  } else if (type === 'ideas') {
+    md = `# Content Ideas\n\n` + items.sort((a,b) => b.weirdnessScore - a.weirdnessScore).slice(0, 10).map(a => `- **Angle:** “${a.title}” — potential headline or short topic.`).join('\n');
+  } else if (type === 'caution') {
+    const caution = items.filter(a => a.weirdnessScore > 70 && a.tags.some(t => t === 'conflict' || t === 'disaster'));
+    md = `# “Do Not Touch” Caution List\n\n` + caution.slice(0, 10).map(a => `- **${a.title}** — ${a.domain} — score ${a.weirdnessScore} — ${a.weirdnessReasons.join('; ')}`).join('\n');
+  }
+  out.textContent = md;
+}
+
+async function copyToClipboard(text) {
+  try { await navigator.clipboard.writeText(text); toast('Copied.', 'success'); }
+  catch(e) { toast('Copy failed.', 'error'); }
+}
+
+async function saveReportFile() {
+  const text = document.getElementById('briefingOutput').textContent;
+  if (!text.trim()) { toast('Nothing to save.', 'warning'); return; }
+  const blob = new Blob([text], { type: 'text/markdown' });
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({ suggestedName: 'weirdness-report.md', types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }] });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      toast('Saved.', 'success');
+      return;
+    } catch (e) {}
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'weirdness-report.md'; a.click(); URL.revokeObjectURL(url);
+}
+
+/* -----------------------------------------------------------
+   Archive
+   ----------------------------------------------------------- */
+async function renderArchive() {
+  const container = document.getElementById('archiveContent');
+  const search = document.getElementById('archiveSearch').value.toLowerCase();
+  let items = state.articles.slice();
+  if (search) {
+    items = items.filter(a =>
+      (a.title || '').toLowerCase().includes(search) ||
+      (a.domain || '').toLowerCase().includes(search) ||
+      a.tags.some(t => t.toLowerCase().includes(search))
+    );
+  }
+  container.innerHTML = '';
+  if (items.length === 0) { container.innerHTML = '<div style="padding:2rem;color:#556655;text-align:center;">No results.</div>'; return; }
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'article-card';
+    row.style.padding = '0.6rem 0.8rem';
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(item.title || 'Untitled')}</div>
+          <div class="article-meta">${escapeHtml(item.domain || '')} • ${formatDate(item.seendate)} • score ${item.weirdnessScore}${item.hidden ? ' • hidden' : ''}</div>
+        </div>
+        <div style="display:flex;gap:0.3rem;flex-shrink:0;">
+          <button class="btn btn-sm" data-action="detail" data-id="${item.id}">Details</button>
+          <button class="btn btn-sm btn-danger" data-action="delete" data-id="${item.id}">Delete</button>
+        </div>
+      </div>
+    `;
+    row.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const act = e.target.dataset.action;
+        const id = e.target.dataset.id;
+        if (act === 'detail') openDetailDrawer(id);
+        if (act === 'delete') { if (!confirm('Delete this record?')) return; await dbDelete('articles', id); await loadAllArticles(); renderArchive(); }
+      });
+    });
+    container.appendChild(row);
+  });
+}
+
+async function exportArchive() {
+  const items = await dbGetAll('articles');
+  const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `weirdness-archive-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importArchive(file) {
+  const text = await file.text();
+  const imported = JSON.parse(text);
+  if (!Array.isArray(imported)) throw new Error('Expected array');
+  for (const item of imported) { await dbPut('articles', item); }
+  await loadAllArticles();
+  renderArchive();
+}
+
+async function renderScanLog() {
+  const container = document.getElementById('scanLogContent');
+  if (!container) return;
+  const scans = (await dbGetAll('scans')).sort((a,b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0)).slice(0, 120);
+  if (!scans.length) {
+    container.innerHTML = '<div style="padding:2rem;color:#556655;text-align:center;">No scan records yet.</div>';
+    return;
+  }
+  container.innerHTML = scans.map(scan => {
+    const status = scan.error ? 'error' : 'ok';
+    const detail = [
+      `Started: ${formatDate(scan.startedAt)}`,
+      `Finished: ${formatDate(scan.finishedAt)}`,
+      `Preset: ${scan.preset || 'custom'}`,
+      `Results: ${scan.resultCount || 0}`,
+      `New: ${scan.newCount || 0}`,
+      `Updated: ${scan.updatedCount || 0}`,
+      scan.error ? `Error: ${scan.error}` : '',
+      scan.requestUrl ? `URL: ${scan.requestUrl}` : ''
+    ].filter(Boolean).join('\n');
+    return `
+      <div class="log-entry ${status}">
+        <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+          <strong>${status === 'ok' ? 'Scan complete' : 'Scan failed'}</strong>
+          <span class="article-meta">${formatDate(scan.finishedAt || scan.startedAt)}</span>
+        </div>
+        <pre>${escapeHtml(detail)}</pre>
+      </div>
+    `;
+  }).join('');
+}
+
+/* -----------------------------------------------------------
+   Detail drawer
+   ----------------------------------------------------------- */
+function openDetailDrawer(id) {
+  const item = state.articles.find(a => a.id === id);
+  if (!item) return;
+  const drawer = document.getElementById('detailDrawer');
+  const overlay = document.getElementById('drawerOverlay');
+  drawer.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+      <h3 style="margin:0;color:var(--neon-green);">Article Detail</h3>
+      <button class="btn btn-sm" id="closeDrawerBtn">Close</button>
+    </div>
+    <div class="article-title" style="font-size:1.1rem;margin-bottom:0.5rem;">${escapeHtml(item.title || 'Untitled')}</div>
+    <div class="article-meta">${escapeHtml(item.domain || '')} • ${escapeHtml(item.sourceCountry || '')} • ${formatDate(item.seendate)}</div>
+    <div style="margin-top:1rem;">
+      <strong>Score:</strong> ${item.weirdnessScore}<br>
+      <strong>Reasons:</strong> ${item.weirdnessReasons.join('; ') || '—'}<br>
+      <strong>Tags:</strong> ${item.tags.join(', ') || '—'}<br>
+      <strong>Tone:</strong> ${item.tone || '—'}<br>
+      <strong>Cluster:</strong> ${escapeHtml(item.clusterKey || '—')}
+    </div>
+    <div style="margin-top:1rem;">
+      <strong>AI Brief:</strong>
+      <pre style="margin-top:0.3rem;font-size:0.82rem;">${escapeHtml(item.localAiSummary ? JSON.stringify(item.localAiSummary, null, 2) : 'None')}</pre>
+    </div>
+    <div style="margin-top:1rem;display:flex;gap:0.4rem;flex-wrap:wrap;">
+      <a class="btn" href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Open source</a>
+      <button class="btn" id="drawerCopyBtn">Copy markdown</button>
+      <button class="btn btn-danger" id="drawerDeleteBtn">Delete</button>
+    </div>
+    <details style="margin-top:1rem;">
+      <summary>Raw JSON</summary>
+      <pre style="font-size:0.75rem;">${escapeHtml(JSON.stringify(item.raw, null, 2))}</pre>
+    </details>
+  `;
+  drawer.querySelector('#closeDrawerBtn').addEventListener('click', closeDetailDrawer);
+  drawer.querySelector('#drawerCopyBtn').addEventListener('click', () => copyToClipboard(`## ${item.title}\n- Source: ${item.domain}\n- Score: ${item.weirdnessScore}\n- Tags: ${item.tags.join(', ')}\n- URL: ${item.url}`));
+  drawer.querySelector('#drawerDeleteBtn').addEventListener('click', async () => {
+    if (!confirm('Delete this record?')) return;
+    await dbDelete('articles', item.id); await loadAllArticles(); closeDetailDrawer();
+    if (state.activeTab === 'feed') renderFeed(); if (state.activeTab === 'archive') renderArchive();
+  });
+  overlay.classList.add('open'); drawer.classList.add('open');
+}
+
+function closeDetailDrawer() {
+  document.getElementById('drawerOverlay').classList.remove('open');
+  document.getElementById('detailDrawer').classList.remove('open');
+}
+
+/* -----------------------------------------------------------
+   Admin / Diagnostics
+   ----------------------------------------------------------- */
+function renderAdminDiagnostics() {
+  const diag = {
+    'IndexedDB': !!window.indexedDB,
+    'LocalStorage': !!window.localStorage,
+    'FileSystemAccess': !!window.showSaveFilePicker,
+    'Clipboard': !!(navigator.clipboard && navigator.clipboard.writeText),
+    'ViewTransition': !!document.startViewTransition,
+    'WebGPU': !!navigator.gpu,
+    'Canvas': !!document.createElement('canvas').getContext,
+    'LocalAI typeof': typeof window.LanguageModel,
+    'LocalAI availability': state.aiAvailable,
+    'Online': navigator.onLine,
+    'Protocol': location.protocol,
+    'Last request URL': state.lastRequestUrl || null,
+    'UserAgent': navigator.userAgent,
+    'Articles stored': state.articles.length,
+    'Last scan': state.lastScan ? new Date(state.lastScan).toISOString() : null,
+    'Auto-watch': state.autoWatch,
+    'Timestamp': new Date().toISOString()
+  };
+  document.getElementById('adminDiagnostics').textContent = JSON.stringify(diag, null, 2);
+}
+
+function renderPresetEditor() {
+  const container = document.getElementById('presetEditor');
+  container.innerHTML = '';
+  state.settings.presets.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.style.marginBottom = '0.6rem';
+    row.innerHTML = `
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+        <input type="text" value="${escapeHtml(p.label)}" data-idx="${idx}" data-field="label" style="flex:1;min-width:120px;" placeholder="Label">
+        <input type="text" value="${escapeHtml(p.query)}" data-idx="${idx}" data-field="query" style="flex:2;min-width:200px;" placeholder="Query">
+        <button class="btn btn-sm btn-danger" data-idx="${idx}" data-action="delPreset">Delete</button>
+      </div>
+    `;
+    row.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('change', (e) => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        const field = e.target.dataset.field;
+        state.settings.presets[idx][field] = e.target.value;
+        saveSettings();
+        renderPresetButtons();
+      });
+    });
+    row.querySelector('button[data-action="delPreset"]').addEventListener('click', () => {
+      state.settings.presets.splice(idx, 1); saveSettings(); renderPresetEditor(); renderPresetButtons();
+    });
+    container.appendChild(row);
+  });
+  const addBtn = document.createElement('button');
+  addBtn.className = 'btn btn-sm';
+  addBtn.textContent = 'Add preset';
+  addBtn.addEventListener('click', () => {
+    state.settings.presets.push({ id: 'custom-' + Date.now(), label: 'New preset', query: '' });
+    saveSettings(); renderPresetEditor(); renderPresetButtons();
+  });
+  container.appendChild(addBtn);
+}
+
+function renderPresetButtons() {
+  const container = document.getElementById('presetButtons');
+  container.innerHTML = '';
+  state.settings.presets.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm' + (state.settings.presetId === p.id ? ' btn-accent' : '');
+    btn.textContent = p.label;
+    btn.dataset.preset = p.id;
+    btn.addEventListener('click', () => {
+      state.settings.presetId = p.id;
+      state.settings.query = p.query;
+      document.getElementById('queryInput').value = p.query;
+      saveSettings();
+      renderPresetButtons();
+    });
+    container.appendChild(btn);
+  });
+}
+
+/* -----------------------------------------------------------
+   Event wiring & init
+   ----------------------------------------------------------- */
+function init() {
+  if (location.protocol === 'file:') {
+    document.getElementById('fileWarning').style.display = 'block';
+  }
+  loadSettings().then(() => {
+    document.getElementById('queryInput').value = state.settings.query || '';
+    document.getElementById('timespanSelect').value = state.settings.timespan || '6h';
+    document.getElementById('intervalSelect').value = String(state.settings.intervalMinutes || 0);
+    document.getElementById('maxRecordsInput').value = String(state.settings.maxRecords || 50);
+    document.getElementById('sortSelect').value = state.settings.sort || 'HybridRel';
+    document.getElementById('langSelect').value = state.settings.language || 'eng';
+    document.getElementById('scoreThreshold').value = String(state.settings.scoreThreshold || 0);
+    document.getElementById('aiBriefsToggle').checked = state.settings.aiBriefs || false;
+    document.getElementById('resumeAutoToggle').checked = state.settings.resumeAuto || false;
+    renderPresetButtons();
+    renderPresetEditor();
+    if (state.settings.resumeAuto && state.settings.intervalMinutes >= 5) {
+      startAutoWatch();
+    }
+  });
+
+  loadAllArticles().then(() => {
+    renderRadarBlips();
+    updateStorageStatus();
+  });
+
+  initRadar();
+  checkLocalAI();
+
+  // Tabs
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      if (document.startViewTransition) {
+        document.startViewTransition(() => switchTab(tab));
+      } else {
+        switchTab(tab);
+      }
+    });
+  });
+
+  // Controls
+  document.getElementById('runScanBtn').addEventListener('click', runScan);
+  document.getElementById('startAutoBtn').addEventListener('click', startAutoWatch);
+  document.getElementById('pauseAutoBtn').addEventListener('click', pauseAutoWatch);
+
+  document.getElementById('queryInput').addEventListener('change', (e) => { state.settings.query = e.target.value; saveSettings(); });
+  document.getElementById('timespanSelect').addEventListener('change', (e) => { state.settings.timespan = e.target.value; saveSettings(); });
+  document.getElementById('intervalSelect').addEventListener('change', (e) => { state.settings.intervalMinutes = parseInt(e.target.value, 10) || 0; saveSettings(); });
+  document.getElementById('maxRecordsInput').addEventListener('change', (e) => { state.settings.maxRecords = parseInt(e.target.value, 10) || 50; saveSettings(); });
+  document.getElementById('sortSelect').addEventListener('change', (e) => { state.settings.sort = e.target.value; saveSettings(); });
+  document.getElementById('langSelect').addEventListener('change', (e) => { state.settings.language = e.target.value; saveSettings(); });
+  document.getElementById('scoreThreshold').addEventListener('change', (e) => { state.settings.scoreThreshold = parseInt(e.target.value, 10) || 0; saveSettings(); renderFeed(); });
+  document.getElementById('aiBriefsToggle').addEventListener('change', (e) => { state.settings.aiBriefs = e.target.checked; saveSettings(); });
+  document.getElementById('resumeAutoToggle').addEventListener('change', (e) => { state.settings.resumeAuto = e.target.checked; saveSettings(); });
+
+  // Briefing
+  document.querySelectorAll('button[data-report]').forEach(btn => {
+    btn.addEventListener('click', () => generateReport(btn.dataset.report));
+  });
+  document.getElementById('copyReportBtn').addEventListener('click', () => copyToClipboard(document.getElementById('briefingOutput').textContent));
+  document.getElementById('saveReportBtn').addEventListener('click', saveReportFile);
+
+  // Archive
+  document.getElementById('archiveSearch').addEventListener('input', () => { renderArchive(); renderFeed(); });
+  document.getElementById('archiveExportBtn').addEventListener('click', exportArchive);
+  document.getElementById('archiveClearBtn').addEventListener('click', async () => {
+    if (!confirm('Clear ALL archive data?')) return;
+    await dbClear('articles'); await loadAllArticles(); renderArchive(); renderFeed(); renderRadarBlips(); toast('Archive cleared.', 'neutral');
+  });
+  document.getElementById('archiveImportFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try { await importArchive(file); toast('Archive imported.', 'success'); } catch(err) { toast('Import failed: ' + err.message, 'error'); }
+    e.target.value = '';
+  });
+  document.getElementById('refreshLogBtn').addEventListener('click', renderScanLog);
+  document.getElementById('clearLogBtn').addEventListener('click', async () => {
+    if (!confirm('Clear scan log entries?')) return;
+    await dbClear('scans');
+    renderScanLog();
+    toast('Scan log cleared.', 'neutral');
+  });
+
+  // Admin
+  document.getElementById('checkAiBtn').addEventListener('click', checkLocalAI);
+  document.getElementById('createAiBtn').addEventListener('click', createLocalAISession);
+  document.getElementById('resetAiBtn').addEventListener('click', resetLocalAISession);
+
+  // Drawer overlay close
+  document.getElementById('drawerOverlay').addEventListener('click', closeDetailDrawer);
+
+  // Visibility
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state.autoWatch) {
+      toast('Tab hidden. Auto-watch may be throttled by the browser.', 'warning');
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

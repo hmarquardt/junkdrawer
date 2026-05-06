@@ -1,0 +1,1918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Watchtower — Browser Mission Control</title>
+<link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="shortcut icon" href="favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="Junk Drawer" />
+<link rel="manifest" href="site.webmanifest" />
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --fg: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #39ff14;
+    --amber: #ffae00;
+    --cyan: #00f0ff;
+    --red: #ff5555;
+    --yellow: #f1fa8c;
+    --border: #30363d;
+    --radius: 8px;
+    --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --shadow: 0 0 0 1px rgba(48,54,61,0.6);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.45;
+  }
+  /* CRT scanlines */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 1px, transparent 1px, transparent 2px);
+    opacity: .35;
+  }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  header { border-bottom: 1px solid var(--border); padding: 16px 0; margin-bottom: 12px; }
+  h1 { margin: 0 0 4px; font-size: clamp(22px, 3vw, 32px); letter-spacing: .04em; color: var(--accent); text-shadow: 0 0 12px rgba(57,255,20,0.25); }
+  .subtitle { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .topbar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .status-strip {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 10px; font-size: 12px; color: var(--muted);
+  }
+  .pill strong { color: var(--fg); font-weight: 700; }
+  .led {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
+    box-shadow: 0 0 6px currentColor;
+  }
+  .led.green { background: var(--accent); color: var(--accent); }
+  .led.amber { background: var(--amber); color: var(--amber); }
+  .led.red { background: var(--red); color: var(--red); }
+  .led.cyan { background: var(--cyan); color: var(--cyan); }
+
+  .btn {
+    appearance: none; border: 1px solid var(--border); background: var(--panel); color: var(--fg);
+    padding: 8px 12px; border-radius: 6px; font-family: inherit; font-weight: 600; cursor: pointer; font-size: 12px;
+    box-shadow: var(--shadow); display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: rgba(57,255,20,0.08); border-color: var(--accent); color: var(--accent); }
+  .btn.warn { background: rgba(255,174,0,0.08); border-color: var(--amber); color: var(--amber); }
+  .btn.danger { background: rgba(255,85,85,0.08); border-color: var(--red); color: var(--red); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .tab {
+    appearance: none; background: transparent; border: 0; color: var(--muted); font-family: inherit; font-weight: 700;
+    padding: 10px 14px; cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+    border-bottom: 2px solid transparent;
+  }
+  .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .panel { display: none; padding: 16px 0; }
+  .panel.active { display: block; }
+
+  .grid { display: grid; gap: 12px; }
+  .grid.cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .grid.cols-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+  @media (max-width: 1100px) {
+    .grid.cols-4 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  }
+  @media (max-width: 640px) {
+    .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px; box-shadow: var(--shadow);
+  }
+  .card h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+  .card-title { font-weight: 700; font-size: 14px; }
+  .card-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .card-body { font-size: 13px; color: var(--fg); margin-top: 8px; }
+
+  .score-bar {
+    height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin-top: 6px;
+  }
+  .score-fill { height: 100%; background: var(--accent); width: 0%; transition: width .6s ease; }
+  .score-fill.amber { background: var(--amber); }
+  .score-fill.red { background: var(--red); }
+  .score-fill.cyan { background: var(--cyan); }
+
+  .scan-progress {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; margin-bottom: 14px; box-shadow: var(--shadow);
+  }
+  .progress-head {
+    display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted); margin-bottom: 8px;
+  }
+  .progress-track {
+    height: 8px; border-radius: 999px; overflow: hidden;
+    background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  }
+  .progress-fill {
+    height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--cyan));
+    transition: width .25s ease;
+  }
+  .log-list { display: grid; gap: 8px; }
+  .log-entry {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; font-size: 12px; box-shadow: var(--shadow);
+  }
+  .log-entry.ok { border-left: 3px solid var(--accent); }
+  .log-entry.error { border-left: 3px solid var(--red); }
+  .log-entry.partial { border-left: 3px solid var(--amber); }
+  .log-entry pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; color: var(--muted); }
+  .ai-brief {
+    margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(0,240,255,0.22);
+    border-left: 3px solid var(--cyan); border-radius: var(--radius);
+    background: rgba(0,240,255,0.04); font-size: 13px;
+  }
+  .ai-brief h4 {
+    margin: 0 0 8px; color: var(--cyan); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .ai-brief dl { display: grid; gap: 8px; margin: 0; }
+  .ai-brief dt { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+  .ai-brief dd { margin: 2px 0 0; color: var(--fg); }
+  .ai-brief .caveat { color: var(--amber); }
+
+  .event-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; box-shadow: var(--shadow);
+  }
+  .event-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .event-title { font-weight: 700; font-size: 14px; }
+  .event-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .event-score { font-family: var(--mono); font-size: 12px; color: var(--accent); white-space: nowrap; }
+  .event-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em; border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+    color: var(--muted); flex-shrink: 0;
+  }
+  .badge.nasa { color: var(--cyan); border-color: rgba(0,240,255,0.25); }
+  .badge.gdelt { color: var(--amber); border-color: rgba(255,174,0,0.25); }
+  .badge.usgs { color: var(--red); border-color: rgba(255,85,85,0.25); }
+  .badge.crypto { color: var(--accent); border-color: rgba(57,255,20,0.25); }
+
+  .control-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: center; }
+  label { font-size: 12px; font-weight: 600; color: var(--muted); }
+  input, select, textarea {
+    border: 1px solid var(--border); background: var(--bg); color: var(--fg); padding: 8px 10px;
+    border-radius: 6px; font-family: inherit; font-size: 13px; width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  textarea { resize: vertical; font-family: var(--mono); font-size: 12px; }
+  .value { font-family: var(--mono); font-size: 12px; word-break: break-word; }
+
+  .toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--panel); color: var(--fg); border: 1px solid var(--border);
+    padding: 10px 14px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 99999; font-size: 12px; opacity: 0; transform: translateY(10px); transition: opacity .3s, transform .3s;
+    pointer-events: none; max-width: 420px;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99998;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    max-width: 800px; width: 100%; max-height: 85vh; overflow: auto; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal h2 { margin: 0 0 12px; font-size: 16px; color: var(--accent); text-transform: uppercase; }
+
+  .hidden { display: none !important; }
+
+  canvas { display: block; width: 100%; border-radius: var(--radius); border: 1px solid var(--border); background: rgba(0,0,0,0.3); }
+
+  .welcome { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .welcome h2 { color: var(--accent); margin-bottom: 8px; }
+
+  .table-wrap { overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--accent); text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
+  tr:hover td { background: rgba(255,255,255,0.03); }
+
+  .report-output { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>The Watchtower</h1>
+        <p class="subtitle">A local-first browser mission control for watching the public data firehose.</p>
+      </div>
+      <div class="status-strip" id="status-strip"></div>
+    </div>
+    <div class="control-row">
+      <button class="btn primary" id="btn-run-all">Run All Watchers Now</button>
+      <button class="btn" id="btn-auto-watch">Start Auto-Watch</button>
+      <button class="btn warn" id="btn-pause">Pause Auto-Watch</button>
+      <button class="btn" id="btn-brief">Briefing Desk</button>
+      <button class="btn" id="btn-export-snap">Export Snapshot</button>
+    </div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+  </header>
+
+  <div class="scan-progress" aria-live="polite">
+    <div class="progress-head">
+      <span id="scan-progress-label">Idle</span>
+      <span id="scan-progress-count">0 / 0</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="scan-progress-fill"></div></div>
+  </div>
+
+  <section class="panel active" id="panel-mission" role="tabpanel">
+    <div id="mission-content"></div>
+    <div class="grid cols-4" id="watcher-tiles"></div>
+    <div id="mission-welcome" class="welcome hidden">
+      <h2>The Watchtower is idle.</h2>
+      <p>Choose your watchers, run a scan, or start Auto-Watch.</p>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-stream" role="tabpanel">
+    <div class="control-row">
+      <input type="text" id="stream-search" placeholder="Search events…" style="max-width: 320px;" />
+      <select id="stream-source">
+        <option value="all">All sources</option>
+        <option value="nasa-donki">NASA DONKI</option>
+        <option value="gdelt">GDELT</option>
+        <option value="usgs-earthquake">USGS</option>
+        <option value="crypto-market">Crypto</option>
+      </select>
+      <select id="stream-sort">
+        <option value="newest">Newest</option>
+        <option value="score">Highest score</option>
+        <option value="severity">Severity</option>
+        <option value="weirdness">Weirdness</option>
+        <option value="urgency">Urgency</option>
+      </select>
+      <label><input type="checkbox" id="stream-starred" /> Starred only</label>
+    </div>
+    <div class="grid" id="event-stream"></div>
+  </section>
+
+  <section class="panel" id="panel-field" role="tabpanel">
+    <div class="card" style="padding:8px;">
+      <canvas id="signal-canvas" height="500"></canvas>
+      <div class="card-meta" id="field-caption">Signal field: size = score, color = source, recency = opacity.</div>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-watchers" role="tabpanel">
+    <div id="watchers-config"></div>
+  </section>
+
+  <section class="panel" id="panel-brief" role="tabpanel">
+    <div class="control-row">
+      <select id="brief-type">
+        <option value="top-signals">Top signals right now</option>
+        <option value="last-24h">Last 24 hours</option>
+        <option value="space">Space weather brief</option>
+        <option value="weirdness">Global weirdness brief</option>
+        <option value="earthquakes">Earthquake brief</option>
+        <option value="crypto">Crypto tremor brief</option>
+        <option value="attention">What should I pay attention to?</option>
+        <option value="noise">What is probably noise?</option>
+      </select>
+      <button class="btn primary" id="btn-gen-report">Generate Report</button>
+      <button class="btn" id="btn-copy-report">Copy Markdown</button>
+      <button class="btn" id="btn-download-report">Download Markdown</button>
+    </div>
+    <div class="card mt-2" style="margin-top:12px;">
+      <pre class="report-output" id="report-output">Select a report type and click Generate Report.</pre>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-archive" role="tabpanel">
+    <div class="control-row">
+      <button class="btn" id="btn-export-events">Export Events JSON</button>
+      <button class="btn" id="btn-export-db">Export Full DB JSON</button>
+      <button class="btn" id="btn-import">Import JSON</button>
+      <input type="file" id="import-file" class="hidden" accept=".json" />
+      <button class="btn danger" id="btn-clear-all">Clear All Data</button>
+    </div>
+    <div class="table-wrap" style="margin-top:12px;">
+      <table>
+        <thead><tr><th>ID</th><th>Source</th><th>Title</th><th>Score</th><th>Time</th><th>Actions</th></tr></thead>
+        <tbody id="archive-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-log" role="tabpanel">
+    <div class="control-row">
+      <button class="btn" id="btn-refresh-log">Refresh Log</button>
+      <button class="btn danger" id="btn-clear-log">Clear Scan Log</button>
+    </div>
+    <div class="log-list" id="scan-log"></div>
+  </section>
+
+  <section class="panel" id="panel-about" role="tabpanel">
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>What This Page Is</h3>
+        <div class="card-body">
+          The Watchtower is a local-first monitoring console. It pulls public signals from several APIs, normalizes them into one event stream, scores them for severity, weirdness, urgency, novelty, and recency, then lets you scan, filter, archive, and summarize what it found.
+        </div>
+      </div>
+      <div class="card">
+        <h3>What The Top Buttons Do</h3>
+        <div class="card-body">
+          <strong>Run All Watchers Now</strong> calls every enabled data source once. <strong>Start Auto-Watch</strong> repeats scans on the polling interval. <strong>Briefing Desk</strong> only opens the Briefing Desk tab. It does not generate text until you click <strong>Generate Report</strong> inside that tab.
+        </div>
+      </div>
+      <div class="card">
+        <h3>Data Sources</h3>
+        <div class="card-body">
+          <strong>NASA DONKI</strong> watches space-weather events such as flares, CMEs, storms, and radiation events. <strong>GDELT</strong> watches global news metadata for unusual coverage patterns. <strong>USGS</strong> watches earthquake feeds. <strong>CoinGecko</strong> watches selected crypto market moves.
+        </div>
+      </div>
+      <div class="card">
+        <h3>Briefs And Local AI</h3>
+        <div class="card-body">
+          <strong>Generate Report</strong> creates a deterministic Markdown report from stored events and scores. It does not use AI. Local AI is used only when you create a Chrome built-in AI session and then click an event’s <strong>AI</strong> action or the detail modal’s <strong>Generate AI Brief</strong> button.
+        </div>
+      </div>
+      <div class="card">
+        <h3>Tabs</h3>
+        <div class="card-body">
+          <strong>Mission Control</strong> shows watcher status. <strong>Event Stream</strong> lists normalized events. <strong>Signal Field</strong> plots events visually. <strong>Watchers</strong> configures sources. <strong>Briefing Desk</strong> builds Markdown reports. <strong>Archive</strong> exports/imports data. <strong>Log</strong> shows scan outcomes. <strong>Admin</strong> stores keys and scoring settings.
+        </div>
+      </div>
+      <div class="card">
+        <h3>Caveats</h3>
+        <div class="card-body">
+          This is a triage and exploration tool, not a truth engine. Provider APIs can rate-limit requests, news metadata can be noisy, and scores are heuristics. Treat every item as a lead to verify from primary sources.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-admin" role="tabpanel">
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>API Keys</h3>
+        <label>NASA API Key</label>
+        <input type="text" id="nasa-key" placeholder="DEMO_KEY" />
+        <label>CoinGecko API Key (optional)</label>
+        <input type="text" id="cg-key" placeholder="optional" />
+        <div class="control-row">
+          <button class="btn primary" id="btn-save-keys">Save Keys</button>
+          <button class="btn" id="btn-clear-keys">Clear Keys</button>
+        </div>
+        <div class="card-meta">Keys stored in localStorage for personal prototypes only.</div>
+      </div>
+      <div class="card">
+        <h3>Scoring Weights</h3>
+        <label>Severity %</label>
+        <input type="number" id="w-severity" min="0" max="100" />
+        <label>Weirdness %</label>
+        <input type="number" id="w-weirdness" min="0" max="100" />
+        <label>Urgency %</label>
+        <input type="number" id="w-urgency" min="0" max="100" />
+        <label>Novelty %</label>
+        <input type="number" id="w-novelty" min="0" max="100" />
+        <label>Recency %</label>
+        <input type="number" id="w-recency" min="0" max="100" />
+        <div class="control-row">
+          <button class="btn primary" id="btn-save-weights">Save Weights</button>
+          <button class="btn" id="btn-reset-weights">Reset Defaults</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Local AI</h3>
+        <div id="ai-status" class="value">Checking…</div>
+        <div class="control-row">
+          <button class="btn" id="btn-check-ai">Check AI</button>
+          <button class="btn" id="btn-create-ai">Create AI Session</button>
+          <label><input type="checkbox" id="ai-enabled" /> Enable AI Briefs</label>
+          <label>Max AI events/scan</label>
+          <input type="number" id="ai-max" min="1" max="50" style="width:80px;" />
+        </div>
+      </div>
+      <div class="card">
+        <h3>Polling</h3>
+        <label>Default interval (minutes)</label>
+        <input type="number" id="poll-interval" min="5" max="120" />
+        <label><input type="checkbox" id="resume-auto" /> Resume auto-watch on open</label>
+        <label><input type="checkbox" id="pause-hidden" /> Pause when tab hidden</label>
+      </div>
+      <div class="card">
+        <h3>Browser Capabilities</h3>
+        <div id="browser-cap" class="value"></div>
+      </div>
+      <div class="card">
+        <h3>Storage</h3>
+        <div id="storage-info" class="value"></div>
+        <div class="control-row">
+          <button class="btn" id="btn-persist">Request Persistent Storage</button>
+          <button class="btn" id="btn-refresh-storage">Refresh</button>
+        </div>
+      </div>
+      <div class="card" style="grid-column:1/-1;">
+        <h3>Source Docs</h3>
+        <div class="value" style="display:flex;flex-wrap:wrap;gap:8px;">
+          <a class="btn" href="https://api.nasa.gov/" target="_blank" rel="noopener">NASA APIs</a>
+          <a class="btn" href="https://ccmc.gsfc.nasa.gov/tools/DONKI/" target="_blank" rel="noopener">CCMC DONKI</a>
+          <a class="btn" href="https://www.gdeltproject.org/" target="_blank" rel="noopener">GDELT</a>
+          <a class="btn" href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/" target="_blank" rel="noopener">USGS Feeds</a>
+          <a class="btn" href="https://docs.coingecko.com/" target="_blank" rel="noopener">CoinGecko API</a>
+          <a class="btn" href="https://developer.chrome.com/docs/ai/get-started" target="_blank" rel="noopener">Chrome Built-in AI</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.05.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.05.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  <span>Copyright &copy; 2026 Hank Marquardt.</span> <span>Version 2026.05.05.1.</span>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-overlay" id="event-modal">
+  <div class="modal">
+    <h2>Event Detail</h2>
+    <div id="modal-body"></div>
+    <div class="control-row" style="margin-top:12px;">
+      <button class="btn" id="modal-close">Close</button>
+      <button class="btn" id="modal-copy">Copy Markdown</button>
+      <button class="btn" id="modal-ai">Generate AI Brief</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const DB_NAME = 'watchtowerDB';
+  const DB_VERSION = 1;
+  let db = null;
+  let aiSession = null;
+
+  const state = {
+    settings: {
+      autoWatch: false,
+      resumeAutoWatch: false,
+      pauseWhenHidden: false,
+      pollIntervalMinutes: 15,
+      weights: { severity: 30, weirdness: 25, urgency: 25, novelty: 10, recency: 10 },
+      nasaKey: 'DEMO_KEY',
+      cgKey: '',
+      aiEnabled: false,
+      aiMaxEvents: 5,
+    },
+    watchers: [],
+    events: [],
+    scans: [],
+    newEventsThisSession: 0,
+    lastScanAt: null,
+    nextScanAt: null,
+    autoWatchTimer: null,
+    tabHidden: false,
+    aiStatus: 'Not checked',
+  };
+
+  const TAB_KEYS = ['mission','stream','field','watchers','brief','archive','log','about','admin'];
+  const TAB_LABELS = { mission: 'Mission Control', stream: 'Event Stream', field: 'Signal Field', watchers: 'Watchers', brief: 'Briefing Desk', archive: 'Archive', log: 'Log', about: 'About', admin: 'Admin' };
+
+  function el(id) { return document.getElementById(id); }
+
+  function toast(msg, type) {
+    const t = el('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2800);
+  }
+
+  function hashString(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) - h) + str.charCodeAt(i); h |= 0;
+    }
+    return 'h' + Math.abs(h).toString(36);
+  }
+
+  function formatDate(v) {
+    if (!v) return '—';
+    const d = new Date(v);
+    return isNaN(d) ? String(v) : d.toLocaleString();
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function clampScore(v) { return Math.max(0, Math.min(100, Math.round(v || 0))); }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  function setScanProgress(label, current, total) {
+    const safeTotal = Math.max(0, total || 0);
+    const safeCurrent = Math.max(0, current || 0);
+    const pct = safeTotal ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100)) : 0;
+    el('scan-progress-label').textContent = label || 'Idle';
+    el('scan-progress-count').textContent = safeTotal ? `${safeCurrent} / ${safeTotal}` : '0 / 0';
+    el('scan-progress-fill').style.width = pct + '%';
+  }
+
+  function providerLimitMessage(provider, label, status, body) {
+    const snippet = body ? ' Snippet: ' + body.slice(0, 180) : '';
+    if (status === 429) return `${provider} rate limit while fetching ${label}.${snippet}`;
+    return `${provider} HTTP ${status} while fetching ${label}.${snippet}`;
+  }
+
+  async function fetchWithRetry(url, provider, label, options = {}) {
+    const attempts = options.attempts || 2;
+    const delayMs = options.delayMs || 7000;
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const res = await fetch(url);
+        if (res.status === 429 && attempt < attempts) {
+          setScanProgress(`${provider} rate limit on ${label}; waiting ${Math.round(delayMs / 1000)}s`, 0, 0);
+          await sleep(delayMs);
+          continue;
+        }
+        return res;
+      } catch (err) {
+        lastError = err;
+        if (attempt < attempts) {
+          setScanProgress(`${provider} network retry for ${label}; waiting ${Math.round(delayMs / 1000)}s`, 0, 0);
+          await sleep(delayMs);
+          continue;
+        }
+      }
+    }
+    const msg = lastError && lastError.message ? lastError.message : 'Failed to fetch';
+    throw new Error(`${provider} fetch failed for ${label}: ${msg}`);
+  }
+
+  // ============================================================
+  // IndexedDB
+  // ============================================================
+  function initDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => { db = req.result; resolve(db); };
+      req.onupgradeneeded = (e) => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains('events')) {
+          const ev = d.createObjectStore('events', { keyPath: 'id' });
+          ev.createIndex('sourceType', 'sourceType');
+          ev.createIndex('sourceName', 'sourceName');
+          ev.createIndex('eventTime', 'eventTime');
+          ev.createIndex('fetchedAt', 'fetchedAt');
+          ev.createIndex('compositeScore', 'compositeScore');
+          ev.createIndex('severityScore', 'severityScore');
+          ev.createIndex('weirdnessScore', 'weirdnessScore');
+          ev.createIndex('urgencyScore', 'urgencyScore');
+          ev.createIndex('clusterKey', 'clusterKey');
+          ev.createIndex('country', 'country');
+          ev.createIndex('starred', 'starred');
+          ev.createIndex('hidden', 'hidden');
+        }
+        if (!d.objectStoreNames.contains('scans')) d.createObjectStore('scans', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('watchers')) d.createObjectStore('watchers', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings', { keyPath: 'key' });
+        if (!d.objectStoreNames.contains('briefs')) d.createObjectStore('briefs', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('clusters')) d.createObjectStore('clusters', { keyPath: 'key' });
+      };
+    });
+  }
+
+  async function dbGet(store, key) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readonly');
+      const s = tx.objectStore(store);
+      const req = s.get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function dbPut(store, value) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readwrite');
+      const s = tx.objectStore(store);
+      const req = s.put(value);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function dbGetAll(store) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readonly');
+      const s = tx.objectStore(store);
+      const req = s.getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function dbDelete(store, key) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readwrite');
+      const s = tx.objectStore(store);
+      const req = s.delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function dbClear(store) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readwrite');
+      const s = tx.objectStore(store);
+      const req = s.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // ============================================================
+  // Settings
+  // ============================================================
+  async function loadSettings() {
+    const s = await dbGet('settings', 'main');
+    if (s && s.value) Object.assign(state.settings, s.value);
+    const stored = localStorage.getItem('watchtower-settings');
+    if (stored) try { Object.assign(state.settings, JSON.parse(stored)); } catch(e){}
+    el('nasa-key').value = state.settings.nasaKey;
+    el('cg-key').value = state.settings.cgKey;
+    el('w-severity').value = state.settings.weights.severity;
+    el('w-weirdness').value = state.settings.weights.weirdness;
+    el('w-urgency').value = state.settings.weights.urgency;
+    el('w-novelty').value = state.settings.weights.novelty;
+    el('w-recency').value = state.settings.weights.recency;
+    el('poll-interval').value = state.settings.pollIntervalMinutes;
+    el('resume-auto').checked = state.settings.resumeAutoWatch;
+    el('pause-hidden').checked = state.settings.pauseWhenHidden;
+    el('ai-enabled').checked = state.settings.aiEnabled;
+    el('ai-max').value = state.settings.aiMaxEvents;
+  }
+  async function saveSettings() {
+    state.settings.nasaKey = el('nasa-key').value.trim() || 'DEMO_KEY';
+    state.settings.cgKey = el('cg-key').value.trim();
+    state.settings.weights.severity = parseInt(el('w-severity').value, 10) || 30;
+    state.settings.weights.weirdness = parseInt(el('w-weirdness').value, 10) || 25;
+    state.settings.weights.urgency = parseInt(el('w-urgency').value, 10) || 25;
+    state.settings.weights.novelty = parseInt(el('w-novelty').value, 10) || 10;
+    state.settings.weights.recency = parseInt(el('w-recency').value, 10) || 10;
+    state.settings.pollIntervalMinutes = parseInt(el('poll-interval').value, 10) || 15;
+    state.settings.resumeAutoWatch = el('resume-auto').checked;
+    state.settings.pauseWhenHidden = el('pause-hidden').checked;
+    state.settings.aiEnabled = el('ai-enabled').checked;
+    state.settings.aiMaxEvents = parseInt(el('ai-max').value, 10) || 5;
+    await dbPut('settings', { key: 'main', value: state.settings });
+    localStorage.setItem('watchtower-settings', JSON.stringify(state.settings));
+    toast('Settings saved');
+  }
+
+  async function saveAiSettings() {
+    state.settings.aiEnabled = el('ai-enabled').checked;
+    state.settings.aiMaxEvents = parseInt(el('ai-max').value, 10) || 5;
+    await dbPut('settings', { key: 'main', value: state.settings });
+    localStorage.setItem('watchtower-settings', JSON.stringify(state.settings));
+  }
+
+  // ============================================================
+  // Watchers
+  // ============================================================
+  const DEFAULT_WATCHERS = [
+    {
+      id: 'nasa-donki-space-weather',
+      name: 'NASA DONKI Space Weather',
+      sourceType: 'nasa-donki',
+      enabled: true,
+      pollIntervalMinutes: 30,
+      config: {
+        apiKey: 'DEMO_KEY',
+        types: ['CME','FLR','GST','SEP','IPS','MPC','RBE','HSS'],
+        windowDays: 3,
+      },
+      status: 'idle',
+      lastError: null,
+    },
+    {
+      id: 'gdelt-global-weirdness',
+      name: 'GDELT Global Weirdness',
+      sourceType: 'gdelt',
+      enabled: true,
+      pollIntervalMinutes: 20,
+      config: {
+        presets: [
+          { name: 'Everything weird', query: '(bizarre OR strange OR weird OR unusual OR unexpected OR viral OR mystery)' },
+          { name: 'AI panic', query: '(artificial intelligence OR AI OR chatbot OR "large language model") (panic OR threat OR backlash OR regulation OR lawsuit)' },
+          { name: 'Crypto chaos', query: '(bitcoin OR crypto OR cryptocurrency OR ethereum) (crash OR surge OR hack OR fraud OR ETF OR liquidation)' },
+          { name: 'Animals being ridiculous', query: '(animal OR raccoon OR monkey OR cow OR bear OR alligator OR cat OR dog) (escaped OR stole OR attacked OR rescued OR invaded OR viral)' },
+          { name: 'Natural disasters', query: '(earthquake OR flood OR hurricane OR tornado OR wildfire OR tsunami OR drought OR landslide)' },
+          { name: 'Political absurdity', query: '(politics OR election OR government OR parliament) (absurd OR scandal OR resignation OR protest OR chaos)' },
+          { name: 'Climate weirdness', query: '(climate OR weather OR temperature OR ice OR sea level) (extreme OR record OR anomaly OR unprecedented)' },
+          { name: 'UFO / space / unexplained', query: '(UFO OR UAP OR "unidentified aerial" OR "unexplained phenomenon" OR alien OR sighting)' },
+        ],
+        maxRecords: 25,
+        timespan: '24h',
+      },
+      status: 'idle',
+      lastError: null,
+    },
+    {
+      id: 'usgs-earthquakes',
+      name: 'USGS Earthquakes',
+      sourceType: 'usgs-earthquake',
+      enabled: true,
+      pollIntervalMinutes: 10,
+      config: {
+        feedUrl: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
+      },
+      status: 'idle',
+      lastError: null,
+    },
+    {
+      id: 'crypto-market-tremors',
+      name: 'Crypto Market Tremors',
+      sourceType: 'crypto-market',
+      enabled: true,
+      pollIntervalMinutes: 10,
+      config: {
+        coins: 'bitcoin,ethereum,dogecoin,shiba-inu,solana',
+        vsCurrency: 'usd',
+        thresholds: { h1: 3, h24: 8, vol: 1.5 },
+      },
+      status: 'idle',
+      lastError: null,
+    },
+  ];
+
+  async function loadWatchers() {
+    const rows = await dbGetAll('watchers');
+    if (rows && rows.length) state.watchers = rows;
+    else {
+      state.watchers = JSON.parse(JSON.stringify(DEFAULT_WATCHERS));
+      for (const w of state.watchers) await dbPut('watchers', w);
+    }
+  }
+
+  // ============================================================
+  // Normalization
+  // ============================================================
+  function normalizeNasaDonki(raw, type) {
+    const items = Array.isArray(raw) ? raw : [raw];
+    return items.map(it => {
+      const id = it.activityID || it.catalog || hashString(type + (it.startTime || it.eventTime || Date.now()) + JSON.stringify(it.linkedEvents || ''));
+      const eventTime = it.startTime || it.eventTime || it.beginTime || new Date().toISOString();
+      const notes = it.noteText || it.note || '';
+      const instruments = Array.isArray(it.instruments) ? it.instruments.map(i => i.displayName || i.name || '').filter(Boolean) : [];
+      const speed = it.cmeAnalyses && it.cmeAnalyses[0] && it.cmeAnalyses[0].speed ? it.cmeAnalyses[0].speed : (it.speed || null);
+      const halfAngle = it.cmeAnalyses && it.cmeAnalyses[0] && it.cmeAnalyses[0].halfAngle ? it.cmeAnalyses[0].halfAngle : (it.halfAngle || null);
+      const kp = it.allKpIndex && it.allKpIndex[0] && it.allKpIndex[0].kpIndex ? it.allKpIndex[0].kpIndex : (it.kpIndex || null);
+      const classType = it.classType || '';
+      return {
+        id, sourceType: 'nasa-donki', sourceName: 'NASA DONKI',
+        title: type + (classType ? ' (' + classType + ')' : ''),
+        subtitle: instruments.join(', ') || '',
+        description: notes,
+        eventTime, fetchedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        tags: [type, ...instruments, 'space-weather'],
+        entities: [], location: '', country: '', coordinates: '',
+        magnitude: speed || kp || 0,
+        rawMetrics: { speed, halfAngle, kpIndex: kp, classType, linkedEvents: it.linkedEvents || [] },
+        links: [], status: 'new', raw: it,
+      };
+    });
+  }
+
+  function normalizeGdelt(rawList, presetName) {
+    const articles = Array.isArray(rawList) ? rawList : [];
+    return articles.map(a => {
+      const url = a.url || '';
+      const title = (a.title || a.seoTitle || '').trim();
+      const id = url ? hashString(url) : hashString(title + (a.seendate || ''));
+      const domain = a.domain || '';
+      const lang = a.language || '';
+      const country = a.sourcecountry || a.sourceCountry || '';
+      const tone = parseFloat(a.tone || a.avgTone || 0);
+      const seendate = a.seendate || '';
+      return {
+        id, sourceType: 'gdelt', sourceName: 'GDELT',
+        title: title || 'Untitled',
+        subtitle: domain || a.sourceCommonName || '',
+        description: '',
+        eventTime: seendate ? seendate.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') + 'T00:00:00Z' : new Date().toISOString(),
+        fetchedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        tags: [presetName, country, lang].filter(Boolean),
+        entities: [], location: '', country, coordinates: '',
+        magnitude: tone,
+        rawMetrics: { tone, socialImage: a.socialimage || '', preset: presetName },
+        links: [url].filter(Boolean), status: 'new', raw: a,
+      };
+    });
+  }
+
+  function normalizeUsgs(feature) {
+    const p = feature.properties || {};
+    const id = feature.id || hashString(p.place + p.time);
+    return {
+      id, sourceType: 'usgs-earthquake', sourceName: 'USGS',
+      title: p.title || ('M' + p.mag + ' ' + (p.place || '')),
+      subtitle: 'Depth ' + (p.depth || '?') + ' km',
+      description: p.alert ? 'Alert: ' + p.alert : '',
+      eventTime: new Date(p.time).toISOString(),
+      fetchedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      tags: ['earthquake', p.alert || '', p.tsunami ? 'tsunami' : ''],
+      entities: [], location: p.place || '', country: '', coordinates: (feature.geometry && feature.geometry.coordinates ? feature.geometry.coordinates.join(',') : ''),
+      magnitude: p.mag || 0,
+      rawMetrics: { mag: p.mag, depth: p.depth, cdi: p.cdi, mmi: p.mmi, alert: p.alert, tsunami: !!p.tsunami, felt: p.felt || 0 },
+      links: p.url ? [p.url] : [], status: 'new', raw: feature,
+    };
+  }
+
+  function normalizeCrypto(coinId, data) {
+    const d = data || {};
+    const id = coinId + '-' + Math.floor(Date.now()/60000);
+    const price = d.usd || 0;
+    const mcap = d.usd_market_cap || 0;
+    const vol = d.usd_24h_vol || 0;
+    const chg = d.usd_24h_change || 0;
+    return {
+      id, sourceType: 'crypto-market', sourceName: 'CoinGecko',
+      title: coinId + ' market update',
+      subtitle: '$' + price.toLocaleString() + ' | 24h: ' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%',
+      description: 'Market cap: $' + (mcap/1e9).toFixed(2) + 'B | 24h vol: $' + (vol/1e9).toFixed(2) + 'B',
+      eventTime: new Date().toISOString(), fetchedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      tags: ['crypto', coinId], entities: [], location: '', country: '', coordinates: '',
+      magnitude: Math.abs(chg),
+      rawMetrics: { price, mcap, vol, change24h: chg },
+      links: ['https://www.coingecko.com/en/coins/' + coinId], status: 'new', raw: d,
+    };
+  }
+
+  // ============================================================
+  // Scoring
+  // ============================================================
+  function scoreEvent(ev) {
+    const w = state.settings.weights;
+    let sev = 0, weird = 0, urg = 0, nov = 0, rec = 0;
+    const reasons = [];
+    if (ev.sourceType === 'nasa-donki') { const r = scoreNasaDonki(ev); sev = r.sev; weird = r.weird; urg = r.urg; reasons.push(...r.reasons); }
+    if (ev.sourceType === 'gdelt') { const r = scoreGdelt(ev); sev = r.sev; weird = r.weird; urg = r.urg; reasons.push(...r.reasons); }
+    if (ev.sourceType === 'usgs-earthquake') { const r = scoreUsgs(ev); sev = r.sev; weird = r.weird; urg = r.urg; reasons.push(...r.reasons); }
+    if (ev.sourceType === 'crypto-market') { const r = scoreCrypto(ev); sev = r.sev; weird = r.weird; urg = r.urg; reasons.push(...r.reasons); }
+
+    // novelty: higher if unseen in last 48h by same source + title hash
+    nov = 50;
+    // recency
+    const hoursAgo = (Date.now() - new Date(ev.eventTime).getTime()) / 36e5;
+    rec = Math.max(0, 100 - hoursAgo * 4);
+
+    const composite = clampScore((sev * w.severity + weird * w.weirdness + urg * w.urgency + nov * w.novelty + rec * w.recency) / 100);
+    ev.severityScore = clampScore(sev);
+    ev.weirdnessScore = clampScore(weird);
+    ev.urgencyScore = clampScore(urg);
+    ev.noveltyScore = clampScore(nov);
+    ev.recencyScore = clampScore(rec);
+    ev.compositeScore = composite;
+    ev.scoringReasons = reasons;
+  }
+
+  function scoreNasaDonki(ev) {
+    let sev = 30, weird = 20, urg = 20;
+    const r = [];
+    const m = ev.rawMetrics || {};
+    if (m.classType && m.classType.startsWith('X')) { sev += 25; r.push('X-class flare'); }
+    if (m.kpIndex && m.kpIndex >= 7) { sev += 20; r.push('High Kp storm'); }
+    if (m.speed && m.speed > 1000) { sev += 15; r.push('Fast CME'); }
+    if (m.linkedEvents && m.linkedEvents.length) { weird += 10; r.push('Linked events'); }
+    if (ev.tags.includes('SEP')) { sev += 10; weird += 10; r.push('SEP event'); }
+    return { sev: Math.min(100, sev), weird: Math.min(100, weird), urg: Math.min(100, urg), reasons: r };
+  }
+  function scoreGdelt(ev) {
+    let sev = 10, weird = 30, urg = 20;
+    const r = [];
+    const t = (ev.title || '').toLowerCase();
+    if (/crash|disaster|attack|war|flood|earthquake|tsunami|die|dead|killed/.test(t)) { sev += 20; r.push('Disaster keywords'); }
+    if (/bizarre|strange|weird|unusual|unexpected|mystery/.test(t)) { weird += 20; r.push('Weirdness keywords'); }
+    if (ev.rawMetrics && ev.rawMetrics.tone) {
+      const tone = Math.abs(ev.rawMetrics.tone);
+      if (tone > 5) { sev += 10; r.push('Extreme tone'); }
+    }
+    return { sev: Math.min(100, sev), weird: Math.min(100, weird), urg: Math.min(100, urg), reasons: r };
+  }
+  function scoreUsgs(ev) {
+    let sev = 20, weird = 10, urg = 30;
+    const r = [];
+    const m = ev.rawMetrics || {};
+    const mag = m.mag || 0;
+    if (mag >= 7) { sev += 40; r.push('Major earthquake'); }
+    else if (mag >= 6) { sev += 25; r.push('Strong earthquake'); }
+    else if (mag >= 5) { sev += 10; r.push('Moderate earthquake'); }
+    if (m.tsunami) { sev += 15; r.push('Tsunami risk'); }
+    if (m.alert) { sev += 10; r.push('USGS alert'); }
+    if (m.felt && m.felt > 100) { weird += 10; r.push('Widely felt'); }
+    return { sev: Math.min(100, sev), weird: Math.min(100, weird), urg: Math.min(100, urg), reasons: r };
+  }
+  function scoreCrypto(ev) {
+    let sev = 10, weird = 10, urg = 20;
+    const r = [];
+    const chg = Math.abs(ev.rawMetrics && ev.rawMetrics.change24h || 0);
+    if (chg >= 20) { sev += 30; urg += 30; r.push('Extreme 24h move'); }
+    else if (chg >= 10) { sev += 15; urg += 15; r.push('Large 24h move'); }
+    else if (chg >= 5) { sev += 5; urg += 5; r.push('Notable 24h move'); }
+    if (/dogecoin|shiba/.test(ev.tags.join(' '))) { weird += 10; r.push('Meme coin'); }
+    return { sev: Math.min(100, sev), weird: Math.min(100, weird), urg: Math.min(100, urg), reasons: r };
+  }
+
+  // ============================================================
+  // Deduplication
+  // ============================================================
+  async function deduplicate(newEvents) {
+    const existing = await dbGetAll('events');
+    const byId = {};
+    existing.forEach(e => byId[e.id] = e);
+    const out = [];
+    for (const ev of newEvents) {
+      if (byId[ev.id]) {
+        // update if newer
+        ev.hidden = byId[ev.id].hidden;
+        ev.starred = byId[ev.id].starred;
+        await dbPut('events', ev);
+      } else {
+        await dbPut('events', ev);
+        out.push(ev);
+      }
+    }
+    return out;
+  }
+
+  // ============================================================
+  // Fetchers
+  // ============================================================
+  async function fetchNasaDonki(watcher) {
+    const cfg = watcher.config || {};
+    const savedKey = (state.settings.nasaKey || '').trim();
+    const cfgKey = (cfg.apiKey || '').trim();
+    const key = savedKey && savedKey !== 'DEMO_KEY' ? savedKey : (cfgKey || savedKey || 'DEMO_KEY');
+    let types = cfg.types || ['CME'];
+    if ((!key || key === 'DEMO_KEY') && types.length > 3) types = types.slice(0, 3);
+    const days = cfg.windowDays || 3;
+    const end = new Date();
+    const start = new Date(); start.setDate(start.getDate() - days);
+    const sd = start.toISOString().slice(0,10);
+    const ed = end.toISOString().slice(0,10);
+    const all = [];
+    const requestUrls = [];
+    const outcomes = [];
+    const errors = [];
+    for (let i = 0; i < types.length; i++) {
+      const t = types[i];
+      setScanProgress(`NASA DONKI ${t}`, i, types.length);
+      const url = 'https://api.nasa.gov/DONKI/' + t + '?startDate=' + sd + '&endDate=' + ed + '&api_key=' + encodeURIComponent(key);
+      requestUrls.push(url);
+      let res;
+      try {
+        res = await fetchWithRetry(url, 'NASA DONKI', t, { attempts: 2, delayMs: key === 'DEMO_KEY' ? 10000 : 4500 });
+      } catch (err) {
+        const error = err.message || String(err);
+        errors.push(`${t}: ${error}`);
+        outcomes.push({ preset: t, status: 'error', error, count: 0 });
+        continue;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const error = providerLimitMessage('NASA DONKI', t, res.status, text);
+        errors.push(`${t}: ${error}`);
+        outcomes.push({ preset: t, status: 'error', error, count: 0 });
+        if (res.status === 429 && key === 'DEMO_KEY') break;
+        continue;
+      }
+      const data = await res.json();
+      const norm = normalizeNasaDonki(data, t);
+      all.push(...norm);
+      outcomes.push({ preset: t, status: 'ok', error: null, count: norm.length });
+      if (i < types.length - 1) await sleep(key === 'DEMO_KEY' ? 2500 : 1200);
+    }
+    watcher._lastRequestUrls = requestUrls;
+    watcher._lastPresetOutcomes = outcomes;
+    watcher._lastPartialErrors = errors;
+    if (!all.length && errors.length) throw new Error(errors.slice(0, 3).join(' | '));
+    return all;
+  }
+
+  async function fetchGdelt(watcher) {
+    const cfg = watcher.config || {};
+    const presets = cfg.presets || [];
+    const max = cfg.maxRecords || 25;
+    const timespan = cfg.timespan || '24h';
+    const gapMs = cfg.requestGapMs || 8000;
+    const all = [];
+    const requestUrls = [];
+    const presetOutcomes = [];
+    const errors = [];
+    for (let i = 0; i < presets.length; i++) {
+      const pr = presets[i];
+      if (i > 0) {
+        setScanProgress(`Waiting for GDELT rate limit window`, i, presets.length);
+        await sleep(gapMs);
+      }
+      setScanProgress(`GDELT ${pr.name}`, i, presets.length);
+      const u = new URL('https://api.gdeltproject.org/api/v2/doc/doc');
+      u.searchParams.set('query', pr.query);
+      u.searchParams.set('mode', 'artlist');
+      u.searchParams.set('format', 'json');
+      u.searchParams.set('maxrecords', String(max));
+      u.searchParams.set('sort', 'HybridRel');
+      u.searchParams.set('timespan', timespan);
+      const url = u.toString();
+      requestUrls.push(url);
+      let res;
+      try {
+        res = await fetchWithRetry(url, 'GDELT', pr.name, { attempts: 3, delayMs: gapMs });
+      } catch (netErr) {
+        const msg = netErr.message || '';
+        const error = location.protocol === 'file:'
+          ? 'GDELT blocked on file://. Serve via localhost: python3 -m http.server 8000'
+          : msg.toLowerCase().includes('cors')
+            ? 'GDELT CORS error: ' + msg
+            : msg.toLowerCase().includes('failed to fetch')
+              ? 'GDELT request was blocked or throttled by the browser/provider after earlier calls. The watcher will keep partial results and retry this preset on the next scan.'
+              : 'GDELT fetch failed: ' + msg;
+        errors.push(`${pr.name}: ${error}`);
+        presetOutcomes.push({ preset: pr.name, status: 'error', error, count: 0 });
+        continue;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const error = providerLimitMessage('GDELT', pr.name, res.status, text);
+        errors.push(`${pr.name}: ${error}`);
+        presetOutcomes.push({ preset: pr.name, status: 'error', error, count: 0 });
+        continue;
+      }
+      let data;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        const text = await res.text().catch(() => '');
+        const error = 'GDELT returned non-JSON. Snippet: ' + text.slice(0,200);
+        errors.push(`${pr.name}: ${error}`);
+        presetOutcomes.push({ preset: pr.name, status: 'error', error, count: 0 });
+        continue;
+      }
+      const articles = Array.isArray(data) ? data : (data && Array.isArray(data.articles) ? data.articles : []);
+      const norm = normalizeGdelt(articles, pr.name);
+      all.push(...norm);
+      presetOutcomes.push({ preset: pr.name, status: 'ok', error: null, count: norm.length });
+    }
+    watcher._lastRequestUrls = requestUrls;
+    watcher._lastPresetOutcomes = presetOutcomes;
+    watcher._lastPartialErrors = errors;
+    if (!all.length && errors.length) throw new Error(errors.slice(0, 3).join(' | '));
+    return all;
+  }
+
+  async function fetchUsgs(watcher) {
+    const cfg = watcher.config || {};
+    const url = cfg.feedUrl || 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson';
+    const res = await fetchWithRetry(url, 'USGS', 'earthquake feed', { attempts: 2, delayMs: 3500 });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(providerLimitMessage('USGS', 'earthquake feed', res.status, text));
+    }
+    const data = await res.json();
+    const features = (data && data.features) || [];
+    return features.map(normalizeUsgs);
+  }
+
+  async function fetchCrypto(watcher) {
+    const cfg = watcher.config || {};
+    const coins = cfg.coins || 'bitcoin,ethereum,dogecoin,shiba-inu,solana';
+    const vs = cfg.vsCurrency || 'usd';
+    const url = 'https://api.coingecko.com/api/v3/simple/price?ids=' + coins + '&vs_currencies=' + vs + '&include_market_cap=true&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true';
+    const res = await fetchWithRetry(url, 'CoinGecko', 'market prices', { attempts: 3, delayMs: 4500 });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(providerLimitMessage('CoinGecko', 'market prices', res.status, text));
+    }
+    const data = await res.json();
+    const out = [];
+    const ids = coins.split(',').map(s => s.trim());
+    for (const id of ids) {
+      const d = data[id];
+      if (d) out.push(normalizeCrypto(id, d));
+    }
+    return out;
+  }
+
+  // ============================================================
+  // Watcher runner
+  // ============================================================
+  async function runWatcher(watcher) {
+    const started = Date.now();
+    watcher.status = 'running';
+    watcher.lastError = null;
+    watcher._lastRequestUrls = [];
+    watcher._lastPresetOutcomes = [];
+    watcher._lastPartialErrors = [];
+    setScanProgress('Running ' + watcher.name, 0, 1);
+    renderStatusStrip();
+    renderMissionControl();
+    let events = [];
+    try {
+      if (watcher.sourceType === 'nasa-donki') events = await fetchNasaDonki(watcher);
+      else if (watcher.sourceType === 'gdelt') events = await fetchGdelt(watcher);
+      else if (watcher.sourceType === 'usgs-earthquake') events = await fetchUsgs(watcher);
+      else if (watcher.sourceType === 'crypto-market') events = await fetchCrypto(watcher);
+      else throw new Error('Unknown watcher type');
+    } catch (e) {
+      watcher.status = 'error';
+      watcher.lastError = e.message || String(e);
+      await dbPut('watchers', watcher);
+      await dbPut('scans', {
+        id: 'scan-' + Date.now() + '-' + watcher.id,
+        watcherId: watcher.id, watcherName: watcher.name, sourceType: watcher.sourceType,
+        startedAt: new Date(started).toISOString(),
+        finishedAt: new Date().toISOString(),
+        status: 'error', requestUrls: watcher._lastRequestUrls || [],
+        resultCount: 0, newCount: 0, updatedCount: 0,
+        error: watcher.lastError, durationMs: Date.now() - started,
+        outcomes: watcher._lastPresetOutcomes || []
+      });
+      setScanProgress(watcher.name + ' failed', 1, 1);
+      return { error: watcher.lastError };
+    }
+    events.forEach(scoreEvent);
+    const added = await deduplicate(events);
+    state.newEventsThisSession += added.length;
+    const partialErrors = watcher._lastPartialErrors || [];
+    watcher.status = partialErrors.length ? 'partial' : 'ok';
+    watcher.lastError = partialErrors.length ? partialErrors.slice(0, 2).join(' | ') : null;
+    watcher.lastRunAt = new Date().toISOString();
+    watcher.nextRunAt = new Date(Date.now() + watcher.pollIntervalMinutes * 60000).toISOString();
+    await dbPut('watchers', watcher);
+    const scan = {
+      id: 'scan-' + Date.now() + '-' + watcher.id,
+      watcherId: watcher.id, watcherName: watcher.name, sourceType: watcher.sourceType,
+      startedAt: new Date(started).toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: partialErrors.length ? 'partial' : 'ok',
+      requestUrls: watcher._lastRequestUrls || [], resultCount: events.length,
+      newCount: added.length, updatedCount: events.length - added.length,
+      error: partialErrors.join('\n') || null, durationMs: Date.now() - started,
+      outcomes: watcher._lastPresetOutcomes || []
+    };
+    await dbPut('scans', scan);
+    setScanProgress(`${watcher.name}: ${added.length} new / ${events.length} total`, 1, 1);
+    return { added: added.length, total: events.length };
+  }
+
+  async function runAllWatchers() {
+    const enabled = state.watchers.filter(w => w.enabled);
+    let done = 0;
+    setScanProgress('Starting watcher scan', 0, enabled.length);
+    for (const w of enabled) {
+      if (!w.enabled) continue;
+      await runWatcher(w);
+      done++;
+      setScanProgress(`Completed ${w.name}`, done, enabled.length);
+    }
+    state.lastScanAt = new Date().toISOString();
+    state.nextScanAt = new Date(Date.now() + state.settings.pollIntervalMinutes * 60000).toISOString();
+    await loadEvents();
+    renderAll();
+    renderScanLog();
+    setScanProgress('Scan complete', enabled.length, enabled.length);
+  }
+
+  // ============================================================
+  // Events
+  // ============================================================
+  async function loadEvents() {
+    state.events = await dbGetAll('events');
+  }
+
+  function buildClusterKey(ev) {
+    if (ev.sourceType === 'nasa-donki') return 'nasa-' + (ev.tags[0] || '') + '-' + ev.eventTime.slice(0,10);
+    if (ev.sourceType === 'gdelt') return 'gdelt-' + (ev.country || 'xx');
+    if (ev.sourceType === 'usgs-earthquake') return 'usgs-' + (ev.location || 'xx').split(' ').pop();
+    if (ev.sourceType === 'crypto-market') return 'crypto-' + (ev.tags[1] || 'coin');
+    return ev.sourceType;
+  }
+
+  // ============================================================
+  // Polling
+  // ============================================================
+  function startAutoWatch() {
+    if (state.autoWatchTimer) clearInterval(state.autoWatchTimer);
+    state.settings.autoWatch = true;
+    saveSettings();
+    const ms = Math.max(300000, state.settings.pollIntervalMinutes * 60000);
+    state.autoWatchTimer = setInterval(() => {
+      if (state.settings.pauseWhenHidden && state.tabHidden) return;
+      runAllWatchers();
+    }, ms);
+    toast('Auto-watch started');
+    renderStatusStrip();
+  }
+  function pauseAutoWatch() {
+    state.settings.autoWatch = false;
+    if (state.autoWatchTimer) { clearInterval(state.autoWatchTimer); state.autoWatchTimer = null; }
+    saveSettings();
+    toast('Auto-watch paused');
+    renderStatusStrip();
+  }
+
+  // ============================================================
+  // Local AI
+  // ============================================================
+  async function checkLocalAI() {
+    if (typeof window.LanguageModel === 'undefined') {
+      state.aiStatus = 'Not available';
+      el('ai-status').textContent = state.aiStatus;
+      return;
+    }
+    try {
+      const avail = await LanguageModel.availability();
+      state.aiStatus = avail === 'available' ? 'Ready' : avail === 'downloadable' ? 'Downloadable' : avail;
+    } catch (e) {
+      state.aiStatus = 'Error: ' + (e.message || e);
+    }
+    el('ai-status').textContent = state.aiStatus;
+  }
+  async function createLocalAISession() {
+    if (typeof window.LanguageModel === 'undefined') {
+      toast('Local AI not available');
+      return false;
+    }
+    try {
+      const opts = {};
+      try {
+        opts.monitor = (m) => { m.addEventListener('downloadprogress', (e) => {}); };
+      } catch(e){}
+      state.aiStatus = 'Creating session…';
+      el('ai-status').textContent = state.aiStatus;
+      aiSession = await LanguageModel.create(opts);
+      state.aiStatus = 'Session active';
+      el('ai-status').textContent = state.aiStatus;
+      toast('Local AI session created');
+      return true;
+    } catch (e) {
+      state.aiStatus = 'Session failed';
+      el('ai-status').textContent = state.aiStatus;
+      toast('AI session failed: ' + (e.message || e));
+      return false;
+    }
+  }
+  async function ensureLocalAISession() {
+    if (aiSession) return true;
+    if (typeof window.LanguageModel === 'undefined') {
+      toast('Local AI not available in this browser');
+      return false;
+    }
+    await checkLocalAI();
+    if (/unavailable|not available|error/i.test(state.aiStatus)) {
+      toast('Local AI is not available: ' + state.aiStatus);
+      return false;
+    }
+    return createLocalAISession();
+  }
+  async function generateEventBrief(ev) {
+    const ready = await ensureLocalAISession();
+    if (!ready) return;
+    const prompt = `You are The Watchtower’s local analyst. Analyze this normalized event metadata only. Do not claim facts beyond the metadata. Return compact JSON with keys: plainEnglishSummary, whyItMatters, watchNext, contentAngle, confidence (low|medium|high), caveat.\n\nEvent metadata:\n${JSON.stringify({ title: ev.title, subtitle: ev.subtitle, description: ev.description, tags: ev.tags, magnitude: ev.magnitude, metrics: ev.rawMetrics }, null, 2)}`;
+    try {
+      const text = await aiSession.prompt(prompt);
+      const json = parseAiBriefResponse(text);
+      ev.aiBrief = json || { plainEnglishSummary: text, caveat: 'Could not parse JSON; returned raw text.' };
+      await dbPut('events', ev);
+      toast('AI brief generated');
+    } catch (e) {
+      toast('AI brief failed: ' + (e.message || e));
+    }
+  }
+
+  function parseAiBriefResponse(text) {
+    if (!text) return null;
+    const candidates = [];
+    const trimmed = String(text).trim();
+    candidates.push(trimmed);
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fenced) candidates.push(fenced[1].trim());
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  // ============================================================
+  // Reports
+  // ============================================================
+  function generateReport(type) {
+    const now = new Date().toISOString();
+    let out = '# The Watchtower Brief\n\n**Generated:** ' + now + '\n**Type:** ' + type + '\n\n';
+    let events = state.events.filter(e => !e.hidden);
+    if (type === 'space') events = events.filter(e => e.sourceType === 'nasa-donki');
+    if (type === 'weirdness') events = events.filter(e => e.sourceType === 'gdelt');
+    if (type === 'earthquakes') events = events.filter(e => e.sourceType === 'usgs-earthquake');
+    if (type === 'crypto') events = events.filter(e => e.sourceType === 'crypto-market');
+    if (type === 'last-24h') {
+      const cutoff = Date.now() - 86400000;
+      events = events.filter(e => new Date(e.eventTime).getTime() > cutoff);
+    }
+    if (type === 'top-signals') events = events.filter(e => e.compositeScore >= 40);
+    if (type === 'attention') events = events.filter(e => e.compositeScore >= 35);
+    if (type === 'noise') events = events.filter(e => e.compositeScore < 20);
+    events.sort((a,b) => (b.compositeScore || 0) - (a.compositeScore || 0));
+    const top = events.slice(0, 15);
+    if (!top.length) { out += 'No matching events found.\n'; }
+    else {
+      out += '## Top events\n\n';
+      top.forEach((ev, i) => {
+        out += (i+1) + '. **' + ev.title + '** (' + ev.sourceType + ') — Score ' + (ev.compositeScore || 0) + '\n';
+        out += '   - ' + (ev.subtitle || '') + '\n';
+        out += '   - Time: ' + formatDate(ev.eventTime) + '\n';
+        if (ev.deterministicSummary) out += '   - ' + ev.deterministicSummary + '\n';
+        if (ev.links && ev.links.length) out += '   - Link: ' + ev.links[0] + '\n';
+        out += '\n';
+      });
+    }
+    out += '---\n*Caveat: This is a research toy, not financial, medical, or forecasting advice.*\n';
+    el('report-output').textContent = out;
+    return out;
+  }
+
+  // ============================================================
+  // Rendering
+  // ============================================================
+  function renderStatusStrip() {
+    const strip = el('status-strip');
+    const total = state.events.length;
+    const maxScore = total ? Math.max(...state.events.map(e => e.compositeScore || 0)) : 0;
+    const auto = state.settings.autoWatch ? 'ON' : 'OFF';
+    strip.innerHTML = [
+      '<span class="pill"><span class="led ' + (state.settings.autoWatch ? 'green' : 'amber') + '"></span><strong>Auto:</strong> ' + auto + '</span>',
+      '<span class="pill"><strong>Events:</strong> ' + total + '</span>',
+      '<span class="pill"><strong>New:</strong> ' + state.newEventsThisSession + '</span>',
+      '<span class="pill"><strong>Top score:</strong> ' + maxScore + '</span>',
+      '<span class="pill"><strong>Last scan:</strong> ' + (state.lastScanAt ? formatDate(state.lastScanAt) : '—') + '</span>',
+      '<span class="pill"><strong>Next:</strong> ' + (state.nextScanAt ? formatDate(state.nextScanAt) : '—') + '</span>',
+      '<span class="pill"><strong>AI:</strong> ' + state.aiStatus + '</span>',
+      '<span class="pill"><strong>Online:</strong> ' + (navigator.onLine ? 'Yes' : 'No') + '</span>',
+    ].join('');
+  }
+
+  function renderAiBrief(brief, compact = false) {
+    if (!brief) return '';
+    const data = typeof brief === 'string'
+      ? (parseAiBriefResponse(brief) || { plainEnglishSummary: brief })
+      : (brief.plainEnglishSummary ? (parseAiBriefResponse(brief.plainEnglishSummary) || brief) : brief);
+    const fields = [
+      ['plainEnglishSummary', 'Summary'],
+      ['whyItMatters', 'Why it matters'],
+      ['watchNext', 'Watch next'],
+      ['contentAngle', 'Content angle'],
+      ['confidence', 'Confidence'],
+      ['caveat', 'Caveat']
+    ];
+    const rows = fields
+      .filter(([key]) => data[key])
+      .map(([key, label]) => `<div><dt>${label}</dt><dd class="${key === 'caveat' ? 'caveat' : ''}">${escapeHtml(data[key])}</dd></div>`)
+      .join('');
+    const fallback = rows || `<div><dt>Response</dt><dd>${escapeHtml(JSON.stringify(data, null, 2))}</dd></div>`;
+    const visibleRows = compact
+      ? fields
+          .filter(([key]) => data[key])
+          .slice(0, 2)
+          .map(([key, label]) => `<div><dt>${label}</dt><dd class="${key === 'caveat' ? 'caveat' : ''}">${escapeHtml(data[key])}</dd></div>`)
+          .join('') || fallback
+      : fallback;
+    return `<div class="ai-brief"><h4>Local AI Brief</h4><dl>${visibleRows}</dl></div>`;
+  }
+
+  function renderMissionControl() {
+    const content = el('mission-content');
+    content.innerHTML = '';
+    const welcome = el('mission-welcome');
+    if (!state.events.length && !state.lastScanAt) welcome.classList.remove('hidden');
+    else welcome.classList.add('hidden');
+    const tiles = el('watcher-tiles');
+    tiles.innerHTML = state.watchers.map(w => {
+      const statusLed = w.status === 'ok' ? 'green' : w.status === 'error' ? 'red' : w.status === 'running' ? 'cyan' : 'amber';
+      const enabledLed = w.enabled ? 'green' : 'red';
+      return `
+        <div class="card" style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="led ${enabledLed}"></span>
+            <div class="card-title">${w.name}</div>
+          </div>
+          <div class="card-meta">Status: ${w.status} ${w.lastError ? '<span style="color:' + (w.status === 'partial' ? 'var(--amber)' : 'var(--red)') + '">(' + w.lastError + ')</span>' : ''}</div>
+          <div class="card-meta">Last run: ${formatDate(w.lastRunAt)}</div>
+          <div class="card-meta">Next run: ${formatDate(w.nextRunAt)}</div>
+          <div style="margin-top:auto;padding-top:8px;">
+            <button class="btn" data-wid="${w.id}" data-action="toggle">${w.enabled ? 'Disable' : 'Enable'}</button>
+            <button class="btn primary" data-wid="${w.id}" data-action="run">Run now</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    tiles.querySelectorAll('button[data-action]').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        const id = e.currentTarget.dataset.wid;
+        const action = e.currentTarget.dataset.action;
+        const w = state.watchers.find(x => x.id === id);
+        if (!w) return;
+        if (action === 'toggle') { w.enabled = !w.enabled; await dbPut('watchers', w); renderAll(); }
+        if (action === 'run') { await runWatcher(w); await loadEvents(); renderAll(); renderScanLog(); }
+      });
+    });
+  }
+
+  function renderEventStream() {
+    const container = el('event-stream');
+    const source = el('stream-source').value;
+    const sort = el('stream-sort').value;
+    const search = el('stream-search').value.toLowerCase();
+    const starredOnly = el('stream-starred').checked;
+    let list = state.events.filter(e => !e.hidden);
+    if (source !== 'all') list = list.filter(e => e.sourceType === source);
+    if (starredOnly) list = list.filter(e => e.starred);
+    if (search) list = list.filter(e => (e.title + ' ' + e.subtitle + ' ' + e.description + ' ' + e.tags.join(' ')).toLowerCase().includes(search));
+    const sorts = {
+      newest: (a,b) => new Date(b.eventTime) - new Date(a.eventTime),
+      score: (a,b) => (b.compositeScore||0) - (a.compositeScore||0),
+      severity: (a,b) => (b.severityScore||0) - (a.severityScore||0),
+      weirdness: (a,b) => (b.weirdnessScore||0) - (a.weirdnessScore||0),
+      urgency: (a,b) => (b.urgencyScore||0) - (a.urgencyScore||0),
+    };
+    list.sort(sorts[sort] || sorts.newest);
+    container.innerHTML = list.slice(0, 100).map(ev => {
+      const srcClass = ev.sourceType.replace(/[^a-z]/g, '');
+      return `
+        <div class="event-card" data-eid="${ev.id}">
+          <div class="event-header">
+            <div>
+              <div class="event-title">${ev.title}</div>
+              <div class="event-sub">${ev.subtitle || ''}</div>
+              <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="badge ${srcClass}">${ev.sourceType}</span>
+                ${ev.tags.map(t => t ? '<span class="badge">' + t + '</span>' : '').join('')}
+              </div>
+            </div>
+            <div class="event-score">${ev.compositeScore || 0}</div>
+          </div>
+          <div style="margin-top:6px;">
+            <div class="score-bar"><div class="score-fill" style="width:${ev.compositeScore || 0}%"></div></div>
+            <div style="display:flex;gap:10px;font-size:11px;color:var(--muted);margin-top:4px;">
+              <span>S:${ev.severityScore||0}</span>
+              <span>W:${ev.weirdnessScore||0}</span>
+              <span>U:${ev.urgencyScore||0}</span>
+            </div>
+          </div>
+          <div class="event-actions">
+            <button class="btn" data-action="star" data-id="${ev.id}">${ev.starred ? 'Unstar' : 'Star'}</button>
+            <button class="btn" data-action="hide" data-id="${ev.id}">Hide</button>
+            <button class="btn" data-action="detail" data-id="${ev.id}">Details</button>
+            <button class="btn" data-action="ai" data-id="${ev.id}">AI Brief</button>
+          </div>
+          ${renderAiBrief(ev.aiBrief, true)}
+        </div>
+      `;
+    }).join('');
+    if (!list.length) container.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);">No events match.</div>';
+    container.querySelectorAll('button[data-action]').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        const id = e.currentTarget.dataset.id;
+        const action = e.currentTarget.dataset.action;
+        const ev = state.events.find(x => x.id === id);
+        if (!ev) return;
+        if (action === 'star') { ev.starred = !ev.starred; await dbPut('events', ev); renderAll(); }
+        if (action === 'hide') { ev.hidden = true; await dbPut('events', ev); await loadEvents(); renderAll(); }
+        if (action === 'detail') openEventDetail(ev.id);
+        if (action === 'ai') { await generateEventBrief(ev); renderAll(); }
+      });
+    });
+  }
+
+  function renderSignalField() {
+    const canvas = el('signal-canvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = 500 * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const W = rect.width; const H = 500;
+    ctx.clearRect(0,0,W,H);
+    // Radar rings
+    const cx = W/2, cy = H/2;
+    ctx.strokeStyle = 'rgba(57,255,20,0.15)';
+    ctx.lineWidth = 1;
+    for (let r = 40; r < Math.min(W,H)/2; r += 60) {
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+    }
+    // Event blips
+    const list = state.events.filter(e => !e.hidden).slice(0, 120);
+    list.forEach(ev => {
+      const hoursAgo = (Date.now() - new Date(ev.eventTime).getTime()) / 36e5;
+      const radius = Math.max(40, Math.min(W,H)/2 - hoursAgo * 8);
+      const angle = ((hashString(ev.sourceType + ev.id).charCodeAt(1) || 0) % 360) * (Math.PI/180);
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      const size = Math.max(3, (ev.compositeScore || 0) / 8);
+      let color = '#999';
+      if (ev.sourceType === 'nasa-donki') color = 'var(--cyan)';
+      if (ev.sourceType === 'gdelt') color = 'var(--amber)';
+      if (ev.sourceType === 'usgs-earthquake') color = 'var(--red)';
+      if (ev.sourceType === 'crypto-market') color = 'var(--accent)';
+      const opacity = Math.max(0.25, 1 - hoursAgo / 72);
+      ctx.globalAlpha = opacity;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI*2); ctx.fill();
+      // pulse ring for high urgency
+      if ((ev.urgencyScore || 0) > 60) {
+        ctx.strokeStyle = color;
+        ctx.beginPath(); ctx.arc(x, y, size + 6, 0, Math.PI*2); ctx.stroke();
+      }
+    });
+    ctx.globalAlpha = 1;
+    // sweep
+    const sweep = (Date.now() / 3000) % (Math.PI*2);
+    ctx.strokeStyle = 'rgba(57,255,20,0.3)';
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sweep)*Math.min(W,H)/2, cy + Math.sin(sweep)*Math.min(W,H)/2); ctx.stroke();
+  }
+
+  function renderWatchersConfig() {
+    const container = el('watchers-config');
+    container.innerHTML = state.watchers.map(w => `
+      <div class="card" style="margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="led ${w.enabled ? 'green' : 'red'}"></span>
+          <div class="card-title">${w.name}</div>
+          <div class="badge">${w.sourceType}</div>
+        </div>
+        <div class="card-meta">Interval: ${w.pollIntervalMinutes} min | Last: ${formatDate(w.lastRunAt)} | Next: ${formatDate(w.nextRunAt)}</div>
+        <div class="control-row" style="margin-top:8px;">
+          <button class="btn" data-wid="${w.id}" data-action="toggle">${w.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="btn primary" data-wid="${w.id}" data-action="run">Run now</button>
+        </div>
+        ${w.lastError ? '<div class="card-error">Last error: ' + w.lastError + '</div>' : ''}
+      </div>
+    `).join('');
+    container.querySelectorAll('button[data-action]').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        const id = e.currentTarget.dataset.wid;
+        const action = e.currentTarget.dataset.action;
+        const w = state.watchers.find(x => x.id === id);
+        if (!w) return;
+        if (action === 'toggle') { w.enabled = !w.enabled; await dbPut('watchers', w); renderAll(); }
+        if (action === 'run') { await runWatcher(w); await loadEvents(); renderAll(); renderScanLog(); }
+      });
+    });
+  }
+
+  function renderArchive() {
+    const tbody = el('archive-body');
+    const list = state.events.slice(0, 200);
+    tbody.innerHTML = list.map(ev => `
+      <tr>
+        <td class="value">${ev.id.slice(0,24)}</td>
+        <td><span class="badge">${ev.sourceType}</span></td>
+        <td>${ev.title}</td>
+        <td>${ev.compositeScore || 0}</td>
+        <td>${formatDate(ev.eventTime)}</td>
+        <td>
+          <button class="btn" data-action="del" data-id="${ev.id}">Delete</button>
+          <button class="btn" data-action="detail" data-id="${ev.id}">Details</button>
+        </td>
+      </tr>
+    `).join('');
+    tbody.querySelectorAll('button').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        const id = e.currentTarget.dataset.id;
+        const action = e.currentTarget.dataset.action;
+        if (action === 'del') { await dbDelete('events', id); await loadEvents(); renderAll(); }
+        if (action === 'detail') openEventDetail(id);
+      });
+    });
+  }
+
+  async function renderScanLog() {
+    const list = el('scan-log');
+    if (!list) return;
+    const scans = (await dbGetAll('scans')).sort((a,b) => new Date(b.finishedAt || b.startedAt).getTime() - new Date(a.finishedAt || a.startedAt).getTime()).slice(0, 120);
+    if (!scans.length) {
+      list.innerHTML = '<div class="card-meta">No scan records yet.</div>';
+      return;
+    }
+    list.innerHTML = scans.map(scan => {
+      const status = scan.status || (scan.error ? 'error' : 'ok');
+      const detail = [
+        `Started: ${formatDate(scan.startedAt)}`,
+        `Finished: ${formatDate(scan.finishedAt)}`,
+        `Duration: ${Math.round((scan.durationMs || 0) / 1000)}s`,
+        `Results: ${scan.resultCount || 0}`,
+        `New: ${scan.newCount || 0}`,
+        `Updated: ${scan.updatedCount || 0}`,
+        scan.error ? `Error: ${scan.error}` : '',
+        scan.outcomes && scan.outcomes.length ? 'Preset outcomes:\n' + scan.outcomes.map(o => `- ${o.preset}: ${o.status} (${o.count || 0})${o.error ? ' - ' + o.error : ''}`).join('\n') : ''
+      ].filter(Boolean).join('\n');
+      return `
+        <div class="log-entry ${status}">
+          <strong>${escapeHtml(scan.watcherName || scan.watcherId || scan.sourceType || 'Scan')}</strong>
+          <span class="badge ${escapeHtml(scan.sourceType || '')}">${escapeHtml(status)}</span>
+          <pre>${escapeHtml(detail)}</pre>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderAdmin() {
+    const cap = el('browser-cap');
+    const caps = {
+      'IndexedDB': !!window.indexedDB,
+      'LocalStorage': !!window.localStorage,
+      'Clipboard': !!(navigator.clipboard && navigator.clipboard.writeText),
+      'File System Access': !!window.showOpenFilePicker,
+      'View Transition': typeof document.startViewTransition === 'function',
+      'WebGPU': !!navigator.gpu,
+      'Canvas': !!document.createElement('canvas').getContext,
+      'Local AI': typeof window.LanguageModel !== 'undefined',
+      'Online': navigator.onLine,
+      'Secure context': !!window.isSecureContext,
+    };
+    cap.innerHTML = Object.entries(caps).map(([k,v]) => `<div>${k}: <strong style="color:${v ? 'var(--accent)' : 'var(--red)'}">${v ? 'Yes' : 'No'}</strong></div>`).join('');
+    refreshStorageInfo();
+  }
+
+  async function refreshStorageInfo() {
+    const elInfo = el('storage-info');
+    let text = 'Unknown';
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        const used = est.usage ? Math.round(est.usage / 1024 / 1024) + ' MB' : '?';
+        const quota = est.quota ? Math.round(est.quota / 1024 / 1024) + ' MB' : '?';
+        text = used + ' used / ' + quota + ' quota';
+      }
+    } catch (e) { text = 'Error'; }
+    elInfo.textContent = text;
+  }
+
+  // ============================================================
+  // Event detail modal
+  // ============================================================
+  async function openEventDetail(id) {
+    const ev = state.events.find(x => x.id === id) || await dbGet('events', id);
+    if (!ev) return;
+    const body = el('modal-body');
+    body.innerHTML = `
+      <div class="card" style="border:0;box-shadow:none;padding:0;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <span class="badge">${ev.sourceType}</span>
+          ${ev.tags.map(t => t ? '<span class="badge">' + t + '</span>' : '').join('')}
+        </div>
+        <div class="card-title">${ev.title}</div>
+        <div class="card-meta">${ev.subtitle || ''}</div>
+        <div class="card-body">${ev.description || ''}</div>
+        <div class="value" style="margin-top:8px;">Score: ${ev.compositeScore || 0} (S:${ev.severityScore||0} W:${ev.weirdnessScore||0} U:${ev.urgencyScore||0})</div>
+        <div class="card-meta">Time: ${formatDate(ev.eventTime)} | Fetched: ${formatDate(ev.fetchedAt)}</div>
+        ${ev.links && ev.links.length ? '<div class="card-meta">Links: ' + ev.links.map(l => '<a href="' + l + '" target="_blank" rel="noopener">' + l + '</a>').join(' ') + '</div>' : ''}
+        ${ev.deterministicSummary ? '<div class="card-body" style="margin-top:8px;"><strong>Summary:</strong> ' + ev.deterministicSummary + '</div>' : ''}
+        ${renderAiBrief(ev.aiBrief)}
+        <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:var(--muted);">Raw JSON</summary><pre class="value" style="max-height:200px;overflow:auto;background:rgba(0,0,0,0.2);padding:8px;border-radius:6px;">${JSON.stringify(ev.raw, null, 2)}</pre></details>
+      </div>
+    `;
+    el('event-modal').classList.add('open');
+  }
+
+  // ============================================================
+  // Export / Import / Clipboard
+  // ============================================================
+  function downloadBlob(name, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+  async function exportEvents() {
+    const events = await dbGetAll('events');
+    const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
+    downloadBlob('watchtower-events-' + new Date().toISOString().slice(0,10) + '.json', blob);
+    toast('Events exported');
+  }
+  async function exportDb() {
+    const data = {
+      events: await dbGetAll('events'),
+      scans: await dbGetAll('scans'),
+      watchers: await dbGetAll('watchers'),
+      settings: await dbGetAll('settings'),
+      briefs: await dbGetAll('briefs'),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    downloadBlob('watchtower-db-' + new Date().toISOString().slice(0,10) + '.json', blob);
+    toast('Full DB exported');
+  }
+  async function importJson(file) {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (Array.isArray(data)) {
+      for (const ev of data) await dbPut('events', ev);
+      toast('Events imported');
+    } else if (data.events) {
+      for (const ev of data.events) await dbPut('events', ev);
+      toast('DB imported');
+    }
+    await loadEvents(); renderAll();
+  }
+
+  // ============================================================
+  // Tabs
+  // ============================================================
+  function buildTabs() {
+    const container = el('tabs');
+    container.innerHTML = TAB_KEYS.map(k => {
+      return '<button class="tab" role="tab" aria-selected="' + (k === 'mission' ? 'true' : 'false') + '" data-tab="' + k + '">' + TAB_LABELS[k] + '</button>';
+    }).join('');
+    container.querySelectorAll('.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.tab;
+        TAB_KEYS.forEach(k => {
+          el('panel-' + k).classList.toggle('active', k === key);
+        });
+        container.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', 'false'));
+        btn.setAttribute('aria-selected', 'true');
+        if (key === 'field') requestAnimationFrame(renderSignalField);
+        if (key === 'log') renderScanLog();
+      });
+    });
+  }
+
+  // ============================================================
+  // Wire controls
+  // ============================================================
+  el('btn-run-all').addEventListener('click', runAllWatchers);
+  el('btn-auto-watch').addEventListener('click', startAutoWatch);
+  el('btn-pause').addEventListener('click', pauseAutoWatch);
+  el('btn-brief').addEventListener('click', () => { activateTab('brief'); });
+  el('btn-export-snap').addEventListener('click', exportEvents);
+  el('btn-export-events').addEventListener('click', exportEvents);
+  el('btn-export-db').addEventListener('click', exportDb);
+  el('btn-import').addEventListener('click', () => el('import-file').click());
+  el('import-file').addEventListener('change', (e) => { if (e.target.files[0]) importJson(e.target.files[0]); });
+  el('btn-clear-all').addEventListener('click', async () => {
+    if (!confirm('Permanently delete all stored events, scans, and settings?')) return;
+    await dbClear('events'); await dbClear('scans'); await dbClear('briefs');
+    state.events = []; state.newEventsThisSession = 0; renderAll(); toast('All data cleared');
+  });
+  el('btn-refresh-log').addEventListener('click', renderScanLog);
+  el('btn-clear-log').addEventListener('click', async () => {
+    if (!confirm('Clear scan log entries?')) return;
+    await dbClear('scans');
+    renderScanLog();
+    toast('Scan log cleared');
+  });
+  el('btn-save-keys').addEventListener('click', saveSettings);
+  el('btn-clear-keys').addEventListener('click', () => { el('nasa-key').value = 'DEMO_KEY'; el('cg-key').value = ''; saveSettings(); });
+  el('btn-save-weights').addEventListener('click', saveSettings);
+  el('btn-reset-weights').addEventListener('click', () => {
+    state.settings.weights = { severity: 30, weirdness: 25, urgency: 25, novelty: 10, recency: 10 };
+    el('w-severity').value = 30; el('w-weirdness').value = 25; el('w-urgency').value = 25; el('w-novelty').value = 10; el('w-recency').value = 10;
+    saveSettings();
+  });
+  el('btn-check-ai').addEventListener('click', checkLocalAI);
+  el('btn-create-ai').addEventListener('click', createLocalAISession);
+  el('ai-enabled').addEventListener('change', saveAiSettings);
+  el('ai-max').addEventListener('change', saveAiSettings);
+  el('btn-persist').addEventListener('click', async () => {
+    if (navigator.storage && navigator.storage.persist) {
+      const ok = await navigator.storage.persist();
+      toast('Persistent storage: ' + (ok ? 'granted' : 'denied'));
+    } else toast('Not supported');
+  });
+  el('btn-refresh-storage').addEventListener('click', refreshStorageInfo);
+  el('btn-gen-report').addEventListener('click', () => generateReport(el('brief-type').value));
+  el('btn-copy-report').addEventListener('click', () => {
+    const text = el('report-output').textContent;
+    navigator.clipboard.writeText(text).then(() => toast('Report copied'));
+  });
+  el('btn-download-report').addEventListener('click', () => {
+    const text = el('report-output').textContent;
+    const blob = new Blob([text], { type: 'text/markdown' });
+    downloadBlob('watchtower-brief-' + new Date().toISOString().slice(0,10) + '.md', blob);
+  });
+  el('modal-close').addEventListener('click', () => el('event-modal').classList.remove('open'));
+  el('modal-copy').addEventListener('click', () => {
+    const text = el('modal-body').innerText;
+    navigator.clipboard.writeText(text).then(() => toast('Copied'));
+  });
+  el('modal-ai').addEventListener('click', async () => {
+    const id = el('modal-body').querySelector('.event-card')?.dataset?.eid;
+    if (!id) return;
+    const ev = state.events.find(x => x.id === id);
+    if (ev) await generateEventBrief(ev);
+  });
+  el('stream-search').addEventListener('input', renderEventStream);
+  el('stream-source').addEventListener('change', renderEventStream);
+  el('stream-sort').addEventListener('change', renderEventStream);
+  el('stream-starred').addEventListener('change', renderEventStream);
+
+  function activateTab(key) {
+    TAB_KEYS.forEach(k => el('panel-' + k).classList.toggle('active', k === key));
+    el('tabs').querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === key ? 'true' : 'false'));
+    if (key === 'field') requestAnimationFrame(renderSignalField);
+    if (key === 'log') renderScanLog();
+  }
+
+  document.addEventListener('visibilitychange', () => { state.tabHidden = document.hidden; });
+
+  function renderAll() {
+    renderStatusStrip();
+    renderMissionControl();
+    renderEventStream();
+    renderWatchersConfig();
+    renderArchive();
+    renderScanLog();
+    renderAdmin();
+  }
+
+  // ============================================================
+  // First run / Init
+  // ============================================================
+  async function init() {
+    await initDb();
+    await loadSettings();
+    await loadWatchers();
+    await loadEvents();
+    buildTabs();
+    renderAll();
+    if (state.settings.resumeAutoWatch) startAutoWatch();
+    checkLocalAI();
+    // auto-refresh signal field if visible
+    setInterval(() => {
+      if (el('panel-field').classList.contains('active')) renderSignalField();
+    }, 1200);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
