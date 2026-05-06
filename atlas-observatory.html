@@ -251,7 +251,7 @@ table.data-table tr.selected td{background:rgba(74,122,48,0.08)}
 </div>
 <script>
 const APP_NAME = "Atlas Observatory";
-const APP_VERSION = "2026.05.06.2";
+const APP_VERSION = "2026.05.06.4";
 const DB_NAME = "atlasObservatoryDB";
 const DB_VERSION = 1;
 
@@ -260,7 +260,7 @@ const state = {
   db: null,
   localAI: { availability: null, session: null, enabled: false, checking: false, lastError: null },
   data: { datasets: [], activeDatasetId: null, selectedRows: [], selectedColumns: [], chartSuggestions: [], importedFiles: [], currentView: null },
-  knowledge: { notes: [], activeNoteId: null, graph: null, selectedTag: null, selectedLink: null, editMode: false, graphLayout: null },
+  knowledge: { notes: [], activeNoteId: null, graph: null, selectedTag: null, selectedLink: null, editMode: false, graphLayout: null, aiBusyNoteId: null, aiStatus: "" },
   ui: { currentView: {}, sidebarOpen: true, theme: "atlas-room", searchQuery: "" },
   dataView: { page: 0, pageSize: 25, sortCol: null, sortDir: 1, filter: "" },
   mapView: { zoom: 1, panX: 0, panY: 0, clusterBy: "tags", showEdges: true, filterTag: null }
@@ -538,6 +538,10 @@ function escapeHtml(s) {
   const d = document.createElement("div"); d.textContent = s; return d.innerHTML;
 }
 
+function escapeAttr(s) {
+  return escapeHtml(String(s)).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 function formatNum(n) {
   if (n === undefined || n === null) return "\u2014";
   if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + "M";
@@ -729,9 +733,12 @@ function profileDataset(dataset) {
     var likelyRole = inferRole(colName, inferredType, uniqueRatio, rowCount);
     var likelyLat = /^lat(itude)?$/i.test(colName) || (inferredType === "number" && min >= -90 && max <= 90 && uniqueRatio > 0.1);
     var likelyLon = /^(lon|lng)(gitude)?$/i.test(colName) || (inferredType === "number" && min >= -180 && max <= 180 && uniqueRatio > 0.1);
-    if (likelyLat) return { name: colName, inferredType: "latitude", nullable: nonNull.length < rowCount, sampleValues: sampleValues, uniqueCount: uniqueCount, min: min, max: max, dateRange: dateRange, likelyRole: "location", likelyLat: true, likelyLon: false };
-    if (likelyLon) return { name: colName, inferredType: "longitude", nullable: nonNull.length < rowCount, sampleValues: sampleValues, uniqueCount: uniqueCount, min: min, max: max, dateRange: dateRange, likelyRole: "location", likelyLat: false, likelyLon: true };
-    return { name: colName, inferredType: inferredType, nullable: nonNull.length < rowCount, sampleValues: sampleValues, uniqueCount: uniqueCount, min: min, max: max, dateRange: dateRange, likelyRole: likelyRole, likelyLat: false, likelyLon: false };
+    var pathMeta = dataset.jsonMeta && dataset.jsonMeta.paths ? dataset.jsonMeta.paths[colName] : null;
+    var baseProfile = { name: colName, path: colName, jsonTypes: pathMeta ? Object.keys(pathMeta.types) : null, inferredType: inferredType, nullable: nonNull.length < rowCount, sampleValues: sampleValues, uniqueCount: uniqueCount, min: min, max: max, dateRange: dateRange, likelyRole: likelyRole, likelyLat: false, likelyLon: false };
+    if (pathMeta && pathMeta.maxArrayLength) baseProfile.maxArrayLength = pathMeta.maxArrayLength;
+    if (likelyLat) return Object.assign(baseProfile, { inferredType: "latitude", likelyRole: "location", likelyLat: true, likelyLon: false });
+    if (likelyLon) return Object.assign(baseProfile, { inferredType: "longitude", likelyRole: "location", likelyLat: false, likelyLon: true });
+    return baseProfile;
   });
   var hasLat = profiles.some(function(p) { return p.likelyLat || p.inferredType === "latitude"; });
   var hasLon = profiles.some(function(p) { return p.likelyLon || p.inferredType === "longitude"; });
@@ -746,7 +753,9 @@ function generateDeterministicSummary(name, columns, rowCount) {
   var dateCols = columns.filter(function(c) { return c.inferredType === "date"; });
   var locCols = columns.filter(function(c) { return c.likelyLat || c.likelyLon || c.likelyRole === "location"; });
   var idCols = columns.filter(function(c) { return c.likelyRole === "identifier"; });
+  var jsonCols = columns.filter(function(c) { return c.name.indexOf(".") >= 0 || c.name.indexOf("[") >= 0 || c.name.indexOf("._") >= 0; });
   var s = '"' + name + '" contains ' + rowCount + ' records across ' + columns.length + ' fields. ';
+  if (jsonCols.length) s += jsonCols.length + ' nested JSON paths were flattened for inspection. ';
   if (numCols.length) s += 'Numeric measures: ' + numCols.map(function(c) { return c.name; }).join(', ') + '. ';
   if (catCols.length) s += 'Categorical groups: ' + catCols.map(function(c) { return c.name; }).join(', ') + '. ';
   if (dateCols.length) s += 'Time fields: ' + dateCols.map(function(c) { return c.name + (c.dateRange ? ' (' + c.dateRange[0] + ' to ' + c.dateRange[1] + ')' : ''); }).join(', ') + '. ';
@@ -817,25 +826,119 @@ async function importJson(file) {
   await importJsonText(text, file.name);
 }
 
+function getJsonType(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function jsonPathJoin(base, key) {
+  var safe = /^[A-Za-z_$][\w$]*$/.test(key);
+  if (!base) return safe ? key : '["' + String(key).replace(/"/g, '\\"') + '"]';
+  return safe ? base + "." + key : base + '["' + String(key).replace(/"/g, '\\"') + '"]';
+}
+
+function stringifyJsonCell(value) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (typeof value === "object") {
+    try { return JSON.stringify(value); } catch(e) { return String(value); }
+  }
+  return value;
+}
+
+function flattenJsonRecord(value, path, out, meta) {
+  var type = getJsonType(value);
+  if (path) {
+    meta.paths[path] = meta.paths[path] || { path: path, types: {}, maxArrayLength: 0, objectKeys: {} };
+    meta.paths[path].types[type] = (meta.paths[path].types[type] || 0) + 1;
+    if (type === "array") meta.paths[path].maxArrayLength = Math.max(meta.paths[path].maxArrayLength, value.length);
+    if (type === "object") Object.keys(value).slice(0, 30).forEach(function(k) { meta.paths[path].objectKeys[k] = true; });
+  }
+
+  if (value === null || value === undefined || typeof value !== "object") {
+    if (path) out[path] = value;
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    if (path) {
+      out[path] = stringifyJsonCell(value);
+      out[path + "._count"] = value.length;
+    }
+    var primitive = value.every(function(v) { return v === null || typeof v !== "object"; });
+    if (primitive && path) {
+      out[path + "._values"] = value.filter(function(v) { return v !== null && v !== undefined; }).join(", ");
+    } else {
+      value.slice(0, 3).forEach(function(item, idx) {
+        flattenJsonRecord(item, path ? path + "[" + idx + "]" : "[" + idx + "]", out, meta);
+      });
+    }
+    return;
+  }
+
+  var keys = Object.keys(value);
+  if (path && keys.length === 0) out[path] = "{}";
+  keys.forEach(function(key) {
+    flattenJsonRecord(value[key], jsonPathJoin(path, key), out, meta);
+  });
+}
+
+function extractJsonRecords(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object") {
+    var arrayKeys = Object.keys(data).filter(function(k) { return Array.isArray(data[k]); });
+    if (arrayKeys.length) {
+      arrayKeys.sort(function(a, b) { return data[b].length - data[a].length; });
+      return data[arrayKeys[0]];
+    }
+    return [data];
+  }
+  return null;
+}
+
+function normalizeJsonDataset(data) {
+  var records = extractJsonRecords(data);
+  if (!records) return null;
+  var meta = { paths: {}, recordType: Array.isArray(data) ? "array" : "object" };
+  var flatRows = records.map(function(record) {
+    var flat = {};
+    flattenJsonRecord(record, "", flat, meta);
+    return flat;
+  });
+  var seen = {};
+  var columns = [];
+  flatRows.forEach(function(row) {
+    Object.keys(row).forEach(function(k) {
+      if (!seen[k]) { seen[k] = true; columns.push(k); }
+    });
+  });
+  columns.sort(function(a, b) {
+    var da = (a.match(/\./g) || []).length + (a.match(/\[/g) || []).length;
+    var db = (b.match(/\./g) || []).length + (b.match(/\[/g) || []).length;
+    return da === db ? a.localeCompare(b) : da - db;
+  });
+  var rows = flatRows.map(function(row) { return columns.map(function(k) { return row[k] !== undefined ? row[k] : null; }); });
+  return { columns: columns, rows: rows, rawRows: records, meta: meta };
+}
+
 async function importJsonText(text, fileName) {
   var data;
   try { data = JSON.parse(text); } catch(e) { toast("Invalid JSON", "error"); return; }
-  if (!Array.isArray(data)) {
-    if (typeof data === "object" && data !== null) { data = [data]; }
-    else { toast("JSON must be an array of objects", "error"); return; }
-  }
-  if (data.length === 0) { toast("JSON array is empty", "error"); return; }
-  var columns = Object.keys(data[0]);
-  var rows = data.map(function(obj) { return columns.map(function(k) { return obj[k] !== undefined ? obj[k] : null; }); });
+  var normalized = normalizeJsonDataset(data);
+  if (!normalized) { toast("JSON must be an object or array", "error"); return; }
+  if (normalized.rows.length === 0) { toast("JSON contains no records", "error"); return; }
+  if (normalized.columns.length === 0) { toast("JSON records contain no fields", "error"); return; }
   var name = (fileName || "imported-json").replace(/\.json$/i, "");
-  var ds = { id: hashString(name + Date.now()), name: name, sourceType: "json", importedAt: new Date().toISOString(), columns: columns, rows: rows };
+  var ds = { id: hashString(name + Date.now()), name: name, sourceType: "json", importedAt: new Date().toISOString(), columns: normalized.columns, rows: normalized.rows, rawRows: normalized.rawRows, jsonMeta: normalized.meta };
   var profile = profileDataset(ds);
+  profile.rawMeta = { json: { recordType: normalized.meta.recordType, paths: normalized.meta.paths } };
   ds.profile = profile;
   state.data.datasets.push(ds);
   state.data.activeDatasetId = ds.id;
   await dbPut("datasets", ds);
   await dbPut("datasetProfiles", profile);
-  toast("Imported " + ds.name + " (" + rows.length + " rows)", "success");
+  toast("Imported " + ds.name + " (" + normalized.rows.length + " rows, " + normalized.columns.length + " JSON paths)", "success");
   renderApp();
 }
 
@@ -939,6 +1042,9 @@ function renderTablePreview(ds) {
   }
   var typeColor = {number:"#3A5A8B",integer:"#3A5A8B",category:"#2D5016",date:"#8B3A3A",latitude:"#B87333",longitude:"#B87333",boolean:"#6A5ACD",url:"#4A7A30",string:"#8B7D6B"};
   var html = '<div class="panel-header">Table Preview <span class="badge badge-muted">' + total + ' rows</span></div>';
+  if (ds.sourceType === "json") {
+    html += '<div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px">Nested JSON is flattened into path columns. Array helper fields use <code>._count</code> and <code>._values</code>.</div>';
+  }
   html += '<div class="flex-row" style="margin-bottom:8px"><input type="search" placeholder="Filter rows..." data-action="filter-table" value="' + escapeHtml(filter) + '" style="max-width:250px">';
   html += '<select data-action="page-size" style="width:auto">';
   [10,25,50,100].forEach(function(n) { html += '<option value="' + n + '"' + (n===pageSize?' selected':'') + '>' + n + '/page</option>'; });
@@ -948,14 +1054,14 @@ function renderTablePreview(ds) {
     var tp = profile ? profile.columns[i] : null;
     var type = tp ? tp.inferredType : "string";
     var color = typeColor[type] || "#8B7D6B";
-    html += '<th data-action="sort-col" data-col="' + c + '">' + escapeHtml(c) + '<span class="type-badge" style="background:' + color + ';color:#fff">' + type + '</span>' + (sortCol===c?(sortDir===1?' &#9650;':' &#9660;'):'') + '</th>';
+    html += '<th data-action="sort-col" data-col="' + escapeAttr(c) + '">' + escapeHtml(c) + '<span class="type-badge" style="background:' + color + ';color:#fff">' + type + '</span>' + (sortCol===c?(sortDir===1?' &#9650;':' &#9660;'):'') + '</th>';
   });
   html += '</tr></thead><tbody>';
   pageRows.forEach(function(r, ri) {
     html += '<tr>';
     r.forEach(function(v, ci2) {
       var sv = v === null || v === undefined ? '<span style="color:var(--text-muted)">null</span>' : (String(v).length > 60 ? escapeHtml(String(v).slice(0,60))+'...' : escapeHtml(String(v)));
-      html += '<td data-action="inspect-col" data-col="' + cols[ci2] + '" title="' + escapeHtml(String(v||'')) + '">' + sv + '</td>';
+      html += '<td data-action="inspect-col" data-col="' + escapeAttr(cols[ci2]) + '" title="' + escapeAttr(String(v||'')) + '">' + sv + '</td>';
     });
     html += '</tr>';
   });
@@ -968,6 +1074,10 @@ function renderFieldInspector(col) {
   var html = '<div class="panel-header">Field: ' + escapeHtml(col.name) + '</div><dl class="field-detail">';
   html += '<dt>Type</dt><dd><span class="tag tag-navy">' + col.inferredType + '</span></dd>';
   html += '<dt>Likely Role</dt><dd><span class="tag tag-green">' + col.likelyRole + '</span></dd>';
+  if (col.path && col.path !== col.name) html += '<dt>JSON Path</dt><dd><code>' + escapeHtml(col.path) + '</code></dd>';
+  else if (col.name.indexOf(".") >= 0 || col.name.indexOf("[") >= 0) html += '<dt>JSON Path</dt><dd><code>' + escapeHtml(col.name) + '</code></dd>';
+  if (col.jsonTypes && col.jsonTypes.length) html += '<dt>JSON Types</dt><dd>' + col.jsonTypes.map(function(t) { return '<span class="tag tag-muted">' + escapeHtml(t) + '</span>'; }).join(" ") + '</dd>';
+  if (col.maxArrayLength) html += '<dt>Max Array Length</dt><dd>' + col.maxArrayLength + '</dd>';
   html += '<dt>Sample Values</dt><dd>' + (col.sampleValues||[]).map(function(v) { return '<code>' + escapeHtml(String(v)) + '</code>'; }).join(", ") + '</dd>';
   html += '<dt>Unique Count</dt><dd>' + col.uniqueCount + '</dd>';
   if (col.min !== undefined) { html += '<dt>Min</dt><dd>' + col.min + '</dd><dt>Max</dt><dd>' + col.max + '</dd>'; }
@@ -991,6 +1101,10 @@ function renderDatasetInsights(ds, profile) {
   html += '<div class="card stat-card"><div class="stat-value">' + catCols.length + '</div><div class="stat-label">Categorical</div></div>';
   html += '</div>';
   html += '<p style="font-size:0.88rem;color:var(--text-secondary);margin:8px 0">' + (profile.summary || "") + '</p>';
+  if (ds.sourceType === "json" && ds.jsonMeta) {
+    var nestedCount = profile.columns.filter(function(c) { return c.name.indexOf(".") >= 0 || c.name.indexOf("[") >= 0; }).length;
+    html += '<div style="font-size:0.84rem;color:var(--text-secondary);margin:6px 0"><strong>JSON handling:</strong> ' + nestedCount + ' nested paths flattened from ' + escapeHtml(ds.jsonMeta.recordType || "json") + ' input.</div>';
+  }
   topCats.forEach(function(c) {
     html += '<div style="margin:6px 0"><strong style="font-size:0.85rem">' + c.name + ':</strong> ' + c.topN.map(function(item) { return '<span class="tag tag-brass">' + escapeHtml(String(item[0])) + ' (' + item[1] + ')</span>'; }).join("") + '</div>';
   });
@@ -1496,13 +1610,19 @@ function renderTagSidebar() {
 
 function renderNoteReader(note) {
   var editMode = state.knowledge.editMode;
+  var aiBusy = state.knowledge.aiBusyNoteId === note.id;
   var html = '<div class="panel"><div class="flex-between" style="margin-bottom:8px"><h3 style="margin:0">' + escapeHtml(note.title) + '</h3><div class="flex-row">';
   html += '<button class="btn btn-sm ' + (editMode?'btn-accent':'') + '" data-action="toggle-edit">' + (editMode ? 'Read' : 'Edit') + '</button>';
   html += '<button class="btn btn-sm" data-action="copy-note">Copy</button>';
   html += '<button class="btn btn-sm" data-action="export-note">Export</button>';
   html += '<button class="btn btn-sm btn-danger" data-action="delete-note">Delete</button>';
-  if (state.localAI.enabled) html += '<button class="btn btn-sm btn-accent" data-action="ai-summarize-note">AI Summarize</button>';
+  if (state.localAI.enabled) html += '<button class="btn btn-sm btn-accent" data-action="ai-summarize-note" ' + (aiBusy ? 'disabled' : '') + '>' + (aiBusy ? 'Summarizing...' : 'AI Summarize') + '</button>';
   html += '</div></div>';
+  if (aiBusy) {
+    html += '<div style="margin-bottom:10px;padding:8px;background:var(--parchment);border:1px solid var(--border-light);border-radius:var(--radius);font-size:0.85rem;color:var(--text-secondary)">Local AI is summarizing this note...</div>';
+  } else if (state.knowledge.aiStatus && state.knowledge.activeNoteId === note.id) {
+    html += '<div style="margin-bottom:10px;padding:8px;background:var(--parchment);border:1px solid var(--border-light);border-radius:var(--radius);font-size:0.85rem;color:var(--text-secondary)">' + escapeHtml(state.knowledge.aiStatus) + '</div>';
+  }
   if (editMode) {
     html += '<textarea class="note-editor" data-action="edit-note-body">' + escapeHtml(note.body) + '</textarea>';
     html += '<div class="flex-row" style="margin-top:8px"><button class="btn btn-green btn-sm" data-action="save-note">Save</button></div>';
@@ -1511,8 +1631,24 @@ function renderNoteReader(note) {
   }
   html += '<div style="margin-top:10px;font-size:0.78rem;color:var(--text-muted)">Created: ' + formatDate(note.createdAt) + ' &middot; Modified: ' + formatDate(note.updatedAt) + ' &middot; Type: ' + inferNoteType(note) + ' &middot; ' + note.body.length + ' chars</div>';
   if (note.aiSummary) {
-    html += '<div style="margin-top:8px;padding:8px;background:var(--parchment);border-radius:var(--radius);font-size:0.85rem"><strong>AI Summary:</strong> ' + escapeHtml(typeof note.aiSummary === "string" ? note.aiSummary : note.aiSummary.summary || JSON.stringify(note.aiSummary).slice(0,300)) + '</div>';
+    html += renderNoteAISummary(note.aiSummary);
   }
+  html += '</div>';
+  return html;
+}
+
+function renderNoteAISummary(summary) {
+  if (typeof summary === "string") {
+    return '<div style="margin-top:8px;padding:10px;background:var(--parchment);border-radius:var(--radius);font-size:0.85rem"><strong>AI Summary:</strong> ' + escapeHtml(summary) + '</div>';
+  }
+  var html = '<div style="margin-top:8px;padding:10px;background:var(--parchment);border-radius:var(--radius);font-size:0.85rem">';
+  html += '<div style="font-family:var(--font-heading);font-weight:700;color:var(--navy);margin-bottom:6px">AI Summary</div>';
+  if (summary.summary) html += '<p style="margin-bottom:6px">' + escapeHtml(summary.summary) + '</p>';
+  if (summary.noteType) html += '<div><strong>Type:</strong> ' + escapeHtml(summary.noteType) + '</div>';
+  if (summary.whyItMatters) html += '<div style="margin-top:4px"><strong>Why it matters:</strong> ' + escapeHtml(summary.whyItMatters) + '</div>';
+  if (summary.suggestedTags && summary.suggestedTags.length) html += '<div style="margin-top:6px"><strong>Suggested tags:</strong> ' + summary.suggestedTags.map(function(t) { return '<span class="tag tag-green">#' + escapeHtml(t) + '</span>'; }).join(" ") + '</div>';
+  if (summary.relatedTopics && summary.relatedTopics.length) html += '<div style="margin-top:6px"><strong>Related:</strong> ' + summary.relatedTopics.map(function(t) { return '<span class="tag tag-navy">' + escapeHtml(t) + '</span>'; }).join(" ") + '</div>';
+  if (summary.possibleConnections && summary.possibleConnections.length) html += '<div style="margin-top:6px"><strong>Connections:</strong><ul style="margin-left:18px">' + summary.possibleConnections.slice(0,5).map(function(c) { return '<li>' + escapeHtml(c) + '</li>'; }).join("") + '</ul></div>';
   html += '</div>';
   return html;
 }
@@ -1629,17 +1765,30 @@ function drawMemoryMap(ctx, canvas, graph) {
 }
 
 async function summarizeNoteWithAI(note) {
-  if (!state.localAI.enabled) { toast("Local AI not available", "error"); return; }
+  if (!state.localAI.enabled) { toast("Local AI not available", "error"); state.knowledge.aiStatus = "Local AI is not available."; renderApp(); return; }
+  state.knowledge.aiBusyNoteId = note.id;
+  state.knowledge.aiStatus = "Summarizing note with local AI...";
+  renderApp();
   var prompt = "You are analyzing a personal markdown note. Use only the provided title, excerpt, tags, and extracted links. Do not invent hidden content. Return compact JSON only.\nTitle: " + note.title + "\nExcerpt: " + note.summary + "\nTags: " + note.tags.join(", ") + "\nLinks: " + note.outboundLinks.join(", ") + "\nKeywords: " + note.keywords.slice(0,8).join(", ") + '\nReturn JSON: {"summary":"...","noteType":"...","suggestedTags":["..."],"keywords":["..."],"relatedTopics":["..."],"whyItMatters":"...","possibleConnections":["..."]}';
-  var result = await localAIGenerate(prompt);
-  if (result) {
+  try {
+    var result = await localAIGenerate(prompt);
+    if (!result) throw new Error(state.localAI.lastError || "No AI response");
+    var cleaned = result.replace(/```json\s*|```/g, "").trim();
     try {
-      var cleaned = result.replace(/```json\s*|```/g, "").trim();
       note.aiSummary = JSON.parse(cleaned);
-      await dbPut("notes", note);
-      toast("AI summary generated", "success");
-      renderApp();
-    } catch(e) { toast("AI returned invalid JSON", "error"); }
+    } catch(e) {
+      note.aiSummary = { summary: cleaned, noteType: "note", suggestedTags: [], relatedTopics: [], possibleConnections: [], parseWarning: "AI returned text instead of valid JSON" };
+    }
+    note.updatedAt = new Date().toISOString();
+    await dbPut("notes", note);
+    state.knowledge.aiStatus = "AI summary saved to this note.";
+    toast("AI summary generated", "success");
+  } catch(e) {
+    state.knowledge.aiStatus = "AI summary failed: " + e.message;
+    toast("AI summary failed: " + e.message, "error");
+  } finally {
+    state.knowledge.aiBusyNoteId = null;
+    renderApp();
   }
 }
 
