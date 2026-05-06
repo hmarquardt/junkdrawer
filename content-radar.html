@@ -1,0 +1,2961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Content Radar</title>
+<link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="shortcut icon" href="favicon.ico">
+<style>
+:root {
+  --bg: #0d0d0f;
+  --bg2: #141418;
+  --bg3: #1a1a20;
+  --card: #1e1e26;
+  --card-hover: #24242e;
+  --border: #2a2a36;
+  --text: #eaeaf0;
+  --text2: #c8c8d8;
+  --text3: #8e8ea8;
+  --neon-red: #ff2d55;
+  --neon-cyan: #00e5ff;
+  --neon-amber: #ffab00;
+  --neon-green: #00e676;
+  --neon-purple: #b388ff;
+  --neon-pink: #ff80ab;
+  --neon-orange: #ff6e40;
+  --glow-red: 0 0 12px rgba(255,45,85,0.4);
+  --glow-cyan: 0 0 12px rgba(0,229,255,0.4);
+  --glow-amber: 0 0 12px rgba(255,171,0,0.4);
+  --glow-green: 0 0 12px rgba(0,230,118,0.4);
+  --font-mono: 'Courier New', Courier, monospace;
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --radius: 4px;
+  --radius-lg: 8px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  flex-shrink: 0;
+}
+header h1 {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--neon-cyan);
+  text-shadow: var(--glow-cyan);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+header .tagline {
+  font-size: 12px;
+  color: var(--text2);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+header .header-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text2);
+}
+header .header-status .status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--text3);
+  border: 1px solid var(--text2);
+}
+header .header-status .status-dot.active { background: var(--neon-green); box-shadow: var(--glow-green); }
+header .header-status .status-dot.scanning { background: var(--neon-amber); box-shadow: var(--glow-amber); animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+nav {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+nav button {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+nav button:hover { color: #fff; }
+nav button.active { color: var(--neon-cyan); border-bottom-color: var(--neon-cyan); }
+
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+#deploy-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text3);
+  font: 11px/1.4 var(--font-mono);
+  padding: 6px 16px;
+  text-align: center;
+}
+.view { display: none; }
+.view.active { display: block; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s;
+}
+.card:hover { border-color: var(--text3); }
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.card-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+.card-title a:hover { color: var(--neon-cyan); text-decoration: underline; }
+.card-meta {
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.card-meta span { white-space: nowrap; }
+.card-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.score-chip {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.score-chip.high { border-color: var(--neon-green); color: var(--neon-green); }
+.score-chip.medium { border-color: var(--neon-amber); color: var(--neon-amber); }
+.score-chip.low { border-color: var(--text3); color: var(--text3); }
+.score-chip.caution { border-color: var(--neon-red); color: var(--neon-red); }
+
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 2px;
+  margin: 1px;
+  white-space: nowrap;
+}
+.tag-ai_panic { background: rgba(179,136,255,0.2); color: var(--neon-purple); }
+.tag-tech_dystopia { background: rgba(0,229,255,0.15); color: var(--neon-cyan); }
+.tag-political_absurdity { background: rgba(255,45,85,0.15); color: var(--neon-red); }
+.tag-dating_relationships { background: rgba(255,128,171,0.15); color: var(--neon-pink); }
+.tag-animal_chaos { background: rgba(0,230,118,0.15); color: var(--neon-green); }
+.tag-crypto_chaos { background: rgba(255,171,0,0.15); color: var(--neon-amber); }
+.tag-local_weirdness { background: rgba(255,110,64,0.15); color: var(--neon-orange); }
+.tag-culture_war { background: rgba(255,45,85,0.2); color: var(--neon-red); }
+.tag-health_wellness { background: rgba(0,230,118,0.2); color: var(--neon-green); }
+.tag-space_weather { background: rgba(0,229,255,0.2); color: var(--neon-cyan); }
+.tag-natural_hazard { background: rgba(255,171,0,0.2); color: var(--neon-amber); }
+.tag-open_source_dev { background: rgba(179,136,255,0.2); color: var(--neon-purple); }
+.tag-weird_but_fun { background: rgba(0,230,118,0.15); color: var(--neon-green); }
+.tag-too_dark { background: rgba(255,45,85,0.25); color: var(--neon-red); }
+.tag-too_sensitive { background: rgba(255,45,85,0.2); color: var(--neon-red); }
+.tag-low_signal { background: rgba(102,102,128,0.2); color: var(--text3); }
+
+.caution-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  font-weight: 600;
+}
+.caution-safe_fun { background: rgba(0,230,118,0.15); color: var(--neon-green); }
+.caution-discuss_carefully { background: rgba(255,171,0,0.15); color: var(--neon-amber); }
+.caution-too_tragic { background: rgba(255,45,85,0.2); color: var(--neon-red); }
+.caution-political_fire { background: rgba(255,45,85,0.25); color: var(--neon-red); }
+.caution-health_claims_need_caution { background: rgba(255,171,0,0.2); color: var(--neon-amber); }
+.caution-financial_advice_risk { background: rgba(255,171,0,0.2); color: var(--neon-amber); }
+.caution-unverified_claims { background: rgba(255,110,64,0.15); color: var(--neon-orange); }
+.caution-likely_low_signal { background: rgba(102,102,128,0.2); color: var(--text3); }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg3); color: var(--text); border-color: var(--text3); }
+.btn:active { transform: scale(0.97); }
+.btn:focus-visible { outline: 2px solid var(--neon-cyan); outline-offset: 1px; }
+.btn-primary { background: rgba(0,229,255,0.15); border-color: var(--neon-cyan); color: var(--neon-cyan); }
+.btn-primary:hover { background: rgba(0,229,255,0.25); }
+.btn-danger { background: rgba(255,45,85,0.1); border-color: var(--neon-red); color: var(--neon-red); }
+.btn-danger:hover { background: rgba(255,45,85,0.2); }
+.btn-amber { background: rgba(255,171,0,0.1); border-color: var(--neon-amber); color: var(--neon-amber); }
+.btn-amber:hover { background: rgba(255,171,0,0.2); }
+.btn-green { background: rgba(0,230,118,0.1); border-color: var(--neon-green); color: var(--neon-green); }
+.btn-green:hover { background: rgba(0,230,118,0.2); }
+.btn-sm { font-size: 10px; padding: 2px 5px; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 768px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+}
+
+.section-title {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--neon-amber);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mini-bar-container { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+.mini-bar { height: 6px; border-radius: 3px; background: var(--border); flex: 1; max-width: 80px; overflow: hidden; }
+.mini-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+#radar-canvas {
+  width: 100%;
+  max-width: 600px;
+  aspect-ratio: 1;
+  display: block;
+  margin: 0 auto;
+}
+
+.top-card {
+  border-left: 3px solid var(--neon-amber);
+  padding-left: 12px;
+}
+.top-card.hank { border-left-color: var(--neon-red); }
+.top-card.song { border-left-color: var(--neon-purple); }
+.top-card.facebook { border-left-color: var(--neon-cyan); }
+.top-card.visual { border-left-color: var(--neon-green); }
+.top-card.caution { border-left-color: var(--neon-red); }
+
+.source-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.source-card .source-name { font-weight: 600; font-size: 14px; min-width: 180px; }
+.source-card .source-status { font-size: 12px; }
+.scan-progress {
+  margin-bottom: 12px;
+}
+.progress-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+  margin: 8px 0;
+}
+.progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-green));
+  transition: width 0.25s ease;
+}
+.scan-log {
+  max-height: 140px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text2);
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.scan-log div { margin-bottom: 3px; }
+.scan-log .ok { color: var(--neon-green); }
+.scan-log .error { color: var(--neon-red); }
+.scan-log .info { color: var(--neon-cyan); }
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.filters select, .filters input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text);
+}
+.filters select:focus, .filters input:focus { border-color: var(--neon-cyan); outline: none; }
+
+.detail-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 1000;
+  overflow-y: auto;
+  padding: 24px;
+}
+.detail-content {
+  max-width: 700px;
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  position: relative;
+}
+.detail-close {
+  position: absolute;
+  top: 8px; right: 8px;
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 20px;
+  cursor: pointer;
+}
+.detail-close:hover { color: var(--text); }
+
+.toast-container {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  animation: slideIn 0.3s ease-out;
+  max-width: 350px;
+}
+.toast.success { border-color: var(--neon-green); color: var(--neon-green); }
+.toast.error { border-color: var(--neon-red); color: var(--neon-red); }
+.toast.info { border-color: var(--neon-cyan); color: var(--neon-cyan); }
+@keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+.welcome-card {
+  text-align: center;
+  padding: 40px 20px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+.welcome-card h2 {
+  font-family: var(--font-mono);
+  color: var(--neon-cyan);
+  font-size: 22px;
+  margin-bottom: 12px;
+  text-shadow: var(--glow-cyan);
+}
+.welcome-card p { color: var(--text2); margin-bottom: 8px; }
+.welcome-card .welcome-actions { margin-top: 20px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+textarea, input[type="text"], input[type="number"], input[type="url"] {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text);
+  width: 100%;
+}
+textarea:focus, input:focus { border-color: var(--neon-cyan); outline: none; }
+textarea { resize: vertical; min-height: 80px; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table th, table td {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+table th {
+  background: var(--bg2);
+  font-family: var(--font-mono);
+  color: var(--text2);
+  font-weight: 600;
+}}
+table tr:hover { background: var(--bg3); }
+
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: inline-block;
+  vertical-align: middle;
+}
+.toggle.on { background: var(--neon-cyan); }
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 0.2s;
+}
+.toggle.on::after { transform: translateX(16px); }
+
+.diag-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+.diag-grid dt { color: var(--text2); font-family: var(--font-mono); }
+.diag-grid dd { color: var(--text); }
+
+.radar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text2);
+  justify-content: center;
+}
+.radar-legend span { display: flex; align-items: center; gap: 4px; }
+.radar-legend .dot {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+}
+
+.scanner-line {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+  animation: scanLine 3s linear infinite;
+  pointer-events: none;
+}
+@keyframes scanLine { 0% { top: 0; } 100% { top: 100%; } }
+
+.keyword-bucket {
+  padding: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+.keyword-bucket h4 {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--neon-amber);
+  margin-bottom: 4px;
+}
+.keyword-bucket .keywords {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+.brief-preview {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 500px;
+  overflow-y: auto;
+  line-height: 1.6;
+}
+
+.privacy-note {
+  font-size: 11px;
+  color: var(--text2);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+.hook-line {
+  font-size: 13px;
+  margin: 2px 0;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+.hook-serious { border-left: 2px solid var(--neon-cyan); }
+.hook-sarcastic { border-left: 2px solid var(--neon-amber); }
+.hook-clicky { border-left: 2px solid var(--neon-green); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>CONTENT RADAR</h1>
+    <span class="tagline">A local-first browser scout for things worth posting, riffing on, singing about, or turning into visual chaos.</span>
+    <div class="header-status">
+      <span id="item-count">0 items</span>
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">idle</span>
+    </div>
+  </header>
+  <nav id="nav" role="navigation" aria-label="Main views"></nav>
+  <main id="main"></main>
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.06.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer id="deploy-footer" data-junkdrawer-deploy-footer data-deploy-version="2026.05.06.1">
+    &copy; 2026 Hank Marquardt · Content Radar · version 2026.05.06.1
+  </footer>
+  <div class="toast-container" id="toasts"></div>
+  <div class="detail-overlay" id="detail-overlay" style="display:none" role="dialog" aria-label="Item detail"></div>
+</div>
+<script>
+const APP_NAME = "Content Radar";
+const DB_NAME = "contentRadarDB";
+const DB_VERSION = 1;
+const VIEWS = ["radar","feed","classifier","briefing","sources","archive","admin"];
+const VIEW_LABELS = {radar:"Radar",feed:"Opportunity Feed",classifier:"Classifier Lab",briefing:"Briefing Desk",sources:"Sources",archive:"Archive",admin:"Admin / Diagnostics"};
+const OUTPUT_TYPES = ["facebookDiscussion","youtubeShort","songConcept","imagePrompt","substackEssay","techDemo","absurdityArchive","localInterest","cautionRisk","hankRantPotential"];
+const OUTPUT_LABELS = {facebookDiscussion:"FB Discussion",youtubeShort:"YT Short",songConcept:"Song Concept",imagePrompt:"Image Prompt",substackEssay:"Substack/Blog",techDemo:"Tech Demo",absurdityArchive:"Absurdity Archive",localInterest:"Local Interest",cautionRisk:"Caution Risk",hankRantPotential:"Hank Rant"};
+const OUTPUT_COLORS = {facebookDiscussion:"#00e5ff",youtubeShort:"#ff2d55",songConcept:"#b388ff",imagePrompt:"#00e676",substackEssay:"#ffab00",techDemo:"#00e5ff",absurdityArchive:"#ff80ab",localInterest:"#ff6e40",cautionRisk:"#ff2d55",hankRantPotential:"#ff2d55"};
+const CAUTION_LABELS = ["safe_fun","discuss_carefully","too_tragic","political_fire","health_claims_need_caution","financial_advice_risk","unverified_claims","likely_low_signal"];
+const CATEGORY_LABELS = ["ai_panic","tech_dystopia","political_absurdity","dating_relationships","animal_chaos","crypto_chaos","local_weirdness","culture_war","health_wellness","space_weather","natural_hazard","open_source_dev","weird_but_fun","too_dark","too_sensitive","low_signal"];
+
+const KEYWORD_BUCKETS = {
+  ai_panic: ["AI","artificial intelligence","chatbot","LLM","large language model","robot","automation","hallucination","lawsuit","regulation","threat","job loss","replaced","deepfake","backlash","banned"],
+  dating_relationships: ["dating","singles","relationship","marriage","divorce","ghosting","red flag","cheating","dating app","lonely","sex","intimacy","over 50","tinder","bumble","singles study"],
+  political_absurdity: ["election","politician","president","senator","mayor","parliament","scandal","gaffe","outrage","conspiracy","indictment","lawsuit","campaign","governor"],
+  animal_chaos: ["raccoon","opossum","possum","cat","dog","monkey","bear","alligator","cow","goat","escaped","stole","invaded","rescued","animal","pet","wildlife","deer","squirrel","pig"],
+  tech_dystopia: ["surveillance","facial recognition","algorithm","biometric","drone","privacy","banned","tracking","workplace monitoring","spyware","data breach","hack","cybersecurity"],
+  crypto_chaos: ["bitcoin","ethereum","crypto","cryptocurrency","meme coin","dogecoin","solana","hack","crash","whale","ETF","liquidation","fraud","exchange","wallet","defi","NFT"],
+  culture_war: ["boycott","banned","school board","outrage","backlash","woke","anti-woke","protest","censorship","cancel","culture war","book ban","controversy"],
+  health_wellness: ["wellness","supplement","diet","keto","longevity","biohack","obesity","GLP-1","Ozempic","raw milk","influencer","weight loss","exercise","fad","detox"],
+  space_weather: ["solar flare","CME","geomagnetic","aurora","asteroid","meteor","satellite","UFO","UAP","space debris","NASA","solar wind","cosmic","coronal mass ejection","space weather"],
+  natural_hazard: ["earthquake","volcano","wildfire","tornado","hurricane","flood","tsunami","landslide","magnitude","seismic","eruption"],
+  open_source_dev: ["open source","GitHub","release","framework","library","developer","API","programming","Rust","JavaScript","TypeScript","WebAssembly","browser","Chrome","Firefox","Safari","standard"],
+  weird_but_fun: ["bizarre","strange","weird","unusual","unexpected","mystery","viral","absurd","unbelievable","peculiar","curious","odd","eerie"]
+};
+
+const DEFAULT_SOURCES = [
+  {id:"gdelt_ai_panic",name:"GDELT AI Panic / Weirdness",sourceGroup:"GDELT",type:"gdelt",enabled:true,pollIntervalMinutes:30,config:{query:'(artificial intelligence OR AI OR chatbot OR "large language model" OR robot OR algorithm) (panic OR threat OR backlash OR lawsuit OR regulation OR bizarre OR controversy OR replaced OR banned)',maxrecords:25,timespan:"7d"},categoryHint:"ai_panic"},
+  {id:"gdelt_dating",name:"GDELT Dating / Relationship Culture",sourceGroup:"GDELT",type:"gdelt",enabled:true,pollIntervalMinutes:60,config:{query:'(dating OR relationship OR marriage OR divorce OR singles OR "dating app" OR Tinder OR Bumble) (study OR trend OR viral OR backlash OR lonely OR cheating OR red flag OR ghosting)',maxrecords:20,timespan:"7d"},categoryHint:"dating_relationships"},
+  {id:"gdelt_animals",name:"GDELT Animals Being Ridiculous",sourceGroup:"GDELT",type:"gdelt",enabled:true,pollIntervalMinutes:60,config:{query:'(raccoon OR opossum OR monkey OR bear OR alligator OR cat OR dog OR cow OR goat OR animal) (escaped OR stole OR attacked OR invaded OR rescued OR viral OR chaos)',maxrecords:20,timespan:"7d"},categoryHint:"animal_chaos"},
+  {id:"gdelt_tech_dystopia",name:"GDELT Tech Dystopia",sourceGroup:"GDELT",type:"gdelt",enabled:true,pollIntervalMinutes:30,config:{query:'(surveillance OR facial recognition OR algorithm OR robot OR drone OR AI OR biometric) (privacy OR banned OR lawsuit OR controversy OR police OR school OR workplace)',maxrecords:20,timespan:"7d"},categoryHint:"tech_dystopia"},
+  {id:"gdelt_political",name:"GDELT Political Absurdity",sourceGroup:"GDELT",type:"gdelt",enabled:false,pollIntervalMinutes:60,config:{query:'(election OR president OR senator OR mayor OR parliament OR campaign OR politician) (bizarre OR scandal OR outrage OR viral OR conspiracy OR gaffe OR lawsuit)',maxrecords:20,timespan:"7d"},categoryHint:"political_absurdity"},
+  {id:"gdelt_crypto",name:"GDELT Crypto Chaos",sourceGroup:"GDELT",type:"gdelt",enabled:false,pollIntervalMinutes:60,config:{query:'(bitcoin OR crypto OR cryptocurrency OR ethereum OR solana OR dogecoin) (crash OR surge OR hack OR fraud OR liquidation OR lawsuit OR ETF OR whale)',maxrecords:20,timespan:"7d"},categoryHint:"crypto_chaos"},
+  {id:"gdelt_culture_war",name:"GDELT Culture War Nonsense",sourceGroup:"GDELT",type:"gdelt",enabled:false,pollIntervalMinutes:60,config:{query:'(book ban OR school board OR boycott OR outrage OR cancel culture OR woke OR anti-woke OR backlash) (viral OR protest OR controversy OR lawsuit)',maxrecords:20,timespan:"7d"},categoryHint:"culture_war"},
+  {id:"gdelt_health",name:"GDELT Health Panic / Wellness Weirdness",sourceGroup:"GDELT",type:"gdelt",enabled:false,pollIntervalMinutes:60,config:{query:'(health OR wellness OR diet OR supplement OR obesity OR longevity OR biohacking) (trend OR viral OR warning OR lawsuit OR bizarre OR controversy)',maxrecords:20,timespan:"7d"},categoryHint:"health_wellness"},
+  {id:"gdelt_local",name:"GDELT Local Weirdness",sourceGroup:"GDELT",type:"gdelt",enabled:false,pollIntervalMinutes:120,config:{query:'("Indiana" OR "Evansville" OR "Indianapolis" OR "Princeton Indiana" OR "Gibson County") (bizarre OR strange OR unusual OR viral OR arrested OR escaped OR controversy OR animal)',maxrecords:15,timespan:"14d"},categoryHint:"local_weirdness"},
+  {id:"gdelt_weird",name:"GDELT Everything Weird",sourceGroup:"GDELT",type:"gdelt",enabled:false,pollIntervalMinutes:120,config:{query:'(bizarre OR strange OR weird OR unusual OR unexpected OR mystery OR viral OR absurd)',maxrecords:25,timespan:"7d"},categoryHint:"weird_but_fun"},
+  {id:"hn_top",name:"Hacker News Top",sourceGroup:"HackerNews",type:"hackernews",enabled:true,pollIntervalMinutes:15,config:{feed:"topstories",maxItems:30},categoryHint:"open_source_dev"},
+  {id:"hn_best",name:"Hacker News Best",sourceGroup:"HackerNews",type:"hackernews",enabled:true,pollIntervalMinutes:30,config:{feed:"beststories",maxItems:30},categoryHint:"open_source_dev"},
+  {id:"hn_new",name:"Hacker News New",sourceGroup:"HackerNews",type:"hackernews",enabled:false,pollIntervalMinutes:15,config:{feed:"newstories",maxItems:20},categoryHint:"open_source_dev"},
+  {id:"nasa_donki",name:"NASA DONKI Space Events",sourceGroup:"NASA",type:"nasa",enabled:false,pollIntervalMinutes:120,config:{endpoints:["CME","FLR","GST","SEP"],apiKey:"DEMO_KEY"},categoryHint:"space_weather"},
+  {id:"usgs_significant",name:"USGS Significant Earthquakes",sourceGroup:"USGS",type:"usgs",enabled:true,pollIntervalMinutes:30,config:{feed:"significant_day"},categoryHint:"natural_hazard"},
+  {id:"usgs_45",name:"USGS 4.5+ Day",sourceGroup:"USGS",type:"usgs",enabled:false,pollIntervalMinutes:60,config:{feed:"4.5_day"},categoryHint:"natural_hazard"},
+  {id:"reddit_optional",name:"Reddit/RSS Optional Feeds",sourceGroup:"Reddit",type:"rss",enabled:false,pollIntervalMinutes:60,config:{feeds:["https://www.reddit.com/r/artificial/hot.rss","https://www.reddit.com/r/nottheonion/hot.rss","https://www.reddit.com/r/Weird/hot.rss"]},categoryHint:"weird_but_fun"},
+  {id:"custom_json",name:"Custom JSON Source",sourceGroup:"Custom",type:"custom_json",enabled:false,pollIntervalMinutes:60,config:{url:"",itemPath:"data",titlePath:"title",urlPath:"url",datePath:"date",scorePath:"score",sourceLabel:"Custom"},categoryHint:"weird_but_fun"}
+];
+
+const DEFAULT_SETTINGS = {
+  activeSources: [],
+  autoWatchEnabled: false,
+  resumeAutoWatchOnOpen: false,
+  scoreWeights: {
+    facebookDiscussion: 1.0, youtubeShort: 0.8, songConcept: 0.7, imagePrompt: 0.6,
+    substackEssay: 0.7, techDemo: 0.5, absurdityArchive: 0.8, localInterest: 0.6,
+    cautionRisk: -0.3, hankRantPotential: 0.9
+  },
+  localAiEnabled: false,
+  maxAiItemsPerScan: 10,
+  defaultTimeWindow: "7d",
+  manualScanCooldownMs: 15000,
+  minAutoIntervalMinutes: 5,
+  pauseWhenHidden: true,
+  nasaApiKey: "DEMO_KEY",
+  corsProxy: "https://corsproxy.io/?",
+  gdeltDelayMs: 3500
+};
+
+const state = {
+  currentView: "radar",
+  db: null,
+  sources: [],
+  settings: {...DEFAULT_SETTINGS},
+  items: [],
+  localAI: { availability: null, session: null, enabled: false, lastError: null, checking: false },
+  polling: { active: false, timer: null, nextRunAt: null, lastManualScan: 0, failureCounts: {} },
+  scanProgress: { active: false, label: "", total: 0, completed: 0, current: "", log: [] },
+  lastGdeltRequestAt: 0,
+  firstRun: false,
+  scanQueue: [],
+  scanning: false,
+  radarBlips: [],
+  radarAnimFrame: null
+};
+
+function hashString(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) { h = ((h << 5) - h + str.charCodeAt(i)) | 0; }
+  return Math.abs(h);
+}
+
+function formatDate(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d)) return String(v);
+  const now = new Date();
+  const diffMs = now - d;
+  if (diffMs < 60000) return "just now";
+  if (diffMs < 3600000) return Math.floor(diffMs/60000) + "m ago";
+  if (diffMs < 86400000) return Math.floor(diffMs/3600000) + "h ago";
+  return d.toLocaleDateString("en-US", {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+}
+
+function clampScore(v) { return Math.max(0, Math.min(100, Math.round(v))); }
+
+function toast(message, type="info") {
+  const c = document.getElementById("toasts");
+  const t = document.createElement("div");
+  t.className = "toast " + type;
+  t.textContent = message;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity 0.3s"; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+function generateId(prefix) {
+  return (prefix || "item") + "_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6);
+}
+
+function startViewTransition(fn) {
+  if (document.startViewTransition) {
+    document.startViewTransition(fn);
+  } else {
+    fn();
+  }
+}
+
+function switchView(view) {
+  if (state.currentView === view) return;
+  state.currentView = view;
+  startViewTransition(() => {
+    renderNav();
+    renderCurrentView();
+  });
+}
+
+function renderNav() {
+  const nav = document.getElementById("nav");
+  nav.innerHTML = "";
+  VIEWS.forEach(v => {
+    const btn = document.createElement("button");
+    btn.textContent = VIEW_LABELS[v];
+    btn.className = v === state.currentView ? "active" : "";
+    btn.setAttribute("aria-label", VIEW_LABELS[v]);
+    btn.onclick = () => switchView(v);
+    nav.appendChild(btn);
+  });
+}
+
+function renderCurrentView() {
+  const main = document.getElementById("main");
+  main.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "view active";
+  main.appendChild(div);
+  switch(state.currentView) {
+    case "radar": renderRadar(div); break;
+    case "feed": renderOpportunityFeed(div); break;
+    case "classifier": renderClassifierLab(div); break;
+    case "briefing": renderBriefingDesk(div); break;
+    case "sources": renderSources(div); break;
+    case "archive": renderArchive(div); break;
+    case "admin": renderAdmin(div); break;
+  }
+  updateHeaderStatus();
+}
+
+function updateHeaderStatus() {
+  const dot = document.getElementById("status-dot");
+  const txt = document.getElementById("status-text");
+  const cnt = document.getElementById("item-count");
+  cnt.textContent = state.items.length + " items";
+  if (state.scanning) {
+    dot.className = "status-dot scanning";
+    const p = state.scanProgress;
+    txt.textContent = p.total ? `scanning ${p.completed}/${p.total}` : "scanning...";
+  } else if (state.polling.active) {
+    dot.className = "status-dot active";
+    txt.textContent = "auto-watch on";
+  } else {
+    dot.className = "status-dot";
+    txt.textContent = "idle";
+  }
+}
+
+function startScanProgress(label, total) {
+  state.scanProgress = { active: true, label, total, completed: 0, current: "", log: [] };
+  updateScanProgressUI();
+  updateHeaderStatus();
+}
+
+function pushScanLog(message, type = "info") {
+  const time = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+  state.scanProgress.log.unshift({time, message, type});
+  state.scanProgress.log = state.scanProgress.log.slice(0, 20);
+  updateScanProgressUI();
+}
+
+function updateScanProgress(patch = {}) {
+  state.scanProgress = {...state.scanProgress, ...patch};
+  updateScanProgressUI();
+  updateHeaderStatus();
+}
+
+function finishScanProgress(message, type = "ok") {
+  if (message) pushScanLog(message, type);
+  state.scanProgress.active = false;
+  state.scanProgress.current = "";
+  updateScanProgressUI();
+  updateHeaderStatus();
+}
+
+function renderScanProgressHTML() {
+  const p = state.scanProgress;
+  if (!p.active && p.log.length === 0) return "";
+  const pct = p.total ? Math.round((p.completed / p.total) * 100) : 0;
+  const current = p.current ? `<div style="font-size:12px;color:var(--text2)">Now: ${esc(p.current)}</div>` : "";
+  const log = p.log.length
+    ? `<div class="scan-log">${p.log.map(entry => `<div class="${entry.type}">[${entry.time}] ${esc(entry.message)}</div>`).join("")}</div>`
+    : "";
+  return `<div class="card scan-progress">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+      <div>
+        <div class="card-title">${esc(p.label || "Source Pull")}</div>
+        ${current}
+      </div>
+      <div style="font-family:var(--font-mono);font-size:12px;color:var(--text2)">${p.completed}/${p.total || "?"} · ${pct}%</div>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+    ${log}
+  </div>`;
+}
+
+function updateScanProgressUI() {
+  const el = document.getElementById("scan-progress");
+  if (el) el.innerHTML = renderScanProgressHTML();
+}
+
+function renderApp() {
+  renderNav();
+  renderCurrentView();
+}
+
+function createItem(raw, context) {
+  const now = new Date().toISOString();
+  const title = (raw.title || raw.name || raw.label || "").trim();
+  if (!title) return null;
+  const url = raw.url || raw.link || raw.documentUrl || "";
+  let id;
+  if (raw.id && context.sourceType !== "gdelt") {
+    id = context.sourceId + "_" + raw.id;
+  } else if (url) {
+    id = context.sourceId + "_" + hashString(url);
+  } else {
+    id = context.sourceId + "_" + hashString(title + (raw.publishedAt || ""));
+  }
+  const item = {
+    id,
+    sourceGroup: context.sourceGroup,
+    sourceName: context.sourceName,
+    sourceType: context.sourceType,
+    sourceUrl: context.sourceUrl || "",
+    title,
+    subtitle: raw.subtitle || raw.sector || "",
+    description: raw.description || raw.summary || raw.excerpt || "",
+    url,
+    author: raw.author || raw.by || "",
+    domain: url ? (url.match(/:\/\/([^/]+)/)||[])[1] || "" : "",
+    publishedAt: raw.publishedAt || raw.pubDate || raw.time_iso || raw.startTime || "",
+    fetchedAt: now,
+    rawScore: raw.rawScore || raw.score || null,
+    rawComments: raw.rawComments || raw.descendants || raw.numComments || null,
+    rawTone: raw.rawTone || raw.tone || null,
+    rawMetrics: raw.rawMetrics || null,
+    country: raw.country || raw.countries || "",
+    region: raw.region || "",
+    coordinates: raw.coordinates || null,
+    language: raw.language || "",
+    tags: [],
+    classifierLabels: [],
+    contentScores: {facebookDiscussion:0,youtubeShort:0,songConcept:0,imagePrompt:0,substackEssay:0,techDemo:0,absurdityArchive:0,localInterest:0,cautionRisk:0,hankRantPotential:0},
+    totalOpportunityScore: 0,
+    reasons: [],
+    suggestedOutputs: [],
+    aiBrief: null,
+    deterministicBrief: "",
+    caveats: "",
+    starred: false,
+    hidden: false,
+    dismissed: false,
+    raw: raw
+  };
+  return item;
+}
+
+const CORS_PROXY_FALLBACKS = [
+  "https://corsproxy.io/?",
+  "https://api.codetabs.com/v1/proxy?quest=",
+  "https://api.allorigins.win/raw?url="
+];
+
+function getCorsProxyPrefixes() {
+  const configured = (state.settings.corsProxy || "").trim();
+  if (!configured) return [];
+  const proxies = [];
+  if (configured && !configured.includes("allorigins.win")) proxies.push(configured);
+  CORS_PROXY_FALLBACKS.forEach(proxy => {
+    if (!proxies.includes(proxy)) proxies.push(proxy);
+  });
+  return proxies;
+}
+
+async function corsFetch(url, options = {}, fetchOptions = {}) {
+  const proxies = fetchOptions.useFallbacks === false
+    ? [(state.settings.corsProxy || "").trim()].filter(Boolean)
+    : getCorsProxyPrefixes();
+  if (proxies.length === 0) return fetch(url, options);
+
+  let lastError = null;
+  for (const proxy of proxies) {
+    try {
+      const resp = await fetch(proxy + encodeURIComponent(url), options);
+      if (resp.ok || resp.status === 429) return resp;
+      lastError = new Error(`proxy ${new URL(proxy).hostname} HTTP ${resp.status}`);
+    } catch(e) {
+      lastError = e;
+    }
+  }
+  throw new Error("CORS proxy failed: " + (lastError?.message || "network error"));
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForGdeltPacing(label = "GDELT") {
+  const delay = state.settings.gdeltDelayMs || 3500;
+  const elapsed = Date.now() - state.lastGdeltRequestAt;
+  if (state.lastGdeltRequestAt && elapsed < delay) {
+    const waitMs = delay - elapsed;
+    pushScanLog(`Waiting ${(waitMs/1000).toFixed(1)}s before ${label}`, "info");
+    await sleep(waitMs);
+  }
+}
+
+async function gdeltFetch(url, label = "GDELT") {
+  await waitForGdeltPacing(label);
+  state.lastGdeltRequestAt = Date.now();
+  return corsFetch(url, {}, {useFallbacks: false});
+}
+
+async function fetchGdeltSource(source) {
+  const q = source.config.query;
+  const max = source.config.maxrecords || 20;
+  const ts = source.config.timespan || "7d";
+  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=artlist&format=json&maxrecords=${max}&sort=HybridRel&timespan=${ts}`;
+  const resp = await gdeltFetch(url, source.name);
+  if (resp.status === 429) {
+    const configuredDelay = state.settings.gdeltDelayMs || 3500;
+    const retryAfter = Math.max(parseInt(resp.headers.get("Retry-After") || "0", 10) * 1000 || 0, configuredDelay);
+    pushScanLog(`GDELT 429 for ${source.name}; retrying after ${(retryAfter/1000).toFixed(1)}s`, "error");
+    await sleep(retryAfter);
+    const retry = await gdeltFetch(url, source.name + " retry");
+    if (!retry.ok) throw new Error("GDELT rate limited (429). Wait a few minutes and retry.");
+    const data = await retry.json();
+    return normalizeGdeltArticles(data);
+  }
+  if (!resp.ok) throw new Error("GDELT HTTP " + resp.status);
+  const data = await resp.json();
+  return normalizeGdeltArticles(data);
+}
+
+function normalizeGdeltArticles(data) {
+  const articles = data.articles || [];
+  return articles.map(a => ({
+    title: a.title,
+    url: a.url,
+    publishedAt: a.seendate || "",
+    domain: (a.url && a.url.match(/:\/\/([^/]+)/)||[])[1] || a.source || "",
+    author: "",
+    rawScore: null,
+    rawComments: null,
+    rawTone: a.tone ? parseFloat(a.tone.split(",")[0]) : null,
+    rawMetrics: {tone: a.tone, source: a.source, social: a.social, image: a.image},
+    country: "",
+    language: a.language || ""
+  }));
+}
+
+async function fetchHackerNewsSource(source) {
+  const feed = source.config.feed || "topstories";
+  const maxItems = source.config.maxItems || 30;
+  const resp = await fetch(`https://hacker-news.firebaseio.com/v0/${feed}.json`);
+  if (!resp.ok) throw new Error("HN HTTP " + resp.status);
+  const ids = await resp.json();
+  const topIds = ids.slice(0, maxItems);
+  const items = [];
+  const batchSize = 10;
+  for (let i = 0; i < topIds.length; i += batchSize) {
+    const batch = topIds.slice(i, i + batchSize);
+    const results = await Promise.all(batch.map(id =>
+      fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`).then(r => r.json()).catch(() => null)
+    ));
+    results.forEach(item => {
+      if (item && item.type === "story" && item.title) {
+        items.push({
+          id: String(item.id),
+          title: item.title,
+          url: item.url || "",
+          publishedAt: new Date(item.time * 1000).toISOString(),
+          author: item.by || "",
+          rawScore: item.score || 0,
+          rawComments: item.descendants || 0,
+          domain: (item.url && item.url.match(/:\/\/([^/]+)/)||[])[1] || "news.ycombinator.com"
+        });
+      }
+    });
+  }
+  return items;
+}
+
+async function fetchNasaDonkiSource(source) {
+  const endpoints = source.config.endpoints || ["CME","FLR"];
+  const apiKey = source.config.apiKey || state.settings.nasaApiKey || "DEMO_KEY";
+  const now = new Date();
+  const start = new Date(now - 7*86400000).toISOString().split("T")[0];
+  const end = now.toISOString().split("T")[0];
+  const allItems = [];
+  for (const ep of endpoints) {
+    const url = `https://api.nasa.gov/DONKI/${ep}?startDate=${start}&endDate=${end}&api_key=${apiKey}`;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      (Array.isArray(data) ? data : []).forEach(ev => {
+        allItems.push({
+          id: ev.activityID || ev.flrID || ev.gstID || ev.sepID || null,
+          title: `[${ep}] ${ev.eventType || ep}: ${ev.note || ev.source || ev.activityID || "Space event detected"}`.slice(0,200),
+          url: ev.link || "",
+          publishedAt: ev.startTime || ev.eventTime || ev.beginTime || "",
+          rawScore: ev.link ? 50 : 30,
+          rawMetrics: {type: ep, instruments: ev.instruments, linkedEvents: ev.linkedEvents}
+        });
+      });
+    } catch(e) { continue; }
+  }
+  return allItems;
+}
+
+async function fetchUsgsSource(source) {
+  const feed = source.config.feed || "significant_day";
+  const url = `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${feed}.geojson`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("USGS HTTP " + resp.status);
+  const data = await resp.json();
+  return (data.features || []).map(f => {
+    const p = f.properties || {};
+    const g = f.geometry || {};
+    return {
+      id: f.id || p.ids || null,
+      title: `M${p.mag || "?"} ${p.place || "Earthquake"}`,
+      url: p.url || "",
+      publishedAt: p.time ? new Date(p.time).toISOString() : "",
+      rawScore: p.mag || 0,
+      rawMetrics: {mag: p.mag, place: p.place, felt: p.felt, alert: p.alert, tsunami: p.tsunami, sig: p.sig},
+      coordinates: g.coordinates || null,
+      domain: "earthquake.usgs.gov"
+    };
+  });
+}
+
+async function fetchRssSource(source) {
+  const feeds = source.config.feeds || [];
+  const allItems = [];
+  for (const feedUrl of feeds) {
+    try {
+      const resp = await corsFetch(feedUrl);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const text = await resp.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, "text/xml");
+      const errNode = xml.querySelector("parsererror");
+      if (errNode) throw new Error("XML parse error");
+      const entries = xml.querySelectorAll("item, entry");
+      entries.forEach(e => {
+        const title = e.querySelector("title")?.textContent || "";
+        const link = e.querySelector("link")?.textContent || e.querySelector("link")?.getAttribute("href") || "";
+        const pubDate = e.querySelector("pubDate, published, updated")?.textContent || "";
+        const author = e.querySelector("author name, dc\\:creator, author")?.textContent || "";
+        const desc = e.querySelector("description, summary, content")?.textContent?.slice(0,300) || "";
+        if (title) {
+          allItems.push({title, url: link, publishedAt: pubDate, author, description: desc});
+        }
+      });
+    } catch(e) {
+      allItems.push({title: `[CORS/Network error: ${feedUrl}]`, url: "", publishedAt: new Date().toISOString(), _error: true});
+    }
+  }
+  return allItems;
+}
+
+async function fetchCustomJsonSource(source) {
+  const url = source.config.url;
+  if (!url) return [];
+  const resp = await corsFetch(url);
+  if (!resp.ok) throw new Error("Custom JSON HTTP " + resp.status);
+  const data = await resp.json();
+  const ip = source.config.itemPath;
+  const items = ip ? ip.split(".").reduce((o,k) => o&&o[k], data) : data;
+  if (!Array.isArray(items)) return [];
+  return items.map(r => ({
+    title: r[source.config.titlePath || "title"] || "",
+    url: r[source.config.urlPath || "url"] || "",
+    publishedAt: r[source.config.datePath || "date"] || "",
+    rawScore: r[source.config.scorePath || "score"] || null,
+    author: r.author || ""
+  }));
+}
+
+async function runSource(sourceId) {
+  const source = state.sources.find(s => s.id === sourceId);
+  if (!source) return;
+  let scannedItems = [];
+  const scan = {
+    id: generateId("scan"),
+    sourceId: source.id,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    status: "running",
+    requestUrls: [],
+    resultCount: 0,
+    newCount: 0,
+    updatedCount: 0,
+    error: null,
+    durationMs: 0
+  };
+  try {
+    let rawItems;
+    switch(source.type) {
+      case "gdelt": rawItems = await fetchGdeltSource(source); break;
+      case "hackernews": rawItems = await fetchHackerNewsSource(source); break;
+      case "nasa": rawItems = await fetchNasaDonkiSource(source); break;
+      case "usgs": rawItems = await fetchUsgsSource(source); break;
+      case "rss": rawItems = await fetchRssSource(source); break;
+      case "custom_json": rawItems = await fetchCustomJsonSource(source); break;
+      default: rawItems = [];
+    }
+    scan.resultCount = rawItems.length;
+    const context = {
+      sourceId: source.id,
+      sourceGroup: source.sourceGroup,
+      sourceName: source.name,
+      sourceType: source.type,
+      sourceUrl: "",
+      categoryHint: source.categoryHint
+    };
+    const newItems = [];
+    for (const raw of rawItems) {
+      if (raw._error) continue;
+      const item = createItem(raw, context);
+      if (!item) continue;
+      classifyItem(item);
+      scoreContentPotential(item);
+      newItems.push(item);
+    }
+    await storeItems(newItems);
+    scannedItems = (await Promise.all(newItems.map(item => dbGet("items", item.id)))).filter(Boolean);
+    scan.newCount = newItems.length;
+    scan.updatedCount = 0;
+    scan.status = "success";
+    source.lastStatus = "success";
+    source.lastError = null;
+    state.polling.failureCounts[source.id] = 0;
+  } catch(e) {
+    scan.status = "error";
+    scan.error = e.message;
+    source.lastStatus = "error";
+    source.lastError = e.message;
+    const fc = (state.polling.failureCounts[source.id] || 0) + 1;
+    state.polling.failureCounts[source.id] = fc;
+  }
+  scan.finishedAt = new Date().toISOString();
+  scan.durationMs = new Date(scan.finishedAt) - new Date(scan.startedAt);
+  source.lastRunAt = scan.startedAt;
+  source.nextRunAt = new Date(Date.now() + (source.pollIntervalMinutes * 60000 * Math.min(1 + (state.polling.failureCounts[source.id]||0), 8))).toISOString();
+  await saveScan(scan);
+  await saveSource(source);
+  if (scannedItems.length && await ensureLocalAIReady()) {
+    await runAIOnItems(scannedItems);
+  }
+  return scan;
+}
+
+async function runAllSources() {
+  const now = Date.now();
+  if (now - state.polling.lastManualScan < state.settings.manualScanCooldownMs) {
+    toast("Cooldown active, wait " + Math.ceil((state.settings.manualScanCooldownMs - (now - state.polling.lastManualScan))/1000) + "s", "error");
+    return;
+  }
+  state.polling.lastManualScan = now;
+  state.scanning = true;
+  const enabled = state.sources.filter(s => s.enabled);
+  startScanProgress("Source Pull", enabled.length);
+  for (let i = 0; i < enabled.length; i++) {
+    const s = enabled[i];
+    updateScanProgress({current: s.name});
+    pushScanLog(`Starting ${s.name}`, "info");
+    try {
+      const scan = await runSource(s.id);
+      if (scan && scan.status === "error") {
+        toast(s.name + ": " + scan.error, "error");
+        pushScanLog(`${s.name} failed: ${scan.error}`, "error");
+      } else if (scan) {
+        pushScanLog(`${s.name} complete: ${scan.resultCount} fetched, ${scan.newCount} stored`, "ok");
+      }
+    } catch(e) {
+      toast(s.name + ": " + e.message, "error");
+      pushScanLog(`${s.name} failed: ${e.message}`, "error");
+    }
+    updateScanProgress({completed: i + 1, current: ""});
+  }
+  state.scanning = false;
+  await refreshItems();
+  renderCurrentView();
+  finishScanProgress("Pull complete: " + state.items.length + " active items", "ok");
+  toast("Scan complete: " + state.items.length + " items", "success");
+}
+
+async function runDueSources() {
+  const now = Date.now();
+  const due = state.sources.filter(s =>
+    s.enabled && (!s.nextRunAt || new Date(s.nextRunAt).getTime() <= now)
+  );
+  if (due.length === 0) return;
+  state.scanning = true;
+  startScanProgress("Auto-Watch Pull", due.length);
+  for (let i = 0; i < due.length; i++) {
+    const s = due[i];
+    updateScanProgress({current: s.name});
+    try {
+      const scan = await runSource(s.id);
+      if (scan && scan.status === "error") pushScanLog(`${s.name} failed: ${scan.error}`, "error");
+      else if (scan) pushScanLog(`${s.name} complete: ${scan.resultCount} fetched`, "ok");
+    } catch(e) { pushScanLog(`${s.name} failed: ${e.message}`, "error"); }
+    updateScanProgress({completed: i + 1, current: ""});
+  }
+  state.scanning = false;
+  await refreshItems();
+  if (state.currentView === "radar" || state.currentView === "feed") {
+    renderCurrentView();
+  }
+  finishScanProgress("Auto-watch pull complete", "ok");
+  updateHeaderStatus();
+}
+
+function scheduleNextPoll() {
+  if (state.polling.timer) clearTimeout(state.polling.timer);
+  if (!state.polling.active) return;
+  const now = Date.now();
+  let nextDue = Infinity;
+  state.sources.filter(s => s.enabled).forEach(s => {
+    const nt = s.nextRunAt ? new Date(s.nextRunAt).getTime() : now;
+    if (nt < nextDue) nextDue = nt;
+  });
+  const delay = Math.max(Math.min(nextDue - now, 300000), 5000);
+  state.polling.nextRunAt = new Date(now + delay).toISOString();
+  state.polling.timer = setTimeout(async () => {
+    await runDueSources();
+    scheduleNextPoll();
+  }, delay);
+}
+
+function startAutoWatch() {
+  state.polling.active = true;
+  state.settings.autoWatchEnabled = true;
+  scheduleNextPoll();
+  updateHeaderStatus();
+  toast("Auto-watch started", "success");
+}
+
+function pauseAutoWatch() {
+  state.polling.active = false;
+  if (state.polling.timer) clearTimeout(state.polling.timer);
+  state.polling.timer = null;
+  state.settings.autoWatchEnabled = false;
+  updateHeaderStatus();
+  toast("Auto-watch paused", "info");
+}
+
+function classifyItem(item) {
+  const text = (item.title + " " + item.description + " " + item.subtitle).toLowerCase();
+  const labels = [];
+  const matchedKeywords = {};
+  for (const [label, keywords] of Object.entries(KEYWORD_BUCKETS)) {
+    let matchCount = 0;
+    const matched = [];
+    for (const kw of keywords) {
+      if (text.includes(kw.toLowerCase())) {
+        matchCount++;
+        matched.push(kw);
+      }
+    }
+    if (matchCount > 0) {
+      labels.push(label);
+      matchedKeywords[label] = matched;
+    }
+  }
+  if (labels.length === 0) labels.push("low_signal");
+  item.classifierLabels = labels;
+  item.tags = [...labels];
+  const lower = text;
+  const tooDark = /murder|killed|mass shooting|genocide|child abuse|sexual assault|dead body|suicide|terrorist attack/i.test(lower);
+  if (tooDark) {
+    if (!labels.includes("too_dark")) { labels.push("too_dark"); item.tags.push("too_dark"); }
+  }
+}
+
+function scoreContentPotential(item) {
+  const scores = item.contentScores;
+  const text = (item.title + " " + item.description).toLowerCase();
+  const labels = item.classifierLabels;
+  const now = Date.now();
+  const pubDate = item.publishedAt ? new Date(item.publishedAt).getTime() : 0;
+  const ageHours = pubDate ? (now - pubDate) / 3600000 : 24;
+  const recencyBoost = Math.max(0, 1 - ageHours / 168);
+  const hasLabel = l => labels.includes(l);
+
+  if (hasLabel("ai_panic")) {
+    scores.facebookDiscussion += 25 * recencyBoost;
+    scores.youtubeShort += 20 * recencyBoost;
+    scores.songConcept += 15;
+    scores.substackEssay += 20;
+    scores.techDemo += 10;
+    scores.absurdityArchive += 15;
+    scores.hankRantPotential += 25 * recencyBoost;
+  }
+  if (hasLabel("dating_relationships")) {
+    scores.facebookDiscussion += 35 * recencyBoost;
+    scores.songConcept += 20;
+    scores.absurdityArchive += 10;
+    scores.localInterest += 10;
+    scores.hankRantPotential += 15;
+  }
+  if (hasLabel("political_absurdity")) {
+    scores.facebookDiscussion += 20;
+    scores.absurdityArchive += 25;
+    scores.cautionRisk += 20;
+    scores.songConcept += 10;
+    scores.substackEssay += 10;
+    scores.hankRantPotential += 15;
+  }
+  if (hasLabel("animal_chaos")) {
+    scores.facebookDiscussion += 20;
+    scores.songConcept += 20;
+    scores.imagePrompt += 25;
+    scores.absurdityArchive += 30;
+    scores.localInterest += 15;
+    scores.youtubeShort += 15;
+  }
+  if (hasLabel("tech_dystopia")) {
+    scores.substackEssay += 25;
+    scores.facebookDiscussion += 15;
+    scores.techDemo += 10;
+    scores.absurdityArchive += 15;
+    scores.cautionRisk += 10;
+    scores.hankRantPotential += 20;
+  }
+  if (hasLabel("crypto_chaos")) {
+    scores.facebookDiscussion += 10;
+    scores.cautionRisk += 20;
+    scores.absurdityArchive += 15;
+    scores.substackEssay += 10;
+    scores.youtubeShort += 10;
+  }
+  if (hasLabel("culture_war")) {
+    scores.facebookDiscussion += 15;
+    scores.cautionRisk += 25;
+    scores.absurdityArchive += 10;
+    scores.substackEssay += 10;
+  }
+  if (hasLabel("health_wellness")) {
+    scores.facebookDiscussion += 15;
+    scores.cautionRisk += 15;
+    scores.substackEssay += 15;
+    scores.youtubeShort += 10;
+  }
+  if (hasLabel("space_weather")) {
+    scores.imagePrompt += 30;
+    scores.songConcept += 20;
+    scores.substackEssay += 10;
+    scores.youtubeShort += 15;
+    scores.absurdityArchive += 10;
+  }
+  if (hasLabel("natural_hazard")) {
+    scores.imagePrompt += 15;
+    scores.localInterest += 20;
+    scores.facebookDiscussion += 10;
+    scores.substackEssay += 5;
+  }
+  if (hasLabel("open_source_dev")) {
+    scores.techDemo += 30;
+    scores.substackEssay += 15;
+    scores.youtubeShort += 10;
+  }
+  if (hasLabel("weird_but_fun")) {
+    scores.absurdityArchive += 25;
+    scores.facebookDiscussion += 15;
+    scores.songConcept += 15;
+    scores.imagePrompt += 10;
+    scores.youtubeShort += 10;
+    scores.hankRantPotential += 10;
+  }
+  if (hasLabel("local_weirdness")) {
+    scores.localInterest += 30;
+    scores.facebookDiscussion += 20;
+    scores.absurdityArchive += 10;
+  }
+
+  if (item.rawScore) {
+    if (item.sourceGroup === "HackerNews") {
+      const hnBoost = Math.min(item.rawScore / 10, 20);
+      scores.techDemo += hnBoost * 0.5;
+      scores.substackEssay += hnBoost * 0.3;
+      scores.facebookDiscussion += hnBoost * 0.2;
+    }
+    if (item.sourceGroup === "USGS") {
+      const magBoost = Math.min((item.rawScore || 0) * 5, 30);
+      scores.imagePrompt += magBoost;
+      scores.localInterest += magBoost;
+      scores.facebookDiscussion += magBoost * 0.5;
+    }
+  }
+  if (item.rawTone !== null && item.rawTone !== undefined) {
+    const toneAbs = Math.abs(item.rawTone);
+    if (toneAbs > 5) {
+      scores.absurdityArchive += Math.min(toneAbs, 15);
+      scores.facebookDiscussion += Math.min(toneAbs * 0.5, 10);
+    }
+  }
+  if (item.rawComments && item.sourceGroup === "HackerNews") {
+    scores.facebookDiscussion += Math.min(item.rawComments / 5, 15);
+  }
+
+  const titleLen = item.title.length;
+  if (titleLen > 10 && titleLen < 80) {
+    scores.facebookDiscussion += 5;
+    scores.youtubeShort += 5;
+  }
+
+  const excl = (item.title.match(/!|breaking|urgent|shocking|outrage|panic|chaos|insane|unbelievable/i) || []).length;
+  if (excl > 0) {
+    scores.absurdityArchive += excl * 5;
+    scores.hankRantPotential += excl * 3;
+  }
+
+  if (hasLabel("too_dark")) {
+    scores.cautionRisk += 30;
+    scores.facebookDiscussion -= 10;
+    scores.youtubeShort -= 10;
+    scores.songConcept -= 5;
+  }
+
+  for (const key of OUTPUT_TYPES) {
+    scores[key] = clampScore(scores[key]);
+  }
+
+  let total = 0;
+  for (const key of OUTPUT_TYPES) {
+    const w = state.settings.scoreWeights[key] || 1;
+    total += scores[key] * w;
+  }
+  item.totalOpportunityScore = clampScore(total / OUTPUT_TYPES.length + 30);
+
+  const bestTypes = [];
+  const sorted = Object.entries(scores).sort((a,b) => b[1] - a[1]);
+  if (sorted[0] && sorted[0][1] > 10) bestTypes.push(sorted[0][0]);
+  if (sorted[1] && sorted[1][1] > 10) bestTypes.push(sorted[1][0]);
+  item.suggestedOutputs = bestTypes;
+
+  item.reasons = generateReasons(item, scores, labels);
+  item.deterministicBrief = generateDeterministicBrief(item);
+  item.caveats = generateCaveat(item, scores, labels);
+}
+
+function generateReasons(item, scores, labels) {
+  const reasons = [];
+  const has = l => labels.includes(l);
+  if (has("ai_panic")) reasons.push("AI panic/future shock angle — high engagement potential");
+  if (has("dating_relationships")) reasons.push("Relationship/dating topic — strong Facebook discussion bait");
+  if (has("animal_chaos")) reasons.push("Animal chaos — inherently shareable and visual");
+  if (has("political_absurdity")) reasons.push("Political absurdity — satire potential, but handle carefully");
+  if (has("tech_dystopia")) reasons.push("Tech dystopia narrative — Substack/essay gold");
+  if (has("crypto_chaos")) reasons.push("Crypto volatility — commentary opportunity, financial caution");
+  if (has("culture_war")) reasons.push("Culture war angle — likely engagement, high caution");
+  if (has("health_wellness")) reasons.push("Health/wellness trend — discussion bait, verify claims");
+  if (has("space_weather")) reasons.push("Space event — great visual/ambient content potential");
+  if (has("natural_hazard")) reasons.push("Natural hazard — local interest, visual potential");
+  if (has("weird_but_fun")) reasons.push("Inherently weird/fun — absurdity archive candidate");
+  if (has("local_weirdness")) reasons.push("Local/regional angle — community discussion starter");
+  if (has("open_source_dev")) reasons.push("Dev/tech story — demo or commentary potential");
+  if (item.rawScore > 100) reasons.push("High community engagement signal (" + item.rawScore + ")");
+  if (scores.hankRantPotential > 40) reasons.push("Hank rant potential: " + scores.hankRantPotential);
+  if (scores.songConcept > 30) reasons.push("Song bait: title has lyrical potential");
+  if (scores.imagePrompt > 30) reasons.push("Visual content potential");
+  if (reasons.length === 0) reasons.push("Low signal — probably skip");
+  return reasons.slice(0, 5);
+}
+
+function generateDeterministicBrief(item) {
+  const labels = item.classifierLabels;
+  const has = l => labels.includes(l);
+  let brief = `Based on title/metadata: "${item.title}" from ${item.domain || item.sourceName}. `;
+  if (has("ai_panic")) brief += "AI-related topic with panic/backlash signals. ";
+  if (has("animal_chaos")) brief += "Animal-related chaos or comedy. ";
+  if (has("dating_relationships")) brief += "Relationship/dating culture story. ";
+  if (has("political_absurdity")) brief += "Political story with absurd/satirical angle. ";
+  if (has("weird_but_fun")) brief += "Weird/fun story with shareability. ";
+  if (item.totalOpportunityScore > 60) brief += "High content opportunity score. ";
+  else if (item.totalOpportunityScore < 25) brief += "Low opportunity score. ";
+  return brief;
+}
+
+function generateCaveat(item, scores, labels) {
+  if (labels.includes("too_dark")) return "too_tragic";
+  if (scores.cautionRisk > 50) {
+    if (labels.includes("political_absurdity") || labels.includes("culture_war")) return "political_fire";
+    if (labels.includes("crypto_chaos")) return "financial_advice_risk";
+    if (labels.includes("health_wellness")) return "health_claims_need_caution";
+    return "discuss_carefully";
+  }
+  if (scores.cautionRisk > 25) return "discuss_carefully";
+  if (item.totalOpportunityScore < 20) return "likely_low_signal";
+  if (!item.url) return "unverified_claims";
+  return "safe_fun";
+}
+
+function generateHeadlineHooks(item) {
+  const t = item.title;
+  const serious = t.length > 60 ? t.slice(0,57) + "..." : t;
+  const sarcastic = "You won't believe " + (item.classifierLabels.includes("animal_chaos") ? "what this animal did" : item.classifierLabels.includes("ai_panic") ? "what the robots are up to now" : item.classifierLabels.includes("crypto_chaos") ? "what crypto bros are crying about" : "what just happened");
+  const clicky = t.replace(/^(The|A|An)\s+/i, "").slice(0,50) + ": Here's why it matters";
+  return {serious, sarcastic, clickyButNotGross: clicky};
+}
+
+function generateDeterministicDraft(item, type) {
+  const hooks = generateHeadlineHooks(item);
+  const angle = item.reasons[0] || "Content opportunity";
+  const caution = item.caveats;
+  const cautionNote = caution !== "safe_fun" ? `\nCaution: ${caution}` : "";
+  switch(type) {
+    case "facebook":
+      return `${hooks.sarcastic}\n\n${item.title}\nSource: ${item.domain || item.sourceName}\n${item.url || "(no link)"}\n\nAngle: ${angle}${cautionNote}\n\nWhat do you think — funny, concerning, or both?`;
+    case "song":
+      const genreHint = item.classifierLabels.includes("ai_panic") ? "synth-blues" : item.classifierLabels.includes("animal_chaos") ? "rockabilly" : item.classifierLabels.includes("crypto_chaos") ? "country-swamp" : item.classifierLabels.includes("dating_relationships") ? "indie folk" : "garage rock";
+      return `Song: "${hooks.sarcastic}"\nGenre hint: ${genreHint}\nHook: ${item.title}\nAngle: ${angle}\n\nVerse idea: Write from the perspective of someone who just found out about this.\nChorus: Repeat the absurd core as a mantra.`;
+    case "image":
+      return `Image prompt seed: "${item.title}"\nStyle: Wide aspect, no text, editorial illustration\nMood: ${item.classifierLabels.includes("ai_panic") ? "neon dystopian" : item.classifierLabels.includes("animal_chaos") ? "whimsical chaos" : item.classifierLabels.includes("space_weather") ? "cosmic awe" : "dark editorial"}\nElements: ${item.reasons.slice(0,3).join(", ")}`;
+    case "substack":
+      return `# ${hooks.serious}\n\n> ${angle}\n\n${item.title} — ${item.domain || item.sourceName}\n\n${item.deterministicBrief}${cautionNote}`;
+    case "techdemo":
+      return `Tech demo idea: "${item.title}"\nBased on: ${item.domain || item.sourceName}\nAngle: ${angle}\nApproach: Build a minimal prototype or visualization around this concept.`;
+    case "absurdity":
+      return `[Absurdity Archive Entry]\n"${item.title}"\nSource: ${item.domain || item.sourceName}\nScore: ${item.totalOpportunityScore}\nReason: ${angle}${cautionNote}`;
+    default:
+      return `${item.title}\n${item.deterministicBrief}\nScore: ${item.totalOpportunityScore}`;
+  }
+}
+
+async function checkLocalAI() {
+  if (!window.LanguageModel) {
+    state.localAI.availability = "unavailable";
+    return "unavailable";
+  }
+  try {
+    state.localAI.checking = true;
+    const avail = await LanguageModel.availability({
+      expectedInputs: [{ type: "text", languages: ["en"] }],
+      expectedOutputs: [{ type: "text", languages: ["en"] }]
+    });
+    state.localAI.availability = avail;
+    state.localAI.checking = false;
+    return avail;
+  } catch(e) {
+    state.localAI.availability = "unavailable";
+    state.localAI.lastError = e.message;
+    state.localAI.checking = false;
+    return "unavailable";
+  }
+}
+
+function getLocalAISessionOptions() {
+  return {
+    expectedInputs: [{ type: "text", languages: ["en"] }],
+    expectedOutputs: [{ type: "text", languages: ["en"] }]
+  };
+}
+
+async function createLocalAISession() {
+  if (!window.LanguageModel) {
+    state.localAI.lastError = "LanguageModel API not available in this browser";
+    return false;
+  }
+  try {
+    const session = await LanguageModel.create(getLocalAISessionOptions());
+    state.localAI.session = session;
+    return true;
+  } catch(e) {
+    state.localAI.lastError = e.message;
+    if (e.message && e.message.includes("download")) {
+      state.localAI.availability = "after-download";
+    }
+    return false;
+  }
+}
+
+async function ensureLocalAIReady() {
+  if (state.localAI.enabled && state.localAI.session) return true;
+  const avail = state.localAI.availability || await checkLocalAI();
+  if (avail !== "readily") return false;
+  if (!state.localAI.session) {
+    const created = await createLocalAISession();
+    if (!created) return false;
+  }
+  state.localAI.enabled = true;
+  await saveSetting("localAiEnabled", true);
+  return true;
+}
+
+async function runAIClassification(item) {
+  if (!state.localAI.session) {
+    const created = await createLocalAISession();
+    if (!created) return null;
+  }
+  const prompt = `You are Content Radar's local classifier.
+Analyze only the metadata provided.
+Do not claim to have read the full article unless full text is present.
+Classify whether this item is useful for content creation.
+
+Return compact JSON:
+{
+  "bestOutputType": "...",
+  "opportunityScore": 0-100,
+  "labels": ["..."],
+  "whyItMightWork": ["..."],
+  "suggestedAngle": "...",
+  "headlineHooks": {
+    "serious": "...",
+    "sarcastic": "...",
+    "clickyButNotGross": "..."
+  },
+  "songConcept": {
+    "title": "...",
+    "genreHint": "...",
+    "hook": "..."
+  },
+  "imagePromptSeed": "...",
+  "facebookPrompt": "...",
+  "caution": "...",
+  "confidence": "low|medium|high"
+}
+
+Metadata:
+Title: ${item.title}
+Source: ${item.sourceName}
+Domain: ${item.domain}
+Published: ${item.publishedAt}
+Score: ${item.rawScore}
+Description: ${item.description || "(none)"}
+Existing labels: ${item.classifierLabels.join(", ")}
+Existing scores: ${JSON.stringify(item.contentScores)}`;
+
+  try {
+    const result = await state.localAI.session.prompt(prompt);
+    try {
+      const parsed = JSON.parse(result);
+      item.aiBrief = parsed;
+      return parsed;
+    } catch(e) {
+      item.aiBrief = {rawText: result};
+      return null;
+    }
+  } catch(e) {
+    state.localAI.lastError = e.message;
+    return null;
+  }
+}
+
+async function runAIOnItems(items) {
+  if (!items.length || !await ensureLocalAIReady()) return;
+  const candidates = [...items]
+    .filter(i => !i.dismissed && !i.hidden && i.totalOpportunityScore > 30 && !i.aiBrief)
+    .sort((a,b) => b.totalOpportunityScore - a.totalOpportunityScore)
+    .slice(0, state.settings.maxAiItemsPerScan);
+  for (const item of candidates) {
+    await runAIClassification(item);
+    await saveItem(item);
+  }
+}
+
+async function runAIOnTopCandidates() {
+  if (!await ensureLocalAIReady()) return;
+  const candidates = state.items
+    .filter(i => !i.dismissed && !i.hidden && i.totalOpportunityScore > 30 && !i.aiBrief)
+    .sort((a,b) => b.totalOpportunityScore - a.totalOpportunityScore)
+    .slice(0, state.settings.maxAiItemsPerScan);
+  for (const item of candidates) {
+    await runAIClassification(item);
+    await saveItem(item);
+  }
+}
+
+function initDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("items")) {
+        const items = db.createObjectStore("items", {keyPath: "id"});
+        items.createIndex("sourceGroup","sourceGroup",{unique:false});
+        items.createIndex("sourceName","sourceName",{unique:false});
+        items.createIndex("publishedAt","publishedAt",{unique:false});
+        items.createIndex("fetchedAt","fetchedAt",{unique:false});
+        items.createIndex("totalOpportunityScore","totalOpportunityScore",{unique:false});
+        items.createIndex("domain","domain",{unique:false});
+        items.createIndex("starred","starred",{unique:false});
+        items.createIndex("hidden","hidden",{unique:false});
+        items.createIndex("dismissed","dismissed",{unique:false});
+      }
+      if (!db.objectStoreNames.contains("scans")) db.createObjectStore("scans",{keyPath:"id"});
+      if (!db.objectStoreNames.contains("sources")) db.createObjectStore("sources",{keyPath:"id"});
+      if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings",{keyPath:"key"});
+      if (!db.objectStoreNames.contains("briefs")) db.createObjectStore("briefs",{keyPath:"id"});
+      if (!db.objectStoreNames.contains("classifierRules")) db.createObjectStore("classifierRules",{keyPath:"id"});
+    };
+    req.onsuccess = (e) => { state.db = e.target.result; resolve(state.db); };
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+function dbTx(store, mode="readonly") {
+  const tx = state.db.transaction(store, mode);
+  return tx.objectStore(store);
+}
+
+function dbPut(store, item) {
+  return new Promise((resolve, reject) => {
+    const s = dbTx(store, "readwrite");
+    const r = s.put(item);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+function dbGet(store, key) {
+  return new Promise((resolve, reject) => {
+    const s = dbTx(store);
+    const r = s.get(key);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+function dbGetAll(store) {
+  return new Promise((resolve, reject) => {
+    const s = dbTx(store);
+    const r = s.getAll();
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+function dbDelete(store, key) {
+  return new Promise((resolve, reject) => {
+    const s = dbTx(store, "readwrite");
+    const r = s.delete(key);
+    r.onsuccess = () => resolve();
+    r.onerror = () => reject(r.error);
+  });
+}
+
+function dbClear(store) {
+  return new Promise((resolve, reject) => {
+    const s = dbTx(store, "readwrite");
+    const r = s.clear();
+    r.onsuccess = () => resolve();
+    r.onerror = () => reject(r.error);
+  });
+}
+
+async function storeItems(items) {
+  for (const item of items) {
+    const existing = await dbGet("items", item.id);
+    if (existing) {
+      if (item.rawScore && existing.rawScore && item.rawScore > existing.rawScore) {
+        await dbPut("items", {...existing, ...item, starred: existing.starred, hidden: existing.hidden, dismissed: existing.dismissed});
+      }
+    } else {
+      await dbPut("items", item);
+    }
+  }
+}
+
+async function saveItem(item) { return dbPut("items", item); }
+async function saveScan(scan) { return dbPut("scans", scan); }
+async function saveSource(source) { return dbPut("sources", source); }
+
+async function loadSettings() {
+  const rows = await dbGetAll("settings");
+  const s = {};
+  rows.forEach(r => s[r.key] = r.value);
+  state.settings = {...DEFAULT_SETTINGS, ...s};
+  if (state.settings.scoreWeights) {
+    state.settings.scoreWeights = {...DEFAULT_SETTINGS.scoreWeights, ...state.settings.scoreWeights};
+  }
+}
+
+async function saveSetting(key, value) {
+  state.settings[key] = value;
+  await dbPut("settings", {key, value});
+}
+
+async function loadSources() {
+  const stored = await dbGetAll("sources");
+  if (stored.length === 0) {
+    state.sources = DEFAULT_SOURCES.map(s => ({...s}));
+    for (const s of state.sources) await saveSource(s);
+  } else {
+    const defaultIds = DEFAULT_SOURCES.map(d => d.id);
+    state.sources = stored;
+    for (const d of DEFAULT_SOURCES) {
+      if (!stored.find(s => s.id === d.id)) {
+        const newS = {...d};
+        state.sources.push(newS);
+        await saveSource(newS);
+      }
+    }
+  }
+}
+
+async function refreshItems() {
+  const all = await dbGetAll("items");
+  state.items = all.filter(i => !i.dismissed && !i.hidden).sort((a,b) => b.totalOpportunityScore - a.totalOpportunityScore);
+}
+
+async function getAllItems() {
+  return dbGetAll("items");
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => toast("Copied to clipboard","success")).catch(() => toast("Clipboard failed","error"));
+  } else {
+    toast("Clipboard API not available","error");
+  }
+}
+
+async function saveFile(name, content, mime="text/markdown") {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({suggestedName: name, types: [{description: "File", accept: {[mime]: [name.split(".").pop()]}}]});
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      toast("File saved","success");
+      return;
+    } catch(e) { if (e.name === "AbortError") return; }
+  }
+  const blob = new Blob([content], {type: mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportJson() {
+  const items = await dbGetAll("items");
+  const sources = await dbGetAll("sources");
+  const scans = await dbGetAll("scans");
+  const settings = await dbGetAll("settings");
+  const data = {items, sources, scans, settings, exportedAt: new Date().toISOString(), app: APP_NAME};
+  const json = JSON.stringify(data, null, 2);
+  await saveFile("content-radar-export.json", json, "application/json");
+}
+
+async function importJson(file) {
+  const text = await file.text();
+  const data = JSON.parse(text);
+  if (data.items) { for (const item of data.items) await dbPut("items", item); }
+  if (data.sources) { for (const source of data.sources) await dbPut("sources", source); }
+  if (data.settings) { for (const s of data.settings) await dbPut("settings", s); }
+  if (data.scans) { for (const s of data.scans) await dbPut("scans", s); }
+  await loadSources();
+  await loadSettings();
+  await refreshItems();
+  renderCurrentView();
+  toast("Import complete","success");
+}
+
+function drawRadar(canvas) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxR = Math.min(cx, cy) - 20;
+  ctx.clearRect(0, 0, w, h);
+
+  for (let i = 1; i <= 4; i++) {
+    const r = (maxR / 4) * i;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = i === 4 ? "rgba(0,229,255,0.15)" : "rgba(0,229,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 6) {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * maxR, cy + Math.sin(a) * maxR);
+    ctx.strokeStyle = "rgba(0,229,255,0.06)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  const sweepAngle = (Date.now() / 2000) % (Math.PI * 2);
+  const grad = ctx.createConicalGradient ? null : null;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, maxR, sweepAngle - 0.3, sweepAngle);
+  ctx.closePath();
+  const sg = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+  sg.addColorStop(0, "rgba(0,229,255,0.15)");
+  sg.addColorStop(1, "rgba(0,229,255,0.02)");
+  ctx.fillStyle = sg;
+  ctx.fill();
+
+  const items = state.items.slice(0, 50);
+  state.radarBlips = [];
+  items.forEach((item, idx) => {
+    const ageMs = item.publishedAt ? Date.now() - new Date(item.publishedAt).getTime() : 86400000;
+    const ageNorm = Math.min(ageMs / (7 * 86400000), 1);
+    const dist = maxR * 0.2 + maxR * 0.75 * (1 - ageNorm);
+    const angleHash = hashString(item.classifierLabels[0] || "default") % 360;
+    const angle = (angleHash / 360) * Math.PI * 2 + (idx * 0.05);
+    const x = cx + Math.cos(angle) * dist;
+    const y = cy + Math.sin(angle) * dist;
+    const size = 3 + (item.totalOpportunityScore / 100) * 8;
+    const bestType = item.suggestedOutputs[0] || "absurdityArchive";
+    const color = OUTPUT_COLORS[bestType] || "#00e5ff";
+
+    const pulseScale = 1 + Math.sin(Date.now() / 500 + idx) * 0.2;
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(2, size * pulseScale), 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.7 + (item.totalOpportunityScore / 200);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(2, size * pulseScale) + 3, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    state.radarBlips.push({x, y, size: Math.max(2, size * pulseScale) + 5, itemId: item.id});
+  });
+
+  ctx.font = "10px monospace";
+  ctx.fillStyle = "rgba(0,229,255,0.5)";
+  ctx.textAlign = "center";
+  const ringLabels = ["7d","5d","3d","1d"];
+  for (let i = 0; i < 4; i++) {
+    const r = (maxR / 4) * (i + 1);
+    ctx.fillText(ringLabels[i], cx + r, cy - 4);
+  }
+}
+
+function animateRadar(canvas) {
+  if (state.currentView !== "radar") {
+    state.radarAnimFrame = null;
+    return;
+  }
+  drawRadar(canvas);
+  state.radarAnimFrame = requestAnimationFrame(() => animateRadar(canvas));
+}
+
+function renderRadar(container) {
+  const top10 = state.items.slice(0, 10);
+  if (state.items.length === 0 && !state.scanning) {
+    container.innerHTML = `
+      <div id="scan-progress">${renderScanProgressHTML()}</div>
+      <div class="welcome-card">
+        <h2>CONTENT RADAR</h2>
+        <p>A local-first browser scout for things worth posting, riffing on, singing about, or turning into visual chaos.</p>
+        <p>Data stores locally in your browser. No remote AI calls. Public APIs fetched directly.</p>
+        <p style="color:var(--neon-amber);">Content Radar is idle. Pick sources, run a scan, and let the classifier find the bait.</p>
+        <div class="welcome-actions">
+          <button class="btn btn-primary" onclick="runAllSources()">Run High-Hit Sources Now</button>
+          <button class="btn" onclick="switchView('sources')">Open Sources</button>
+          <button class="btn" onclick="switchView('classifier')">Open Classifier Lab</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const progress = document.createElement("div");
+  progress.id = "scan-progress";
+  progress.innerHTML = renderScanProgressHTML();
+  container.appendChild(progress);
+
+  const canvas = document.createElement("canvas");
+  canvas.id = "radar-canvas";
+  canvas.width = 600;
+  canvas.height = 600;
+  canvas.style.cssText = "width:100%;max-width:600px;aspect-ratio:1;display:block;margin:0 auto;cursor:pointer;";
+  canvas.addEventListener("click", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    for (const blip of state.radarBlips) {
+      const dx = x - blip.x;
+      const dy = y - blip.y;
+      if (Math.sqrt(dx*dx + dy*dy) < blip.size) {
+        openItemDetail(blip.itemId);
+        return;
+      }
+    }
+  });
+  container.appendChild(canvas);
+
+  const legend = document.createElement("div");
+  legend.className = "radar-legend";
+  const types = ["facebookDiscussion","songConcept","imagePrompt","absurdityArchive","techDemo","cautionRisk"];
+  types.forEach(t => {
+    legend.innerHTML += `<span><span class="dot" style="background:${OUTPUT_COLORS[t]}"></span>${OUTPUT_LABELS[t]}</span>`;
+  });
+  container.appendChild(legend);
+
+  if (state.radarAnimFrame) cancelAnimationFrame(state.radarAnimFrame);
+  requestAnimationFrame(() => animateRadar(canvas));
+
+  const hankTop = state.items.filter(i => i.contentScores.hankRantPotential > 30).slice(0,1);
+  const songTop = state.items.filter(i => i.contentScores.songConcept > 30).slice(0,1);
+  const fbTop = state.items.filter(i => i.contentScores.facebookDiscussion > 30).slice(0,1);
+  const imgTop = state.items.filter(i => i.contentScores.imagePrompt > 30).slice(0,1);
+  const cautionTop = state.items.filter(i => i.contentScores.cautionRisk > 30).slice(0,1);
+
+  const topCards = document.createElement("div");
+  topCards.className = "grid-2";
+  topCards.style.marginTop = "16px";
+
+  function makeTopCard(item, label, cssClass) {
+    if (!item) return "";
+    return `<div class="card top-card ${cssClass}">
+      <div class="card-meta"><span style="color:var(--neon-amber)">${label}</span></div>
+      <div class="card-title"><a href="#" onclick="openItemDetail('${item.id}');return false;">${esc(item.title)}</a></div>
+      <div class="card-meta"><span>${item.domain || item.sourceName}</span><span>${formatDate(item.publishedAt)}</span></div>
+      <div class="card-scores">${makeScoreChips(item.contentScores, item.suggestedOutputs[0])}</div>
+    </div>`;
+  }
+
+  topCards.innerHTML = makeTopCard(hankTop[0], "HANK RANT POTENTIAL", "hank")
+    + makeTopCard(songTop[0], "SONG BAIT", "song")
+    + makeTopCard(fbTop[0], "FACEBOOK DISCUSSION BAIT", "facebook")
+    + makeTopCard(imgTop[0], "VISUAL PROMPT BAIT", "visual")
+    + makeTopCard(cautionTop[0], "PROBABLY SKIP THIS", "caution")
+    + (top10.length > 0 ? makeTopCard(top10[0], "TOP OPPORTUNITY", "") : "");
+
+  container.appendChild(topCards);
+
+  if (top10.length > 1) {
+    const rest = document.createElement("div");
+    rest.innerHTML = `<div class="section-title">Top Opportunities</div>`;
+    const list = document.createElement("div");
+    top10.slice(1).forEach(item => {
+      list.innerHTML += renderCardHTML(item);
+    });
+    rest.appendChild(list);
+    container.appendChild(rest);
+  }
+
+  const srcStatus = document.createElement("div");
+  srcStatus.innerHTML = `<div class="section-title">Source Status</div>`;
+  const sg = document.createElement("div");
+  sg.className = "grid-3";
+  state.sources.filter(s => s.enabled).slice(0, 6).forEach(s => {
+    sg.innerHTML += `<div class="card" style="padding:10px">
+      <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(s.name)}</div>
+      <div style="font-size:11px;color:var(--text2)">${s.lastStatus || "never run"}</div>
+      <div style="font-size:11px;color:var(--text2)">${s.lastRunAt ? formatDate(s.lastRunAt) : "—"}</div>
+    </div>`;
+  });
+  srcStatus.appendChild(sg);
+  container.appendChild(srcStatus);
+
+  const catDist = document.createElement("div");
+  catDist.innerHTML = `<div class="section-title">Category Distribution</div>`;
+  const cats = {};
+  state.items.forEach(i => i.classifierLabels.forEach(l => cats[l] = (cats[l]||0) + 1));
+  const sortedCats = Object.entries(cats).sort((a,b) => b[1] - a[1]).slice(0,8);
+  const catDiv = document.createElement("div");
+  catDiv.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;";
+  sortedCats.forEach(([cat, count]) => {
+    catDiv.innerHTML += `<span class="tag tag-${cat}">${cat}: ${count}</span>`;
+  });
+  catDist.appendChild(catDiv);
+  container.appendChild(catDist);
+}
+
+function esc(s) {
+  if (s == null) return "";
+  const d = document.createElement("div");
+  d.textContent = String(s);
+  return d.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function makeScoreChips(scores, highlight) {
+  const sorted = Object.entries(scores).sort((a,b) => b[1] - a[1]).slice(0,4);
+  return sorted.map(([k,v]) => {
+    const cls = v > 40 ? "high" : v > 20 ? "medium" : "low";
+    return `<span class="score-chip ${cls}">${OUTPUT_LABELS[k]||k}: ${v}</span>`;
+  }).join("");
+}
+
+function renderCardHTML(item) {
+  const cautionCls = "caution-" + item.caveats;
+  const hooks = generateHeadlineHooks(item);
+  return `<div class="card" id="card-${item.id}">
+    <div class="card-header">
+      <div class="card-title"><a href="#" onclick="openItemDetail('${item.id}');return false;">${esc(item.title)}</a></div>
+      <span class="caution-badge ${cautionCls}">${item.caveats.replace(/_/g," ")}</span>
+    </div>
+    <div class="card-meta">
+      <span>${item.sourceName}</span>
+      ${item.domain ? `<span>${item.domain}</span>` : ""}
+      <span>${formatDate(item.publishedAt)}</span>
+      <span>Score: ${item.totalOpportunityScore}</span>
+    </div>
+    <div class="card-scores">${makeScoreChips(item.contentScores)}</div>
+    <div style="margin:4px 0">${item.classifierLabels.map(l => `<span class="tag tag-${l}">${l.replace(/_/g," ")}</span>`).join("")}</div>
+    <div style="font-size:13px;color:var(--text2);margin:4px 0">${item.reasons[0] || ""}</div>
+    <div style="font-size:11px;margin:4px 0">
+      <span class="hook-line hook-serious">${esc(hooks.serious)}</span><br>
+      <span class="hook-line hook-sarcastic">${esc(hooks.sarcastic)}</span><br>
+      <span class="hook-line hook-clicky">${esc(hooks.clickyButNotGross)}</span>
+    </div>
+    <div class="actions">
+      <button class="btn btn-sm" onclick="toggleStar('${item.id}')">${item.starred ? "Unstar" : "Star"}</button>
+      <button class="btn btn-sm" onclick="dismissItem('${item.id}')">Dismiss</button>
+      <button class="btn btn-sm" onclick="hideItem('${item.id}')">Hide</button>
+      <button class="btn btn-sm btn-primary" onclick="copyDraft('${item.id}','facebook')">FB Draft</button>
+      <button class="btn btn-sm" onclick="copyDraft('${item.id}','song')">Song</button>
+      <button class="btn btn-sm" onclick="copyDraft('${item.id}','image')">Image</button>
+      <button class="btn btn-sm" onclick="copyDraft('${item.id}','substack')">Substack</button>
+      ${item.url ? `<a class="btn btn-sm" href="${esc(item.url)}" target="_blank" rel="noopener">Source</a>` : ""}
+    </div>
+  </div>`;
+}
+
+function renderOpportunityFeed(container) {
+  const filtersDiv = document.createElement("div");
+  filtersDiv.className = "filters";
+  filtersDiv.innerHTML = `
+    <select id="feed-filter-type" aria-label="Filter by output type">
+      <option value="">All types</option>
+      ${OUTPUT_TYPES.map(t => `<option value="${t}">${OUTPUT_LABELS[t]}</option>`).join("")}
+    </select>
+    <select id="feed-filter-label" aria-label="Filter by label">
+      <option value="">All labels</option>
+      ${CATEGORY_LABELS.map(l => `<option value="${l}">${l.replace(/_/g," ")}</option>`).join("")}
+    </select>
+    <select id="feed-filter-source" aria-label="Filter by source">
+      <option value="">All sources</option>
+      ${state.sources.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}
+    </select>
+    <select id="feed-filter-caution" aria-label="Filter by caution">
+      <option value="">All caution</option>
+      ${CAUTION_LABELS.map(c => `<option value="${c}">${c.replace(/_/g," ")}</option>`).join("")}
+    </select>
+    <select id="feed-sort" aria-label="Sort by">
+      <option value="score">Opportunity Score</option>
+      <option value="newest">Newest</option>
+      <option value="fb">FB Discussion</option>
+      <option value="song">Song Concept</option>
+      <option value="image">Image Prompt</option>
+      <option value="absurdity">Absurdity</option>
+      <option value="caution">Caution Risk</option>
+    </select>
+    <input type="text" id="feed-search" placeholder="Search..." aria-label="Search items">
+    <select id="feed-starred" aria-label="Starred filter">
+      <option value="">All items</option>
+      <option value="starred">Starred only</option>
+    </select>
+  `;
+  container.appendChild(filtersDiv);
+
+  const itemsDiv = document.createElement("div");
+  const applyFilters = () => {
+    const typeFilter = document.getElementById("feed-filter-type")?.value || "";
+    const labelFilter = document.getElementById("feed-filter-label")?.value || "";
+    const sourceFilter = document.getElementById("feed-filter-source")?.value || "";
+    const cautionFilter = document.getElementById("feed-filter-caution")?.value || "";
+    const sort = document.getElementById("feed-sort")?.value || "score";
+    const search = (document.getElementById("feed-search")?.value || "").toLowerCase();
+    const starredFilter = document.getElementById("feed-starred")?.value || "";
+
+    let items = [...state.items];
+    if (typeFilter) items = items.filter(i => i.suggestedOutputs.includes(typeFilter) || i.contentScores[typeFilter] > 30);
+    if (labelFilter) items = items.filter(i => i.classifierLabels.includes(labelFilter));
+    if (sourceFilter) items = items.filter(i => i.sourceId === sourceFilter || i.sourceName === sourceFilter);
+    if (cautionFilter) items = items.filter(i => i.caveats === cautionFilter);
+    if (search) items = items.filter(i => (i.title + i.description).toLowerCase().includes(search));
+    if (starredFilter === "starred") items = items.filter(i => i.starred);
+
+    switch(sort) {
+      case "newest": items.sort((a,b) => (b.publishedAt||"").localeCompare(a.publishedAt||"")); break;
+      case "fb": items.sort((a,b) => b.contentScores.facebookDiscussion - a.contentScores.facebookDiscussion); break;
+      case "song": items.sort((a,b) => b.contentScores.songConcept - a.contentScores.songConcept); break;
+      case "image": items.sort((a,b) => b.contentScores.imagePrompt - a.contentScores.imagePrompt); break;
+      case "absurdity": items.sort((a,b) => b.contentScores.absurdityArchive - a.contentScores.absurdityArchive); break;
+      case "caution": items.sort((a,b) => b.contentScores.cautionRisk - a.contentScores.cautionRisk); break;
+      default: items.sort((a,b) => b.totalOpportunityScore - a.totalOpportunityScore);
+    }
+
+    itemsDiv.innerHTML = items.length === 0 ? '<div style="color:var(--text2);text-align:center;padding:40px">No items match filters. Run a scan first.</div>' : items.map(i => renderCardHTML(i)).join("");
+  };
+
+  filtersDiv.querySelectorAll("select, input").forEach(el => el.addEventListener("change", applyFilters));
+  filtersDiv.querySelectorAll("input").forEach(el => el.addEventListener("input", applyFilters));
+
+  container.appendChild(itemsDiv);
+  applyFilters();
+}
+
+function renderClassifierLab(container) {
+  container.innerHTML = `
+    <div class="section-title">Keyword Buckets</div>
+    <div id="keyword-buckets"></div>
+    <div class="section-title" style="margin-top:20px">Score Weights</div>
+    <div id="score-weights" class="grid-2"></div>
+    <div class="section-title" style="margin-top:20px">Test Classifier</div>
+    <div class="card">
+      <label for="classifier-test-input" style="font-size:13px;color:var(--text2)">Paste a headline or item metadata to test classifier:</label>
+      <textarea id="classifier-test-input" rows="3" style="margin-top:8px"></textarea>
+      <button class="btn btn-primary" onclick="testClassifier()" style="margin-top:8px">Test</button>
+      <div id="classifier-test-result" style="margin-top:12px"></div>
+    </div>
+  `;
+
+  const bucketsDiv = document.getElementById("keyword-buckets");
+  for (const [label, keywords] of Object.entries(KEYWORD_BUCKETS)) {
+    bucketsDiv.innerHTML += `<div class="keyword-bucket">
+      <h4>${label.replace(/_/g," ")}</h4>
+      <div class="keywords">${keywords.join(", ")}</div>
+    </div>`;
+  }
+
+  const weightsDiv = document.getElementById("score-weights");
+  for (const [key, val] of Object.entries(state.settings.scoreWeights)) {
+    weightsDiv.innerHTML += `<div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--text2);min-width:120px">${OUTPUT_LABELS[key]||key}</span>
+      <input type="number" step="0.1" value="${val}" style="width:60px;font-size:12px" data-weight="${key}" onchange="updateWeight('${key}',this.value)">
+    </div>`;
+  }
+}
+
+function updateWeight(key, val) {
+  state.settings.scoreWeights[key] = parseFloat(val) || 0;
+  saveSetting("scoreWeights", state.settings.scoreWeights);
+}
+
+function testClassifier() {
+  const input = document.getElementById("classifier-test-input").value;
+  if (!input.trim()) return;
+  const testItem = createItem({title: input, url: "", publishedAt: new Date().toISOString()}, {sourceId:"test",sourceGroup:"Test",sourceName:"Test",sourceType:"test"});
+  if (!testItem) return;
+  classifyItem(testItem);
+  scoreContentPotential(testItem);
+  const hooks = generateHeadlineHooks(testItem);
+  const resultDiv = document.getElementById("classifier-test-result");
+  resultDiv.innerHTML = `
+    <div style="font-size:13px">
+      <strong>Labels:</strong> ${testItem.classifierLabels.map(l => `<span class="tag tag-${l}">${l.replace(/_/g," ")}</span>`).join("")}<br><br>
+      <strong>Scores:</strong><br>
+      ${Object.entries(testItem.contentScores).map(([k,v]) => `${OUTPUT_LABELS[k]||k}: ${v}`).join("<br>")}<br><br>
+      <strong>Total:</strong> ${testItem.totalOpportunityScore}<br><br>
+      <strong>Reasons:</strong><br>${testItem.reasons.map(r => "- " + r).join("<br>")}<br><br>
+      <strong>Caution:</strong> <span class="caution-badge caution-${testItem.caveats}">${testItem.caveats.replace(/_/g," ")}</span><br><br>
+      <strong>Hooks:</strong><br>
+      <span class="hook-line hook-serious">Serious: ${esc(hooks.serious)}</span><br>
+      <span class="hook-line hook-sarcastic">Sarcastic: ${esc(hooks.sarcastic)}</span><br>
+      <span class="hook-line hook-clicky">Clicky: ${esc(hooks.clickyButNotGross)}</span>
+    </div>
+  `;
+}
+
+function renderBriefingDesk(container) {
+  const reportTypes = [
+    {id:"top10", label:"Today's Top 10 Content Opportunities"},
+    {id:"facebook", label:"Facebook Discussion Pack"},
+    {id:"song", label:"Song Concept Pack"},
+    {id:"image", label:"Image Prompt Seed Pack"},
+    {id:"substack", label:"Substack/Blog Angle Pack"},
+    {id:"tech", label:"AI/Tech Radar"},
+    {id:"weird", label:"Weirdness Digest"},
+    {id:"local", label:"Local/Regional Digest"},
+    {id:"caution", label:"Avoid This One — Caution List"}
+  ];
+
+  container.innerHTML = `
+    <div class="section-title">Generate Report</div>
+    <div class="grid-2">
+      ${reportTypes.map(r => `<button class="btn btn-primary" onclick="generateReport('${r.id}')">${r.label}</button>`).join("")}
+    </div>
+    <div id="brief-preview" style="margin-top:16px"></div>
+  `;
+}
+
+function generateReport(type) {
+  const items = state.items;
+  const date = new Date().toLocaleDateString("en-US", {year:"numeric",month:"long",day:"numeric"});
+  let md = `# Content Radar Brief — ${date}\n\n`;
+
+  switch(type) {
+    case "top10": {
+      const top = items.slice(0, 10);
+      md += `## Best Overall Opportunities\n\n`;
+      top.forEach((item, i) => {
+        md += `${i+1}. **${item.title}**\n   Source: ${item.domain || item.sourceName}\n   Best use: ${OUTPUT_LABELS[item.suggestedOutputs[0]] || "general"}\n   Score: ${item.totalOpportunityScore}\n   Angle: ${item.reasons[0] || "—"}\n   Caution: ${item.caveats.replace(/_/g," ")}\n   ${item.url ? `Link: ${item.url}` : ""}\n\n`;
+      });
+      break;
+    }
+    case "facebook": {
+      const fb = items.filter(i => i.contentScores.facebookDiscussion > 25).slice(0, 10);
+      md += `## Facebook Discussion Starters\n\n`;
+      fb.forEach((item, i) => {
+        const draft = generateDeterministicDraft(item, "facebook");
+        md += `${i+1}. ${item.title}\n\`\`\`\n${draft}\n\`\`\`\n\n`;
+      });
+      break;
+    }
+    case "song": {
+      const songs = items.filter(i => i.contentScores.songConcept > 25).slice(0, 10);
+      md += `## Song Bait\n\n`;
+      songs.forEach((item, i) => {
+        const draft = generateDeterministicDraft(item, "song");
+        md += `${i+1}. ${item.title}\n\`\`\`\n${draft}\n\`\`\`\n\n`;
+      });
+      break;
+    }
+    case "image": {
+      const imgs = items.filter(i => i.contentScores.imagePrompt > 25).slice(0, 10);
+      md += `## Image Prompt Seeds\n\n`;
+      imgs.forEach((item, i) => {
+        const draft = generateDeterministicDraft(item, "image");
+        md += `${i+1}. ${item.title}\n\`\`\`\n${draft}\n\`\`\`\n\n`;
+      });
+      break;
+    }
+    case "substack": {
+      const ss = items.filter(i => i.contentScores.substackEssay > 25).slice(0, 10);
+      md += `## Substack/Blog Angles\n\n`;
+      ss.forEach((item, i) => {
+        const draft = generateDeterministicDraft(item, "substack");
+        md += `${i+1}. ${item.title}\n\`\`\`\n${draft}\n\`\`\`\n\n`;
+      });
+      break;
+    }
+    case "tech": {
+      const tech = items.filter(i => i.classifierLabels.some(l => ["ai_panic","tech_dystopia","open_source_dev"].includes(l))).slice(0, 10);
+      md += `## AI/Tech Radar\n\n`;
+      tech.forEach((item, i) => {
+        md += `${i+1}. **${item.title}** (Score: ${item.totalOpportunityScore})\n   ${item.reasons[0] || ""}\n   ${item.url || ""}\n\n`;
+      });
+      break;
+    }
+    case "weird": {
+      const weird = items.filter(i => i.classifierLabels.some(l => ["weird_but_fun","animal_chaos","absurdityArchive"].includes(l)) || i.contentScores.absurdityArchive > 30).slice(0, 10);
+      md += `## Weirdness Digest\n\n`;
+      weird.forEach((item, i) => {
+        md += `${i+1}. **${item.title}**\n   Score: ${item.totalOpportunityScore} | Absurdity: ${item.contentScores.absurdityArchive}\n   ${item.reasons[0] || ""}\n\n`;
+      });
+      break;
+    }
+    case "local": {
+      const local = items.filter(i => i.contentScores.localInterest > 20 || i.classifierLabels.includes("local_weirdness")).slice(0, 10);
+      md += `## Local/Regional Digest\n\n`;
+      local.forEach((item, i) => {
+        md += `${i+1}. **${item.title}**\n   Score: ${item.totalOpportunityScore}\n   ${item.url || ""}\n\n`;
+      });
+      break;
+    }
+    case "caution": {
+      const caution = items.filter(i => i.caveats !== "safe_fun").slice(0, 15);
+      md += `## Skip / Handle Carefully\n\n`;
+      caution.forEach((item, i) => {
+        md += `${i+1}. **${item.title}**\n   Caution: ${item.caveats.replace(/_/g," ")} (risk: ${item.contentScores.cautionRisk})\n   ${item.reasons[0] || ""}\n\n`;
+      });
+      break;
+    }
+  }
+
+  md += `\n---\n_Generated by Content Radar — Metadata-based summaries are not fact checks._\n_Do not treat market/health/legal/political classifications as advice._`;
+
+  const preview = document.getElementById("brief-preview");
+  if (preview) {
+    const briefId = "brief_" + Date.now();
+    window._briefData = window._briefData || {};
+    window._briefData[briefId] = {
+      md,
+      json: JSON.stringify({
+        type,
+        date,
+        items: items.slice(0,10).map(i => ({title:i.title,score:i.totalOpportunityScore,url:i.url,caution:i.caveats}))
+      }, null, 2)
+    };
+    preview.innerHTML = `
+      <div class="section-title">Preview</div>
+      <div class="brief-preview">${esc(md)}</div>
+      <div class="actions" style="margin-top:8px">
+        <button class="btn btn-primary" onclick="copyToClipboard(window._briefData['${briefId}'].md)">Copy to Clipboard</button>
+        <button class="btn" onclick="saveFile('content-radar-brief.md',window._briefData['${briefId}'].md)">Download Markdown</button>
+        <button class="btn" onclick="saveFile('content-radar-brief.json',window._briefData['${briefId}'].json,'application/json')">Export JSON</button>
+      </div>
+    `;
+  }
+}
+
+function renderSources(container) {
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:0">Sources</div>
+      <div>
+        <button class="btn btn-primary" onclick="runAllSources()" ${state.scanning ? "disabled" : ""}>Run All Enabled</button>
+        <button class="btn" onclick="switchView('admin')">Diagnostics</button>
+      </div>
+    </div>
+    <div id="scan-progress">${renderScanProgressHTML()}</div>
+    <div id="sources-list"></div>
+    <div class="section-title" style="margin-top:20px">Auto-Watch</div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:13px;color:var(--text2)">Auto-Watch:</span>
+        <div class="toggle ${state.polling.active ? 'on' : ''}" onclick="toggleAutoWatch()" role="switch" aria-checked="${state.polling.active}" tabindex="0" aria-label="Toggle auto-watch"></div>
+        <span style="font-size:13px;color:var(--text2)">${state.polling.active ? "ON" : "OFF"}</span>
+        ${state.polling.nextRunAt ? `<span style="font-size:12px;color:var(--text2)">Next: ${formatDate(state.polling.nextRunAt)}</span>` : ""}
+      </div>
+      <div style="margin-top:8px">
+        <label style="font-size:12px;color:var(--text2)">
+          <input type="checkbox" ${state.settings.resumeAutoWatchOnOpen ? "checked" : ""} onchange="saveSetting('resumeAutoWatchOnOpen',this.checked)"> Resume auto-watch on open
+        </label>
+      </div>
+      <div class="privacy-note" style="margin-top:8px">
+        Note: Hidden/background tabs may be throttled by the browser. Minimum auto interval: 5 minutes. Manual scan cooldown: 15 seconds.
+      </div>
+    </div>
+  `;
+
+  const list = document.getElementById("sources-list");
+  state.sources.forEach(s => {
+    const runBtn = `<button class="btn btn-sm" onclick="runSourceNow('${s.id}')" ${state.scanning ? "disabled" : ""}>Run Once</button>`;
+    list.innerHTML += `<div class="card source-card">
+      <div class="source-name">${esc(s.name)}</div>
+      <div class="toggle ${s.enabled ? 'on' : ''}" onclick="toggleSource('${s.id}')" role="switch" aria-checked="${s.enabled}" tabindex="0" aria-label="Toggle ${esc(s.name)}"></div>
+      <div class="source-status">
+        <span style="color:${s.lastStatus==='success'?'var(--neon-green)':s.lastStatus==='error'?'var(--neon-red)':'var(--text2)'}">${s.lastStatus || "never run"}</span>
+        ${s.lastError ? `<span style="color:var(--neon-red);font-size:11px">${esc(s.lastError).slice(0,60)}</span>` : ""}
+      </div>
+      <span style="font-size:11px;color:var(--text2)">Interval: ${s.pollIntervalMinutes}m</span>
+      <span style="font-size:11px;color:var(--text2)">${s.lastRunAt ? "Last: " + formatDate(s.lastRunAt) : ""}</span>
+      ${runBtn}
+      ${s.type === 'gdelt' ? `<a class="btn btn-sm" href="https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/" target="_blank" rel="noopener">Docs</a>` : ""}
+      ${s.type === 'hackernews' ? `<a class="btn btn-sm" href="https://github.com/HackerNews/API" target="_blank" rel="noopener">Docs</a>` : ""}
+      ${s.type === 'nasa' ? `<a class="btn btn-sm" href="https://api.nasa.gov/" target="_blank" rel="noopener">Docs</a>` : ""}
+      ${s.type === 'usgs' ? `<a class="btn btn-sm" href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/" target="_blank" rel="noopener">Docs</a>` : ""}
+    </div>`;
+  });
+}
+
+function renderArchive(container) {
+  container.innerHTML = `
+    <div class="section-title">Archive</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <input type="text" id="archive-search" placeholder="Search archive..." style="max-width:300px" aria-label="Search archive">
+      <button class="btn" onclick="clearDismissed()">Clear Dismissed</button>
+      <button class="btn" onclick="clearHidden()">Clear Hidden</button>
+      <button class="btn btn-danger" onclick="clearAllItems()">Clear All</button>
+      <button class="btn" onclick="exportItemsJson()">Export Items JSON</button>
+      <button class="btn" onclick="exportJson()">Export Full DB</button>
+      <label class="btn" style="cursor:pointer">Import JSON<input type="file" accept=".json" style="display:none" onchange="handleImport(this.files[0])"></label>
+    </div>
+    <div id="archive-items"></div>
+  `;
+  const search = document.getElementById("archive-search");
+  search.addEventListener("input", () => renderArchiveItems(search.value));
+  renderArchiveItems("");
+}
+
+async function renderArchiveItems(search) {
+  const all = await getAllItems();
+  let items = all;
+  if (search) items = items.filter(i => (i.title + i.description).toLowerCase().includes(search.toLowerCase()));
+  items.sort((a,b) => b.totalOpportunityScore - a.totalOpportunityScore);
+  const div = document.getElementById("archive-items");
+  if (!div) return;
+  div.innerHTML = items.length === 0 ? '<div style="color:var(--text2);text-align:center;padding:40px">No items in archive</div>' :
+    `<table><thead><tr><th>Title</th><th>Source</th><th>Score</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>
+    ${items.slice(0,100).map(i => `<tr>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis"><a href="#" onclick="openItemDetail('${i.id}');return false;">${esc(i.title)}</a></td>
+      <td>${esc(i.sourceName)}</td>
+      <td>${i.totalOpportunityScore}</td>
+      <td>${i.dismissed?"dismissed":i.hidden?"hidden":i.starred?"starred":"active"}</td>
+      <td>${formatDate(i.publishedAt)}</td>
+      <td><button class="btn btn-sm" onclick="deleteItem('${i.id}')">Delete</button>
+        ${i.dismissed ? `<button class="btn btn-sm" onclick="unDismissItem('${i.id}')">Undismiss</button>` : ""}
+        ${i.hidden ? `<button class="btn btn-sm" onclick="unHideItem('${i.id}')">Unhide</button>` : ""}
+      </td>
+    </tr>`).join("")}
+    </tbody></table>`;
+}
+
+function renderAdmin(container) {
+  const caps = {
+    indexedDB: !!window.indexedDB,
+    localStorage: !!window.localStorage,
+    clipboard: !!navigator.clipboard,
+    fileSystemAccess: !!window.showSaveFilePicker,
+    viewTransition: !!document.startViewTransition,
+    canvas: !!document.createElement("canvas").getContext,
+    webGPU: !!navigator.gpu,
+    languageModel: !!window.LanguageModel,
+    online: navigator.onLine,
+    secureContext: window.isSecureContext
+  };
+
+  container.innerHTML = `
+    <div class="section-title">Browser Capabilities</div>
+    <div class="card">
+      <dl class="diag-grid">
+        ${Object.entries(caps).map(([k,v]) => `<dt>${k}</dt><dd style="color:${v?'var(--neon-green)':'var(--neon-red)'}">${v?"available":"unavailable"}</dd>`).join("")}
+        <dt>localAI status</dt><dd>${state.localAI.availability || "unchecked"}</dd>
+      </dl>
+    </div>
+
+    <div class="section-title">API Keys &amp; Network</div>
+    <div class="card">
+      <label style="font-size:13px;color:var(--text2)">NASA API Key:</label>
+      <input type="text" value="${state.settings.nasaApiKey || "DEMO_KEY"}" onchange="saveSetting('nasaApiKey',this.value);toast('Saved','success')" aria-label="NASA API Key">
+      <div style="margin-top:10px">
+        <label style="font-size:13px;color:var(--text2)">CORS Proxy Prefix:</label>
+        <input type="text" value="${state.settings.corsProxy || ""}" placeholder="https://corsproxy.io/?" onchange="saveSetting('corsProxy',this.value);toast('Saved','success')" aria-label="CORS proxy URL prefix">
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">GDELT and Reddit don't send CORS headers. A proxy prefixes the URL and passes it through. Leave blank to try direct. GDELT uses only this configured proxy to avoid noisy fallback bursts; RSS/custom pulls may try built-in fallbacks. Options: <code>https://corsproxy.io/?</code> · <code>https://api.codetabs.com/v1/proxy?quest=</code> · <code>https://api.allorigins.win/raw?url=</code></div>
+      </div>
+      <div style="margin-top:10px">
+        <label style="font-size:13px;color:var(--text2)">GDELT delay (ms) between requests:</label>
+        <input type="number" value="${state.settings.gdeltDelayMs || 3500}" min="1000" max="30000" step="500" style="width:80px;font-size:12px" onchange="saveSetting('gdeltDelayMs',parseInt(this.value));toast('Saved','success')" aria-label="GDELT delay ms">
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">This delay is enforced before every GDELT request, including single-source pulls and one retry after a 429.</div>
+      </div>
+      <div class="privacy-note" style="margin-top:8px">Keys/proxy settings are stored locally. Proxies can see your request URLs. For personal prototype use only.</div>
+    </div>
+
+    <div class="section-title">Local AI</div>
+    <div class="card">
+      <div style="font-size:13px;color:var(--text2)">
+        <div>Status: ${state.localAI.enabled && state.localAI.session ? "automatic, session active" : state.localAI.availability || "checking on startup"}</div>
+        <div>Language: English input/output</div>
+        <div>Max AI items per scan: <input type="number" value="${state.settings.maxAiItemsPerScan}" min="1" max="50" style="width:48px;font-size:12px" onchange="saveSetting('maxAiItemsPerScan',parseInt(this.value))" aria-label="Max AI items per scan"></div>
+        ${state.localAI.lastError ? `<div style="color:var(--neon-red)">Last error: ${esc(state.localAI.lastError)}</div>` : ""}
+        <div class="privacy-note" style="margin-top:8px">When Chrome's built-in Prompt API is available, Content Radar creates a local session automatically and classifies top scan results. No remote AI calls are made.</div>
+      </div>
+    </div>
+
+    <div class="section-title">Storage</div>
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn" onclick="showStorageEstimate()">Check Storage</button>
+        <button class="btn" onclick="requestPersistentStorage()">Request Persistent</button>
+        <button class="btn" onclick="exportJson()">Export Full DB</button>
+        <label class="btn" style="cursor:pointer">Import Full DB<input type="file" accept=".json" style="display:none" onchange="handleImport(this.files[0])"></label>
+        <button class="btn btn-danger" onclick="clearDatabase()">Clear Database</button>
+      </div>
+      <div id="storage-info" style="font-size:13px;color:var(--text2)"></div>
+    </div>
+
+    <div class="section-title">Docs &amp; Links</div>
+    <div class="card" style="font-size:13px;color:var(--text2)">
+      <a href="https://www.gdeltproject.org/" target="_blank" rel="noopener" style="color:var(--neon-cyan)">GDELT Project</a><br>
+      <a href="https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/" target="_blank" rel="noopener" style="color:var(--neon-cyan)">GDELT DOC 2.0</a><br>
+      <a href="https://github.com/HackerNews/API" target="_blank" rel="noopener" style="color:var(--neon-cyan)">Hacker News API</a><br>
+      <a href="https://api.nasa.gov/" target="_blank" rel="noopener" style="color:var(--neon-cyan)">NASA Open APIs</a><br>
+      <a href="https://ccmc.gsfc.nasa.gov/tools/DONKI/" target="_blank" rel="noopener" style="color:var(--neon-cyan)">DONKI / CCMC</a><br>
+      <a href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/" target="_blank" rel="noopener" style="color:var(--neon-cyan)">USGS Feeds</a><br>
+      <a href="https://developer.chrome.com/docs/ai/get-started" target="_blank" rel="noopener" style="color:var(--neon-cyan)">Chrome Built-in AI</a><br>
+      <a href="https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API" target="_blank" rel="noopener" style="color:var(--neon-cyan)">IndexedDB</a><br>
+      <a href="https://developer.mozilla.org/en-US/docs/Web/API/File_System_API" target="_blank" rel="noopener" style="color:var(--neon-cyan)">File System Access</a><br>
+      <a href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API" target="_blank" rel="noopener" style="color:var(--neon-cyan)">View Transition API</a>
+    </div>
+
+    <div class="section-title">Privacy &amp; Caveats</div>
+    <div class="card" style="font-size:12px;color:var(--text2);line-height:1.6">
+      <ul style="padding-left:16px">
+        <li>This app stores its archive locally in your browser.</li>
+        <li>Public API requests go directly from your browser to the configured sources.</li>
+        <li>No remote AI calls are made.</li>
+        <li>Chrome local AI is optional and runs through the browser API when available.</li>
+        <li>Metadata-based summaries are not fact checks.</li>
+        <li>Do not treat market/health/legal/political classifications as advice.</li>
+      </ul>
+    </div>
+  `;
+}
+
+async function checkAndShowAI() {
+  const result = await checkLocalAI();
+  toast("Local AI: " + result, result === "readily" ? "success" : "info");
+  renderCurrentView();
+}
+
+async function createAndShowAISession() {
+  const result = await createLocalAISession();
+  toast(result ? "AI session created" : "Failed: " + (state.localAI.lastError || "unknown"), result ? "success" : "error");
+  renderCurrentView();
+}
+
+async function toggleLocalAI() {
+  if (!state.localAI.enabled) {
+    const ready = await ensureLocalAIReady();
+    if (!ready) {
+      toast("Local AI not available: " + (state.localAI.availability || state.localAI.lastError || "unknown"), "error");
+      return;
+    }
+    toast("Local AI enabled", "success");
+  } else {
+    state.localAI.enabled = false;
+    await saveSetting("localAiEnabled", false);
+    toast("Local AI disabled", "info");
+  }
+  renderCurrentView();
+}
+
+async function showStorageEstimate() {
+  const info = document.getElementById("storage-info");
+  if (!info) return;
+  if (navigator.storage && navigator.storage.estimate) {
+    const est = await navigator.storage.estimate();
+    const items = await dbGetAll("items");
+    const scans = await dbGetAll("scans");
+    const sources = await dbGetAll("sources");
+    info.innerHTML = `Quota: ${(est.quota/1024/1024).toFixed(1)} MB | Used: ${(est.usage/1024/1024).toFixed(2)} MB<br>
+      Items: ${items.length} | Scans: ${scans.length} | Sources: ${sources.length}`;
+  } else {
+    const items = await dbGetAll("items");
+    info.innerHTML = `Items: ${items.length} (estimate API unavailable)`;
+  }
+}
+
+async function requestPersistentStorage() {
+  if (navigator.storage && navigator.storage.persist) {
+    const result = await navigator.storage.persist();
+    toast("Persistent storage: " + (result ? "granted" : "denied"), result ? "success" : "error");
+  } else {
+    toast("Persistent storage API not available", "error");
+  }
+}
+
+async function clearDatabase() {
+  if (!confirm("Clear entire database? This cannot be undone.")) return;
+  await dbClear("items");
+  await dbClear("scans");
+  await dbClear("sources");
+  await dbClear("settings");
+  await dbClear("briefs");
+  await dbClear("classifierRules");
+  state.items = [];
+  await loadSources();
+  await loadSettings();
+  await refreshItems();
+  renderCurrentView();
+  toast("Database cleared", "info");
+}
+
+async function clearAllItems() {
+  if (!confirm("Clear all items? This cannot be undone.")) return;
+  await dbClear("items");
+  state.items = [];
+  renderCurrentView();
+  toast("All items cleared", "info");
+}
+
+async function clearDismissed() {
+  const all = await getAllItems();
+  let count = 0;
+  for (const item of all) {
+    if (item.dismissed) { await dbDelete("items", item.id); count++; }
+  }
+  await refreshItems();
+  renderCurrentView();
+  toast(`Cleared ${count} dismissed items`, "info");
+}
+
+async function clearHidden() {
+  const all = await getAllItems();
+  let count = 0;
+  for (const item of all) {
+    if (item.hidden) { await dbDelete("items", item.id); count++; }
+  }
+  await refreshItems();
+  renderCurrentView();
+  toast(`Cleared ${count} hidden items`, "info");
+}
+
+async function deleteItem(id) {
+  await dbDelete("items", id);
+  await refreshItems();
+  renderCurrentView();
+}
+
+async function exportItemsJson() {
+  const items = await getAllItems();
+  const json = JSON.stringify(items, null, 2);
+  await saveFile("content-radar-items.json", json, "application/json");
+}
+
+async function handleImport(file) {
+  if (!file) return;
+  await importJson(file);
+}
+
+async function toggleStar(id) {
+  const item = state.items.find(i => i.id === id);
+  if (!item) { const all = await getAllItems(); const found = all.find(i => i.id === id); if (found) { found.starred = !found.starred; await saveItem(found); } }
+  else { item.starred = !item.starred; await saveItem(item); }
+  await refreshItems();
+  renderCurrentView();
+}
+
+async function dismissItem(id) {
+  const item = state.items.find(i => i.id === id);
+  if (item) { item.dismissed = true; await saveItem(item); await refreshItems(); renderCurrentView(); }
+}
+
+async function hideItem(id) {
+  const item = state.items.find(i => i.id === id);
+  if (item) { item.hidden = true; await saveItem(item); await refreshItems(); renderCurrentView(); }
+}
+
+async function unDismissItem(id) {
+  const all = await getAllItems();
+  const item = all.find(i => i.id === id);
+  if (item) { item.dismissed = false; await saveItem(item); await refreshItems(); renderArchiveItems(""); }
+}
+
+async function unHideItem(id) {
+  const all = await getAllItems();
+  const item = all.find(i => i.id === id);
+  if (item) { item.hidden = false; await saveItem(item); await refreshItems(); renderArchiveItems(""); }
+}
+
+function copyDraft(id, type) {
+  const item = state.items.find(i => i.id === id);
+  if (!item) { toast("Item not found","error"); return; }
+  const draft = generateDeterministicDraft(item, type);
+  copyToClipboard(draft);
+}
+
+async function toggleSource(id) {
+  const source = state.sources.find(s => s.id === id);
+  if (source) {
+    source.enabled = !source.enabled;
+    await saveSource(source);
+    renderCurrentView();
+  }
+}
+
+function toggleAutoWatch() {
+  if (state.polling.active) pauseAutoWatch();
+  else startAutoWatch();
+  renderCurrentView();
+}
+
+async function runSourceNow(id) {
+  const source = state.sources.find(s => s.id === id);
+  state.scanning = true;
+  startScanProgress("Single Source Pull", 1);
+  updateScanProgress({current: source?.name || id});
+  pushScanLog(`Starting ${source?.name || id}`, "info");
+  updateHeaderStatus();
+  try {
+    const scan = await runSource(id);
+    await refreshItems();
+    state.scanning = false;
+    updateScanProgress({completed: 1, current: ""});
+    renderCurrentView();
+    if (scan && scan.status === "error") {
+      pushScanLog(`${source?.name || id} failed: ${scan.error}`, "error");
+      finishScanProgress("Pull failed", "error");
+      toast("Source scan failed: " + scan.error, "error");
+    } else {
+      pushScanLog(`${source?.name || id} complete: ${scan?.resultCount || 0} fetched, ${scan?.newCount || 0} stored`, "ok");
+      finishScanProgress("Pull complete: " + state.items.length + " active items", "ok");
+      toast("Source scan complete", "success");
+    }
+  } catch(e) {
+    pushScanLog(`${source?.name || id} failed: ${e.message}`, "error");
+    toast("Scan failed: " + e.message, "error");
+    state.scanning = false;
+    finishScanProgress("Pull failed", "error");
+  }
+  updateHeaderStatus();
+}
+
+function openItemDetail(id) {
+  const item = state.items.find(i => i.id === id);
+  if (!item) {
+    const overlay = document.getElementById("detail-overlay");
+    overlay.style.display = "none";
+    return;
+  }
+  const overlay = document.getElementById("detail-overlay");
+  const hooks = generateHeadlineHooks(item);
+  const scoresHtml = Object.entries(item.contentScores).map(([k,v]) => {
+    const pct = v;
+    const color = v > 40 ? "var(--neon-green)" : v > 20 ? "var(--neon-amber)" : "var(--text3)";
+    return `<div class="mini-bar-container"><span style="min-width:100px">${OUTPUT_LABELS[k]||k}</span><div class="mini-bar"><div class="mini-bar-fill" style="width:${pct}%;background:${color}"></div></div><span>${v}</span></div>`;
+  }).join("");
+
+  overlay.innerHTML = `<div class="detail-content">
+    <button class="detail-close" onclick="closeDetail()" aria-label="Close">&times;</button>
+    <div class="card-title" style="font-size:18px;margin-bottom:8px">${esc(item.title)}</div>
+    <div class="card-meta">
+      <span>${item.sourceName}</span>
+      ${item.domain ? `<span>${item.domain}</span>` : ""}
+      <span>${formatDate(item.publishedAt)}</span>
+      <span>Fetched: ${formatDate(item.fetchedAt)}</span>
+    </div>
+    ${item.url ? `<a href="${esc(item.url)}" target="_blank" rel="noopener" style="color:var(--neon-cyan);font-size:13px">${esc(item.url)}</a>` : ""}
+    ${item.description ? `<div style="font-size:13px;color:var(--text2);margin-top:8px">${esc(item.description).slice(0,300)}</div>` : ""}
+    <div style="margin:12px 0">${item.classifierLabels.map(l => `<span class="tag tag-${l}">${l.replace(/_/g," ")}</span>`).join("")}</div>
+    <div style="margin:8px 0"><span class="caution-badge caution-${item.caveats}">${item.caveats.replace(/_/g," ")}</span></div>
+    <div class="section-title" style="margin-top:16px">Content Scores</div>
+    ${scoresHtml}
+    <div style="margin-top:8px;font-size:13px"><strong>Total Opportunity Score: ${item.totalOpportunityScore}</strong></div>
+    <div class="section-title" style="margin-top:16px">Reasons</div>
+    <ul style="padding-left:16px;font-size:13px;color:var(--text2)">${item.reasons.map(r => `<li>${r}</li>`).join("")}</ul>
+    <div class="section-title" style="margin-top:16px">Headline Hooks</div>
+    <div class="hook-line hook-serious"><strong>Serious:</strong> ${esc(hooks.serious)}</div>
+    <div class="hook-line hook-sarcastic"><strong>Sarcastic:</strong> ${esc(hooks.sarcastic)}</div>
+    <div class="hook-line hook-clicky"><strong>Clicky:</strong> ${esc(hooks.clickyButNotGross)}</div>
+    <div class="section-title" style="margin-top:16px">Drafts</div>
+    <div class="actions" style="margin-bottom:8px">
+      <button class="btn btn-primary" onclick="copyDraft('${item.id}','facebook')">Facebook Draft</button>
+      <button class="btn" onclick="copyDraft('${item.id}','song')">Song Concept</button>
+      <button class="btn" onclick="copyDraft('${item.id}','image')">Image Prompt</button>
+      <button class="btn" onclick="copyDraft('${item.id}','substack')">Substack Draft</button>
+      <button class="btn" onclick="copyDraft('${item.id}','techdemo')">Tech Demo</button>
+      <button class="btn" onclick="copyDraft('${item.id}','absurdity')">Absurdity Entry</button>
+    </div>
+    ${item.aiBrief ? `<div class="section-title">AI Classification</div><div style="font-size:13px;color:var(--text2);white-space:pre-wrap">${esc(JSON.stringify(item.aiBrief, null, 2))}</div>` : ""}
+    <div class="section-title" style="margin-top:16px">Deterministic Brief</div>
+    <div style="font-size:13px;color:var(--text2)">${esc(item.deterministicBrief)}</div>
+    <div class="section-title" style="margin-top:16px">Raw Metadata</div>
+    <details><summary style="font-size:12px;color:var(--text2);cursor:pointer">Show raw</summary>
+      <pre style="font-size:11px;color:var(--text2);overflow-x:auto;max-height:200px">${esc(JSON.stringify(item.raw, null, 1)).slice(0,2000)}</pre>
+    </details>
+    <div class="actions" style="margin-top:16px">
+      <button class="btn btn-sm" onclick="toggleStar('${item.id}');closeDetail()">${item.starred ? "Unstar" : "Star"}</button>
+      <button class="btn btn-sm" onclick="dismissItem('${item.id}');closeDetail()">Dismiss</button>
+      <button class="btn btn-sm" onclick="hideItem('${item.id}');closeDetail()">Hide</button>
+      <button class="btn btn-sm btn-amber" onclick="runAIOnItem('${item.id}')">Run AI Classification</button>
+    </div>
+  </div>`;
+  overlay.style.display = "block";
+  overlay.onclick = (e) => { if (e.target === overlay) closeDetail(); };
+}
+
+function closeDetail() {
+  document.getElementById("detail-overlay").style.display = "none";
+}
+
+async function runAIOnItem(id) {
+  const item = state.items.find(i => i.id === id);
+  if (!item) return;
+  if (!await ensureLocalAIReady()) {
+    toast("AI session failed: " + (state.localAI.lastError || state.localAI.availability || ""), "error");
+    return;
+  }
+  toast("Running AI classification...", "info");
+  const result = await runAIClassification(item);
+  if (result) {
+    await saveItem(item);
+    openItemDetail(id);
+    toast("AI classification complete", "success");
+  } else {
+    toast("AI classification failed", "error");
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDetail();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (state.settings.pauseWhenHidden && document.hidden && state.polling.active) {
+    pauseAutoWatch();
+    state.polling._autoPaused = true;
+  }
+  if (!document.hidden && state.polling._autoPaused) {
+    startAutoWatch();
+    state.polling._autoPaused = false;
+  }
+});
+
+async function initLocalAI() {
+  const avail = await checkLocalAI();
+  if (avail === "readily") {
+    toast("Chrome local AI detected — creating session", "info");
+    const created = await createLocalAISession();
+    if (created) {
+      state.localAI.enabled = true;
+      await saveSetting("localAiEnabled", true);
+      toast("Local AI session ready", "success");
+    } else {
+      toast("Local AI session failed: " + (state.localAI.lastError || ""), "error");
+    }
+  } else if (avail === "after-download") {
+    toast("Chrome local AI available after download — enable in Admin when ready", "info");
+  }
+}
+
+async function init() {
+  try {
+    await initDb();
+    await loadSettings();
+    await loadSources();
+    await refreshItems();
+
+    initLocalAI();
+
+    if (state.settings.autoWatchEnabled || state.settings.resumeAutoWatchOnOpen) {
+      startAutoWatch();
+    }
+
+    renderApp();
+  } catch(e) {
+    toast("Init error: " + e.message, "error");
+    console.error("Content Radar init error:", e);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
