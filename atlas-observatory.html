@@ -72,6 +72,18 @@ nav#app-nav button.active::after{content:'';position:absolute;bottom:-1px;left:0
 nav#app-nav .nav-sep{width:1px;background:var(--border-light);margin:8px 6px}
 nav#app-nav button.secondary{font-size:0.85rem;color:var(--text-muted);font-weight:500;font-family:var(--font-body)}
 nav#app-nav button.secondary.active{color:var(--green);border-bottom-color:var(--green-light)}
+.ai-nav-status{
+  margin-left:auto;align-self:center;display:inline-flex;align-items:center;gap:8px;
+  padding:5px 10px;border:1px solid var(--border-light);border-radius:999px;
+  background:var(--card-bg);font-size:0.78rem;color:var(--text-secondary);
+}
+.ai-nav-status .dot{width:8px;height:8px;border-radius:50%;background:var(--border-dark)}
+.ai-nav-status.ai-on .dot{background:var(--green-light)}
+.ai-nav-status.ai-ready .dot{background:var(--brass)}
+.ai-nav-status.ai-wait .dot{background:var(--brass-light)}
+.ai-nav-status.ai-off .dot{background:var(--red)}
+nav#app-nav .ai-nav-status button{padding:2px 8px;border-bottom:0;font-size:0.75rem;font-family:var(--font-body);border:1px solid var(--border-medium);border-radius:999px;background:var(--cream);color:var(--text-secondary)}
+nav#app-nav .ai-nav-status button:hover{background:var(--parchment);color:var(--navy)}
 main#app-main{min-height:60vh}
 footer#app-footer{
   margin-top:30px;padding:12px 0;border-top:1px solid var(--border-light);
@@ -239,14 +251,14 @@ table.data-table tr.selected td{background:rgba(74,122,48,0.08)}
 </div>
 <script>
 const APP_NAME = "Atlas Observatory";
-const APP_VERSION = "2026.05.06.1";
+const APP_VERSION = "2026.05.06.2";
 const DB_NAME = "atlasObservatoryDB";
 const DB_VERSION = 1;
 
 const state = {
   currentTab: "welcome",
   db: null,
-  localAI: { availability: null, session: null, enabled: false, lastError: null },
+  localAI: { availability: null, session: null, enabled: false, checking: false, lastError: null },
   data: { datasets: [], activeDatasetId: null, selectedRows: [], selectedColumns: [], chartSuggestions: [], importedFiles: [], currentView: null },
   knowledge: { notes: [], activeNoteId: null, graph: null, selectedTag: null, selectedLink: null, editMode: false, graphLayout: null },
   ui: { currentView: {}, sidebarOpen: true, theme: "atlas-room", searchQuery: "" },
@@ -259,7 +271,7 @@ function init() {
     loadSettings();
     return loadFromDb();
   }).then(() => {
-    checkLocalAI();
+    initLocalAI();
     renderApp();
   }).catch(err => {
     console.error("Init error:", err);
@@ -361,15 +373,24 @@ function loadFromDb() {
 
 async function checkLocalAI() {
   try {
+    state.localAI.checking = true;
+    state.localAI.lastError = null;
     if (window.LanguageModel && LanguageModel.availability) {
       const avail = await LanguageModel.availability(getLocalAISessionOptions());
-      state.localAI.availability = avail;
-      state.localAI.enabled = avail === "readily";
+      state.localAI.availability = normalizeLocalAIAvailability(avail);
+      state.localAI.enabled = !!state.localAI.session;
+    } else {
+      state.localAI.availability = "unavailable";
+      state.localAI.enabled = false;
     }
   } catch(e) {
     state.localAI.availability = "unavailable";
     state.localAI.lastError = e.message;
+    state.localAI.enabled = false;
+  } finally {
+    state.localAI.checking = false;
   }
+  return state.localAI.availability;
 }
 
 function getLocalAISessionOptions() {
@@ -379,23 +400,50 @@ function getLocalAISessionOptions() {
   };
 }
 
+function normalizeLocalAIAvailability(value) {
+  if (value === "readily") return "available";
+  if (value === "after-download") return "downloadable";
+  return value || "unavailable";
+}
+
 async function createLocalAISession() {
   try {
     if (!window.LanguageModel) throw new Error("LanguageModel API not available");
+    state.localAI.lastError = null;
     state.localAI.session = await LanguageModel.create(getLocalAISessionOptions());
     state.localAI.enabled = true;
+    state.localAI.availability = "available";
     toast("Local AI session created", "success");
+    return true;
   } catch(e) {
     state.localAI.lastError = e.message;
     state.localAI.enabled = false;
     toast("Local AI unavailable: " + e.message, "error");
+    return false;
   }
 }
 
 function resetLocalAISession() {
   if (state.localAI.session && state.localAI.session.destroy) state.localAI.session.destroy();
   state.localAI.session = null;
-  state.localAI.enabled = state.localAI.availability === "readily";
+  state.localAI.enabled = false;
+  toast("Local AI session reset", "info");
+}
+
+async function initLocalAI() {
+  const availability = await checkLocalAI();
+  if (availability === "available") {
+    await createLocalAISession();
+  }
+  renderApp();
+}
+
+async function enableLocalAI() {
+  if (!state.localAI.availability || state.localAI.availability === "unavailable") {
+    await checkLocalAI();
+  }
+  await createLocalAISession();
+  renderApp();
 }
 
 async function localAIGenerate(prompt) {
@@ -516,8 +564,25 @@ function renderApp() {
 }
 
 function renderHeader() {
-  var aiStatus = state.localAI.enabled ? '<span class="diag-available">Available</span>' : '<span class="diag-unavailable">Off</span>';
+  var aiStatus = state.localAI.session ? '<span class="diag-available">Session active</span>' : '<span class="diag-unavailable">' + escapeHtml(getLocalAIStatusText()) + '</span>';
   return '<header id="app-header"><div class="title-group"><h1>Atlas <span class="brass">Observatory</span></h1><div class="tagline">A local-first browser atlas for structured data and living notes</div></div><div class="header-actions"><span style="font-size:0.78rem;color:var(--text-muted)">Local AI: ' + aiStatus + '</span></div></header>';
+}
+
+function getLocalAIStatusText() {
+  if (state.localAI.checking) return "checking";
+  if (state.localAI.session) return "session active";
+  return state.localAI.availability || "unchecked";
+}
+
+function renderLocalAIIndicator() {
+  var status = getLocalAIStatusText();
+  var cls = state.localAI.session ? "ai-on" : status === "available" ? "ai-ready" : (status === "downloadable" || status === "downloading") ? "ai-wait" : "ai-off";
+  var html = '<span class="ai-nav-status ' + cls + '" title="Local AI status"><span class="dot"></span><span>AI: ' + escapeHtml(status) + '</span>';
+  if (!state.localAI.session && (status === "available" || status === "downloadable" || status === "downloading")) {
+    html += '<button type="button" data-action="enable-local-ai">Enable</button>';
+  }
+  html += '</span>';
+  return html;
 }
 
 function renderNav() {
@@ -528,6 +593,7 @@ function renderNav() {
   tabs.forEach(function(item) { html += '<button data-tab="' + item[0] + '" class="' + (t === item[0] ? 'active' : '') + '">' + item[1] + '</button>'; });
   html += '<div class="nav-sep"></div>';
   sec.forEach(function(item) { html += '<button data-tab="' + item[0] + '" class="secondary ' + (t === item[0] ? 'active' : '') + '">' + item[1] + '</button>'; });
+  html += renderLocalAIIndicator();
   html += '</nav>';
   return html;
 }
@@ -1599,12 +1665,17 @@ function renderInsights() {
   html += '<div style="margin-top:8px"><strong>Top Tags:</strong> ' + topTags.map(function(e) { return '<span class="tag tag-green">#' + e[0] + ' (' + e[1] + ')</span>'; }).join(' ') + '</div>';
   html += '</div></div>';
   html += '<div class="panel"><div class="panel-header">Local AI Status</div>';
-  html += '<p style="font-size:0.88rem;color:var(--text-secondary)">Availability: <strong>' + (state.localAI.availability || "checking...") + '</strong>';
+  html += '<p style="font-size:0.88rem;color:var(--text-secondary)">Availability: <strong>' + escapeHtml(getLocalAIStatusText()) + '</strong>';
   if (state.localAI.lastError) html += ' <span style="color:var(--red)">Error: ' + escapeHtml(state.localAI.lastError) + '</span>';
   html += '</p>';
   html += '<p style="font-size:0.88rem;color:var(--text-secondary);margin-top:4px">Session: ' + (state.localAI.session ? 'Active' : 'None');
   html += (state.localAI.enabled ? ' \u00b7 <span class="diag-available">Enabled</span>' : ' \u00b7 <span class="diag-unavailable">Disabled</span>');
-  html += '</p></div></div>';
+  if (!state.localAI.session && (state.localAI.availability === "downloadable" || state.localAI.availability === "downloading")) {
+    html += '</p><p style="font-size:0.85rem;color:var(--text-secondary);margin-top:4px">Chrome may require a button press to start or continue the model download.</p>';
+  } else {
+    html += '</p>';
+  }
+  html += '</div></div>';
   return html;
 }
 
@@ -1633,7 +1704,7 @@ function renderDiagnostics() {
     ["View Transition API", !!document.startViewTransition],
     ["WebGPU", !!navigator.gpu],
     ["Canvas 2D", !!document.createElement("canvas").getContext],
-    ["Local AI (LanguageModel)", state.localAI.availability === "readily"],
+    ["Local AI (LanguageModel)", state.localAI.availability === "available" || !!state.localAI.session],
     ["Local AI Detected", state.localAI.availability !== null]
   ];
   var html = '<div class="tab-content"><h2 style="margin-bottom:16px">Diagnostics & Admin</h2>';
@@ -1647,10 +1718,13 @@ function renderDiagnostics() {
   html += '<button class="btn btn-sm" data-action="check-storage">Refresh Storage Estimate</button></div></div>';
   html += '<div class="panel" style="margin-top:16px"><div class="panel-header">Local AI Controls</div><div class="flex-row">';
   html += '<button class="btn btn-sm" data-action="check-local-ai">Check Local AI</button>';
+  if (!state.localAI.session && (state.localAI.availability === "available" || state.localAI.availability === "downloadable" || state.localAI.availability === "downloading")) {
+    html += '<button class="btn btn-sm btn-accent" data-action="enable-local-ai">Enable Local AI</button>';
+  }
   html += '<button class="btn btn-sm" data-action="create-ai-session">Create Session</button>';
   html += '<button class="btn btn-sm" data-action="reset-ai-session">Reset Session</button>';
-  html += '<button class="btn btn-sm" data-action="toggle-local-ai">' + (state.localAI.enabled ? 'Disable' : 'Enable') + ' AI Assistance</button>';
   html += '</div>';
+  html += '<p style="font-size:0.85rem;color:var(--text-secondary);margin-top:6px">Startup auto-creates a session only when availability is <strong>available</strong>. Downloadable or downloading models wait for user activation.</p>';
   if (state.localAI.lastError) html += '<p style="font-size:0.85rem;color:var(--red);margin-top:6px">Last error: ' + escapeHtml(state.localAI.lastError) + '</p>';
   html += '</div>';
   html += '<div class="panel" style="margin-top:16px"><div class="panel-header">Documentation</div><div style="font-size:0.88rem;display:flex;flex-direction:column;gap:4px">';
@@ -1852,9 +1926,9 @@ function handleClick(e) {
       break;
     case "export-all-notes": saveFile("all-notes.json", JSON.stringify(state.knowledge.notes, null, 2), "application/json"); break;
     case "check-local-ai": checkLocalAI().then(function() { renderApp(); }); break;
+    case "enable-local-ai": enableLocalAI(); break;
     case "create-ai-session": createLocalAISession().then(function() { renderApp(); }); break;
     case "reset-ai-session": resetLocalAISession(); renderApp(); break;
-    case "toggle-local-ai": state.localAI.enabled = !state.localAI.enabled; renderApp(); break;
     case "request-persist":
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(function(r) { toast("Persistent storage: " + r, "info"); });
       else toast("Not available", "error");
