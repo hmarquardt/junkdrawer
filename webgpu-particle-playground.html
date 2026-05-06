@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>WebGPU Particle Playground</title>
+<link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="shortcut icon" href="favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a18;--panel:rgba(16,16,30,.94);--border:rgba(0,229,255,.25);
+  --cyan:#00e5ff;--violet:#a78bfa;--amber:#fbbf24;--green:#4ade80;
+  --text:#e2e8f0;--dim:#94a3b8;--bright:#f1f5f9;
+  --glow-cyan:0 0 8px rgba(0,229,255,.4);
+  --glow-violet:0 0 8px rgba(167,139,250,.4);--glow-amber:0 0 8px rgba(251,191,36,.4);
+  --radius:6px;--font-mono:'SF Mono','Cascadia Code','Fira Code','Consolas',monospace;
+  --font-ui:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px}
+body{
+  background:
+    radial-gradient(ellipse at 50% 0%,rgba(0,229,255,.04) 0%,transparent 50%),
+    repeating-linear-gradient(0deg,transparent,transparent 59px,rgba(0,229,255,.025) 60px),
+    repeating-linear-gradient(90deg,transparent,transparent 59px,rgba(0,229,255,.025) 60px),
+    var(--bg);
+}
+canvas#stage{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;display:block}
+#header{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;gap:10px;
+  padding:6px 14px;background:var(--panel);border-bottom:1px solid rgba(0,229,255,.2);
+  backdrop-filter:blur(12px);font-size:12px;flex-wrap:nowrap;min-height:38px;overflow-x:auto}
+#header .title{font-weight:700;color:var(--cyan);text-shadow:var(--glow-cyan);white-space:nowrap;font-size:13px;letter-spacing:.5px}
+#toggleSidebar{flex-shrink:0}
+.status{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:3px;
+  background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.25);font-family:var(--font-mono);font-size:11px;white-space:nowrap;color:var(--bright)}
+.led{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
+.led.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+.led.off{background:#555}
+.led.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.hbtn{padding:3px 10px;border:1px solid rgba(0,229,255,.3);border-radius:3px;background:rgba(0,229,255,.08);
+  color:var(--bright);cursor:pointer;font-size:11px;font-family:var(--font-mono);transition:all .15s;white-space:nowrap}
+.hbtn:hover{background:rgba(0,229,255,.2);border-color:var(--cyan);color:#fff}
+.hbtn:active{transform:scale(.96)}
+#sidebar{position:fixed;top:46px;left:8px;bottom:8px;width:340px;z-index:15;
+  background:var(--panel);border:1px solid rgba(0,229,255,.2);border-radius:var(--radius);
+  backdrop-filter:blur(16px);overflow:hidden;display:flex;flex-direction:column;transition:transform .25s}
+#sidebar.hidden{transform:translateX(-360px)}
+#tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+#tabs button{flex:1;padding:7px 2px;background:transparent;border:none;color:var(--dim);
+  cursor:pointer;font-size:10px;font-family:var(--font-mono);border-bottom:2px solid transparent;
+  transition:all .15s;text-transform:uppercase;letter-spacing:.5px}
+#tabs button:hover{color:var(--bright)}
+#tabs button.active{color:var(--cyan);border-bottom-color:var(--cyan);text-shadow:var(--glow-cyan)}
+.tab-content{flex:1;overflow-y:auto;padding:12px;scrollbar-width:thin;scrollbar-color:rgba(0,229,255,.2) transparent}
+.tab-content::-webkit-scrollbar{width:5px}
+.tab-content::-webkit-scrollbar-thumb{background:rgba(0,229,255,.2);border-radius:3px}
+.panel{display:none}
+.panel.active{display:block}
+.ctrl-group{margin-bottom:14px}
+.ctrl-group>label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--dim);margin-bottom:4px;font-family:var(--font-mono);border-bottom:1px solid rgba(0,229,255,.1);padding-bottom:2px}
+.ctrl-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.ctrl-row label{min-width:100px;font-size:11px;color:var(--bright);flex-shrink:0}
+.ctrl-row .val{font-family:var(--font-mono);font-size:11px;color:var(--cyan);min-width:44px;text-align:right;font-weight:600}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:6px;
+  background:rgba(0,229,255,.18);border-radius:3px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+  border-radius:50%;background:var(--cyan);cursor:pointer;box-shadow:0 0 6px rgba(0,229,255,.5)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+  background:var(--cyan);cursor:pointer;border:none}
+select{background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.25);border-radius:3px;
+  color:var(--bright);padding:4px 8px;font-size:11px;font-family:var(--font-mono);width:100%}
+select option{background:#1a1a2e;color:var(--bright)}
+.preset-card{background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.2);border-radius:var(--radius);
+  padding:10px;margin-bottom:8px;transition:border-color .2s}
+.preset-card:hover{border-color:rgba(0,229,255,.45)}
+.preset-card h4{font-size:12px;color:var(--cyan);margin-bottom:2px;font-family:var(--font-mono)}
+.preset-card p{font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.4}
+.preset-card .btns{display:flex;gap:6px}
+.sbtn{padding:3px 10px;border:1px solid rgba(0,229,255,.25);border-radius:3px;background:rgba(0,229,255,.06);
+  color:var(--bright);cursor:pointer;font-size:10px;font-family:var(--font-mono);transition:all .15s}
+.sbtn:hover{color:var(--cyan);border-color:var(--cyan);background:rgba(0,229,255,.12)}
+.event-card{background:rgba(139,92,246,.06);border:1px solid rgba(167,139,250,.25);
+  border-radius:var(--radius);padding:8px;margin-bottom:6px;font-size:11px;font-family:var(--font-mono)}
+.event-card .etype{color:var(--violet);font-weight:700}
+.event-card .etitle{color:var(--bright)}
+.event-card .eint{color:var(--amber)}
+.docs-link{color:var(--cyan);text-decoration:none;font-family:var(--font-mono);font-size:11px}
+.docs-link:hover{text-decoration:underline}
+.docs-section{margin-bottom:16px}
+.docs-section h3{color:var(--cyan);font-size:12px;margin-bottom:6px;font-family:var(--font-mono)}
+.docs-section p{font-size:11px;line-height:1.5;color:var(--dim);margin-bottom:4px}
+.docs-section p[style*="green"]{color:var(--green)}
+#toast-container{position:fixed;bottom:16px;right:16px;z-index:100;display:flex;flex-direction:column;gap:8px}
+.toast{padding:8px 16px;border-radius:4px;font-size:12px;font-family:var(--font-mono);
+  backdrop-filter:blur(12px);animation:toastIn .3s;max-width:340px}
+.toast.info{background:rgba(0,229,255,.18);border:1px solid rgba(0,229,255,.4);color:var(--cyan)}
+.toast.ok{background:rgba(74,222,128,.15);border:1px solid rgba(74,222,128,.4);color:var(--green)}
+.toast.warn{background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.4);color:var(--amber)}
+.toast.err{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171}
+@keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+#fallback-badge{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:50;
+  display:none;padding:6px 16px;border-radius:4px;background:rgba(251,191,36,.15);
+  border:1px solid rgba(251,191,36,.4);color:var(--amber);font-size:11px;font-family:var(--font-mono);
+  text-align:center;backdrop-filter:blur(8px)}
+#deploy-footer{position:fixed;right:14px;bottom:10px;z-index:12;color:rgba(148,163,184,.82);
+  font-family:var(--font-mono);font-size:10px;line-height:1.5;text-align:right;pointer-events:none;
+  text-shadow:0 1px 8px rgba(0,0,0,.85)}
+.hint{font-size:10px;color:var(--dim);font-style:italic;margin-top:2px}
+@media(max-width:700px){
+  #sidebar{width:calc(100vw - 16px);left:8px}
+  .ctrl-row label{min-width:80px}
+  #deploy-footer{left:8px;right:8px;text-align:center;font-size:9px}
+}
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:0s!important;transition-duration:0s!important}
+}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div id="header">
+  <button class="hbtn" id="toggleSidebar" title="Toggle controls">&#9776;</button>
+  <span class="title">WebGPU Particle Playground</span>
+  <span class="status"><span class="led" id="ledRenderer"></span><span id="statusRenderer">—</span></span>
+  <span class="status" id="statusFPS">0 fps</span>
+  <span class="status" id="statusCount">0 particles</span>
+  <span class="status" id="statusPreset">—</span>
+  <button class="hbtn" id="btnToggle" title="Start / Pause">Pause</button>
+</div>
+
+<aside id="sidebar">
+  <nav id="tabs">
+    <button class="active" data-tab="playground">Playground</button>
+    <button data-tab="presets">Presets</button>
+    <button data-tab="datafeed">Data Feed</button>
+    <button data-tab="perf">Perf</button>
+    <button data-tab="export">Export</button>
+    <button data-tab="about">About</button>
+  </nav>
+  <div class="tab-content">
+    <div class="panel active" id="panel-playground"></div>
+    <div class="panel" id="panel-presets"></div>
+    <div class="panel" id="panel-datafeed"></div>
+    <div class="panel" id="panel-perf"></div>
+    <div class="panel" id="panel-export"></div>
+    <div class="panel" id="panel-about"></div>
+  </div>
+</aside>
+
+<div id="toast-container"></div>
+<div id="fallback-badge">Canvas fallback mode — fewer particles, still pretty.</div>
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.06.1" bump="Update this version whenever this file changes in a commit." -->
+<footer id="deploy-footer" data-junkdrawer-deploy-footer data-deploy-version="2026.05.06.1">
+  &copy; 2026 Hank Marquardt · WebGPU Particle Playground · v2026.05.06.1
+</footer>
+
+<script>
+const APP_NAME = "WebGPU Particle Playground";
+const VERSION = 1;
+const DEPLOY_VERSION = "2026.05.06.1";
+const LS_KEY = "wgpu_pp_";
+
+const BOUNDARY = {wrap:0,bounce:1,absorb:2,infinite:3};
+const SPAWN = {random:0,ring:1,spiral:2,grid:3,fountain:4,implosion:5,wavefront:6,constellation:7,market:8,solar:9,earthquake:10};
+const COLOR = {velocity:0,age:1,distance:2,force:3,source:4,heatmap:5,monochrome:6,rainbow:7,amber:8,cyan_ghost:9};
+const INTERACT = {attract:0,repel:1,vortex:2,stir:3,explode:4,freeze:5,draw:6};
+
+const BOUNDARY_NAMES=["Wrap","Bounce","Absorb/Respawn","Infinite Drift"];
+const SPAWN_NAMES=["Random Field","Ring","Spiral Galaxy","Grid","Fountain","Implosion","Wavefront","Constellation","Market Tremor","Solar Storm","Earthquake Ripples"];
+const COLOR_NAMES=["Velocity","Age","Distance","Force Intensity","Source Type","Heatmap","Monochrome Neon","Rainbow Field","Amber Radar","Cyan Ghost"];
+const INTERACT_NAMES=["Attract","Repel","Vortex","Stir","Explode","Freeze","Draw Emitter"];
+
+const DEFAULT_CONFIG = {
+  particleCount:50000,speed:1,damping:.98,turbulence:1,gravityStrength:0,
+  vortexStrength:0,attractorStrength:1,repulsionStrength:1,noiseScale:.003,
+  noiseSpeed:.5,trailFade:.08,particleSize:3,glowAmount:1.5,
+  colorMode:COLOR.velocity,boundaryMode:BOUNDARY.wrap,spawnPattern:SPAWN.random,
+  interactionMode:INTERACT.attract,blendMode:0
+};
+const MAX_GPU_PARTICLES = 250000;
+const MAX_CANVAS_PARTICLES = 10000;
+
+const PRESETS = [
+  {name:"Solar Storm",desc:"High-energy particles radiating from one side. Amber/cyan plasma feel. Useful for NASA DONKI visualization.",
+   config:{particleCount:80000,speed:1.8,damping:.97,turbulence:2.5,gravityStrength:0,vortexStrength:.3,attractorStrength:.5,repulsionStrength:.8,noiseScale:.004,noiseSpeed:1.2,trailFade:.06,particleSize:3,glowAmount:2,colorMode:COLOR.velocity,boundaryMode:BOUNDARY.wrap,spawnPattern:SPAWN.solar,interactionMode:INTERACT.attract,blendMode:0}},
+  {name:"Market Tremor",desc:"Clustered points vibrating and exploding on spikes. Useful for crypto/stock anomaly visualization.",
+   config:{particleCount:60000,speed:1.2,damping:.96,turbulence:3,gravityStrength:.5,vortexStrength:.2,attractorStrength:1.5,repulsionStrength:1,noiseScale:.005,noiseSpeed:2,trailFade:.05,particleSize:2,glowAmount:1.8,colorMode:COLOR.heatmap,boundaryMode:BOUNDARY.bounce,spawnPattern:SPAWN.market,interactionMode:INTERACT.explode,blendMode:0}},
+  {name:"Global Weirdness Field",desc:"Radar-like blips with pulses. Useful for GDELT/news signal visualization.",
+   config:{particleCount:40000,speed:.6,damping:.99,turbulence:.8,gravityStrength:0,vortexStrength:.1,attractorStrength:.3,repulsionStrength:.2,noiseScale:.002,noiseSpeed:.3,trailFade:.12,particleSize:2.5,glowAmount:2.5,colorMode:COLOR.amber,boundaryMode:BOUNDARY.wrap,spawnPattern:SPAWN.constellation,interactionMode:INTERACT.stir,blendMode:0}},
+  {name:"Earthquake Ripples",desc:"Concentric shockwaves from point sources. Useful for USGS event visualization.",
+   config:{particleCount:50000,speed:1,damping:.97,turbulence:1,gravityStrength:.3,vortexStrength:0,attractorStrength:.5,repulsionStrength:1.5,noiseScale:.003,noiseSpeed:.5,trailFade:.07,particleSize:2,glowAmount:1.5,colorMode:COLOR.distance,boundaryMode:BOUNDARY.absorb,spawnPattern:SPAWN.earthquake,interactionMode:INTERACT.explode,blendMode:0}},
+  {name:"Firefly Wetlands",desc:"Slow bioluminescent particles drifting over an implied marsh. Useful for wildlife/nature dashboards.",
+   config:{particleCount:25000,speed:.3,damping:.995,turbulence:.4,gravityStrength:0,vortexStrength:0,attractorStrength:.1,repulsionStrength:.1,noiseScale:.001,noiseSpeed:.15,trailFade:.15,particleSize:4,glowAmount:3,colorMode:COLOR.age,boundaryMode:BOUNDARY.wrap,spawnPattern:SPAWN.random,interactionMode:INTERACT.attract,blendMode:0}},
+  {name:"Neural Fog",desc:"Brain-like drifting clusters and tendrils. Useful for local AI / thought map visuals.",
+   config:{particleCount:45000,speed:.5,damping:.99,turbulence:1.2,gravityStrength:.2,vortexStrength:.5,attractorStrength:1,repulsionStrength:.5,noiseScale:.002,noiseSpeed:.4,trailFade:.1,particleSize:2.5,glowAmount:2,colorMode:COLOR.source,boundaryMode:BOUNDARY.bounce,spawnPattern:SPAWN.constellation,interactionMode:INTERACT.stir,blendMode:0}},
+  {name:"Wormhole Laundry Machine",desc:"Absurd vortex preset — dramatic and fun.",
+   config:{particleCount:70000,speed:2,damping:.96,turbulence:2,gravityStrength:1,vortexStrength:3,attractorStrength:2,repulsionStrength:.5,noiseScale:.005,noiseSpeed:1.5,trailFade:.04,particleSize:2,glowAmount:2.5,colorMode:COLOR.rainbow,boundaryMode:BOUNDARY.wrap,spawnPattern:SPAWN.ring,interactionMode:INTERACT.vortex,blendMode:0}},
+  {name:"Minimal Radar",desc:"Restrained amber/green signal display.",
+   config:{particleCount:15000,speed:.4,damping:.995,turbulence:.3,gravityStrength:0,vortexStrength:0,attractorStrength:.2,repulsionStrength:.2,noiseScale:.001,noiseSpeed:.2,trailFade:.2,particleSize:2,glowAmount:1.8,colorMode:COLOR.amber,boundaryMode:BOUNDARY.wrap,spawnPattern:SPAWN.constellation,interactionMode:INTERACT.attract,blendMode:0}}
+];
+
+const state = {
+  renderer:"unknown",running:true,config:{...DEFAULT_CONFIG},gpu:null,device:null,
+  canvas:null,ctx2d:null,gpuCtx:null,canvasFormat:"rgba8unorm",
+  pointer:{x:0,y:0,active:false,down:false},
+  events:[],fps:{frames:0,lastTime:0,value:0,frameTime:0},
+  animId:null,lastFrame:0,presetName:"",maxFPS:0,pauseHidden:true,
+  reduceMotion:false,adaptiveQuality:false,trailTex:null,trailReady:false,
+  particleBuffer:null,uniformBuffer:null,quadBuffer:null,computeBindGroup:null,renderBindGroup:null,
+  computePipeline:null,fadePipeline:null,particlePipeline:null,computePipelineLayout:null,renderPipelineLayout:null,
+  particles2d:[]
+};
+
+function clamp(v,mn,mx){return Math.max(mn,Math.min(mx,v))}
+function lerp(a,b,t){return a+(b-a)*t}
+function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
+function sanitizeConfig(){
+  const c=state.config;
+  c.particleCount=Math.round(clamp(Number(c.particleCount)||DEFAULT_CONFIG.particleCount,100,MAX_GPU_PARTICLES));
+  c.speed=clamp(Number(c.speed)||0,0,5);
+  c.damping=clamp(Number(c.damping)||DEFAULT_CONFIG.damping,.9,.999);
+  c.turbulence=clamp(Number(c.turbulence)||0,0,5);
+  c.gravityStrength=clamp(Number(c.gravityStrength)||0,0,5);
+  c.vortexStrength=clamp(Number(c.vortexStrength)||0,0,5);
+  c.attractorStrength=clamp(Number(c.attractorStrength)||0,0,5);
+  c.repulsionStrength=clamp(Number(c.repulsionStrength)||0,0,5);
+  c.noiseScale=clamp(Number(c.noiseScale)||DEFAULT_CONFIG.noiseScale,.001,.01);
+  c.noiseSpeed=clamp(Number(c.noiseSpeed)||0,0,2);
+  c.trailFade=clamp(Number(c.trailFade)||0,0,.3);
+  c.particleSize=clamp(Number(c.particleSize)||DEFAULT_CONFIG.particleSize,1,20);
+  c.glowAmount=clamp(Number(c.glowAmount)||0,0,5);
+  c.colorMode=clamp(Math.round(Number(c.colorMode)||0),0,COLOR_NAMES.length-1);
+  c.boundaryMode=clamp(Math.round(Number(c.boundaryMode)||0),0,BOUNDARY_NAMES.length-1);
+  c.spawnPattern=clamp(Math.round(Number(c.spawnPattern)||0),0,SPAWN_NAMES.length-1);
+  c.interactionMode=clamp(Math.round(Number(c.interactionMode)||0),0,INTERACT_NAMES.length-1);
+  c.blendMode=clamp(Math.round(Number(c.blendMode)||0),0,1);
+}
+
+function toast(msg,type="info"){
+  const c=document.getElementById("toast-container");
+  const d=document.createElement("div");d.className="toast "+type;d.textContent=msg;
+  c.appendChild(d);setTimeout(()=>d.remove(),3500);
+}
+
+const UNIFORM_COUNT=32;
+const U={time:0,dt:1,rx:2,ry:3,count:4,px:5,py:6,pAct:7,pDn:8,
+  speed:9,damp:10,turb:11,grav:12,vort:13,attr:14,rep:15,
+  nScale:16,nSpeed:17,trail:18,ptSize:19,glow:20,colMode:21,bndMode:22,intMode:23,spawn:24,blend:25};
+
+function buildUniformData(){
+  const d=new Float32Array(UNIFORM_COUNT);
+  const c=state.config;const p=state.pointer;
+  d[U.time]=performance.now()/1000;d[U.dt]=1/60;
+  d[U.rx]=state.canvas.width;d[U.ry]=state.canvas.height;
+  d[U.count]=effectiveParticleCount();d[U.px]=p.x;d[U.py]=p.y;
+  d[U.pAct]=p.active?1:0;d[U.pDn]=p.down?1:0;
+  d[U.speed]=c.speed;d[U.damp]=c.damping;d[U.turb]=c.turbulence;
+  d[U.grav]=c.gravityStrength;d[U.vort]=c.vortexStrength;
+  d[U.attr]=c.attractorStrength;d[U.rep]=c.repulsionStrength;
+  d[U.nScale]=c.noiseScale;d[U.nSpeed]=c.noiseSpeed;
+  d[U.trail]=c.trailFade;d[U.ptSize]=c.particleSize;d[U.glow]=c.glowAmount;
+  d[U.colMode]=c.colorMode;d[U.bndMode]=c.boundaryMode;
+  d[U.intMode]=c.interactionMode;d[U.spawn]=c.spawnPattern;d[U.blend]=c.blendMode;
+  return d;
+}
+
+const COMPUTE_WGSL=`
+struct Particle{pos:vec2f,vel:vec2f,life:f32,seed:f32};
+struct U{time:f32,dt:f32,rx:f32,ry:f32,cnt:f32,px:f32,py:f32,pAct:f32,pDn:f32,
+  speed:f32,damp:f32,turb:f32,grav:f32,vort:f32,attr:f32,rep:f32,
+  nScale:f32,nSpeed:f32,trail:f32,ptSz:f32,glow:f32,col:f32,bnd:f32,intMode:f32,spawn:f32,blend:f32,
+  _p1:f32,_p2:f32,_p3:f32,_p4:f32,_p5:f32,_p6:f32};
+
+@group(0)@binding(0) var<storage,read_write> P:array<Particle>;
+@group(0)@binding(1) var<uniform> u:U;
+
+fn h21(p:vec2f)->f32{var p3=fract(vec3f(p.x,p.y,p.x+1.)*.1031);let d1=dot(p3,p3.yzx+33.33);p3+=vec3f(d1,d1,d1);return fract((p3.x+p3.y)*p3.z);}
+fn noise(p:vec2f)->f32{let i=vec2f(floor(p));let f=fract(p);let u=f*f*(3.-2.*f);
+  return mix(mix(h21(i),h21(i+vec2f(1.,0.)),u.x),mix(h21(i+vec2f(0.,1.)),h21(i+vec2f(1.,1.)),u.x),u.y);}
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) id:vec3u){
+  let idx=id.x;if(idx>=u32(u.cnt)){return;}
+  var p=P[idx];
+  let dt=u.dt*u.speed;
+  p.vel*=u.damp;
+  let ctr=vec2f(u.rx*.5,u.ry*.5);
+  let tc=ctr-p.pos;
+  let d=length(tc);
+  if(d>1.){let nd=tc/d;
+    p.vel+=nd*u.grav*10.*u.dt;
+    let prp=vec2f(-nd.y,nd.x);p.vel+=prp*u.vort*5.*u.dt;
+  }
+  if(u.pAct>.5){
+    let tp=vec2f(u.px,u.py)-p.pos;let dp=length(tp);
+    if(dp>1.){let nd=tp/dp;let str=100./(dp+10.)*u.dt;
+      if(u.intMode<.5){p.vel+=nd*u.attr*str;}
+      else if(u.intMode<1.5){p.vel-=nd*u.rep*str;}
+      else if(u.intMode<2.5){p.vel+=vec2f(-nd.y,nd.x)*u.vort*str*.5;}
+      else if(u.intMode<3.5){let n2=vec2f(noise(p.pos*.01+u.time*.1),noise(p.pos*.01+u.time*.1+100.));p.vel+=n2*str*2.;}
+      else if(u.intMode<4.5){if(u.pDn>.5){p.vel+=nd*str*3.;}else{p.vel*=.95;}}
+      else if(u.intMode<5.5){p.vel*=.9;}
+      else if(u.intMode<6.5){if(u.pDn>.5){p.vel+=vec2f((h21(vec2f(f32(idx),u.time))-.5)*200.,(h21(vec2f(f32(idx),u.time+1.))-.5)*200.)*u.dt;}}
+    }
+  }
+  let nv=noise(p.pos*u.nScale+u.time*u.nSpeed);
+  let na=nv*6.2832;p.vel+=vec2f(cos(na),sin(na))*u.turb*50.*u.dt;
+  p.pos+=p.vel*dt;
+  if(u.bnd<.5){
+    if(p.pos.x<0.){p.pos.x+=u.rx;}if(p.pos.x>u.rx){p.pos.x-=u.rx;}
+    if(p.pos.y<0.){p.pos.y+=u.ry;}if(p.pos.y>u.ry){p.pos.y-=u.ry;}
+  }else if(u.bnd<1.5){
+    if(p.pos.x<0.||p.pos.x>u.rx){p.vel.x*=-1.;p.pos.x=clamp(p.pos.x,0.,u.rx);}
+    if(p.pos.y<0.||p.pos.y>u.ry){p.vel.y*=-1.;p.pos.y=clamp(p.pos.y,0.,u.ry);}
+  }else if(u.bnd<2.5){
+    if(p.pos.x<0.||p.pos.x>u.rx||p.pos.y<0.||p.pos.y>u.ry){
+      p.pos=vec2f(h21(vec2f(f32(idx),u.time))*u.rx,h21(vec2f(f32(idx),u.time+1.))*u.ry);
+      p.vel=vec2f(0.);p.life=1.;}
+  }
+  p.life-=u.dt*.05;
+  if(p.life<0.){
+    p.life=1.;p.pos=vec2f(h21(vec2f(f32(idx)+.1,u.time))*u.rx,h21(vec2f(f32(idx)+.1,u.time+1.))*u.ry);
+    p.vel=vec2f((h21(vec2f(f32(idx),u.time+2.))-.5)*30.,(h21(vec2f(f32(idx),u.time+3.))-.5)*30.);
+  }
+  P[idx]=p;
+}`;
+
+const RENDER_WGSL=`
+struct Particle{pos:vec2f,vel:vec2f,life:f32,seed:f32};
+struct U{time:f32,dt:f32,rx:f32,ry:f32,cnt:f32,px:f32,py:f32,pAct:f32,pDn:f32,
+  speed:f32,damp:f32,turb:f32,grav:f32,vort:f32,attr:f32,rep:f32,
+  nScale:f32,nSpeed:f32,trail:f32,ptSz:f32,glow:f32,col:f32,bnd:f32,intMode:f32,spawn:f32,blend:f32,
+  _p1:f32,_p2:f32,_p3:f32,_p4:f32,_p5:f32,_p6:f32};
+@group(0)@binding(0) var<storage,read> P:array<Particle>;
+@group(0)@binding(1) var<uniform> u:U;
+
+fn h21(p:vec2f)->f32{var p3=fract(vec3f(p.x,p.y,p.x+1.)*.1031);let d1=dot(p3,p3.yzx+33.33);p3+=vec3f(d1,d1,d1);return fract((p3.x+p3.y)*p3.z);}
+fn hsv2rgb(c:vec3f)->vec3f{let p=fract(c.xxx+vec3f(1.,2./3.,1./3.));return c.z*mix(vec3f(1.),clamp((p*6.-vec3f(0.,4.,2.))-1.,vec3f(0.),vec3f(1.)),c.y);}
+
+fn getColor(idx:u32)->vec3f{
+  let p=P[idx];let m=u.col;
+  if(m<.5){let v=length(p.vel);return mix(vec3f(0.,.8,1.),vec3f(.55,.2,.96),clamp(v/200.,0.,1.));}
+  if(m<1.5){return mix(vec3f(0.,1.,.5),vec3f(1.,.15,.3),clamp(p.life,0.,1.));}
+  if(m<2.5){let d=length(p.pos-vec2f(u.rx*.5,u.ry*.5))/length(vec2f(u.rx,u.ry));return mix(vec3f(.96,.62,.04),vec3f(0.,.8,1.),clamp(d,0.,1.));}
+  if(m<3.5){let v=length(p.vel);return vec3f(.2,.8,.3)*clamp(v/100.,.1,1.);}
+  if(m<4.5){let s=p.seed;return hsv2rgb(vec3f(fract(s*.01),.7,.9));}
+  if(m<5.5){let v=length(p.vel);let t=clamp(v/150.,0.,1.);return mix(vec3f(0.,0.,1.),vec3f(1.,0.,0.),t);}
+  if(m<6.5){return vec3f(0.,.9,1.);}
+  if(m<7.5){let a=atan2(p.pos.y-u.ry*.5,p.pos.x-u.rx*.5);return hsv2rgb(vec3f(a/6.2832,.8,.9));}
+  if(m<8.5){return mix(vec3f(.96,.62,.04),vec3f(.22,1.,.08),clamp(length(p.vel)/120.,0.,1.));}
+  return mix(vec3f(0.,.7,.9),vec3f(.7,.95,1.),clamp(length(p.vel)/100.,0.,1.));
+}
+fn getAlpha(idx:u32)->f32{
+  let p=P[idx];let v=length(p.vel);return clamp(p.life*.7+v/200.*.3,0.05,1.);
+}
+
+@vertex fn fadeVS(@builtin(vertex_index) vi:u32)->@builtin(position) vec4f{
+  var p=array<vec2f,3>(vec2f(-1.,-1.),vec2f(3.,-1.),vec2f(-1.,3.));
+  return vec4f(p[vi],0.,1.);
+}
+@fragment fn fadeFS()->@location(0) vec4f{
+  let a=1.-u.trail*.95;return vec4f(0.,0.,0.,a);
+}
+
+struct VO{@builtin(position) pos:vec4f,@location(0) lp:vec2f,@location(1) col:vec3f,@location(2) alpha:f32};
+@vertex fn partVS(@location(0) qp:vec2f,@builtin(instance_index) idx:u32)->VO{
+  var o:VO;let p=P[idx];
+  let cp=vec2f(p.pos.x/u.rx*2.-1.,1.-p.pos.y/u.ry*2.);
+  let sc=u.ptSz;
+  o.pos=vec4f(cp+qp*sc/vec2f(u.rx,u.ry)*2.,0.,1.);
+  o.lp=qp;o.col=getColor(idx);o.alpha=getAlpha(idx);return o;
+}
+@fragment fn partFS(i:VO)->@location(0) vec4f{
+  let d=length(i.lp);if(d>1.){discard;}
+  let g=pow(1.-d,1.+u.glow*.5);
+  return vec4f(i.col*g,i.alpha*g);
+}`;
+
+function generateParticles(count,pattern,w,h){
+  const d=new Float32Array(count*6);
+  const cx=w/2,cy=h/2;
+  for(let i=0;i<count;i++){
+    const o=i*6;let x,y,vx,vy;
+    const t=i/count;
+    switch(pattern){
+      case SPAWN.ring:{const a=t*Math.PI*2;const r=Math.min(w,h)*.35;x=cx+Math.cos(a)*r+(Math.random()-.5)*8;y=cy+Math.sin(a)*r+(Math.random()-.5)*8;vx=Math.cos(a+Math.PI/2)*30;vy=Math.sin(a+Math.PI/2)*30;break}
+      case SPAWN.spiral:{const a=t*Math.PI*8;const r=t*Math.min(w,h)*.4;x=cx+Math.cos(a)*r;y=cy+Math.sin(a)*r;vx=Math.cos(a+Math.PI/2)*20;vy=Math.sin(a+Math.PI/2)*20;break}
+      case SPAWN.grid:{const cols=Math.ceil(Math.sqrt(count*w/h));const rows=Math.ceil(count/cols);const ci=i%cols;const ri=Math.floor(i/cols);x=(ci+.5)/cols*w;y=(ri+.5)/rows*h;vx=(Math.random()-.5)*10;vy=(Math.random()-.5)*10;break}
+      case SPAWN.fountain:{x=cx+(Math.random()-.5)*w*.2;y=h;vx=(Math.random()-.5)*80;vy=-Math.random()*200-100;break}
+      case SPAWN.implosion:{const a=Math.random()*Math.PI*2;const r=Math.min(w,h)*.5+Math.random()*Math.min(w,h)*.2;x=cx+Math.cos(a)*r;y=cy+Math.sin(a)*r;const toC=Math.atan2(cy-y,cx-x);vx=Math.cos(toC)*80;vy=Math.sin(toC)*80;break}
+      case SPAWN.wavefront:{const a=Math.random()*Math.PI*2;x=cx+Math.cos(a)*10;y=cy+Math.sin(a)*10;vx=Math.cos(a)*(100+Math.random()*100);vy=Math.sin(a)*(100+Math.random()*100);break}
+      case SPAWN.constellation:{const clusters=12;const ci=Math.floor(Math.random()*clusters);const ca=ci/clusters*Math.PI*2;const cr=Math.min(w,h)*.3;const ccx=cx+Math.cos(ca)*cr;const ccy=cy+Math.sin(ca)*cr;x=ccx+(Math.random()-.5)*80;y=ccy+(Math.random()-.5)*80;vx=(Math.random()-.5)*15;vy=(Math.random()-.5)*15;break}
+      case SPAWN.market:{const clusters=8;const ci=Math.floor(Math.random()*clusters);const ccx=w*.15+ci/clusters*w*.7;const ccy=h*.3+Math.random()*h*.4;x=ccx+(Math.random()-.5)*40;y=ccy+(Math.random()-.5)*40;vx=(Math.random()-.5)*60;vy=(Math.random()-.5)*60;break}
+      case SPAWN.solar:{x=Math.random()*w*.15;y=Math.random()*h;vx=Math.random()*150+50;vy=(Math.random()-.5)*60;break}
+      case SPAWN.earthquake:{const ep=Math.floor(Math.random()*5);const ex=w*.2+ep*w*.15;const ey=h*.5+(Math.random()-.5)*h*.4;const a=Math.random()*Math.PI*2;const r=Math.random()*Math.min(w,h)*.15;x=ex+Math.cos(a)*r;y=ey+Math.sin(a)*r;vx=Math.cos(a)*80;vy=Math.sin(a)*80;break}
+      default:{x=Math.random()*w;y=Math.random()*h;vx=(Math.random()-.5)*40;vy=(Math.random()-.5)*40}
+    }
+    d[o]=x;d[o+1]=y;d[o+2]=vx;d[o+3]=vy;d[o+4]=.5+Math.random()*.5;d[o+5]=Math.random()*1000;
+  }
+  return d;
+}
+
+async function setupWebGPU(){
+  if(!navigator.gpu){return false}
+  try{
+    const adapter=await navigator.gpu.requestAdapter();
+    if(!adapter){return false}
+    state.gpu=adapter;
+    const device=await adapter.requestDevice();
+    if(!device){return false}
+    state.device=device;
+    device.lost.then(info=>{toast(`GPU device lost: ${info.message}`,"err");state.device=null;state.renderer="none"});
+    const canvas=state.canvas;
+    const ctx=canvas.getContext("webgpu");
+    if(!ctx){return false}
+    state.gpuCtx=ctx;
+    const fmt=navigator.gpu.getPreferredCanvasFormat();
+    ctx.configure({device,format:fmt,alphaMode:"premultiplied",
+      usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_DST});
+    await createGPUPipelines(fmt);
+    resetGPUParticles();
+    state.renderer="webgpu";
+    return true;
+  }catch(e){console.warn("WebGPU init failed:",e);return false}
+}
+
+async function createGPUPipelines(canvasFormat){
+  const dev=state.device;
+  const computeBgl=dev.createBindGroupLayout({entries:[
+    {binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:"storage"}},
+    {binding:1,visibility:GPUShaderStage.COMPUTE,buffer:{type:"uniform"}}
+  ]});
+  const renderBgl=dev.createBindGroupLayout({entries:[
+    {binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:"read-only-storage"}},
+    {binding:1,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:"uniform"}}
+  ]});
+  state.computePipelineLayout=dev.createPipelineLayout({bindGroupLayouts:[computeBgl]});
+  state.renderPipelineLayout=dev.createPipelineLayout({bindGroupLayouts:[renderBgl]});
+
+  const compMod=dev.createShaderModule({code:COMPUTE_WGSL});
+  state.computePipeline=dev.createComputePipeline({layout:state.computePipelineLayout,compute:{module:compMod,entryPoint:"main"}});
+
+  const rendMod=dev.createShaderModule({code:RENDER_WGSL});
+
+  state.canvasFormat=canvasFormat;
+
+  state.fadePipeline=dev.createRenderPipeline({
+    layout:state.renderPipelineLayout,
+    vertex:{module:rendMod,entryPoint:"fadeVS"},
+    fragment:{module:rendMod,entryPoint:"fadeFS",targets:[{format:canvasFormat,blend:{
+      color:{srcFactor:"src-alpha",dstFactor:"one-minus-src-alpha"},alpha:{srcFactor:"one",dstFactor:"zero"}}}]}
+  });
+
+  state.particlePipeline=dev.createRenderPipeline({
+    layout:state.renderPipelineLayout,
+    vertex:{module:rendMod,entryPoint:"partVS",buffers:[{arrayStride:8,attributes:[{format:"float32x2",offset:0,shaderLocation:0}]}]},
+    fragment:{module:rendMod,entryPoint:"partFS",targets:[{format:canvasFormat,blend:{
+      color:{srcFactor:"one",dstFactor:"one"},alpha:{srcFactor:"one",dstFactor:"one"}}}]}
+  });
+
+  const qd=new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]);
+  state.quadBuffer=dev.createBuffer({size:qd.byteLength,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
+  dev.queue.writeBuffer(state.quadBuffer,0,qd);
+
+  state.uniformBuffer=dev.createBuffer({size:UNIFORM_COUNT*4,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+
+  const sz=MAX_GPU_PARTICLES*6*4;
+  state.particleBuffer=dev.createBuffer({size:sz,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+  state.particleBufferSize=sz;
+
+  const bgEntries=[
+    {binding:0,resource:{buffer:state.particleBuffer}},
+    {binding:1,resource:{buffer:state.uniformBuffer}}
+  ];
+  state.computeBindGroup=dev.createBindGroup({layout:computeBgl,entries:bgEntries});
+  state.renderBindGroup=dev.createBindGroup({layout:renderBgl,entries:bgEntries});
+
+  createTrailTexture();
+}
+
+function createTrailTexture(){
+  if(!state.device)return;
+  if(state.trailTex)state.trailTex.destroy();
+  const w=state.canvas.width,h=state.canvas.height;
+  const fmt=state.canvasFormat||"rgba8unorm";
+  state.trailTex=state.device.createTexture({size:[w,h],format:fmt,
+    usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC|GPUTextureUsage.TEXTURE_BINDING});
+  state.trailReady=false;
+}
+
+function resetGPUParticles(){
+  if(!state.device||!state.particleBuffer)return;
+  sanitizeConfig();
+  const c=state.config;
+  const data=generateParticles(effectiveParticleCount(),c.spawnPattern,state.canvas.width,state.canvas.height);
+  state.device.queue.writeBuffer(state.particleBuffer,0,data);
+  state.trailReady=false;
+}
+
+function resizeGPU(){
+  if(!state.device)return;
+  const fmt=navigator.gpu.getPreferredCanvasFormat();
+  state.canvasFormat=fmt;
+  state.gpuCtx.configure({device:state.device,format:fmt,alphaMode:"premultiplied",
+    usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_DST});
+  createTrailTexture();
+  resetGPUParticles();
+}
+
+function renderWebGPU(dt){
+  const dev=state.device;
+  if(!dev||!state.gpuCtx)return;
+  const w=state.canvas.width,h=state.canvas.height;
+  const count=effectiveParticleCount();
+
+  const ud=buildUniformData();ud[U.dt]=dt;
+  dev.queue.writeBuffer(state.uniformBuffer,0,ud);
+
+  const enc=dev.createCommandEncoder();
+
+  const compPass=enc.beginComputePass();
+  compPass.setPipeline(state.computePipeline);
+  compPass.setBindGroup(0,state.computeBindGroup);
+  compPass.dispatchWorkgroups(Math.ceil(count/256));
+  compPass.end();
+
+  if(!state.trailReady){
+    const cp=enc.beginRenderPass({colorAttachments:[{view:state.trailTex.createView(),loadOp:"clear",storeOp:"store",clearValue:{r:0,g:0,b:0,a:1}}]});
+    cp.end();state.trailReady=true;
+  }
+
+  const tView=state.trailTex.createView();
+  const rp=enc.beginRenderPass({colorAttachments:[{view:tView,loadOp:"load",storeOp:"store"}]});
+  rp.setPipeline(state.fadePipeline);rp.setBindGroup(0,state.renderBindGroup);rp.draw(3);
+  rp.setPipeline(state.particlePipeline);rp.setBindGroup(0,state.renderBindGroup);
+  rp.setVertexBuffer(0,state.quadBuffer);rp.draw(6,count);
+  rp.end();
+
+  const cTex=state.gpuCtx.getCurrentTexture();
+  enc.copyTextureToTexture({texture:state.trailTex},{texture:cTex},[w,h,1]);
+
+  dev.queue.submit([enc.finish()]);
+}
+
+function setupCanvasFallback(){
+  const ctx=state.canvas.getContext("2d");
+  if(!ctx){toast("No Canvas 2D available","err");return false}
+  state.ctx2d=ctx;state.renderer="canvas2d";
+  resetCanvasParticles();
+  return true;
+}
+
+function effectiveParticleCount(){
+  return state.renderer==="canvas2d"
+    ?Math.min(state.config.particleCount,MAX_CANVAS_PARTICLES)
+    :Math.min(state.config.particleCount,MAX_GPU_PARTICLES);
+}
+
+function resetCanvasParticles(){
+  sanitizeConfig();
+  const c=state.config;const w=state.canvas.width,h=state.canvas.height;
+  const n=effectiveParticleCount();
+  const data=generateParticles(n,c.spawnPattern,w,h);
+  state.particles2d=[];
+  for(let i=0;i<n;i++){
+    const o=i*6;
+    state.particles2d.push({x:data[o],y:data[o+1],vx:data[o+2],vy:data[o+3],life:data[o+4],seed:data[o+5]});
+  }
+}
+
+function canvasColor(p,maxV){
+  const c=state.config;const w=state.canvas.width,h=state.canvas.height;
+  const spd=Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+  switch(c.colorMode){
+    case COLOR.velocity:{const t=clamp(spd/200,0,1);return`rgb(${Math.round(lerp(0,140,t))},${Math.round(lerp(204,51,t))},${Math.round(lerp(255,245,t))})`}
+    case COLOR.age:{const t=clamp(p.life,0,1);return`rgb(${Math.round(lerp(255,0,t))},${Math.round(lerp(38,255,t))},${Math.round(lerp(77,128,t))})`}
+    case COLOR.distance:{const d=Math.sqrt((p.x-w/2)**2+(p.y-h/2)**2)/Math.sqrt(w*w+h*h);const t=clamp(d,0,1);return`rgb(${Math.round(lerp(245,0,t))},${Math.round(lerp(158,204,t))},${Math.round(lerp(11,255,t))})`}
+    case COLOR.heatmap:{const t=clamp(spd/150,0,1);return`rgb(${Math.round(t*255)},${Math.round((1-Math.abs(t-.5)*2)*100)},${Math.round((1-t)*255)})`}
+    case COLOR.monochrome:return"rgba(0,229,255,0.8)";
+    case COLOR.rainbow:{const a=Math.atan2(p.y-h/2,p.x-w/2);const hue=((a/Math.PI*180)+360)%360;return`hsl(${hue},80%,60%)`}
+    case COLOR.amber:{const t=clamp(spd/120,0,1);return`rgb(${Math.round(lerp(245,56,t))},${Math.round(lerp(158,255,t))},${Math.round(lerp(11,20,t))})`}
+    case COLOR.cyan_ghost:{const t=clamp(spd/100,0,1);return`rgba(${Math.round(lerp(0,179,t))},${Math.round(lerp(179,242,t))},255,0.8)`}
+    default:return"rgba(0,229,255,0.7)";
+  }
+}
+
+function updateCanvasParticles(dt){
+  const c=state.config;const w=state.canvas.width,h=state.canvas.height;
+  const cx=w/2,cy=h/2;
+  const ptr=state.pointer;
+  const ps=state.particles2d;
+  const n=effectiveParticleCount();
+  for(let i=0;i<n;i++){
+    const p=ps[i];
+    p.vx*=c.damping;p.vy*=c.damping;
+    const tcx=cx-p.x,tcy=cy-p.y;const d=Math.sqrt(tcx*tcx+tcy*tcy);
+    if(d>1){const nx=tcx/d,ny=tcy/d;
+      p.vx+=nx*c.gravityStrength*10*dt;p.vy+=ny*c.gravityStrength*10*dt;
+      const px=-ny,py=nx;p.vx+=px*c.vortexStrength*5*dt;p.vy+=py*c.vortexStrength*5*dt;
+    }
+    if(ptr.active){
+      const tpx=ptr.x-p.x,tpy=ptr.y-p.y;const dp=Math.sqrt(tpx*tpx+tpy*tpy);
+      if(dp>1){const nx=tpx/dp,ny=tpy/dp;const str=100/(dp+10)*dt;
+        switch(c.interactionMode){
+          case INTERACT.attract:p.vx+=nx*c.attractorStrength*str;p.vy+=ny*c.attractorStrength*str;break;
+          case INTERACT.repel:p.vx-=nx*c.repulsionStrength*str;p.vy-=ny*c.repulsionStrength*str;break;
+          case INTERACT.vortex:{const px=-ny,py=nx;p.vx+=px*c.vortexStrength*str*.5;p.vy+=py*c.vortexStrength*str*.5;break}
+          case INTERACT.stir:{p.vx+=(Math.random()-.5)*str*2;p.vy+=(Math.random()-.5)*str*2;break}
+          case INTERACT.explode:if(ptr.down){p.vx+=nx*str*3;p.vy+=ny*str*3}else{p.vx*=.95;p.vy*=.95}break;
+          case INTERACT.freeze:p.vx*=.9;p.vy*=.9;break;
+          case INTERACT.draw:if(ptr.down){p.vx+=(Math.random()-.5)*200*dt;p.vy+=(Math.random()-.5)*200*dt}break;
+        }
+      }
+    }
+    const ns=c.noiseScale;const nss=c.noiseSpeed;const t=performance.now()/1000;
+    const nx=Math.sin(p.x*ns+t*nss)*Math.cos(p.y*ns*.7+t*nss*.5);
+    const ny=Math.cos(p.x*ns*.6-t*nss*.8)*Math.sin(p.y*ns+t*nss*.3);
+    p.vx+=nx*c.turbulence*50*dt;p.vy+=ny*c.turbulence*50*dt;
+    p.x+=p.vx*c.speed*dt;p.y+=p.vy*c.speed*dt;
+    switch(c.boundaryMode){
+      case BOUNDARY.wrap:if(p.x<0)p.x+=w;if(p.x>w)p.x-=w;if(p.y<0)p.y+=h;if(p.y>h)p.y-=h;break;
+      case BOUNDARY.bounce:if(p.x<0||p.x>w){p.vx*=-1;p.x=clamp(p.x,0,w)}if(p.y<0||p.y>h){p.vy*=-1;p.y=clamp(p.y,0,h)}break;
+      case BOUNDARY.absorb:if(p.x<0||p.x>w||p.y<0||p.y>h){p.x=Math.random()*w;p.y=Math.random()*h;p.vx=0;p.vy=0;p.life=1}break;
+    }
+    p.life-=dt*.05;
+    if(p.life<0){p.life=1;p.x=Math.random()*w;p.y=Math.random()*h;p.vx=(Math.random()-.5)*30;p.vy=(Math.random()-.5)*30}
+  }
+}
+
+function renderCanvasFrame(dt){
+  const ctx=state.ctx2d;const w=state.canvas.width,h=state.canvas.height;
+  const c=state.config;
+  ctx.fillStyle=`rgba(7,7,14,${1-c.trailFade*.95})`;
+  ctx.fillRect(0,0,w,h);
+  const n=effectiveParticleCount();
+  const ps=state.particles2d;
+  const sz=c.particleSize;
+  for(let i=0;i<n;i++){
+    const p=ps[i];if(p.x<-10||p.x>w+10||p.y<-10||p.y>h+10)continue;
+    const alpha=clamp(p.life*.7+Math.sqrt(p.vx*p.vx+p.vy*p.vy)/200*.3,.05,1);
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=canvasColor(p,200);
+    ctx.beginPath();
+    const r=sz*(1+c.glowAmount*.1);
+    ctx.arc(p.x,p.y,r,0,Math.PI*2);
+    ctx.fill();
+    if(c.glowAmount>1.5){
+      ctx.globalAlpha=alpha*.2;
+      ctx.beginPath();ctx.arc(p.x,p.y,r*2.5,0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.globalAlpha=1;
+}
+
+function applyPreset(name){
+  const pr=PRESETS.find(p=>p.name===name);
+  if(!pr)return;
+  state.config={...DEFAULT_CONFIG,...pr.config};
+  sanitizeConfig();
+  state.presetName=name;
+  document.getElementById("statusPreset").textContent=name;
+  resetSimulation();updateAllControls();
+  toast(`Preset: ${name}`,"ok");
+}
+
+function resetSimulation(){
+  if(state.renderer==="webgpu")resetGPUParticles();
+  else if(state.renderer==="canvas2d")resetCanvasParticles();
+  if(state.trailTex)state.trailReady=false;
+}
+
+function randomizeConfig(){
+  const c=state.config;
+  c.speed=.3+Math.random()*2.5;c.damping=.92+Math.random()*.07;
+  c.turbulence=Math.random()*4;c.gravityStrength=Math.random()*2;
+  c.vortexStrength=Math.random()*2;c.attractorStrength=Math.random()*2;
+  c.repulsionStrength=Math.random()*2;c.noiseScale=.001+Math.random()*.008;
+  c.noiseSpeed=Math.random()*1.5;c.trailFade=.02+Math.random()*.18;
+  c.particleSize=1+Math.random()*6;c.glowAmount=.5+Math.random()*3;
+  c.colorMode=Math.floor(Math.random()*10);c.boundaryMode=Math.floor(Math.random()*4);
+  c.spawnPattern=Math.floor(Math.random()*11);c.interactionMode=Math.floor(Math.random()*7);
+  state.presetName="Randomized";
+  document.getElementById("statusPreset").textContent="Randomized";
+  resetSimulation();updateAllControls();toast("Config randomized","info");
+}
+
+function resizeCanvas(){
+  const c=state.canvas;const dpr=window.devicePixelRatio||1;
+  const rect=c.getBoundingClientRect();
+  const w=Math.max(1,Math.floor(rect.width*dpr));
+  const h=Math.max(1,Math.floor(rect.height*dpr));
+  if(c.width===w&&c.height===h)return;
+  c.width=w;c.height=h;
+  if(state.renderer==="webgpu")resizeGPU();
+  else if(state.ctx2d){state.ctx2d.setTransform(1,0,0,1,0,0)}
+  resetSimulation();
+}
+
+function animate(ts){
+  if(!state.running){state.animId=requestAnimationFrame(animate);return}
+  if(state.pauseHidden&&document.hidden){state.animId=requestAnimationFrame(animate);return}
+
+  let dt=(ts-state.lastFrame)/1000;state.lastFrame=ts;
+  if(dt>0.1)dt=1/60;if(dt<=0)dt=1/60;
+
+  if(state.maxFPS===30){dt=Math.max(dt,1/30)}
+  else if(state.maxFPS===60){dt=Math.max(dt,1/60)}
+
+  state.fps.frames++;
+  if(ts-state.fps.lastTime>=500){
+    state.fps.value=Math.round(state.fps.frames/((ts-state.fps.lastTime)/1000));
+    state.fps.frames=0;state.fps.lastTime=ts;
+    state.fps.frameTime=dt*1000;
+    document.getElementById("statusFPS").textContent=state.fps.value+" fps";
+  }
+  document.getElementById("statusCount").textContent=effectiveParticleCount()+" particles";
+
+  if(state.renderer==="webgpu")renderWebGPU(dt);
+  else if(state.renderer==="canvas2d"){updateCanvasParticles(dt);renderCanvasFrame(dt)}
+
+  applySimulatedEvents(dt);
+  state.animId=requestAnimationFrame(animate);
+}
+
+function handlePointerMove(e){
+  const r=state.canvas.getBoundingClientRect();const dpr=window.devicePixelRatio||1;
+  state.pointer.x=(e.clientX-r.left)*dpr;state.pointer.y=(e.clientY-r.top)*dpr;
+  state.pointer.active=true;
+}
+function handlePointerDown(e){
+  state.pointer.down=true;handlePointerMove(e);
+  if(state.config.interactionMode===INTERACT.explode||state.config.interactionMode===INTERACT.draw){
+    pulseBurst(state.pointer.x,state.pointer.y);
+  }
+}
+function handlePointerUp(){state.pointer.down=false}
+function pulseBurst(x,y){
+  if(state.renderer==="canvas2d"){
+    const ps=state.particles2d;const c=state.config;
+    for(let i=0;i<effectiveParticleCount();i++){
+      const p=ps[i];const dx=p.x-x,dy=p.y-y;const d=Math.sqrt(dx*dx+dy*dy);
+      if(d<200&&d>1){const f=150/(d+20);p.vx+=dx/d*f;p.vy+=dy/d*f}
+    }
+  }
+}
+
+const EVENT_TYPES=["space_weather","news_weirdness","earthquake","market_tremor","wildlife_sighting"];
+const EVENT_TITLES={
+  space_weather:["CME Impact Detected","Solar Flare X2.3","Geomagnetic Storm Kp=7","Radiation Belt Surge","Magnetopause Compression"],
+  news_weirdness:["Anomaly Cluster in Southeast Asia","Unusual Diplomatic Signal","Mass Event Pattern Detected","Cognitive Dissonance Spike","Narrative Inversion Wave"],
+  earthquake:["M5.8 Near Coast","M6.2 Deep Focus","M4.1 Aftershock Swarm","M7.0 Subduction Event","Tsunami Advisory Issued"],
+  market_tremor:["Flash Crash Pattern","Liquidity Vacuum","Whale Movement Detected","Correlation Breakdown","Volatility Spike VIX>40"],
+  wildlife_sighting:["Bioluminescent Bloom","Migration Path Deviation","Acoustic Anomaly Pod","Thermal Signature Cluster","Nocturnal Activity Surge"]
+};
+const EVENT_COLORS={space_weather:"#00e5ff",news_weirdness:"#8b5cf6",earthquake:"#f59e0b",market_tremor:"#ef4444",wildlife_sighting:"#39ff14"};
+
+let eventIdCounter=0;
+function generateSimulatedEvent(type){
+  type=type||EVENT_TYPES[Math.floor(Math.random()*EVENT_TYPES.length)];
+  const titles=EVENT_TITLES[type]||["Unknown Event"];
+  const w=state.canvas.width,h=state.canvas.height;
+  const ev={
+    id:++eventIdCounter,type,title:titles[Math.floor(Math.random()*titles.length)],
+    timestamp:Date.now(),intensity:.3+Math.random()*.7,
+    x:Math.random()*w,y:Math.random()*h,colorHint:EVENT_COLORS[type],
+    metadata:{}
+  };
+  state.events.push(ev);if(state.events.length>50)state.events.shift();
+  applyEventToSimulation(ev);renderDataFeed();
+  return ev;
+}
+
+function applyEventToSimulation(ev){
+  if(state.renderer==="canvas2d"){
+    const ps=state.particles2d;const c=state.config;const r=150*ev.intensity;
+    for(let i=0;i<effectiveParticleCount();i++){
+      const p=ps[i];const dx=p.x-ev.x,dy=p.y-ev.y;const d=Math.sqrt(dx*dx+dy*dy);
+      if(d<r&&d>1){
+        const f=ev.intensity*100/(d+10);
+        switch(ev.type){
+          case"space_weather":p.vx+=f*.8;p.vy+=(Math.random()-.5)*f;break;
+          case"news_weirdness":p.vx+=(Math.random()-.5)*f;p.vy+=(Math.random()-.5)*f;break;
+          case"earthquake":{const a=Math.atan2(dy,dx);p.vx+=Math.cos(a)*f;p.vy+=Math.sin(a)*f;break}
+          case"market_tremor":p.vx+=(Math.random()-.5)*f*2;p.vy+=(Math.random()-.5)*f*2;break;
+          case"wildlife_sighting":p.vx+=(Math.random()-.5)*f*.3;p.vy+=(Math.random()-.5)*f*.3;p.life=1;break;
+        }
+      }
+    }
+  }
+}
+
+let autoEventTimer=0;let autoEventActive=false;let eventIntensity=.5;
+function applySimulatedEvents(dt){if(!autoEventActive)return;autoEventTimer+=dt;if(autoEventTimer>2/eventIntensity){autoEventTimer=0;generateSimulatedEvent()}}
+
+function exportSnapshot(){
+  const c=state.canvas;
+  try{
+    if(state.renderer==="webgpu"&&state.device){
+      const w=c.width,h=c.height;
+      const bytesPerRow=Math.ceil(w*4/256)*256;
+      const readBuf=state.device.createBuffer({size:bytesPerRow*h,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});
+      const enc=state.device.createCommandEncoder();
+      enc.copyTextureToBuffer({texture:state.trailTex},{buffer:readBuf,bytesPerRow},[w,h,1]);
+      state.device.queue.submit([enc.finish()]);
+      readBuf.mapAsync(GPUMapMode.READ).then(()=>{
+        const data=new Uint8Array(readBuf.getMappedRange());
+        const imgData=new Uint8ClampedArray(w*h*4);
+        const bgra=state.canvasFormat==="bgra8unorm";
+        for(let y=0;y<h;y++){for(let x=0;x<w;x++){
+          const si=y*bytesPerRow+x*4;const di=y*w*4+x*4;
+          if(bgra){imgData[di]=data[si+2];imgData[di+1]=data[si+1];imgData[di+2]=data[si];imgData[di+3]=data[si+3]}
+          else{imgData[di]=data[si];imgData[di+1]=data[si+1];imgData[di+2]=data[si+2];imgData[di+3]=data[si+3]}
+        }}
+        readBuf.unmap();readBuf.destroy();
+        const tmpC=document.createElement("canvas");tmpC.width=w;tmpC.height=h;
+        const tmpCtx=tmpC.getContext("2d");tmpCtx.putImageData(new ImageData(imgData,w,h),0,0);
+        tmpC.toBlob(blob=>{
+          if(!blob){toast("Export failed","err");return}
+          downloadBlob(blob,"particle-snapshot.png");
+        },"image/png");
+      }).catch(()=>{readBuf.destroy();toast("Readback failed","err")});
+    }else{
+      c.toBlob(blob=>{
+        if(!blob){toast("Export failed","err");return}
+        if(window.showSaveFilePicker){
+          window.showSaveFilePicker({suggestedName:"particle-snapshot.png",types:[{description:"PNG",accept:{"image/png":[".png"]}}]})
+            .then(h=>h.createWritable().then(w=>w.write(blob).then(()=>w.close())).then(()=>toast("Snapshot saved","ok")))
+            .catch(()=>downloadBlob(blob,"particle-snapshot.png"));
+        }else{downloadBlob(blob,"particle-snapshot.png")}
+      },"image/png");
+    }
+  }catch(e){toast("Snapshot export failed: "+e.message,"err")}
+}
+
+function downloadBlob(blob,name){
+  const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);toast("Downloaded "+name,"ok");
+}
+
+function exportPresetJson(){
+  const data={app:APP_NAME,version:VERSION,createdAt:new Date().toISOString(),
+    renderer:state.renderer,presetName:state.presetName||"Custom",config:{...state.config}};
+  const json=JSON.stringify(data,null,2);
+  copyOrDownload(json,`particle-preset-${(state.presetName||"custom").replace(/\s+/g,"-").toLowerCase()}.json`,"application/json");
+}
+
+function copyOrDownload(text,filename,mime){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>toast("Copied to clipboard","ok")).catch(()=>downloadText(text,filename,mime));
+  }else{downloadText(text,filename,mime)}
+}
+
+function downloadText(text,filename,mime){
+  const blob=new Blob([text],{type:mime});downloadBlob(blob,filename);
+}
+
+function importPresetJson(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(!data.app||data.app!==APP_NAME||!data.config)throw new Error("Invalid preset format");
+      if(data.version>VERSION)toast("Preset from newer version - some settings may not apply","warn");
+      state.config={...DEFAULT_CONFIG,...data.config};
+      sanitizeConfig();
+      state.presetName=data.presetName||"Imported";
+      document.getElementById("statusPreset").textContent=state.presetName;
+      resetSimulation();updateAllControls();toast(`Imported: ${state.presetName}`,"ok");
+    }catch(err){toast("Invalid preset file: "+err.message,"err")}
+  };
+  reader.readAsText(file);
+}
+
+function saveSettings(){
+  try{
+    localStorage.setItem(LS_KEY+"config",JSON.stringify(state.config));
+    localStorage.setItem(LS_KEY+"preset",state.presetName);
+    localStorage.setItem(LS_KEY+"maxFPS",String(state.maxFPS));
+    localStorage.setItem(LS_KEY+"pauseHidden",String(state.pauseHidden));
+    localStorage.setItem(LS_KEY+"autoEvent",String(autoEventActive));
+    localStorage.setItem(LS_KEY+"eventIntensity",String(eventIntensity));
+  }catch(e){}
+}
+
+function loadSettings(){
+  try{
+    const c=localStorage.getItem(LS_KEY+"config");
+    if(c){const parsed=JSON.parse(c);state.config={...DEFAULT_CONFIG,...parsed};sanitizeConfig()}
+    const p=localStorage.getItem(LS_KEY+"preset");
+    if(p){state.presetName=p;document.getElementById("statusPreset").textContent=p}
+    const fps=localStorage.getItem(LS_KEY+"maxFPS");
+    if(fps)state.maxFPS=parseInt(fps)||0;
+    const ph=localStorage.getItem(LS_KEY+"pauseHidden");
+    if(ph)state.pauseHidden=ph==="true";
+    const ae=localStorage.getItem(LS_KEY+"autoEvent");
+    if(ae)autoEventActive=ae==="true";
+    const ei=localStorage.getItem(LS_KEY+"eventIntensity");
+    if(ei)eventIntensity=parseFloat(ei)||.5;
+  }catch(e){}
+}
+
+function buildUI(){
+  buildPlaygroundPanel();
+  buildPresetsPanel();
+  buildDataFeedPanel();
+  buildPerfPanel();
+  buildExportPanel();
+  buildAboutPanel();
+  setupTabNavigation();
+}
+
+function makeSlider(label,key,min,max,step,parent){
+  const g=document.createElement("div");g.className="ctrl-row";
+  const l=document.createElement("label");l.textContent=label;
+  const inp=document.createElement("input");inp.type="range";inp.min=min;inp.max=max;inp.step=step;
+  inp.value=state.config[key];inp.id="ctrl-"+key;
+  const v=document.createElement("span");v.className="val";v.textContent=Number(state.config[key]).toFixed(step<1?2:0);
+  inp.addEventListener("input",()=>{
+    const oldValue=state.config[key];
+    state.config[key]=parseFloat(inp.value);
+    if(key==="particleCount")state.config[key]=effectiveParticleCount();
+    v.textContent=Number(state.config[key]).toFixed(step<1?2:0);
+    inp.value=state.config[key];
+    if(key==="particleCount"&&state.config[key]!==oldValue)resetSimulation();
+    saveSettings();
+  });
+  g.append(l,inp,v);parent.appendChild(g);return inp;
+}
+
+function makeSelect(label,key,options,parent){
+  const g=document.createElement("div");g.className="ctrl-row";
+  const l=document.createElement("label");l.textContent=label;
+  const sel=document.createElement("select");sel.id="ctrl-"+key;
+  options.forEach((name,i)=>{const o=document.createElement("option");o.value=i;o.textContent=name;sel.appendChild(o)});
+  sel.value=state.config[key];
+  sel.addEventListener("change",()=>{
+    state.config[key]=parseInt(sel.value);
+    if(key==="spawnPattern")resetSimulation();
+    saveSettings();
+  });
+  g.append(l,sel);parent.appendChild(g);return sel;
+}
+
+function buildPlaygroundPanel(){
+  const p=document.getElementById("panel-playground");
+  p.innerHTML="";
+
+  const ag=document.createElement("div");ag.className="ctrl-group";
+  const al=document.createElement("label");al.textContent="Actions";ag.appendChild(al);
+  const abtns=document.createElement("div");abtns.style.cssText="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px";
+  const mkBtn=(txt,fn)=>{const b=document.createElement("button");b.className="sbtn";b.textContent=txt;b.addEventListener("click",fn);return b};
+  abtns.appendChild(mkBtn("Reset",()=>{resetSimulation();toast("Simulation reset","info")}));
+  abtns.appendChild(mkBtn("Randomize",randomizeConfig));
+  abtns.appendChild(mkBtn("Save Preset",()=>{const saved=JSON.parse(localStorage.getItem(LS_KEY+"saved")||"[]");saved.push({name:state.presetName||"Custom",config:{...state.config},createdAt:new Date().toISOString()});localStorage.setItem(LS_KEY+"saved",JSON.stringify(saved));toast("Preset saved locally","ok")}));
+  abtns.appendChild(mkBtn("Export JSON",exportPresetJson));
+  abtns.appendChild(mkBtn("Import JSON",()=>{const inp=document.createElement("input");inp.type="file";inp.accept=".json";inp.addEventListener("change",e=>{if(e.target.files[0])importPresetJson(e.target.files[0])});inp.click()}));
+  abtns.appendChild(mkBtn("Snapshot PNG",exportSnapshot));
+  ag.appendChild(abtns);p.appendChild(ag);
+
+  const cg=document.createElement("div");cg.className="ctrl-group";
+  const cl=document.createElement("label");cl.textContent="Particle Count";cg.appendChild(cl);
+  makeSlider("Count","particleCount",100,state.renderer==="webgpu"?MAX_GPU_PARTICLES:MAX_CANVAS_PARTICLES,100,cg);
+  if(state.renderer==="canvas2d"){const cap=document.createElement("div");cap.className="hint";cap.textContent="Canvas 2D mode: capped at 10,000 particles";cg.appendChild(cap)}
+  p.appendChild(cg);
+
+  const sg=document.createElement("div");sg.className="ctrl-group";
+  const sl=document.createElement("label");sl.textContent="Simulation";sg.appendChild(sl);
+  makeSlider("Speed","speed",0,5,.1,sg);
+  makeSlider("Damping","damping",.9,.999,.001,sg);
+  makeSlider("Turbulence","turbulence",0,5,.1,sg);
+  makeSlider("Gravity","gravityStrength",0,5,.1,sg);
+  makeSlider("Vortex","vortexStrength",0,5,.1,sg);
+  makeSlider("Attractor","attractorStrength",0,5,.1,sg);
+  makeSlider("Repulsion","repulsionStrength",0,5,.1,sg);
+  makeSlider("Noise Scale","noiseScale",.001,.01,.001,sg);
+  makeSlider("Noise Speed","noiseSpeed",0,2,.1,sg);
+  p.appendChild(sg);
+
+  const vg=document.createElement("div");vg.className="ctrl-group";
+  const vl=document.createElement("label");vl.textContent="Visual";vg.appendChild(vl);
+  makeSlider("Trail/Fade","trailFade",0,.3,.01,vg);
+  makeSlider("Particle Size","particleSize",1,20,.5,vg);
+  makeSlider("Glow","glowAmount",0,5,.1,vg);
+  p.appendChild(vg);
+
+  const mg=document.createElement("div");mg.className="ctrl-group";
+  const ml=document.createElement("label");ml.textContent="Modes";mg.appendChild(ml);
+  makeSelect("Color Mode","colorMode",COLOR_NAMES,mg);
+  makeSelect("Boundary","boundaryMode",BOUNDARY_NAMES,mg);
+  makeSelect("Spawn Pattern","spawnPattern",SPAWN_NAMES,mg);
+  makeSelect("Interaction","interactionMode",INTERACT_NAMES,mg);
+  p.appendChild(mg);
+
+  const hint=document.createElement("div");hint.className="hint";
+  hint.textContent="Move pointer over canvas to interact. Click/tap for pulse burst. Drag for vortex trail.";
+  p.appendChild(hint);
+}
+
+function buildPresetsPanel(){
+  const p=document.getElementById("panel-presets");p.innerHTML="";
+  PRESETS.forEach(pr=>{
+    const card=document.createElement("div");card.className="preset-card";
+    const h=document.createElement("h4");h.textContent=pr.name;
+    const d=document.createElement("p");d.textContent=pr.desc;
+    const btns=document.createElement("div");btns.className="btns";
+    const apply=document.createElement("button");apply.className="sbtn";apply.textContent="Apply";
+    apply.addEventListener("click",()=>applyPreset(pr.name));
+    const copy=document.createElement("button");copy.className="sbtn";copy.textContent="Copy Config";
+    copy.addEventListener("click",()=>{
+      const json=JSON.stringify({...DEFAULT_CONFIG,...pr.config},null,2);
+      if(navigator.clipboard)navigator.clipboard.writeText(json).then(()=>toast("Config copied","ok")).catch(()=>toast("Copy failed","err"));
+      else toast("Clipboard unavailable","warn");
+    });
+    btns.append(apply,copy);card.append(h,d,btns);p.appendChild(card);
+  });
+}
+
+function buildDataFeedPanel(){
+  const p=document.getElementById("panel-datafeed");p.innerHTML="";
+  const h=document.createElement("div");h.className="ctrl-group";
+  const hl=document.createElement("label");hl.textContent="Data Feed Simulator";h.appendChild(hl);
+  const hint=document.createElement("div");hint.className="hint";
+  hint.textContent="Simulates external events mapped to particle behavior. Foundation for future Watchtower integrations.";
+  h.appendChild(hint);
+
+  const row1=document.createElement("div");row1.style.cssText="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap";
+  EVENT_TYPES.forEach(t=>{
+    const b=document.createElement("button");b.className="sbtn";b.textContent=t.replace(/_/g," ");
+    b.addEventListener("click",()=>generateSimulatedEvent(t));row1.appendChild(b);
+  });
+  h.appendChild(row1);
+
+  const genB=document.createElement("button");genB.className="sbtn";genB.textContent="Generate Random Event";
+  genB.addEventListener("click",()=>generateSimulatedEvent());h.appendChild(genB);
+
+  const clrB=document.createElement("button");clrB.className="sbtn";clrB.textContent="Clear Events";
+  clrB.addEventListener("click",()=>{state.events=[];renderDataFeed();toast("Events cleared","info")});h.appendChild(clrB);
+
+  const autoRow=document.createElement("div");autoRow.className="ctrl-row";
+  const autoL=document.createElement("label");autoL.textContent="Auto-generate Events";
+  const autoI=document.createElement("input");autoI.type="checkbox";autoI.checked=autoEventActive;
+  autoI.addEventListener("change",()=>{autoEventActive=autoI.checked;saveSettings()});
+  autoRow.append(autoL,autoI);h.appendChild(autoRow);
+
+  const intRow=document.createElement("div");intRow.className="ctrl-row";
+  const intL=document.createElement("label");intL.textContent="Event Intensity";
+  const intI=document.createElement("input");intI.type="range";intI.min=.1;intI.max=2;intI.step=.1;intI.value=eventIntensity;
+  const intV=document.createElement("span");intV.className="val";intV.textContent=eventIntensity.toFixed(1);
+  intI.addEventListener("input",()=>{eventIntensity=parseFloat(intI.value);intV.textContent=eventIntensity.toFixed(1);saveSettings()});
+  intRow.append(intL,intI,intV);h.appendChild(intRow);
+
+  p.appendChild(h);
+
+  const evList=document.createElement("div");evList.id="event-list";
+  p.appendChild(evList);
+}
+
+function renderDataFeed(){
+  const el=document.getElementById("event-list");if(!el)return;
+  el.innerHTML="";
+  const recent=state.events.slice(-10).reverse();
+  recent.forEach(ev=>{
+    const c=document.createElement("div");c.className="event-card";
+    c.innerHTML=`<span class="etype" style="color:${ev.colorHint}">${ev.type.replace(/_/g," ")}</span> <span class="etitle">${ev.title}</span> <span class="eint">int:${ev.intensity.toFixed(2)}</span>`;
+    el.appendChild(c);
+  });
+}
+
+function buildPerfPanel(){
+  const p=document.getElementById("panel-perf");p.innerHTML="";
+  const g=document.createElement("div");g.className="ctrl-group";
+  const gl=document.createElement("label");gl.textContent="Performance";g.appendChild(gl);
+
+  const fpsRow=document.createElement("div");fpsRow.className="ctrl-row";
+  const fpsL=document.createElement("label");fpsL.textContent="Max FPS";
+  const fpsS=document.createElement("select");
+  [{v:0,l:"Uncapped"},{v:30,l:"30"},{v:60,l:"60"}].forEach(o=>{
+    const op=document.createElement("option");op.value=o.v;op.textContent=o.l;fpsS.appendChild(op)});
+  fpsS.value=state.maxFPS;
+  fpsS.addEventListener("change",()=>{state.maxFPS=parseInt(fpsS.value);saveSettings()});
+  fpsRow.append(fpsL,fpsS);g.appendChild(fpsRow);
+
+  const phRow=document.createElement("div");phRow.className="ctrl-row";
+  const phL=document.createElement("label");phL.textContent="Pause when tab hidden";
+  const phI=document.createElement("input");phI.type="checkbox";phI.checked=state.pauseHidden;
+  phI.addEventListener("change",()=>{state.pauseHidden=phI.checked;saveSettings()});
+  phRow.append(phL,phI);g.appendChild(phRow);
+
+  const rmRow=document.createElement("div");rmRow.className="ctrl-row";
+  const rmL=document.createElement("label");rmL.textContent="Reduce motion";
+  const rmI=document.createElement("input");rmI.type="checkbox";rmI.checked=state.reduceMotion;
+  rmI.addEventListener("change",()=>{state.reduceMotion=rmI.checked});
+  rmRow.append(rmL,rmI);g.appendChild(rmRow);
+
+  const aqRow=document.createElement("div");aqRow.className="ctrl-row";
+  const aqL=document.createElement("label");aqL.textContent="Adaptive quality";
+  const aqI=document.createElement("input");aqI.type="checkbox";aqI.checked=state.adaptiveQuality;
+  aqI.addEventListener("change",()=>{state.adaptiveQuality=aqI.checked});
+  aqRow.append(aqL,aqI);g.appendChild(aqRow);
+
+  p.appendChild(g);
+
+  const diag=document.createElement("div");diag.className="ctrl-group";
+  const dl=document.createElement("label");dl.textContent="Diagnostics";diag.appendChild(dl);
+  const di=document.createElement("div");di.id="perf-diagnostics";di.style.cssText="font-family:var(--font-mono);font-size:11px;color:var(--dim);line-height:1.6";
+  diag.appendChild(di);p.appendChild(diag);
+}
+
+function updatePerfDiagnostics(){
+  const d=document.getElementById("perf-diagnostics");if(!d)return;
+  d.innerHTML=`
+    Renderer: ${state.renderer}<br>
+    FPS: ${state.fps.value} | Frame: ${state.fps.frameTime.toFixed(1)}ms<br>
+    Particles: ${state.config.particleCount}<br>
+    GPU Adapter: ${state.gpu?"available":"N/A"}<br>
+    Canvas: ${state.canvas.width}x${state.canvas.height}<br>
+    DPR: ${window.devicePixelRatio}<br>
+    WebGPU: ${state.renderer==="webgpu"?"Active":"Not available"}<br>
+    ${state.renderer!=="webgpu"?"Hints: Use Chrome 113+, enable hardware acceleration, ensure secure context (HTTPS/localhost)":""}
+  `;
+}
+
+function buildExportPanel(){
+  const p=document.getElementById("panel-export");p.innerHTML="";
+  const g=document.createElement("div");g.className="ctrl-group";
+  const gl=document.createElement("label");gl.textContent="Export & Import";g.appendChild(gl);
+
+  const snap=document.createElement("button");snap.className="sbtn";snap.style.marginRight="8px";
+  snap.textContent="Export Snapshot PNG";snap.addEventListener("click",exportSnapshot);
+
+  const json=document.createElement("button");json.className="sbtn";json.style.marginRight="8px";
+  json.textContent="Export Preset JSON";json.addEventListener("click",exportPresetJson);
+
+  g.appendChild(snap);g.appendChild(json);p.appendChild(g);
+
+  const ig=document.createElement("div");ig.className="ctrl-group";
+  const igl=document.createElement("label");igl.textContent="Import Preset JSON";ig.appendChild(igl);
+  const fi=document.createElement("input");fi.type="file";fi.accept=".json";
+  fi.addEventListener("change",e=>{if(e.target.files[0])importPresetJson(e.target.files[0])});
+  ig.appendChild(fi);p.appendChild(ig);
+
+  const pg=document.createElement("div");pg.className="ctrl-group";
+  const pgl=document.createElement("label");pgl.textContent="Paste Preset JSON";pg.appendChild(pgl);
+  const ta=document.createElement("textarea");ta.style.cssText="width:100%;height:80px;background:rgba(0,229,255,.04);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--font-mono);font-size:10px;padding:6px;resize:vertical";
+  const apply=document.createElement("button");apply.className="sbtn";apply.textContent="Apply Pasted Config";
+  apply.addEventListener("click",()=>{
+    try{
+      const data=JSON.parse(ta.value);
+      if(!data.config)throw new Error("No config found");
+      state.config={...DEFAULT_CONFIG,...data.config};
+      sanitizeConfig();
+      state.presetName=data.presetName||"Pasted";
+      document.getElementById("statusPreset").textContent=state.presetName;
+      resetSimulation();updateAllControls();toast("Applied pasted config","ok");
+    }catch(err){toast("Invalid JSON: "+err.message,"err")}
+  });
+  pg.appendChild(ta);pg.appendChild(apply);p.appendChild(pg);
+}
+
+function buildAboutPanel(){
+  const p=document.getElementById("panel-about");p.innerHTML=`
+<div class="docs-section"><h3>WebGPU Particle Playground</h3>
+<p>A browser-native particle lab for beautiful chaos, signal fields, and "how is this running in Chrome?" visual experiments.</p>
+<p style="color:var(--green)">This app does not send data anywhere. It runs locally in your browser.</p></div>
+<div class="docs-section"><h3>What is WebGPU?</h3>
+<p>WebGPU is a modern graphics API for the web, providing low-level access to GPU hardware for compute and rendering. It enables high-performance particle simulations directly in the browser.</p></div>
+<div class="docs-section"><h3>Why Canvas Fallback?</h3>
+<p>WebGPU requires Chrome 113+ (or other Chromium browsers), hardware acceleration enabled, and a secure context. If unavailable, the app falls back to Canvas 2D with fewer particles but full interactivity.</p></div>
+<div class="docs-section"><h3>Documentation</h3>
+<p><a class="docs-link" href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
+<p><a class="docs-link" href="https://developer.chrome.com/docs/capabilities/web-apis/gpu" target="_blank">Chrome: WebGPU</a></p>
+<p><a class="docs-link" href="https://www.w3.org/TR/WGSL/" target="_blank">WGSL Specification</a></p>
+<p><a class="docs-link" href="https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API" target="_blank">MDN: Canvas API</a></p>
+<p><a class="docs-link" href="https://developer.mozilla.org/en-US/docs/Web/API/File_System_API" target="_blank">MDN: File System Access</a></p>
+<p><a class="docs-link" href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API" target="_blank">MDN: View Transition API</a></p></div>
+<div class="docs-section"><h3>Future Uses</h3>
+<p>NASA DONKI solar storm visualization</p>
+<p>GDELT weirdness radar blips</p>
+<p>USGS earthquake ripples</p>
+<p>Crypto/stock market tremor fields</p>
+<p>Wildlife sighting glow maps</p>
+<p>Local AI thought maps</p>
+<p>Audio-reactive visualizers</p></div>
+<div class="docs-section"><h3>Controls</h3>
+<p>Move pointer = attract/repel particles (based on interaction mode)</p>
+<p>Click/tap = pulse burst</p>
+<p>Drag = vortex trail</p>
+<p>Scroll = adjust interaction radius (coming soon)</p></div>`;
+}
+
+function setupTabNavigation(){
+  const tabs=document.querySelectorAll("#tabs button");
+  const panels=document.querySelectorAll(".panel");
+  tabs.forEach(tab=>{
+    tab.addEventListener("click",()=>{
+      tabs.forEach(t=>t.classList.remove("active"));tab.classList.add("active");
+      const target=tab.dataset.tab;
+      if(document.startViewTransition){
+        document.startViewTransition(()=>{
+          panels.forEach(p=>p.classList.toggle("active",p.id==="panel-"+target));
+        });
+      }else{
+        panels.forEach(p=>p.classList.toggle("active",p.id==="panel-"+target));
+      }
+      if(target==="perf")updatePerfDiagnostics();
+    });
+  });
+}
+
+function updateAllControls(){
+  document.querySelectorAll("#panel-playground input[type=range]").forEach(inp=>{
+    const key=inp.id.replace("ctrl-","");
+    if(state.config[key]!==undefined){inp.value=state.config[key];
+      const val=inp.parentElement.querySelector(".val");
+      if(val)val.textContent=Number(inp.value).toFixed(inp.step<1?2:0);
+    }
+  });
+  document.querySelectorAll("#panel-playground select").forEach(sel=>{
+    const key=sel.id.replace("ctrl-","");
+    if(state.config[key]!==undefined)sel.value=state.config[key];
+  });
+  const fpsS=document.querySelector("#panel-perf select");
+  if(fpsS)fpsS.value=state.maxFPS;
+}
+
+function setupButtons(){
+  document.getElementById("btnToggle").addEventListener("click",()=>{
+    state.running=!state.running;
+    document.getElementById("btnToggle").textContent=state.running?"Pause":"Start";
+  });
+  document.getElementById("toggleSidebar").addEventListener("click",()=>{
+    document.getElementById("sidebar").classList.toggle("hidden");
+  });
+}
+
+function updateStatusLEDs(){
+  const led=document.getElementById("ledRenderer");
+  const stat=document.getElementById("statusRenderer");
+  if(state.renderer==="webgpu"){led.className="led on";stat.textContent="WebGPU"}
+  else if(state.renderer==="canvas2d"){led.className="led warn";stat.textContent="Canvas 2D"}
+  else{led.className="led off";stat.textContent="No renderer"}
+}
+
+function showFallbackBadge(){
+  if(state.renderer==="canvas2d"){
+    document.getElementById("fallback-badge").style.display="block";
+  }
+}
+
+async function init(){
+  state.canvas=document.getElementById("stage");
+  resizeCanvas();
+
+  const webgpuOk=await setupWebGPU();
+  if(!webgpuOk){
+    const canvasOk=setupCanvasFallback();
+    if(!canvasOk){toast("No renderer available","err");return}
+  }
+
+  updateStatusLEDs();showFallbackBadge();
+  loadSettings();
+  buildUI();setupButtons();
+
+  if(!state.presetName){
+    applyPreset("Solar Storm");
+  }else{
+    resetSimulation();updateAllControls();
+  }
+
+  if(window.matchMedia("(prefers-reduced-motion: reduce)").matches){
+    state.reduceMotion=true;state.config.speed=Math.min(state.config.speed,.3);
+  }
+
+  state.canvas.addEventListener("pointermove",handlePointerMove);
+  state.canvas.addEventListener("pointerdown",handlePointerDown);
+  state.canvas.addEventListener("pointerup",handlePointerUp);
+  state.canvas.addEventListener("pointerleave",()=>{state.pointer.active=false;state.pointer.down=false});
+  state.canvas.addEventListener("touchstart",e=>e.preventDefault(),{passive:false});
+
+  new ResizeObserver(()=>{resizeCanvas();buildPlaygroundPanel()}).observe(state.canvas);
+
+  setInterval(updatePerfDiagnostics,2000);
+  setInterval(saveSettings,5000);
+
+  state.lastFrame=performance.now();
+  state.fps.lastTime=performance.now();
+  state.animId=requestAnimationFrame(animate);
+  toast("WebGPU Particle Playground loaded","ok");
+}
+
+init();
+</script>
+</body>
+</html>
