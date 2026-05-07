@@ -153,6 +153,10 @@
 
     .panel.active { display: block; }
 
+    .panel.private-mode {
+      border-left: 4px solid var(--good);
+    }
+
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
@@ -675,6 +679,7 @@
     <button class="tab-btn" role="tab" aria-selected="false" data-tab="text-hide">📝 Text Hide</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-tab="text-reveal">🔎 Text Reveal</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-tab="smart-scan">🔮 Smart Scan</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="history">📜 History</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-tab="options">⚙️ Options</button>
     <button class="tab-btn" role="tab" aria-selected="false" data-tab="about">ℹ️ About</button>
   </nav>
@@ -720,6 +725,16 @@
               <div id="img-hide-apod-preview" style="margin-top:8px;font-size:.82rem;color:var(--accent);"></div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <label class="passphrase-toggle" style="margin:0;">
+          <input type="checkbox" id="img-hide-private" aria-label="Private encode - not recorded in history" />
+          <span style="font-size:.9rem;">Private encode <span style="font-size:.8rem;color:var(--muted);">(not recorded in history)</span></span>
+        </label>
+        <div id="img-hide-private-hint" style="display:none;font-size:.8rem;color:var(--good);margin-top:6px;padding:6px 10px;background:rgba(21,128,61,.08);border-radius:8px;border:1px solid rgba(21,128,61,.25);">
+          🔒 Private mode — this encode will not appear in history. You must share the passphrase directly with your recipient.
         </div>
       </div>
 
@@ -792,6 +807,16 @@
               <div id="text-hide-apod-preview" style="margin-top:8px;font-size:.82rem;color:var(--accent);"></div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <label class="passphrase-toggle" style="margin:0;">
+          <input type="checkbox" id="text-hide-private" aria-label="Private encode - not recorded in history" />
+          <span style="font-size:.9rem;">Private encode <span style="font-size:.8rem;color:var(--muted);">(not recorded in history)</span></span>
+        </label>
+        <div id="text-hide-private-hint" style="display:none;font-size:.8rem;color:var(--good);margin-top:6px;padding:6px 10px;background:rgba(21,128,61,.08);border-radius:8px;border:1px solid rgba(21,128,61,.25);">
+          🔒 Private mode — this encode will not appear in history. You must share the passphrase directly with your recipient.
         </div>
       </div>
 
@@ -939,6 +964,20 @@
         <div class="section-label">Privacy Note</div>
         <div class="result-box" style="background:rgba(45,106,79,.06);border-color:rgba(45,106,79,.25);">
           <div class="result-text" style="font-size:.9rem;">🔒 Nothing leaves your browser. NASA API calls are made directly to api.nasa.gov from your browser. Your key and passphrase are never sent to any other server.</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="history" class="panel" role="tabpanel">
+      <div class="panel-section">
+        <div class="section-label">Encode History</div>
+        <p style="font-size:.9rem;color:var(--muted);margin:0 0 14px;">A log of encoded messages. Private encodes are not recorded here. Both parties need this info to decode — keep it somewhere safe.</p>
+        <div class="btn-row" style="margin-bottom:16px;">
+          <button class="btn btn-outline btn-sm" id="clear-history-btn" aria-label="Clear all history">Clear All History</button>
+          <button class="btn btn-outline btn-sm" id="export-history-btn" aria-label="Export history as JSON">Export JSON</button>
+        </div>
+        <div id="history-list" style="max-height:400px;overflow-y:auto;">
+          <div id="history-empty" style="text-align:center;padding:32px;color:var(--muted);font-size:.9rem;">No encodes recorded yet.</div>
         </div>
       </div>
     </div>
@@ -1470,6 +1509,76 @@
     saveSettings();
   }
 
+  const HISTORY_KEY = 'bashful-stego-history';
+  const MAX_HISTORY = 100;
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveHistory(history) {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
+  }
+
+  async function saveHistoryRecord(record) {
+    const history = loadHistory();
+    const finger = await hashBytes(utf8ToBytes(record.passphrase || ''));
+    const entry = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      timestamp: new Date().toISOString(),
+      type: record.type || 'image',
+      messageLength: record.messageLength || 0,
+      passphraseHint: record.passphrase ? (record.passphrase.slice(0, 3) + '...' + record.passphrase.slice(-2)) : '(none)',
+      passphraseFingerprint: finger.slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join(''),
+      date: record.date || '',
+      encrypted: record.encrypted || false,
+      apodSource: record.apodSource || false
+    };
+    history.unshift(entry);
+    if (history.length > MAX_HISTORY) history.splice(MAX_HISTORY);
+    saveHistory(history);
+    return entry;
+  }
+
+  function renderHistory() {
+    const list = document.getElementById('history-list');
+    const empty = document.getElementById('history-empty');
+    const history = loadHistory();
+    if (history.length === 0) {
+      list.innerHTML = '<div id="history-empty" style="text-align:center;padding:32px;color:var(--muted);font-size:.9rem;">No encodes recorded yet.</div>';
+      return;
+    }
+    list.innerHTML = history.map(entry => {
+      const d = new Date(entry.timestamp);
+      const dateStr = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      const timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      const encIcon = entry.encrypted ? '🔐' : '📄';
+      const apodIcon = entry.apodSource ? '🌄' : '';
+      return `<div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:.88rem;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px;">${encIcon} ${escapeHtml(entry.type)} encode${apodIcon ? ' 🌄' : ''}</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:3px;">${escapeHtml(dateStr)} ${escapeHtml(timeStr)} &middot; ${entry.messageLength} chars &middot; pass: <code style="font-family:ui-monospace,monospace;background:rgba(0,0,0,.06);padding:1px 4px;border-radius:3px;">${escapeHtml(entry.passphraseHint)}</code></div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:2px;font-family:ui-monospace,monospace;">fp: ${entry.passphraseFingerprint}</div>
+        </div>
+        <button class="btn btn-outline btn-sm delete-history-btn" data-id="${entry.id}" aria-label="Delete this entry" style="flex-shrink:0;padding:6px 10px;font-size:.78rem;">✕</button>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.delete-history-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const h = loadHistory().filter(e => e.id !== id);
+        saveHistory(h);
+        renderHistory();
+        showToast('Entry deleted', 'info');
+      });
+    });
+  }
+
   function setupUploadZone(zoneId, inputId, onFile) {
     const zone = document.getElementById(zoneId);
     const input = document.getElementById(inputId);
@@ -1591,6 +1700,9 @@
     const apodSection = document.getElementById('img-hide-apod-section');
     const fetchApodBtn = document.getElementById('img-hide-fetch-apod-btn');
     const apodPreview = document.getElementById('img-hide-apod-preview');
+    const privateCheck = document.getElementById('img-hide-private');
+    const privateHint = document.getElementById('img-hide-private-hint');
+    const panel = document.getElementById('image-hide');
     const encodeBtn = document.getElementById('img-hide-encode');
     const resultSection = document.getElementById('img-hide-result-section');
     const resultCanvas = document.getElementById('img-hide-result-canvas');
@@ -1658,6 +1770,13 @@
       fetchApodBtn.textContent = "Fetch Today's APOD";
     });
 
+    privateCheck.addEventListener('change', () => {
+      const isPrivate = privateCheck.checked;
+      privateHint.style.display = isPrivate ? 'block' : 'none';
+      panel.classList.toggle('private-mode', isPrivate);
+      updateEncodeButton();
+    });
+
     function updateEncodeButton() {
       const hasImage = appState.carrierImageData !== null;
       const msgLen = messageInput.value.length;
@@ -1717,7 +1836,18 @@
         appState.encodedImageBlob = blob;
         resultSection.style.display = 'block';
         showToast('Message hidden successfully!', 'success');
-        logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted})`);
+        logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
+        if (!privateCheck.checked) {
+          const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || passInput.value) : passInput.value;
+          saveHistoryRecord({
+            type: 'image',
+            messageLength: message.length,
+            passphrase: passToRecord,
+            encrypted: isEncrypted,
+            date: localDateStr(),
+            apodSource: usingApod || false
+          });
+        }
       } catch (e) {
         showToast('Encoding failed: ' + e.message, 'error');
       }
@@ -1746,6 +1876,9 @@
       apodSection.style.display = 'none';
       apodPreview.textContent = '';
       passSection.classList.remove('visible');
+      privateCheck.checked = false;
+      privateHint.style.display = 'none';
+      panel.classList.remove('private-mode');
       fileInput.value = '';
       updateCharCounter('img-hide-message', 'img-hide-char-counter', MAX_MESSAGE_LENGTH);
       logStatus('Reset image hide panel');
@@ -1862,6 +1995,9 @@
     const apodSection = document.getElementById('text-hide-apod-section');
     const fetchApodBtn = document.getElementById('text-hide-fetch-apod-btn');
     const apodPreview = document.getElementById('text-hide-apod-preview');
+    const privateCheck = document.getElementById('text-hide-private');
+    const privateHint = document.getElementById('text-hide-private-hint');
+    const panel = document.getElementById('text-hide');
     const encodeBtn = document.getElementById('text-hide-encode');
     const resultSection = document.getElementById('text-hide-result-section');
     const resultText = document.getElementById('text-hide-result');
@@ -1909,6 +2045,13 @@
       fetchApodBtn.textContent = "Fetch Today's APOD";
     });
 
+    privateCheck.addEventListener('change', () => {
+      const isPrivate = privateCheck.checked;
+      privateHint.style.display = isPrivate ? 'block' : 'none';
+      panel.classList.toggle('private-mode', isPrivate);
+      updateEncodeButton();
+    });
+
     function updateEncodeButton() {
       const hasSource = sourceInput.value.trim().length > 0;
       const msgLen = messageInput.value.length;
@@ -1953,7 +2096,18 @@
         resultText.value = encodedText;
         resultSection.style.display = 'block';
         showToast('Message hidden in text!', 'success');
-        logStatus(`Encoded ${payloadBytes.length} bytes into text (encrypted: ${isEncrypted})`);
+        logStatus(`Encoded ${payloadBytes.length} bytes into text (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
+        if (!privateCheck.checked) {
+          const passToRecord = (typeof usingApod !== 'undefined' && usingApod) ? (cachedApodPassphrase?.passphrase || passInput.value) : passInput.value;
+          saveHistoryRecord({
+            type: 'text',
+            messageLength: message.length,
+            passphrase: passToRecord,
+            encrypted: isEncrypted,
+            date: localDateStr(),
+            apodSource: (typeof usingApod !== 'undefined' && usingApod) || false
+          });
+        }
       } catch (e) {
         showToast('Encoding failed: ' + e.message, 'error');
       }
@@ -1973,6 +2127,9 @@
       apodSection.style.display = 'none';
       apodPreview.textContent = '';
       passSection.classList.remove('visible');
+      privateCheck.checked = false;
+      privateHint.style.display = 'none';
+      panel.classList.remove('private-mode');
       resultSection.style.display = 'none';
       updateCharCounter('text-hide-message', 'text-hide-char-counter', MAX_MESSAGE_LENGTH);
       logStatus('Reset text hide panel');
@@ -2310,6 +2467,32 @@
     });
   }
 
+  function initHistory() {
+    renderHistory();
+    document.getElementById('clear-history-btn').addEventListener('click', () => {
+      if (confirm('Clear all encode history? This cannot be undone.')) {
+        saveHistory([]);
+        renderHistory();
+        showToast('History cleared', 'info');
+      }
+    });
+    document.getElementById('export-history-btn').addEventListener('click', () => {
+      const history = loadHistory();
+      if (history.length === 0) {
+        showToast('No history to export', 'info');
+        return;
+      }
+      const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bashful-stego-history-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('History exported', 'success');
+    });
+  }
+
   function init() {
     loadSettings();
     initTabs();
@@ -2319,6 +2502,7 @@
     initTextReveal();
     initSmartScan();
     initOptions();
+    initHistory();
     logStatus('Bashful Stegosaurus initialized');
   }
 
@@ -2329,9 +2513,9 @@
   }
 })();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.07.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.07.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; Hank Marquardt 2026 &middot; Version 2026.05.07.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.07.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.07.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; Hank Marquardt 2026 &middot; Version 2026.05.07.3
   </footer>
 </body>
 </html>
