@@ -983,9 +983,9 @@
           <button class="btn btn-outline btn-sm" id="clear-history-btn" aria-label="Clear all history">Clear All History</button>
           <button class="btn btn-outline btn-sm" id="export-history-btn" aria-label="Export history as JSON">Export JSON</button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr auto;gap:6px 12px;padding:8px 12px;background:rgba(0,0,0,.04);border-radius:8px 8px 0 0;border:1px solid var(--line);border-bottom:none;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">
+        <div style="display:grid;grid-template-columns:1fr 60px;gap:6px 12px;padding:8px 12px;background:rgba(0,0,0,.04);border-radius:8px 8px 0 0;border:1px solid var(--line);border-bottom:none;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">
           <div>Type · Date · Passphrase &amp; Source</div>
-          <div style="text-align:right;">Del</div>
+          <div style="text-align:right;">Actions</div>
         </div>
         <div id="history-list" style="max-height:400px;overflow-y:auto;border:1px solid var(--line);border-radius:0 0 8px 8px;">
           <div id="history-empty" style="text-align:center;padding:32px;color:var(--muted);font-size:.9rem;">No encodes recorded yet.</div>
@@ -1590,9 +1590,21 @@
           <div style="font-size:.68rem;color:var(--muted);margin-top:3px;font-family:ui-monospace,monospace;">fp: ${entry.passphraseFingerprint}</div>
           ${carrierPreview}
         </div>
-        <button class="btn btn-outline btn-sm delete-history-btn" data-id="${entry.id}" aria-label="Delete this entry" style="flex-shrink:0;padding:5px 8px;font-size:.75rem;color:var(--danger);border-color:rgba(185,28,28,.3);">✕</button>
+        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+          <button class="use-history-btn" data-id="${entry.id}" aria-label="Load this entry for decoding" title="Use to decode" style="width:28px;height:28px;border-radius:6px;border:1px solid var(--line-strong);background:rgba(255,255,255,.6);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.85rem;transition:all .15s;">▶</button>
+          <button class="delete-history-btn" data-id="${entry.id}" aria-label="Delete this entry" title="Delete" style="width:28px;height:28px;border-radius:6px;border:1px solid rgba(185,28,28,.3);background:rgba(255,255,255,.6);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.78rem;color:var(--danger);transition:all .15s;">✕</button>
+        </div>
       </div>`;
     }).join('');
+    list.querySelectorAll('.use-history-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const history = loadHistory();
+        const entry = history.find(e => e.id === id);
+        if (!entry) return;
+        loadHistoryEntry(entry);
+      });
+    });
     list.querySelectorAll('.delete-history-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id;
@@ -2540,6 +2552,71 @@
       fetchApodBtn.disabled = false;
       fetchApodBtn.textContent = 'Fetch APOD';
     });
+  }
+
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+    });
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    const tab = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+    if (tab) {
+      tab.classList.add('active');
+      tab.setAttribute('aria-selected', 'true');
+    }
+    const panel = document.getElementById(tabId);
+    if (panel) panel.classList.add('active');
+    if (tabId === 'history') renderHistory();
+  }
+
+  function loadHistoryEntry(entry) {
+    const type = entry.type;
+    if (type === 'image') {
+      switchTab('image-reveal');
+      const preview = document.getElementById('img-rev-preview');
+      const zone = document.getElementById('img-rev-upload');
+      if (entry.carrierData && entry.carrierMime) {
+        const img = new Image();
+        img.onload = () => {
+          preview.width = img.width;
+          preview.height = img.height;
+          preview.getContext('2d').drawImage(img, 0, 0);
+          preview.style.display = 'block';
+          zone.classList.add('has-file');
+          document.getElementById('img-rev-decode').disabled = false;
+          logStatus(`Loaded carrier image from history: ${img.width}x${img.height}`);
+        };
+        img.src = entry.carrierData;
+      }
+      if (entry.encrypted && entry.passphrase) {
+        const passInput = document.getElementById('img-rev-pass');
+        passInput.value = entry.passphrase;
+        const passSection = document.getElementById('img-rev-pass-section');
+        passSection.style.display = 'block';
+      }
+      const decodeBtn = document.getElementById('img-rev-decode');
+      const resultSection = document.getElementById('img-rev-result-section');
+      resultSection.style.display = 'none';
+      showToast('Carrier image loaded — click Decode', 'info');
+    } else if (type === 'text') {
+      switchTab('text-reveal');
+      const inputArea = document.getElementById('text-rev-input');
+      inputArea.value = entry.carrierData || '';
+      const decodeBtn = document.getElementById('text-rev-decode');
+      decodeBtn.disabled = false;
+      if (entry.encrypted && entry.passphrase) {
+        const passInput = document.getElementById('text-rev-pass');
+        passInput.value = entry.passphrase;
+        const passSection = document.getElementById('text-rev-pass-section');
+        passSection.style.display = 'block';
+      }
+      const detectSection = document.getElementById('text-rev-detect-section');
+      const resultSection = document.getElementById('text-rev-result-section');
+      detectSection.style.display = 'none';
+      resultSection.style.display = 'none';
+      showToast('Carrier text loaded — click Decode', 'info');
+    }
   }
 
   function initHistory() {
