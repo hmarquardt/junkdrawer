@@ -784,6 +784,10 @@
       <div class="panel-section">
         <div class="section-label">Visible Text</div>
         <textarea id="text-hide-source" placeholder="Type or paste your visible text here. The secret will be hidden within..." rows="6" aria-label="Visible text that will carry the hidden message"></textarea>
+        <div class="btn-row" style="margin-top:8px;">
+          <button class="btn btn-outline btn-sm" id="text-hide-load-file" aria-label="Load text from .txt or .md file">📄 Load .txt/.md file</button>
+          <input type="file" id="text-hide-file-input" accept=".txt,.md,.text,text/plain,text/markdown" style="display:none;" />
+        </div>
       </div>
 
       <div class="panel-section">
@@ -1518,6 +1522,7 @@
 
   const HISTORY_KEY = 'bashful-stego-history';
   const MAX_HISTORY = 100;
+  const MAX_CARRIER_PREVIEW = 400;
 
   function loadHistory() {
     try {
@@ -1545,7 +1550,9 @@
       passphraseFingerprint: finger.slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join(''),
       date: record.date || '',
       encrypted: record.encrypted || false,
-      apodSource: record.apodSource || false
+      apodSource: record.apodSource || false,
+      carrierData: record.carrierData || null,
+      carrierMime: record.carrierMime || null
     };
     history.unshift(entry);
     if (history.length > MAX_HISTORY) history.splice(MAX_HISTORY);
@@ -1566,12 +1573,21 @@
       const timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
       const encIcon = entry.encrypted ? '🔐' : '📄';
       const apodBadge = entry.apodSource ? '<span style="background:rgba(45,106,79,.15);color:var(--accent);padding:1px 6px;border-radius:10px;font-size:.72rem;margin-left:4px;">APOD</span>' : '';
+      let carrierPreview = '';
+      if (entry.carrierData && entry.carrierMime) {
+        if (entry.carrierMime.startsWith('image/')) {
+          carrierPreview = `<div style="margin-top:6px;"><img src="${entry.carrierData}" style="max-width:320px;max-height:180px;border-radius:6px;border:1px solid var(--line);display:block;" alt="Carrier image" /></div>`;
+        } else if (entry.carrierMime === 'text/plain') {
+          carrierPreview = `<div style="margin-top:6px;"><textarea readonly rows="3" style="width:100%;max-width:480px;max-height:120px;overflow-y:auto;resize:none;padding:6px 8px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:6px;font-size:.78rem;font-family:ui-monospace,monospace;color:var(--ink);line-height:1.5;box-sizing:border-box;">${escapeHtml(entry.carrierData)}</textarea></div>`;
+        }
+      }
       return `<div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:start;gap:10px;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:.85rem;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:5px;">${encIcon} ${escapeHtml(entry.type)}${apodBadge}</div>
           <div style="font-size:.75rem;color:var(--muted);margin-top:3px;">${escapeHtml(dateStr)} ${escapeHtml(timeStr)} · ${entry.messageLength} chars</div>
           <div style="margin-top:5px;padding:6px 8px;background:rgba(0,0,0,.05);border-radius:6px;font-family:ui-monospace,monospace;font-size:.78rem;word-break:break-all;line-height:1.5;">${escapeHtml(entry.passphrase || '(none)')}</div>
           <div style="font-size:.68rem;color:var(--muted);margin-top:3px;font-family:ui-monospace,monospace;">fp: ${entry.passphraseFingerprint}</div>
+          ${carrierPreview}
         </div>
         <button class="btn btn-outline btn-sm delete-history-btn" data-id="${entry.id}" aria-label="Delete this entry" style="flex-shrink:0;padding:5px 8px;font-size:.75rem;color:var(--danger);border-color:rgba(185,28,28,.3);">✕</button>
       </div>`;
@@ -1856,13 +1872,20 @@
         logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
+          const cnv = document.createElement('canvas');
+          cnv.width = appState.carrierImageData.width;
+          cnv.height = appState.carrierImageData.height;
+          cnv.getContext('2d').putImageData(appState.carrierImageData, 0, 0);
+          const carrierData = cnv.toDataURL('image/png').slice(0, 200000);
           saveHistoryRecord({
             type: 'image',
             messageLength: message.length,
             passphrase: passToRecord,
             encrypted: isEncrypted,
             date: localDateStr(),
-            apodSource: usingApod || false
+            apodSource: usingApod || false,
+            carrierData,
+            carrierMime: 'image/png'
           }).catch(e => logStatus('History save failed: ' + e.message, 'error'));
         }
       } catch (e) {
@@ -2028,6 +2051,23 @@
 
     sourceInput.addEventListener('input', updateEncodeButton);
 
+    const loadFileBtn = document.getElementById('text-hide-load-file');
+    const fileInput = document.getElementById('text-hide-file-input');
+    loadFileBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        sourceInput.value = text;
+        updateEncodeButton();
+        showToast(`Loaded ${file.name}`, 'success');
+      } catch (e) {
+        showToast('Failed to read file: ' + e.message, 'error');
+      }
+      fileInput.value = '';
+    });
+
     usePassCheck.addEventListener('change', () => {
       passSection.classList.toggle('visible', usePassCheck.checked);
       updateEncodeButton();
@@ -2118,13 +2158,16 @@
         logStatus(`Encoded ${payloadBytes.length} bytes into text (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
+          const truncatedText = source.slice(0, 5000);
           saveHistoryRecord({
             type: 'text',
             messageLength: message.length,
             passphrase: passToRecord,
             encrypted: isEncrypted,
             date: localDateStr(),
-            apodSource: usingApod || false
+            apodSource: usingApod || false,
+            carrierData: truncatedText,
+            carrierMime: 'text/plain'
           }).catch(e => logStatus('History save failed: ' + e.message, 'error'));
         }
       } catch (e) {
