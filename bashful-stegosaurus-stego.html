@@ -724,6 +724,10 @@
               <button class="btn btn-secondary btn-sm" id="img-hide-fetch-apod-btn">Fetch Today's APOD</button>
               <div id="img-hide-apod-preview" style="margin-top:8px;font-size:.82rem;color:var(--accent);"></div>
             </div>
+            <div class="bip39-passphrase-tools" id="img-hide-bip39-tools" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+              <button class="btn btn-secondary btn-sm" id="img-hide-bip39-btn" type="button">Generate BIP-39 Passphrase</button>
+              <div id="img-hide-bip39-preview" style="margin-top:8px;font-size:.82rem;color:var(--accent);font-family:ui-monospace,monospace;word-break:break-all;"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -809,6 +813,10 @@
               <div style="font-size:.82rem;color:var(--muted);margin-bottom:6px;">Fetch APOD first, then click "Use APOD" to fill passphrase:</div>
               <button class="btn btn-secondary btn-sm" id="text-hide-fetch-apod-btn">Fetch Today's APOD</button>
               <div id="text-hide-apod-preview" style="margin-top:8px;font-size:.82rem;color:var(--accent);"></div>
+            </div>
+            <div class="bip39-passphrase-tools" id="text-hide-bip39-tools" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+              <button class="btn btn-secondary btn-sm" id="text-hide-bip39-btn" type="button">Generate BIP-39 Passphrase</button>
+              <div id="text-hide-bip39-preview" style="margin-top:8px;font-size:.82rem;color:var(--accent);font-family:ui-monospace,monospace;word-break:break-all;"></div>
             </div>
           </div>
         </div>
@@ -965,6 +973,20 @@
       </div>
 
       <div class="panel-section">
+        <div class="section-label">BIP-39 Word List</div>
+        <p style="font-size:.9rem;color:var(--muted);margin:0 0 14px;">Load the standard English BIP-39 word list directly, or paste/import a custom list if needed. Small lists are cached in localStorage; larger lists use IndexedDB automatically.</p>
+        <textarea id="bip39WordListInput" rows="7" spellcheck="false" placeholder="abandon&#10;ability&#10;able&#10;about..." aria-label="BIP-39 word list"></textarea>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn btn-secondary btn-sm" id="fetchStandardBip39Btn" type="button">Load Standard English List</button>
+          <button class="btn btn-secondary btn-sm" id="saveBip39Btn" type="button">Save Word List</button>
+          <button class="btn btn-outline btn-sm" id="importBip39Btn" type="button">Import .txt</button>
+          <button class="btn btn-outline btn-sm" id="clearBip39Btn" type="button">Clear</button>
+          <input type="file" id="bip39FileInput" accept=".txt,text/plain" style="display:none;" />
+        </div>
+        <div id="bip39Status" style="font-size:.85rem;margin-top:8px;color:var(--muted);"></div>
+      </div>
+
+      <div class="panel-section">
         <div class="section-label">Privacy Note</div>
         <div class="result-box" style="background:rgba(45,106,79,.06);border-color:rgba(45,106,79,.25);">
           <div class="result-text" style="font-size:.9rem;">🔒 Nothing leaves your browser. NASA API calls are made directly to api.nasa.gov from your browser. Your key and passphrase are never sent to any other server.</div>
@@ -1064,8 +1086,16 @@
 
   const STORAGE_KEYS = {
     settings: 'bashful-stego-settings',
-    secrets: 'bashful-stego-secrets'
+    secrets: 'bashful-stego-secrets',
+    bip39WordList: 'bashful-stego-bip39-word-list'
   };
+
+  const BIP39_IDB_KEY = '__bip39_word_list__';
+  const BIP39_LOCALSTORAGE_LIMIT = 200000;
+  const BIP39_STANDARD_SOURCES = [
+    'https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt',
+    'https://cdn.jsdelivr.net/gh/bitcoin/bips@master/bip-0039/english.txt'
+  ];
 
   const DEFAULT_SETTINGS = {
     rememberApiKey: false
@@ -1074,6 +1104,7 @@
   let settings = {};
   let rememberedSecrets = {};
   let cachedApodPassphrase = null;
+  let cachedBip39WordList = [];
 
   const appState = {
     carrierImage: null,
@@ -1587,6 +1618,129 @@
     }).then(() => {});
   }
 
+  function parseBip39WordList(text) {
+    const seen = new Set();
+    return String(text || '')
+      .toLowerCase()
+      .split(/[\s,;]+/)
+      .map(word => word.trim())
+      .filter(word => /^[a-z]+$/.test(word))
+      .filter(word => {
+        if (seen.has(word)) return false;
+        seen.add(word);
+        return true;
+      });
+  }
+
+  function formatBip39WordList(words) {
+    return words.join('\n');
+  }
+
+  function describeBip39Storage(words, location) {
+    const size = new Blob([formatBip39WordList(words)]).size;
+    return `${words.length} words stored in ${location} (${Math.round(size / 1024)} KB)`;
+  }
+
+  function validateStandardBip39WordList(words) {
+    return words.length === 2048 && words[0] === 'abandon' && words[2047] === 'zoo';
+  }
+
+  async function fetchStandardBip39WordList() {
+    let lastError = null;
+    for (const url of BIP39_STANDARD_SOURCES) {
+      try {
+        const response = await fetch(url, { cache: 'force-cache' });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+        const words = parseBip39WordList(await response.text());
+        if (!validateStandardBip39WordList(words)) {
+          throw new Error(`unexpected word list shape (${words.length} words)`);
+        }
+        return { words, source: url };
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw new Error(lastError ? lastError.message : 'no source available');
+  }
+
+  async function loadBip39WordList() {
+    let raw = '';
+    try {
+      raw = localStorage.getItem(STORAGE_KEYS.bip39WordList) || '';
+    } catch {
+      raw = '';
+    }
+    if (!raw) {
+      const stored = await idbLoad(BIP39_IDB_KEY).catch(() => null);
+      raw = stored?.text || '';
+    }
+    cachedBip39WordList = parseBip39WordList(raw);
+    updateBip39Availability();
+    return cachedBip39WordList;
+  }
+
+  async function saveBip39WordList(words) {
+    const text = formatBip39WordList(words);
+    const size = new Blob([text]).size;
+    if (size <= BIP39_LOCALSTORAGE_LIMIT) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.bip39WordList, text);
+        await idbDelete(BIP39_IDB_KEY).catch(() => {});
+        cachedBip39WordList = words;
+        updateBip39Availability();
+        return 'localStorage';
+      } catch {
+        // Fall through to IndexedDB if localStorage is full or blocked.
+      }
+    }
+    try {
+      localStorage.removeItem(STORAGE_KEYS.bip39WordList);
+    } catch {}
+    await idbSave(BIP39_IDB_KEY, { text });
+    cachedBip39WordList = words;
+    updateBip39Availability();
+    return 'IndexedDB';
+  }
+
+  async function clearBip39WordList() {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.bip39WordList);
+    } catch {}
+    await idbDelete(BIP39_IDB_KEY).catch(() => {});
+    cachedBip39WordList = [];
+    updateBip39Availability();
+  }
+
+  function randomInt(maxExclusive) {
+    if (maxExclusive <= 0) return 0;
+    const range = 0x100000000;
+    const limit = range - (range % maxExclusive);
+    const values = new Uint32Array(1);
+    do {
+      crypto.getRandomValues(values);
+    } while (values[0] >= limit);
+    return values[0] % maxExclusive;
+  }
+
+  function initialCap(word) {
+    return word ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() : '';
+  }
+
+  function generateBip39Passphrase() {
+    if (cachedBip39WordList.length < 2) {
+      throw new Error('Add at least two BIP-39 words in Options first');
+    }
+    const first = cachedBip39WordList[randomInt(cachedBip39WordList.length)];
+    let second = cachedBip39WordList[randomInt(cachedBip39WordList.length)];
+    if (cachedBip39WordList.length > 1) {
+      while (second === first) {
+        second = cachedBip39WordList[randomInt(cachedBip39WordList.length)];
+      }
+    }
+    const digit = randomInt(9) + 1;
+    return `${initialCap(first)}@${initialCap(second)}${digit}`;
+  }
+
   function loadHistory() {
     try {
       const raw = localStorage.getItem(HISTORY_KEY);
@@ -1597,17 +1751,18 @@
   }
 
   function saveHistory(history) {
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   }
 
   async function saveHistoryRecord(record) {
     const history = loadHistory();
     const finger = await hashBytes(utf8ToBytes(record.passphrase || ''));
-    const entryId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const entryId = record.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    const entryType = record.type || 'image';
     const entry = {
       id: entryId,
       timestamp: new Date().toISOString(),
-      type: record.type || 'image',
+      type: entryType,
       messageLength: record.messageLength || 0,
       passphrase: record.passphrase || '',
       passphraseHint: record.passphrase ? (record.passphrase.slice(0, 3) + '...' + record.passphrase.slice(-2)) : '(none)',
@@ -1615,8 +1770,9 @@
       date: record.date || '',
       encrypted: record.encrypted || false,
       apodSource: record.apodSource || false,
+      bip39Source: record.bip39Source || false,
       carrierData: record.carrierData || '',
-      carrierMime: record.carrierMime || null,
+      carrierMime: record.carrierMime || (entryType === 'image' ? 'image/png' : (entryType === 'text' ? 'text/plain' : null)),
       carrierPreview: record.carrierPreview || '',
       width: record.width || 0,
       height: record.height || 0
@@ -1660,20 +1816,25 @@
       const timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
       const encIcon = entry.encrypted ? '🔐' : '📄';
       const apodBadge = entry.apodSource ? '<span style="background:rgba(45,106,79,.15);color:var(--accent);padding:1px 6px;border-radius:10px;font-size:.72rem;margin-left:4px;">APOD</span>' : '';
+      const bip39Badge = entry.bip39Source ? '<span style="background:rgba(217,119,6,.15);color:var(--accent-2);padding:1px 6px;border-radius:10px;font-size:.72rem;margin-left:4px;">BIP-39</span>' : '';
       let carrierPreview = '';
-      const rawData = entry._carrierData || entry.carrierData || '';
-      const thumbSrc = entry._carrierData || entry.carrierPreview || '';
-      if (rawData && entry.carrierMime) {
-        if (entry.carrierMime.startsWith('image/')) {
-          const imgSrc = thumbSrc || rawData;
-          carrierPreview = `<div style="margin-top:6px;"><img src="${imgSrc}" style="max-width:320px;max-height:180px;border-radius:6px;border:1px solid var(--line);display:block;" alt="Carrier image" /></div>`;
-        } else if (entry.carrierMime === 'text/plain') {
-          carrierPreview = `<div style="margin-top:6px;max-width:480px;"><textarea readonly rows="4" style="width:100%;max-height:160px;overflow-y:scroll;resize:none;padding:6px 8px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:6px;font-size:.78rem;font-family:ui-monospace,monospace;color:var(--ink);line-height:1.5;box-sizing:border-box;display:block;">${escapeHtml(rawData)}</textarea></div>`;
+      const storedCarrier = entry._carrierData || null;
+      const rawData = entry.carrierData || '';
+      const isImageEntry = (entry.carrierMime && entry.carrierMime.startsWith('image/')) || (entry.type === 'image' && (entry.carrierPreview || entry.width || entry.height));
+      const isTextEntry = entry.carrierMime === 'text/plain' || entry.type === 'text';
+      if (isImageEntry) {
+        if (entry.carrierPreview) {
+          carrierPreview = `<div style="margin-top:6px;"><img src="${entry.carrierPreview}" style="max-width:320px;max-height:180px;border-radius:6px;border:1px solid var(--line);display:block;" alt="Carrier image thumbnail" /></div>`;
         }
+        carrierPreview += storedCarrier?.imageData
+          ? '<div style="font-size:.7rem;color:var(--good);margin-top:4px;">Full encoded PNG stored for replay.</div>'
+          : '<div style="font-size:.7rem;color:var(--danger);margin-top:4px;">Full encoded image missing. Thumbnail cannot be decoded.</div>';
+      } else if (rawData && isTextEntry) {
+        carrierPreview = `<div style="margin-top:6px;max-width:480px;"><textarea readonly rows="4" style="width:100%;max-height:160px;overflow-y:scroll;resize:none;padding:6px 8px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:6px;font-size:.78rem;font-family:ui-monospace,monospace;color:var(--ink);line-height:1.5;box-sizing:border-box;display:block;">${escapeHtml(rawData)}</textarea></div>`;
       }
       return `<div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:start;gap:10px;">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:.85rem;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:5px;">${encIcon} ${escapeHtml(entry.type)}${apodBadge}</div>
+          <div style="font-size:.85rem;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:5px;">${encIcon} ${escapeHtml(entry.type)}${apodBadge}${bip39Badge}</div>
           <div style="font-size:.75rem;color:var(--muted);margin-top:3px;">${escapeHtml(dateStr)} ${escapeHtml(timeStr)} · ${entry.messageLength} chars</div>
           <div style="margin-top:5px;padding:6px 8px;background:rgba(0,0,0,.05);border-radius:6px;font-family:ui-monospace,monospace;font-size:.78rem;word-break:break-all;line-height:1.5;">${escapeHtml(entry.passphrase || '(none)')}</div>
           <div style="font-size:.68rem;color:var(--muted);margin-top:3px;font-family:ui-monospace,monospace;">fp: ${entry.passphraseFingerprint}</div>
@@ -1842,6 +2003,43 @@
     });
   }
 
+  function updateBip39Availability() {
+    const hasWords = cachedBip39WordList.length >= 2;
+    document.querySelectorAll('.bip39-passphrase-tools').forEach(el => {
+      el.style.display = hasWords ? 'block' : 'none';
+    });
+    const status = document.getElementById('bip39Status');
+    if (status) {
+      status.textContent = hasWords
+        ? `${cachedBip39WordList.length} BIP-39 words ready for passphrase generation`
+        : 'No BIP-39 word list saved yet';
+      status.style.color = hasWords ? 'var(--accent)' : 'var(--muted)';
+    }
+  }
+
+  function setupBip39Generator(prefix, usePassCheck, passSection, passInput, useApodCheck, apodSection, apodPreview, updateEncodeButton) {
+    const btn = document.getElementById(`${prefix}-bip39-btn`);
+    const preview = document.getElementById(`${prefix}-bip39-preview`);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      try {
+        const passphrase = generateBip39Passphrase();
+        usePassCheck.checked = true;
+        passSection.classList.add('visible');
+        passInput.value = passphrase;
+        passInput.dataset.passphraseSource = 'bip39';
+        if (useApodCheck) useApodCheck.checked = false;
+        if (apodSection) apodSection.style.display = 'none';
+        if (apodPreview) apodPreview.textContent = '';
+        if (preview) preview.textContent = passphrase;
+        updateEncodeButton();
+        showToast('BIP-39 passphrase generated', 'success');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    });
+  }
+
   function initImageHide() {
     const zone = document.getElementById('img-hide-upload');
     const fileInput = document.getElementById('img-hide-file-input');
@@ -1858,6 +2056,7 @@
     const apodSection = document.getElementById('img-hide-apod-section');
     const fetchApodBtn = document.getElementById('img-hide-fetch-apod-btn');
     const apodPreview = document.getElementById('img-hide-apod-preview');
+    const bip39Preview = document.getElementById('img-hide-bip39-preview');
     const privateCheck = document.getElementById('img-hide-private');
     const privateHint = document.getElementById('img-hide-private-hint');
     const panel = document.getElementById('image-hide');
@@ -1896,10 +2095,12 @@
 
     usePassCheck.addEventListener('change', () => {
       passSection.classList.toggle('visible', usePassCheck.checked);
+      if (!usePassCheck.checked && bip39Preview) bip39Preview.textContent = '';
       updateEncodeButton();
     });
 
     passInput.addEventListener('input', updateEncodeButton);
+    passInput.addEventListener('input', () => { passInput.dataset.passphraseSource = ''; });
 
     useApodCheck.addEventListener('change', () => {
       apodSection.style.display = useApodCheck.checked ? 'block' : 'none';
@@ -1918,6 +2119,8 @@
         const result = await fetchApodForPassphrase(localDateStr(), key);
         apodPreview.textContent = `✓ Fetched: "${result.title}" — passphrase ready`;
         passInput.value = result.passphrase;
+        passInput.dataset.passphraseSource = 'apod';
+        if (bip39Preview) bip39Preview.textContent = '';
         updateEncodeButton();
         showToast('APOD passphrase ready', 'success');
       } catch (e) {
@@ -1927,6 +2130,8 @@
       fetchApodBtn.disabled = false;
       fetchApodBtn.textContent = "Fetch Today's APOD";
     });
+
+    setupBip39Generator('img-hide', usePassCheck, passSection, passInput, useApodCheck, apodSection, apodPreview, updateEncodeButton);
 
     privateCheck.addEventListener('change', () => {
       const isPrivate = privateCheck.checked;
@@ -2002,9 +2207,7 @@
           const entryId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
           try {
             const fullImageData = resultCanvas.getContext('2d').getImageData(0, 0, resultCanvas.width, resultCanvas.height);
-            idbSave(entryId, { imageData: fullImageData, width: fullImageData.width, height: fullImageData.height }).catch(e => {
-              logStatus('IDB save failed: ' + e.message, 'error');
-            });
+            await idbSave(entryId, { imageData: fullImageData, width: fullImageData.width, height: fullImageData.height });
             const previewCanvas = document.createElement('canvas');
             const maxPreview = 320;
             const pr = Math.min(maxPreview / fullImageData.width, maxPreview / fullImageData.height, 1);
@@ -2016,21 +2219,22 @@
             fullSizeCanvas.getContext('2d').putImageData(fullImageData, 0, 0);
             previewCanvas.getContext('2d').drawImage(fullSizeCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
             const carrierPreview = previewCanvas.toDataURL('image/jpeg', 0.7);
-            saveHistoryRecord({
+            await saveHistoryRecord({
+              id: entryId,
               type: 'image',
               messageLength: message.length,
               passphrase: passToRecord,
               encrypted: isEncrypted,
               date: localDateStr(),
               apodSource: usingApod || false,
+              bip39Source: isEncrypted && !usingApod && passInput.dataset.passphraseSource === 'bip39',
               carrierPreview,
+              carrierMime: 'image/png',
               width: fullImageData.width,
               height: fullImageData.height
-            }).catch(e => {
-              logStatus('History save failed: ' + e.message, 'error');
-              showToast('History save failed: ' + e.message, 'error');
             });
           } catch (e) {
+            idbDelete(entryId).catch(() => {});
             logStatus('History save failed: ' + e.message, 'error');
             showToast('History save skipped — ' + e.message, 'error');
           }
@@ -2058,10 +2262,12 @@
       resultSection.style.display = 'none';
       messageInput.value = '';
       passInput.value = '';
+      passInput.dataset.passphraseSource = '';
       usePassCheck.checked = false;
       useApodCheck.checked = false;
       apodSection.style.display = 'none';
       apodPreview.textContent = '';
+      if (bip39Preview) bip39Preview.textContent = '';
       passSection.classList.remove('visible');
       privateCheck.checked = false;
       privateHint.style.display = 'none';
@@ -2180,6 +2386,7 @@
     const apodSection = document.getElementById('text-hide-apod-section');
     const fetchApodBtn = document.getElementById('text-hide-fetch-apod-btn');
     const apodPreview = document.getElementById('text-hide-apod-preview');
+    const bip39Preview = document.getElementById('text-hide-bip39-preview');
     const privateCheck = document.getElementById('text-hide-private');
     const privateHint = document.getElementById('text-hide-private-hint');
     const panel = document.getElementById('text-hide');
@@ -2215,10 +2422,12 @@
 
     usePassCheck.addEventListener('change', () => {
       passSection.classList.toggle('visible', usePassCheck.checked);
+      if (!usePassCheck.checked && bip39Preview) bip39Preview.textContent = '';
       updateEncodeButton();
     });
 
     passInput.addEventListener('input', updateEncodeButton);
+    passInput.addEventListener('input', () => { passInput.dataset.passphraseSource = ''; });
 
     useApodCheck.addEventListener('change', () => {
       apodSection.style.display = useApodCheck.checked ? 'block' : 'none';
@@ -2237,6 +2446,8 @@
         const result = await fetchApodForPassphrase(localDateStr(), key);
         apodPreview.textContent = `✓ Fetched: "${result.title}" — passphrase ready`;
         passInput.value = result.passphrase;
+        passInput.dataset.passphraseSource = 'apod';
+        if (bip39Preview) bip39Preview.textContent = '';
         updateEncodeButton();
         showToast('APOD passphrase ready', 'success');
       } catch (e) {
@@ -2246,6 +2457,8 @@
       fetchApodBtn.disabled = false;
       fetchApodBtn.textContent = "Fetch Today's APOD";
     });
+
+    setupBip39Generator('text-hide', usePassCheck, passSection, passInput, useApodCheck, apodSection, apodPreview, updateEncodeButton);
 
     privateCheck.addEventListener('change', () => {
       const isPrivate = privateCheck.checked;
@@ -2303,20 +2516,22 @@
         logStatus(`Encoded ${payloadBytes.length} bytes into text (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
-          const carrierText = source.slice(0, 50000);
-          saveHistoryRecord({
-            type: 'text',
-            messageLength: message.length,
-            passphrase: passToRecord,
-            encrypted: isEncrypted,
-            date: localDateStr(),
-            apodSource: usingApod || false,
-            carrierData: carrierText,
-            carrierMime: 'text/plain'
-          }).catch(e => {
+          try {
+            await saveHistoryRecord({
+              type: 'text',
+              messageLength: message.length,
+              passphrase: passToRecord,
+              encrypted: isEncrypted,
+              date: localDateStr(),
+              apodSource: usingApod || false,
+              bip39Source: isEncrypted && !usingApod && passInput.dataset.passphraseSource === 'bip39',
+              carrierData: encodedText,
+              carrierMime: 'text/plain'
+            });
+          } catch (e) {
             logStatus('History save failed: ' + e.message, 'error');
-            showToast('History save failed: ' + e.message, 'error');
-          });
+            showToast('History save skipped — ' + e.message, 'error');
+          }
         }
       } catch (e) {
         showToast('Encoding failed: ' + e.message, 'error');
@@ -2332,10 +2547,12 @@
       sourceInput.value = '';
       messageInput.value = '';
       passInput.value = '';
+      passInput.dataset.passphraseSource = '';
       usePassCheck.checked = false;
       useApodCheck.checked = false;
       apodSection.style.display = 'none';
       apodPreview.textContent = '';
+      if (bip39Preview) bip39Preview.textContent = '';
       passSection.classList.remove('visible');
       privateCheck.checked = false;
       privateHint.style.display = 'none';
@@ -2617,7 +2834,7 @@
     });
   }
 
-  function initOptions() {
+  async function initOptions() {
     const nasaKeyInput = document.getElementById('nasaApiKey');
     const rememberCheck = document.getElementById('rememberNasaKey');
     const saveBtn = document.getElementById('saveNasaKeyBtn');
@@ -2626,6 +2843,13 @@
     const fetchApodBtn = document.getElementById('fetchApodBtn');
     const apodPreview = document.getElementById('apodPreview');
     const apodError = document.getElementById('apodError');
+    const bip39Input = document.getElementById('bip39WordListInput');
+    const fetchStandardBip39Btn = document.getElementById('fetchStandardBip39Btn');
+    const saveBip39Btn = document.getElementById('saveBip39Btn');
+    const importBip39Btn = document.getElementById('importBip39Btn');
+    const clearBip39Btn = document.getElementById('clearBip39Btn');
+    const bip39FileInput = document.getElementById('bip39FileInput');
+    const bip39Status = document.getElementById('bip39Status');
 
     apodDateInput.value = localDateStr();
 
@@ -2675,6 +2899,82 @@
       fetchApodBtn.disabled = false;
       fetchApodBtn.textContent = 'Fetch APOD';
     });
+
+    try {
+      await loadBip39WordList();
+      bip39Input.value = formatBip39WordList(cachedBip39WordList);
+    } catch (e) {
+      bip39Status.textContent = 'Could not load BIP-39 word list: ' + e.message;
+      bip39Status.style.color = 'var(--danger)';
+    }
+
+    fetchStandardBip39Btn.addEventListener('click', async () => {
+      fetchStandardBip39Btn.disabled = true;
+      fetchStandardBip39Btn.textContent = 'Loading...';
+      bip39Status.textContent = 'Fetching standard BIP-39 English list...';
+      bip39Status.style.color = 'var(--muted)';
+      try {
+        const result = await fetchStandardBip39WordList();
+        const location = await saveBip39WordList(result.words);
+        bip39Input.value = formatBip39WordList(result.words);
+        bip39Status.textContent = `${describeBip39Storage(result.words, location)} from ${result.source}`;
+        bip39Status.style.color = 'var(--accent)';
+        showToast('Standard BIP-39 word list loaded', 'success');
+      } catch (e) {
+        bip39Status.textContent = 'Standard list import failed: ' + e.message;
+        bip39Status.style.color = 'var(--danger)';
+        showToast('BIP-39 import failed: ' + e.message, 'error');
+      }
+      fetchStandardBip39Btn.disabled = false;
+      fetchStandardBip39Btn.textContent = 'Load Standard English List';
+    });
+
+    saveBip39Btn.addEventListener('click', async () => {
+      const words = parseBip39WordList(bip39Input.value);
+      if (words.length < 2) {
+        bip39Status.textContent = 'Add at least two valid words.';
+        bip39Status.style.color = 'var(--danger)';
+        showToast('Add at least two BIP-39 words', 'error');
+        return;
+      }
+      saveBip39Btn.disabled = true;
+      try {
+        const location = await saveBip39WordList(words);
+        bip39Input.value = formatBip39WordList(words);
+        bip39Status.textContent = describeBip39Storage(words, location);
+        bip39Status.style.color = 'var(--accent)';
+        showToast('BIP-39 word list saved', 'success');
+      } catch (e) {
+        bip39Status.textContent = 'BIP-39 save failed: ' + e.message;
+        bip39Status.style.color = 'var(--danger)';
+        showToast('BIP-39 save failed: ' + e.message, 'error');
+      }
+      saveBip39Btn.disabled = false;
+    });
+
+    importBip39Btn.addEventListener('click', () => bip39FileInput.click());
+    bip39FileInput.addEventListener('change', async () => {
+      const file = bip39FileInput.files[0];
+      if (!file) return;
+      try {
+        bip39Input.value = await file.text();
+        const words = parseBip39WordList(bip39Input.value);
+        bip39Status.textContent = `${words.length} valid words parsed from ${file.name}. Click Save Word List to cache it.`;
+        bip39Status.style.color = words.length >= 2 ? 'var(--accent)' : 'var(--danger)';
+      } catch (e) {
+        bip39Status.textContent = 'Import failed: ' + e.message;
+        bip39Status.style.color = 'var(--danger)';
+      }
+      bip39FileInput.value = '';
+    });
+
+    clearBip39Btn.addEventListener('click', async () => {
+      await clearBip39WordList();
+      bip39Input.value = '';
+      bip39Status.textContent = 'BIP-39 word list cleared';
+      bip39Status.style.color = 'var(--muted)';
+      showToast('BIP-39 word list cleared', 'info');
+    });
   }
 
   function switchTab(tabId) {
@@ -2710,19 +3010,14 @@
         zone.classList.add('has-file');
         document.getElementById('img-rev-decode').disabled = false;
         logStatus(`Loaded carrier image from history: ${imageData.width}x${imageData.height}`);
-      } else if (entry.carrierPreview) {
-        const img = new Image();
-        img.onload = () => {
-          preview.width = img.width;
-          preview.height = img.height;
-          preview.getContext('2d').drawImage(img, 0, 0);
-          appState.revealImageData = preview.getContext('2d').getImageData(0, 0, img.width, img.height);
-          preview.style.display = 'block';
-          zone.classList.add('has-file');
-          document.getElementById('img-rev-decode').disabled = false;
-          logStatus(`Loaded carrier image from history: ${img.width}x${img.height}`);
-        };
-        img.src = entry.carrierPreview;
+      } else {
+        appState.revealImageData = null;
+        preview.style.display = 'none';
+        zone.classList.remove('has-file');
+        document.getElementById('img-rev-decode').disabled = true;
+        logStatus('History replay skipped: full encoded image is missing; thumbnail is display-only.', 'error');
+        showToast('Full encoded image is missing. Thumbnail cannot be decoded.', 'error');
+        return;
       }
       if (entry.encrypted && entry.passphrase) {
         const passInput = document.getElementById('img-rev-pass');
@@ -2736,7 +3031,7 @@
     } else if (type === 'text') {
       switchTab('text-reveal');
       const inputArea = document.getElementById('text-rev-input');
-      inputArea.value = carrierData;
+      inputArea.value = entry.carrierData || '';
       const decodeBtn = document.getElementById('text-rev-decode');
       decodeBtn.disabled = false;
       if (entry.encrypted && entry.passphrase) {
