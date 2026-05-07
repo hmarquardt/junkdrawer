@@ -1913,19 +1913,36 @@
         logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
-          const encodedDataUrl = await blobToDataURL(appState.encodedImageBlob);
-          const thumb = await generateThumbnail(appState.carrierImageData, 320, 180);
-          saveHistoryRecord({
-            type: 'image',
-            messageLength: message.length,
-            passphrase: passToRecord,
-            encrypted: isEncrypted,
-            date: localDateStr(),
-            apodSource: usingApod || false,
-            carrierData: encodedDataUrl,
-            carrierMime: 'image/png',
-            carrierPreview: thumb
-          }).catch(e => logStatus('History save failed: ' + e.message, 'error'));
+          let encodedDataUrl = '';
+          try {
+            encodedDataUrl = await blobToDataURL(appState.encodedImageBlob);
+          } catch (e) {
+            logStatus('Failed to convert encoded image: ' + e.message, 'error');
+          }
+          let thumb = '';
+          try {
+            thumb = await generateThumbnail(appState.carrierImageData, 320, 180);
+          } catch (e) {
+            logStatus('Failed to generate thumbnail: ' + e.message, 'error');
+          }
+          if (!encodedDataUrl) {
+            showToast('History save skipped — could not read encoded image', 'error');
+          } else {
+            saveHistoryRecord({
+              type: 'image',
+              messageLength: message.length,
+              passphrase: passToRecord,
+              encrypted: isEncrypted,
+              date: localDateStr(),
+              apodSource: usingApod || false,
+              carrierData: encodedDataUrl,
+              carrierMime: 'image/png',
+              carrierPreview: thumb
+            }).catch(e => {
+              logStatus('History save failed: ' + e.message, 'error');
+              showToast('History save failed: ' + e.message, 'error');
+            });
+          }
         }
       } catch (e) {
         showToast('Encoding failed: ' + e.message, 'error');
@@ -2205,7 +2222,10 @@
             apodSource: usingApod || false,
             carrierData: carrierText,
             carrierMime: 'text/plain'
-          }).catch(e => logStatus('History save failed: ' + e.message, 'error'));
+          }).catch(e => {
+            logStatus('History save failed: ' + e.message, 'error');
+            showToast('History save failed: ' + e.message, 'error');
+          });
         }
       } catch (e) {
         showToast('Encoding failed: ' + e.message, 'error');
