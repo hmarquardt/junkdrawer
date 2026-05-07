@@ -1662,6 +1662,22 @@
     });
   }
 
+  async function generateThumbnail(imageData, maxW, maxH) {
+    const { width, height } = imageData;
+    const ratio = Math.min(maxW / width, maxH / height);
+    const tw = Math.round(width * ratio);
+    const th = Math.round(height * ratio);
+    const srcCanvas = document.createElement('canvas');
+    srcCanvas.width = width;
+    srcCanvas.height = height;
+    srcCanvas.getContext('2d').putImageData(imageData, 0, 0);
+    const dstCanvas = document.createElement('canvas');
+    dstCanvas.width = tw;
+    dstCanvas.height = th;
+    dstCanvas.getContext('2d').drawImage(srcCanvas, 0, 0, tw, th);
+    return dstCanvas.toDataURL('image/jpeg', 0.75);
+  }
+
   function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1873,11 +1889,7 @@
         logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
-          const cnv = document.createElement('canvas');
-          cnv.width = appState.carrierImageData.width;
-          cnv.height = appState.carrierImageData.height;
-          cnv.getContext('2d').putImageData(appState.carrierImageData, 0, 0);
-          const carrierData = cnv.toDataURL('image/png').slice(0, 200000);
+          const thumb = await generateThumbnail(appState.carrierImageData, 320, 180);
           saveHistoryRecord({
             type: 'image',
             messageLength: message.length,
@@ -1885,7 +1897,7 @@
             encrypted: isEncrypted,
             date: localDateStr(),
             apodSource: usingApod || false,
-            carrierData,
+            carrierData: thumb,
             carrierMime: 'image/png'
           }).catch(e => logStatus('History save failed: ' + e.message, 'error'));
         }
