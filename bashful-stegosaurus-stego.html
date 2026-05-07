@@ -1525,39 +1525,66 @@
   const HISTORY_KEY = 'bashful-stego-history';
   const MAX_HISTORY = 100;
 
+  let _idbReq = null;
   let _idb = null;
-  function getIDB() {
-    if (!_idb) {
-      _idb = indexedDB.open('bashful-stego-carriers', 1);
-      _idb.onupgradeneeded = e => {
-        e.target.result.createObjectStore('carriers', { keyPath: 'id' });
+  let _idbPending = [];
+
+  function openIDB() {
+    if (!_idbReq) {
+      _idbReq = indexedDB.open('bashful-stego-carriers', 1);
+      _idbReq.onupgradeneeded = e => {
+        _idb = e.target.result;
+        _idb.createObjectStore('carriers', { keyPath: 'id' });
+      };
+      _idbReq.onsuccess = () => {
+        _idb = _idbReq.result;
+        _idbPending.forEach(fn => fn());
+        _idbPending = [];
       };
     }
-    return _idb;
+    return _idbReq;
+  }
+
+  function withIDB(fn) {
+    return new Promise((resolve, reject) => {
+      const op = () => {
+        try {
+          const r = fn(_idb);
+          if (r && typeof r.onsuccess !== 'undefined') {
+            r.onsuccess = () => resolve(r.result);
+            r.onerror = () => reject(r.error);
+          } else {
+            resolve(r);
+          }
+        } catch (e) {
+          reject(e);
+        }
+      };
+      if (_idb) {
+        op();
+      } else {
+        _idbPending.push(op);
+        openIDB();
+      }
+    });
   }
 
   function idbSave(id, data) {
-    return new Promise((resolve, reject) => {
-      const req = getIDB().transaction('carriers', 'readwrite').objectStore('carriers').put({ id, data });
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
+    return withIDB(db => {
+      return db.transaction('carriers', 'readwrite').objectStore('carriers').put({ id, data });
+    }).then(() => {});
   }
 
   function idbLoad(id) {
-    return new Promise((resolve, reject) => {
-      const req = getIDB().transaction('carriers', 'readonly').objectStore('carriers').get(id);
-      req.onsuccess = () => resolve(req.result?.data ?? null);
-      req.onerror = () => reject(req.error);
-    });
+    return withIDB(db => {
+      return db.transaction('carriers', 'readonly').objectStore('carriers').get(id);
+    }).then(r => r?.data ?? null);
   }
 
   function idbDelete(id) {
-    return new Promise((resolve, reject) => {
-      const req = getIDB().transaction('carriers', 'readwrite').objectStore('carriers').delete(id);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
+    return withIDB(db => {
+      return db.transaction('carriers', 'readwrite').objectStore('carriers').delete(id);
+    }).then(() => {});
   }
 
   function loadHistory() {
