@@ -1,0 +1,2071 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bashful Stegosaurus</title>
+  <meta name="description" content="A playful steganography lab. Hide tiny secrets in images and text, all locally in your browser." />
+  <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="shortcut icon" href="favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Bashful Stegosaurus" />
+  <link rel="manifest" href="site.webmanifest" />
+  <style>
+    :root {
+      --bg: #f4efe5;
+      --ink: #1f2933;
+      --muted: #65717f;
+      --card: rgba(255, 252, 245, .86);
+      --card-solid: #fffcf5;
+      --line: rgba(31, 41, 51, .13);
+      --line-strong: rgba(31, 41, 51, .22);
+      --accent: #2d6a4f;
+      --accent-light: #40916c;
+      --accent-2: #d97706;
+      --accent-3: #be123c;
+      --good: #15803d;
+      --danger: #b91c1c;
+      --shadow: 0 24px 80px rgba(87, 67, 38, .18);
+      --shadow-sm: 0 4px 16px rgba(87, 67, 38, .12);
+      --radius: 20px;
+      --radius-sm: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: Avenir Next, Avenir, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 10% 8%, rgba(45, 106, 79, .15), transparent 28rem),
+        radial-gradient(circle at 92% 6%, rgba(217, 119, 6, .18), transparent 30rem),
+        radial-gradient(circle at 52% 95%, rgba(190, 18, 60, .1), transparent 34rem),
+        linear-gradient(135deg, #fbf6ec, var(--bg));
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .28;
+      background-image:
+        linear-gradient(rgba(31, 41, 51, .045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(31, 41, 51, .045) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: radial-gradient(circle at center, black 35%, transparent 82%);
+    }
+
+    button, textarea, input { font: inherit; }
+
+    a { color: var(--accent); }
+
+    .shell {
+      width: min(1060px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 64px;
+      position: relative;
+    }
+
+    .hero {
+      text-align: center;
+      margin-bottom: 28px;
+      position: relative;
+    }
+
+    .mascot {
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+
+    .hero h1 {
+      margin: 0 0 6px;
+      font-size: clamp(1.6rem, 4vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -.02em;
+      color: var(--ink);
+    }
+
+    .tagline {
+      margin: 0;
+      font-size: 1rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 20px;
+      background: var(--card);
+      backdrop-filter: blur(18px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .tab-btn {
+      flex: 1;
+      min-width: 120px;
+      padding: 10px 16px;
+      border: none;
+      background: transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: .88rem;
+      color: var(--muted);
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .tab-btn:hover {
+      background: rgba(45, 106, 79, .08);
+      color: var(--accent);
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .panel {
+      display: none;
+      background: var(--card);
+      backdrop-filter: blur(18px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: clamp(20px, 4vw, 32px);
+      animation: fadeIn .3s ease;
+    }
+
+    .panel.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .panel-section {
+      margin-bottom: 24px;
+    }
+
+    .panel-section:last-child { margin-bottom: 0; }
+
+    .section-label {
+      font-size: .75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-label::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--line);
+    }
+
+    .upload-zone {
+      border: 2px dashed var(--line-strong);
+      border-radius: var(--radius-sm);
+      padding: 32px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all .2s;
+      background: rgba(255,255,255,.4);
+    }
+
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(45, 106, 79, .06);
+    }
+
+    .upload-zone.has-file {
+      border-style: solid;
+      border-color: var(--accent-light);
+      background: rgba(45, 106, 79, .08);
+    }
+
+    .upload-zone input[type="file"] {
+      display: none;
+    }
+
+    .upload-icon {
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+
+    .upload-text {
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    .upload-text strong {
+      color: var(--accent);
+    }
+
+    .preview-canvas {
+      max-width: 100%;
+      max-height: 280px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      display: block;
+      margin: 0 auto;
+    }
+
+    .capacity-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(255,255,255,.5);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+    }
+
+    .capacity-bar .label {
+      font-size: .85rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .capacity-bar .bar {
+      flex: 1;
+      height: 6px;
+      background: var(--line);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .capacity-bar .bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width .3s;
+    }
+
+    .capacity-bar .bar-fill.warning { background: var(--accent-2); }
+    .capacity-bar .bar-fill.danger { background: var(--danger); }
+
+    .capacity-bar .value {
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--ink);
+      min-width: 80px;
+      text-align: right;
+    }
+
+    textarea, input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,.7);
+      font-size: .95rem;
+      resize: vertical;
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(45, 106, 79, .15);
+    }
+
+    textarea { min-height: 100px; }
+
+    .char-counter {
+      text-align: right;
+      font-size: .8rem;
+      margin-top: 4px;
+      color: var(--muted);
+    }
+
+    .char-counter.warning { color: var(--accent-2); }
+    .char-counter.danger { color: var(--danger); font-weight: 600; }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      flex: 1;
+      min-width: 140px;
+      padding: 12px 20px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      font-size: .95rem;
+      cursor: pointer;
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-light);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(45, 106, 79, .1);
+      color: var(--accent);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(45, 106, 79, .18);
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--line-strong);
+      color: var(--ink);
+    }
+
+    .btn-outline:hover:not(:disabled) {
+      background: rgba(0,0,0,.04);
+    }
+
+    .btn-sm {
+      min-width: auto;
+      padding: 8px 14px;
+      font-size: .85rem;
+    }
+
+    .output-box {
+      position: relative;
+    }
+
+    .output-box textarea {
+      padding-right: 48px;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,.8);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .2s;
+    }
+
+    .copy-btn:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .result-box {
+      padding: 16px;
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,.6);
+      border: 1px solid var(--line);
+      min-height: 60px;
+    }
+
+    .result-box.success {
+      background: rgba(21, 128, 61, .08);
+      border-color: rgba(21, 128, 61, .3);
+    }
+
+    .result-box.error {
+      background: rgba(185, 28, 28, .06);
+      border-color: rgba(185, 28, 28, .25);
+    }
+
+    .result-label {
+      font-size: .75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .result-text {
+      font-size: 1rem;
+      word-break: break-all;
+    }
+
+    .result-text.error { color: var(--danger); }
+
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      padding: 12px 20px;
+      border-radius: var(--radius-sm);
+      font-size: .9rem;
+      font-weight: 500;
+      box-shadow: var(--shadow);
+      animation: toastIn .3s ease;
+      pointer-events: auto;
+    }
+
+    .toast.success {
+      background: var(--good);
+      color: #fff;
+    }
+
+    .toast.error {
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .toast.info {
+      background: var(--ink);
+      color: #fff;
+    }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .status-log {
+      margin-top: 20px;
+      padding: 14px 18px;
+      background: rgba(31, 41, 51, .04);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      max-height: 120px;
+      overflow-y: auto;
+      font-size: .82rem;
+      font-family: ui-monospace, monospace;
+    }
+
+    .status-log .entry {
+      padding: 2px 0;
+      display: flex;
+      gap: 10px;
+    }
+
+    .status-log .time {
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .status-log .msg { color: var(--ink); }
+    .status-log .msg.success { color: var(--good); }
+    .status-log .msg.error { color: var(--danger); }
+    .status-log .msg.info { color: var(--accent-2); }
+
+    .about-content {
+      font-size: .95rem;
+      line-height: 1.7;
+    }
+
+    .about-content h3 {
+      margin: 24px 0 10px;
+      font-size: 1.05rem;
+      color: var(--accent);
+    }
+
+    .about-content h3:first-child { margin-top: 0; }
+
+    .about-content p { margin: 0 0 12px; }
+
+    .about-content ul {
+      margin: 0 0 14px;
+      padding-left: 20px;
+    }
+
+    .about-content li { margin-bottom: 6px; }
+
+    .dino-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      background: rgba(217, 119, 6, .1);
+      border-radius: 8px;
+      font-size: .85rem;
+      color: var(--accent-2);
+      margin-top: 12px;
+    }
+
+    .passphrase-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: .88rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .passphrase-toggle input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .passphrase-input {
+      margin-top: 12px;
+      display: none;
+    }
+
+    .passphrase-input.visible { display: block; }
+
+    .smart-scan-toggle {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      width: fit-content;
+    }
+
+    .smart-scan-toggle button {
+      padding: 10px 20px;
+      border: none;
+      background: rgba(255,255,255,.5);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: .88rem;
+      color: var(--muted);
+      transition: all .2s;
+    }
+
+    .smart-scan-toggle button:first-child { border-right: 1px solid var(--line-strong); }
+
+    .smart-scan-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .scan-area {
+      display: none;
+    }
+
+    .scan-area.active { display: block; }
+
+    .detection-result {
+      padding: 16px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+    }
+
+    .detection-result.found {
+      background: rgba(21, 128, 61, .08);
+      border-color: rgba(21, 128, 61, .3);
+    }
+
+    .detection-result.not-found {
+      background: rgba(31, 41, 51, .04);
+    }
+
+    .detection-title {
+      font-weight: 600;
+      font-size: 1rem;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .detection-meta {
+      font-size: .85rem;
+      color: var(--muted);
+    }
+
+    .stego-footer {
+      margin-top: 28px;
+      text-align: center;
+      font-size: .82rem;
+      color: var(--muted);
+    }
+
+    .stego-footer .privacy {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      background: rgba(45, 106, 79, .1);
+      border-radius: 20px;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    @media (max-width: 600px) {
+      .tab-btn { min-width: 100px; font-size: .8rem; padding: 8px 12px; }
+      .btn { min-width: 120px; }
+      .panel { padding: 20px 16px; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="hero">
+    <div class="mascot">
+      <svg width="80" height="60" viewBox="0 0 80 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="40" cy="38" rx="28" ry="18" fill="#2d6a4f"/>
+        <circle cx="22" cy="30" r="12" fill="#40916c"/>
+        <circle cx="18" cy="26" r="3" fill="#1f2933"/>
+        <circle cx="20" cy="25" r="1" fill="#fff"/>
+        <path d="M12 32 Q8 34 10 36" stroke="#2d6a4f" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M30 48 L26 58" stroke="#2d6a4f" stroke-width="5" stroke-linecap="round"/>
+        <path d="M38 48 L36 58" stroke="#2d6a4f" stroke-width="5" stroke-linecap="round"/>
+        <path d="M46 48 L48 58" stroke="#2d6a4f" stroke-width="5" stroke-linecap="round"/>
+        <path d="M54 48 L58 58" stroke="#2d6a4f" stroke-width="5" stroke-linecap="round"/>
+        <path d="M14 22 L10 12 L18 20 Z" fill="#d97706"/>
+        <path d="M22 18 L20 6 L28 16 Z" fill="#d97706"/>
+        <path d="M32 17 L32 4 L38 15 Z" fill="#d97706"/>
+        <path d="M42 17 L44 6 L46 16 Z" fill="#d97706"/>
+        <path d="M50 20 L54 10 L52 20 Z" fill="#d97706"/>
+        <path d="M58 24 L64 16 L60 26 Z" fill="#d97706"/>
+        <path d="M60 38 Q68 36 72 40 Q68 42 60 40 Z" fill="#40916c"/>
+      </svg>
+    </div>
+    <h1>Bashful Stegosaurus</h1>
+    <p class="tagline">Tiny secret, big dinosaur.</p>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Stego tools">
+    <button class="tab-btn active" role="tab" aria-selected="true" data-tab="image-hide">🖼️ Image Hide</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="image-reveal">🔍 Image Reveal</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="text-hide">📝 Text Hide</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="text-reveal">🔎 Text Reveal</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="smart-scan">🔮 Smart Scan</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="about">ℹ️ About</button>
+  </nav>
+
+  <main>
+    <div id="image-hide" class="panel active" role="tabpanel">
+      <div class="panel-section">
+        <div class="section-label">Carrier Image</div>
+        <div class="upload-zone" id="img-hide-upload" tabindex="0" aria-label="Upload carrier image. Supports PNG and JPEG.">
+          <input type="file" accept="image/png,image/jpeg,image/webp" id="img-hide-file-input" />
+          <div class="upload-icon">🦕</div>
+          <div class="upload-text">Drop a PNG here or <strong>click to browse</strong></div>
+        </div>
+        <canvas id="img-hide-preview" class="preview-canvas" style="display:none;" aria-label="Original image preview"></canvas>
+      </div>
+
+      <div class="panel-section" id="img-hide-capacity-section" style="display:none;">
+        <div class="capacity-bar">
+          <span class="label">Capacity:</span>
+          <div class="bar"><div class="bar-fill" id="img-hide-capacity-fill"></div></div>
+          <span class="value" id="img-hide-capacity-value">0 bytes</span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Secret Message</div>
+        <textarea id="img-hide-message" placeholder="Your tiny secret goes here..." rows="3" maxlength="127" aria-label="Secret message to hide"></textarea>
+        <div class="char-counter" id="img-hide-char-counter">0 / 127</div>
+        <label class="passphrase-toggle" style="margin-top:12px;">
+          <input type="checkbox" id="img-hide-use-pass" aria-label="Encrypt with passphrase" />
+          Encrypt with passphrase
+        </label>
+        <div class="passphrase-input" id="img-hide-pass-section">
+          <input type="password" id="img-hide-pass" placeholder="Passphrase (optional but recommended)" aria-label="Encryption passphrase" />
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="img-hide-encode" disabled aria-label="Encode message into image">Hide Message</button>
+      </div>
+
+      <div class="panel-section" id="img-hide-result-section" style="display:none;">
+        <div class="section-label">Encoded Image</div>
+        <canvas id="img-hide-result-canvas" class="preview-canvas" aria-label="Encoded image preview"></canvas>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn btn-primary" id="img-hide-download" aria-label="Download encoded PNG">Download PNG</button>
+          <button class="btn btn-outline btn-sm" id="img-hide-new" aria-label="Start over">New</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="image-reveal" class="panel" role="tabpanel">
+      <div class="panel-section">
+        <div class="section-label">Suspected Image</div>
+        <div class="upload-zone" id="img-rev-upload" tabindex="0" aria-label="Upload image to decode">
+          <input type="file" accept="image/png,image/jpeg,image/webp" id="img-rev-file-input" />
+          <div class="upload-icon">🔍</div>
+          <div class="upload-text">Drop an image here or <strong>click to browse</strong></div>
+        </div>
+        <canvas id="img-rev-preview" class="preview-canvas" style="display:none;" aria-label="Image preview"></canvas>
+      </div>
+
+      <div class="panel-section" id="img-rev-pass-section" style="display:none;">
+        <label class="section-label" style="margin-bottom:8px;">Passphrase (if encrypted)</label>
+        <input type="password" id="img-rev-pass" placeholder="Enter passphrase if message is encrypted" aria-label="Decryption passphrase" />
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="img-rev-decode" disabled aria-label="Decode hidden message">Decode Message</button>
+      </div>
+
+      <div class="panel-section" id="img-rev-result-section" style="display:none;">
+        <div class="section-label">Decoded Message</div>
+        <div class="result-box" id="img-rev-result-box">
+          <div class="result-text" id="img-rev-result-text"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="text-hide" class="panel" role="tabpanel">
+      <div class="panel-section">
+        <div class="section-label">Visible Text</div>
+        <textarea id="text-hide-source" placeholder="Type or paste your visible text here. The secret will be hidden within..." rows="6" aria-label="Visible text that will carry the hidden message"></textarea>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Secret Message</div>
+        <textarea id="text-hide-message" placeholder="Your tiny secret..." rows="2" maxlength="127" aria-label="Secret message to hide in text"></textarea>
+        <div class="char-counter" id="text-hide-char-counter">0 / 127</div>
+        <label class="passphrase-toggle" style="margin-top:12px;">
+          <input type="checkbox" id="text-hide-use-pass" aria-label="Encrypt with passphrase" />
+          Encrypt with passphrase
+        </label>
+        <div class="passphrase-input" id="text-hide-pass-section">
+          <input type="password" id="text-hide-pass" placeholder="Passphrase (optional)" aria-label="Encryption passphrase" />
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="text-hide-encode" disabled aria-label="Encode message into text">Encode into Text</button>
+      </div>
+
+      <div class="panel-section" id="text-hide-result-section" style="display:none;">
+        <div class="section-label">Encoded Text</div>
+        <div class="output-box">
+          <textarea id="text-hide-result" rows="6" readonly aria-label="Encoded text output"></textarea>
+          <button class="copy-btn" id="text-hide-copy" aria-label="Copy encoded text" title="Copy">📋</button>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn btn-outline btn-sm" id="text-hide-new" aria-label="Start over">New</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="text-reveal" class="panel" role="tabpanel">
+      <div class="panel-section">
+        <div class="section-label">Text to Decode</div>
+        <textarea id="text-rev-input" placeholder="Paste text here that may contain hidden characters..." rows="6" aria-label="Text that may contain hidden message"></textarea>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="text-rev-decode" disabled aria-label="Decode hidden message">Decode Message</button>
+      </div>
+
+      <div class="panel-section" id="text-rev-detect-section" style="display:none;">
+        <div class="detection-result" id="text-rev-detection">
+          <div class="detection-title" id="text-rev-detect-title"></div>
+          <div class="detection-meta" id="text-rev-detect-meta"></div>
+        </div>
+      </div>
+
+      <div class="panel-section" id="text-rev-result-section" style="display:none;">
+        <div class="section-label">Decoded Message</div>
+        <div class="result-box" id="text-rev-result-box">
+          <div class="result-text" id="text-rev-result-text"></div>
+        </div>
+      </div>
+
+      <div class="panel-section" id="text-rev-pass-section" style="display:none;">
+        <label class="section-label" style="margin-bottom:8px;">Passphrase (if encrypted)</label>
+        <input type="password" id="text-rev-pass" placeholder="Enter passphrase if message is encrypted" aria-label="Decryption passphrase" />
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn btn-primary btn-sm" id="text-rev-decrypt" aria-label="Decrypt with passphrase">Decrypt</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="smart-scan" class="panel" role="tabpanel">
+      <div class="panel-section">
+        <div class="section-label">Did the bashful dinosaur hide here?</div>
+        <div class="smart-scan-toggle">
+          <button class="active" id="scan-text-btn" aria-label="Switch to text scan">Text Scan</button>
+          <button id="scan-image-btn" aria-label="Switch to image scan">Image Scan</button>
+        </div>
+      </div>
+
+      <div class="scan-area active" id="scan-text-area">
+        <div class="panel-section">
+          <textarea id="scan-text-input" placeholder="Paste text here to scan for hidden messages..." rows="6" aria-label="Text to scan for hidden messages"></textarea>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="scan-text-go" aria-label="Scan text for hidden message">Scan</button>
+        </div>
+      </div>
+
+      <div class="scan-area" id="scan-image-area">
+        <div class="panel-section">
+          <div class="upload-zone" id="scan-img-upload" tabindex="0" aria-label="Upload image to scan">
+            <input type="file" accept="image/png,image/jpeg,image/webp" id="scan-img-input" />
+            <div class="upload-icon">🔮</div>
+            <div class="upload-text">Drop an image here or <strong>click to browse</strong></div>
+          </div>
+          <canvas id="scan-img-preview" class="preview-canvas" style="display:none;margin-top:12px;" aria-label="Image preview"></canvas>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="scan-img-go" disabled aria-label="Scan image for hidden message">Scan</button>
+        </div>
+      </div>
+
+      <div class="panel-section" id="scan-result-section" style="display:none;">
+        <div class="detection-result" id="scan-result">
+          <div class="detection-title" id="scan-result-title"></div>
+          <div class="detection-meta" id="scan-result-meta"></div>
+        </div>
+        <div id="scan-decrypted-section" style="display:none;margin-top:12px;">
+          <div class="result-box success">
+            <div class="result-label">Hidden Message</div>
+            <div class="result-text" id="scan-decrypted-text"></div>
+          </div>
+        </div>
+        <div id="scan-pass-section" style="display:none;margin-top:12px;">
+          <label class="section-label" style="margin-bottom:8px;">Passphrase Required</label>
+          <input type="password" id="scan-pass" placeholder="Enter passphrase to decrypt" aria-label="Passphrase for encrypted message" />
+          <div class="btn-row" style="margin-top:10px;">
+            <button class="btn btn-primary btn-sm" id="scan-decrypt" aria-label="Decrypt hidden message">Decrypt</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="about" class="panel" role="tabpanel">
+      <div class="about-content">
+        <h3>Welcome to Bashful Stegosaurus</h3>
+        <p>A friendly, local steganography tool for hiding tiny secrets in images and text. Nothing leaves your browser — all processing happens right here on your device.</p>
+
+        <h3>Image Steganography (LSB)</h3>
+        <p>This tool hides messages inside images using the least significant bits of color values. Think of it like hiding a whisper in a roar — the changes are so tiny that most eyes won't notice.</p>
+        <ul>
+          <li><strong>PNG only</strong> — JPEG compression will destroy the hidden data. The stegosaurus will forget.</li>
+          <li>Works on RGB channels, leaving alpha untouched</li>
+          <li>Capacity depends on image size: approximately <code>width × height × 3 / 8</code> bytes</li>
+          <li>Includes a small header so the tool can identify payloads reliably</li>
+        </ul>
+        <div class="dino-note">🦕 PNG only. JPEG makes the dinosaur forget.</div>
+
+        <h3>Text Steganography (Invisible Unicode)</h3>
+        <p>Hidden messages are encoded using invisible Unicode characters:</p>
+        <ul>
+          <li><strong>Zero-width non-joiner</strong> (U+200C) represents bit <code>0</code></li>
+          <li><strong>Zero-width joiner</strong> (U+200D) represents bit <code>1</code></li>
+          <li>A magic header identifies genuine payloads</li>
+          <li>Invisible characters are appended to your visible text</li>
+        </ul>
+        <div class="dino-note">🔍 This method can be detected by careful text analysis tools.</div>
+
+        <h3>Encryption</h3>
+        <p>If you provide a passphrase, your message is encrypted before embedding:</p>
+        <ul>
+          <li><strong>PBKDF2</strong> key derivation (100,000 iterations)</li>
+          <li><strong>AES-GCM</strong> encryption with random salt and IV</li>
+          <li>The tool will prompt for the passphrase during decode</li>
+          <li>Wrong passphrases produce a clear error — no silent failures</li>
+        </ul>
+
+        <h3>Limits</h3>
+        <ul>
+          <li>Messages are capped at <strong>127 characters</strong> to keep payloads small and discreet</li>
+          <li>Longer messages would be easier to spot and more likely to cause issues</li>
+        </ul>
+
+        <h3>Security Note</h3>
+        <p>This is an educational tool for learning about steganography and hiding private notes. It is <strong>not</strong> a secure communications system. Sophisticated analysis can often detect hidden data, and determined efforts can extract it.</p>
+
+        <h3>The Philosophy</h3>
+        <p>The stegosaurus is pretending not to know anything. It just wants to help you hide tiny secrets.</p>
+      </div>
+    </div>
+  </main>
+
+  <div class="status-log" id="status-log" aria-live="polite" aria-label="Status log" style="display:none;"></div>
+
+  <footer class="stego-footer">
+    <span class="privacy">🔒 Nothing leaves your browser</span>
+  </footer>
+</div>
+
+<div class="toast-container" id="toast-container" aria-live="assertive"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  const MAGIC_IMAGE = 'STEGOSAURUS_V1';
+  const MAGIC_TEXT = 'STEGOSAURUS_TEXT_V1';
+  const MAGIC_IMAGE_BYTES = utf8ToBytes(MAGIC_IMAGE);
+  const MAGIC_TEXT_BYTES = utf8ToBytes(MAGIC_TEXT);
+  const MAX_MESSAGE_LENGTH = 127;
+  const PBKDF2_ITERATIONS = 100000;
+
+  const appState = {
+    carrierImage: null,
+    carrierImageData: null,
+    encodedImageBlob: null,
+    scanImageData: null,
+    pendingEnvelope: null,
+    currentScanMode: 'text'
+  };
+
+  function utf8ToBytes(str) {
+    return new TextEncoder().encode(str);
+  }
+
+  function bytesToUtf8(bytes) {
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  }
+
+  function bytesToBits(bytes) {
+    const bits = [];
+    for (const byte of bytes) {
+      for (let i = 7; i >= 0; i--) {
+        bits.push((byte >> i) & 1);
+      }
+    }
+    return bits;
+  }
+
+  function bitsToBytes(bits) {
+    const bytes = [];
+    for (let i = 0; i < bits.length; i += 8) {
+      let byte = 0;
+      for (let j = 0; j < 8 && i + j < bits.length; j++) {
+        byte = (byte << 1) | bits[i + j];
+      }
+      bytes.push(byte);
+    }
+    return new Uint8Array(bytes);
+  }
+
+  async function hashBytes(data) {
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return new Uint8Array(digest);
+  }
+
+  async function encryptPayload(messageBytes, passphrase) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      utf8ToBytes(passphrase),
+      'PBKDF2',
+      false,
+      ['deriveBits', 'deriveKey']
+    );
+    const key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      messageBytes
+    );
+    return { encrypted: new Uint8Array(encrypted), salt, iv };
+  }
+
+  async function decryptPayload(encrypted, salt, iv, passphrase) {
+    try {
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        utf8ToBytes(passphrase),
+        'PBKDF2',
+        false,
+        ['deriveBits', 'deriveKey']
+      );
+      const key = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        encrypted
+      );
+      return { success: true, data: new Uint8Array(decrypted) };
+    } catch (e) {
+      return { success: false, error: 'Wrong passphrase or corrupted data' };
+    }
+  }
+
+  function buildEnvelope(payloadBytes, isEncrypted, encryptedMeta) {
+    const magic = MAGIC_IMAGE_BYTES;
+    const flags = isEncrypted ? 1 : 0;
+    let envelope = new Uint8Array(magic.length + 1 + (isEncrypted ? 16 + 12 : 0) + 2 + payloadBytes.length + 4);
+    let offset = 0;
+    envelope.set(magic, offset);
+    offset += magic.length;
+    envelope[offset] = flags;
+    offset += 1;
+    if (isEncrypted && encryptedMeta) {
+      envelope.set(encryptedMeta.salt, offset);
+      offset += 16;
+      envelope.set(encryptedMeta.iv, offset);
+      offset += 12;
+    }
+    envelope[offset] = (payloadBytes.length >> 8) & 0xff;
+    envelope[offset + 1] = payloadBytes.length & 0xff;
+    offset += 2;
+    envelope.set(payloadBytes, offset);
+    offset += payloadBytes.length;
+    hashBytes(payloadBytes).then(hash => {
+      envelope.set(hash.slice(0, 4), offset);
+    });
+    return envelope;
+  }
+
+  async function buildEnvelopeAsync(payloadBytes, isEncrypted, encryptedMeta) {
+    const magic = MAGIC_IMAGE_BYTES;
+    const flags = isEncrypted ? 1 : 0;
+    const headerSize = magic.length + 1 + (isEncrypted ? 16 + 12 : 0) + 2;
+    const checksum = await hashBytes(payloadBytes);
+    const envelope = new Uint8Array(headerSize + payloadBytes.length + 4);
+    let offset = 0;
+    envelope.set(magic, offset);
+    offset += magic.length;
+    envelope[offset] = flags;
+    offset += 1;
+    if (isEncrypted && encryptedMeta) {
+      envelope.set(encryptedMeta.salt, offset);
+      offset += 16;
+      envelope.set(encryptedMeta.iv, offset);
+      offset += 12;
+    }
+    envelope[offset] = (payloadBytes.length >> 8) & 0xff;
+    envelope[offset + 1] = payloadBytes.length & 0xff;
+    offset += 2;
+    envelope.set(payloadBytes, offset);
+    offset += payloadBytes.length;
+    envelope.set(checksum.slice(0, 4), offset);
+    return envelope;
+  }
+
+  async function parseEnvelope(data) {
+    let offset = 0;
+    const magicRead = data.slice(offset, offset + MAGIC_IMAGE_BYTES.length);
+    if (magicRead.length !== MAGIC_IMAGE_BYTES.length ||
+        !magicRead.every((v, i) => v === MAGIC_IMAGE_BYTES[i])) {
+      return { valid: false, error: 'No Bashful Stegosaurus payload found' };
+    }
+    offset += MAGIC_IMAGE_BYTES.length;
+    const flags = data[offset];
+    offset += 1;
+    const isEncrypted = (flags & 1) === 1;
+    let salt = null, iv = null;
+    if (isEncrypted) {
+      salt = data.slice(offset, offset + 16);
+      offset += 16;
+      iv = data.slice(offset, offset + 12);
+      offset += 12;
+    }
+    if (data.length < offset + 2) {
+      return { valid: false, error: 'Corrupted envelope' };
+    }
+    const payloadLen = (data[offset] << 8) | data[offset + 1];
+    offset += 2;
+    if (data.length < offset + payloadLen + 4) {
+      return { valid: false, error: 'Corrupted envelope' };
+    }
+    const payload = data.slice(offset, offset + payloadLen);
+    offset += payloadLen;
+    const storedChecksum = data.slice(offset, offset + 4);
+    const computedChecksum = (await hashBytes(payload)).slice(0, 4);
+    const checksumMatch = storedChecksum.every((v, i) => v === computedChecksum[i]);
+    return {
+      valid: true,
+      isEncrypted,
+      payload,
+      salt,
+      iv,
+      checksumValid: checksumMatch
+    };
+  }
+
+  function calculateCapacity(imageData) {
+    return Math.floor((imageData.width * imageData.height * 3) / 8);
+  }
+
+  function encodeImageLSB(imageData, payloadBytes) {
+    const bits = bytesToBits(payloadBytes);
+    const data = imageData.data;
+    let bitIndex = 0;
+    const totalBitsNeeded = bits.length;
+    for (let i = 0; i < data.length && bitIndex < totalBitsNeeded; i += 4) {
+      if (bitIndex < totalBitsNeeded) {
+        data[i] = (data[i] & 0xfe) | bits[bitIndex++];
+      }
+      if (bitIndex < totalBitsNeeded) {
+        data[i + 1] = (data[i + 1] & 0xfe) | bits[bitIndex++];
+      }
+      if (bitIndex < totalBitsNeeded) {
+        data[i + 2] = (data[i + 2] & 0xfe) | bits[bitIndex++];
+      }
+    }
+    return imageData;
+  }
+
+  async function decodeImageLSB(imageData) {
+    const data = imageData.data;
+    const bits = [];
+    for (let i = 0; i < data.length; i += 4) {
+      bits.push(data[i] & 1);
+      bits.push(data[i + 1] & 1);
+      bits.push(data[i + 2] & 1);
+    }
+    const bytes = bitsToBytes(bits);
+    return parseEnvelope(bytes);
+  }
+
+  function encodeTextStego(visibleText, payloadBytes) {
+    const bits = bytesToBits(payloadBytes);
+    let invisible = '';
+    for (const bit of bits) {
+      invisible += bit === 0 ? '\u200c' : '\u200d';
+    }
+    return visibleText + invisible;
+  }
+
+  async function buildTextEnvelope(payloadBytes, isEncrypted, encryptedMeta) {
+    const magic = MAGIC_TEXT_BYTES;
+    const flags = isEncrypted ? 1 : 0;
+    const headerSize = magic.length + 1 + (isEncrypted ? 16 + 12 : 0) + 2;
+    const checksum = await hashBytes(payloadBytes);
+    const fullPayload = new Uint8Array(2 + payloadBytes.length + 4);
+    fullPayload[0] = flags;
+    let offset = 1;
+    if (isEncrypted && encryptedMeta) {
+      fullPayload.set(encryptedMeta.salt, offset);
+      offset += 16;
+      fullPayload.set(encryptedMeta.iv, offset);
+      offset += 12;
+    }
+    fullPayload[offset] = (payloadBytes.length >> 8) & 0xff;
+    fullPayload[offset + 1] = payloadBytes.length & 0xff;
+    offset += 2;
+    fullPayload.set(payloadBytes, offset);
+    offset += payloadBytes.length;
+    fullPayload.set(checksum.slice(0, 4), offset);
+    const bits = bytesToBits(fullPayload);
+    let invisible = '';
+    for (const bit of bits) {
+      invisible += bit === 0 ? '\u200c' : '\u200d';
+    }
+    const magicBits = bytesToBits(magic);
+    let magicInvisible = '';
+    for (const bit of magicBits) {
+      magicInvisible += bit === 0 ? '\u200c' : '\u200d';
+    }
+    return magicInvisible + invisible;
+  }
+
+  function detectTextStego(text) {
+    let count = 0;
+    let hasZWNJ = false;
+    let hasZWJ = false;
+    for (const char of text) {
+      if (char === '\u200c') {
+        count++;
+        hasZWNJ = true;
+      } else if (char === '\u200d') {
+        count++;
+        hasZWJ = true;
+      }
+    }
+    const hasInvisibles = hasZWNJ || hasZWJ;
+    const bitCount = count;
+    const byteCount = Math.floor(bitCount / 8);
+    if (!hasInvisibles) {
+      return { found: false, charCount: 0, bitCount: 0, byteCount: 0, hasMagic: false };
+    }
+    const bits = [];
+    for (const char of text) {
+      if (char === '\u200c') bits.push(0);
+      else if (char === '\u200d') bits.push(1);
+    }
+    const bytes = bitsToBytes(bits);
+    const magicBytes = MAGIC_TEXT_BYTES;
+    let hasMagic = false;
+    if (bytes.length >= magicBytes.length) {
+      hasMagic = bytes.slice(0, magicBytes.length).every((v, i) => v === magicBytes[i]);
+    }
+    return {
+      found: hasInvisibles,
+      charCount: count,
+      bitCount,
+      byteCount,
+      hasMagic
+    };
+  }
+
+  function extractTextPayload(text) {
+    const bits = [];
+    for (const char of text) {
+      if (char === '\u200c') bits.push(0);
+      else if (char === '\u200d') bits.push(1);
+    }
+    const bytes = bitsToBytes(bits);
+    const magicBytes = MAGIC_TEXT_BYTES;
+    if (bytes.length < magicBytes.length) {
+      return { valid: false, error: 'No Bashful Stegosaurus payload found' };
+    }
+    const magicRead = bytes.slice(0, magicBytes.length);
+    if (!magicRead.every((v, i) => v === magicBytes[i])) {
+      return { valid: false, error: 'No Bashful Stegosaurus payload found' };
+    }
+    let offset = magicBytes.length;
+    if (bytes.length < offset + 1) {
+      return { valid: false, error: 'Corrupted payload' };
+    }
+    const flags = bytes[offset];
+    offset += 1;
+    const isEncrypted = (flags & 1) === 1;
+    let salt = null, iv = null;
+    if (isEncrypted) {
+      if (bytes.length < offset + 16) {
+        return { valid: false, error: 'Corrupted payload' };
+      }
+      salt = bytes.slice(offset, offset + 16);
+      offset += 16;
+      if (bytes.length < offset + 12) {
+        return { valid: false, error: 'Corrupted payload' };
+      }
+      iv = bytes.slice(offset, offset + 12);
+      offset += 12;
+    }
+    if (bytes.length < offset + 2) {
+      return { valid: false, error: 'Corrupted payload' };
+    }
+    const payloadLen = (bytes[offset] << 8) | bytes[offset + 1];
+    offset += 2;
+    if (bytes.length < offset + payloadLen + 4) {
+      return { valid: false, error: 'Corrupted payload' };
+    }
+    const payload = bytes.slice(offset, offset + payloadLen);
+    offset += payloadLen;
+    const storedChecksum = bytes.slice(offset, offset + 4);
+    return {
+      valid: true,
+      isEncrypted,
+      payload,
+      salt,
+      iv
+    };
+  }
+
+  function logStatus(message, type = 'info') {
+    const log = document.getElementById('status-log');
+    log.style.display = 'block';
+    const entry = document.createElement('div');
+    entry.className = 'entry';
+    const time = new Date().toLocaleTimeString();
+    entry.innerHTML = `<span class="time">${time}</span><span class="msg ${type}">${escapeHtml(message)}</span>`;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function setToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(16px)';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function showToast(message, type = 'info') {
+    setToast(message, type);
+    logStatus(message, type);
+  }
+
+  function setupUploadZone(zoneId, inputId, onFile) {
+    const zone = document.getElementById(zoneId);
+    const input = document.getElementById(inputId);
+    zone.addEventListener('click', () => input.click());
+    zone.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        input.click();
+      }
+    });
+    zone.addEventListener('dragover', e => {
+      e.preventDefault();
+      zone.classList.add('dragover');
+    });
+    zone.addEventListener('dragleave', () => {
+      zone.classList.remove('dragover');
+    });
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) onFile(file);
+    });
+    input.addEventListener('change', () => {
+      if (input.files[0]) onFile(input.files[0]);
+    });
+  }
+
+  function loadImageToCanvas(file, canvas) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'));
+            return;
+          }
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, img.width, img.height);
+          resolve({ img, imageData });
+        } catch (e) {
+          reject(new Error('Canvas error: ' + e.message));
+        }
+      };
+      img.onerror = () => reject(new Error('Image load error - may be corrupted or unsupported format'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  function canvasToBlob(canvas) {
+    return new Promise(resolve => {
+      canvas.toBlob(resolve, 'image/png');
+    });
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Copied to clipboard!', 'success');
+    } catch (e) {
+      showToast('Failed to copy', 'error');
+    }
+  }
+
+  function updateCharCounter(inputId, counterId, maxLen) {
+    const input = document.getElementById(inputId);
+    const counter = document.getElementById(counterId);
+    const len = input.value.length;
+    counter.textContent = `${len} / ${maxLen}`;
+    counter.className = 'char-counter';
+    if (len > maxLen) {
+      counter.classList.add('danger');
+    } else if (len > maxLen * 0.8) {
+      counter.classList.add('warning');
+    }
+  }
+
+  function initTabs() {
+    const tabs = document.querySelectorAll('.tab-btn');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => {
+          t.classList.remove('active');
+          t.setAttribute('aria-selected', 'false');
+        });
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        document.getElementById(tab.dataset.tab).classList.add('active');
+      });
+    });
+  }
+
+  function initImageHide() {
+    const zone = document.getElementById('img-hide-upload');
+    const fileInput = document.getElementById('img-hide-file-input');
+    const preview = document.getElementById('img-hide-preview');
+    const capacitySection = document.getElementById('img-hide-capacity-section');
+    const capacityFill = document.getElementById('img-hide-capacity-fill');
+    const capacityValue = document.getElementById('img-hide-capacity-value');
+    const messageInput = document.getElementById('img-hide-message');
+    const charCounter = document.getElementById('img-hide-char-counter');
+    const usePassCheck = document.getElementById('img-hide-use-pass');
+    const passSection = document.getElementById('img-hide-pass-section');
+    const passInput = document.getElementById('img-hide-pass');
+    const encodeBtn = document.getElementById('img-hide-encode');
+    const resultSection = document.getElementById('img-hide-result-section');
+    const resultCanvas = document.getElementById('img-hide-result-canvas');
+    const downloadBtn = document.getElementById('img-hide-download');
+    const newBtn = document.getElementById('img-hide-new');
+
+    setupUploadZone('img-hide-upload', 'img-hide-file-input', async file => {
+      try {
+        const { img, imageData } = await loadImageToCanvas(file, preview);
+        appState.carrierImage = img;
+        appState.carrierImageData = imageData;
+        zone.classList.add('has-file');
+        preview.style.display = 'block';
+        capacitySection.style.display = 'block';
+        const capacity = calculateCapacity(imageData);
+        const msgLen = messageInput.value.length;
+        const needed = msgLen + MAGIC_IMAGE_BYTES.length + 1 + 2 + 4 + (usePassCheck.checked ? 28 : 0);
+        const pct = Math.min(100, (needed / capacity) * 100);
+        capacityFill.style.width = pct + '%';
+        capacityFill.className = 'bar-fill' + (pct > 90 ? ' danger' : pct > 70 ? ' warning' : '');
+        capacityValue.textContent = `${capacity} bytes available`;
+        logStatus(`Loaded image: ${img.width}x${img.height}, capacity: ${capacity} bytes`);
+        updateEncodeButton();
+      } catch (e) {
+        showToast('Failed to load image', 'error');
+      }
+    });
+
+    messageInput.addEventListener('input', () => {
+      updateCharCounter('img-hide-message', 'img-hide-char-counter', MAX_MESSAGE_LENGTH);
+      updateEncodeButton();
+    });
+
+    usePassCheck.addEventListener('change', () => {
+      passSection.classList.toggle('visible', usePassCheck.checked);
+      updateEncodeButton();
+    });
+
+    passInput.addEventListener('input', updateEncodeButton);
+
+    function updateEncodeButton() {
+      const hasImage = appState.carrierImageData !== null;
+      const msgLen = messageInput.value.length;
+      const hasMessage = msgLen > 0 && msgLen <= MAX_MESSAGE_LENGTH;
+      const hasPass = !usePassCheck.checked || passInput.value.length > 0;
+      encodeBtn.disabled = !hasImage || !hasMessage || !hasPass;
+    }
+
+    encodeBtn.addEventListener('click', async () => {
+      if (!appState.carrierImageData) {
+        showToast('Please upload a carrier image first', 'error');
+        return;
+      }
+      const message = messageInput.value;
+      if (message.length > MAX_MESSAGE_LENGTH) {
+        showToast(`Message too long (max ${MAX_MESSAGE_LENGTH} chars)`, 'error');
+        return;
+      }
+      try {
+        encodeBtn.disabled = true;
+        const messageBytes = utf8ToBytes(message);
+        const isEncrypted = usePassCheck.checked;
+        let payloadBytes = messageBytes;
+        let encryptedMeta = null;
+        if (isEncrypted) {
+          const pass = passInput.value;
+          if (!pass) {
+            showToast('Please enter a passphrase', 'error');
+            encodeBtn.disabled = false;
+            return;
+          }
+          const result = await encryptPayload(messageBytes, pass);
+          payloadBytes = result.encrypted;
+          encryptedMeta = { salt: result.salt, iv: result.iv };
+          logStatus('Encrypted payload with AES-GCM');
+        }
+        const capacity = calculateCapacity(appState.carrierImageData);
+        const envelope = await buildEnvelopeAsync(payloadBytes, isEncrypted, encryptedMeta);
+        if (envelope.length > capacity) {
+          showToast(`Message too large for this image (need ${envelope.length}, have ${capacity})`, 'error');
+          encodeBtn.disabled = false;
+          return;
+        }
+        const newImageData = new ImageData(
+          new Uint8ClampedArray(appState.carrierImageData.data),
+          appState.carrierImageData.width,
+          appState.carrierImageData.height
+        );
+        const encoded = encodeImageLSB(newImageData, envelope);
+        resultCanvas.width = appState.carrierImageData.width;
+        resultCanvas.height = appState.carrierImageData.height;
+        const ctx = resultCanvas.getContext('2d');
+        ctx.putImageData(encoded, 0, 0);
+        const blob = await canvasToBlob(resultCanvas);
+        appState.encodedImageBlob = blob;
+        resultSection.style.display = 'block';
+        showToast('Message hidden successfully!', 'success');
+        logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted})`);
+      } catch (e) {
+        showToast('Encoding failed: ' + e.message, 'error');
+      }
+      encodeBtn.disabled = false;
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (appState.encodedImageBlob) {
+        downloadBlob(appState.encodedImageBlob, 'bashful-stego.png');
+        showToast('Downloaded encoded PNG', 'success');
+      }
+    });
+
+    newBtn.addEventListener('click', () => {
+      appState.carrierImage = null;
+      appState.carrierImageData = null;
+      appState.encodedImageBlob = null;
+      preview.style.display = 'none';
+      zone.classList.remove('has-file');
+      capacitySection.style.display = 'none';
+      resultSection.style.display = 'none';
+      messageInput.value = '';
+      passInput.value = '';
+      usePassCheck.checked = false;
+      passSection.classList.remove('visible');
+      fileInput.value = '';
+      updateCharCounter('img-hide-message', 'img-hide-char-counter', MAX_MESSAGE_LENGTH);
+      logStatus('Reset image hide panel');
+    });
+  }
+
+  function initImageReveal() {
+    const zone = document.getElementById('img-rev-upload');
+    const fileInput = document.getElementById('img-rev-file-input');
+    const preview = document.getElementById('img-rev-preview');
+    const passSection = document.getElementById('img-rev-pass-section');
+    const passInput = document.getElementById('img-rev-pass');
+    const decodeBtn = document.getElementById('img-rev-decode');
+    const resultSection = document.getElementById('img-rev-result-section');
+    const resultBox = document.getElementById('img-rev-result-box');
+    const resultText = document.getElementById('img-rev-result-text');
+
+    let loadedImageData = null;
+
+    setupUploadZone('img-rev-upload', 'img-rev-file-input', async file => {
+      try {
+        const { imageData } = await loadImageToCanvas(file, preview);
+        loadedImageData = imageData;
+        zone.classList.add('has-file');
+        preview.style.display = 'block';
+        passSection.style.display = 'none';
+        resultSection.style.display = 'none';
+        decodeBtn.disabled = false;
+        logStatus(`Loaded image for decode: ${imageData.width}x${imageData.height}`);
+      } catch (e) {
+        showToast('Failed to load image', 'error');
+      }
+    });
+
+    decodeBtn.addEventListener('click', async () => {
+      if (!loadedImageData) {
+        showToast('Please upload an image first', 'error');
+        return;
+      }
+      try {
+        decodeBtn.disabled = true;
+        const result = await decodeImageLSB(loadedImageData);
+        if (!result.valid) {
+          resultBox.className = 'result-box error';
+          resultText.className = 'result-text error';
+          resultText.textContent = result.error;
+          resultSection.style.display = 'block';
+          showToast('No hidden message found', 'info');
+          decodeBtn.disabled = false;
+          return;
+        }
+        logStatus(`Found payload: encrypted=${result.isEncrypted}, ${result.payload.length} bytes`);
+        if (result.isEncrypted) {
+          passSection.style.display = 'block';
+          resultSection.style.display = 'none';
+          const tryDecrypt = async () => {
+            const pass = passInput.value;
+            if (!pass) {
+              showToast('Please enter the passphrase', 'error');
+              return;
+            }
+            const decResult = await decryptPayload(result.payload, result.salt, result.iv, pass);
+            if (!decResult.success) {
+              resultBox.className = 'result-box error';
+              resultText.className = 'result-text error';
+              resultText.textContent = decResult.error;
+              resultSection.style.display = 'block';
+              passSection.style.display = 'none';
+              showToast('Wrong passphrase', 'error');
+              return;
+            }
+            const message = bytesToUtf8(decResult.data);
+            resultBox.className = 'result-box success';
+            resultText.className = 'result-text';
+            resultText.textContent = message;
+            resultSection.style.display = 'block';
+            passSection.style.display = 'none';
+            showToast('Message decrypted!', 'success');
+            logStatus('Decrypted message successfully');
+          };
+          passInput.onkeydown = e => {
+            if (e.key === 'Enter') tryDecrypt();
+          };
+          passInput.nextElementSibling?.addEventListener('click', tryDecrypt);
+          const decryptBtn = document.createElement('button');
+          decryptBtn.className = 'btn btn-primary btn-sm';
+          decryptBtn.textContent = 'Decrypt';
+          decryptBtn.onclick = tryDecrypt;
+          passSection.appendChild(decryptBtn);
+        } else {
+          const message = bytesToUtf8(result.payload);
+          resultBox.className = 'result-box success';
+          resultText.className = 'result-text';
+          resultText.textContent = message;
+          resultSection.style.display = 'block';
+          showToast('Message found!', 'success');
+          logStatus('Decoded plaintext message');
+        }
+      } catch (e) {
+        showToast('Decode failed: ' + e.message, 'error');
+      }
+      decodeBtn.disabled = false;
+    });
+  }
+
+  function initTextHide() {
+    const sourceInput = document.getElementById('text-hide-source');
+    const messageInput = document.getElementById('text-hide-message');
+    const charCounter = document.getElementById('text-hide-char-counter');
+    const usePassCheck = document.getElementById('text-hide-use-pass');
+    const passSection = document.getElementById('text-hide-pass-section');
+    const passInput = document.getElementById('text-hide-pass');
+    const encodeBtn = document.getElementById('text-hide-encode');
+    const resultSection = document.getElementById('text-hide-result-section');
+    const resultText = document.getElementById('text-hide-result');
+    const copyBtn = document.getElementById('text-hide-copy');
+    const newBtn = document.getElementById('text-hide-new');
+
+    messageInput.addEventListener('input', () => {
+      updateCharCounter('text-hide-message', 'text-hide-char-counter', MAX_MESSAGE_LENGTH);
+      updateEncodeButton();
+    });
+
+    sourceInput.addEventListener('input', updateEncodeButton);
+
+    usePassCheck.addEventListener('change', () => {
+      passSection.classList.toggle('visible', usePassCheck.checked);
+      updateEncodeButton();
+    });
+
+    passInput.addEventListener('input', updateEncodeButton);
+
+    function updateEncodeButton() {
+      const hasSource = sourceInput.value.trim().length > 0;
+      const msgLen = messageInput.value.length;
+      const hasMessage = msgLen > 0 && msgLen <= MAX_MESSAGE_LENGTH;
+      const hasPass = !usePassCheck.checked || passInput.value.length > 0;
+      encodeBtn.disabled = !hasSource || !hasMessage || !hasPass;
+    }
+
+    encodeBtn.addEventListener('click', async () => {
+      const source = sourceInput.value;
+      const message = messageInput.value;
+      if (source.trim().length === 0) {
+        showToast('Please enter visible text', 'error');
+        return;
+      }
+      if (message.length > MAX_MESSAGE_LENGTH) {
+        showToast(`Message too long (max ${MAX_MESSAGE_LENGTH} chars)`, 'error');
+        return;
+      }
+      try {
+        encodeBtn.disabled = true;
+        const messageBytes = utf8ToBytes(message);
+        const isEncrypted = usePassCheck.checked;
+        let payloadBytes = messageBytes;
+        let encryptedMeta = null;
+        if (isEncrypted) {
+          const pass = passInput.value;
+          if (!pass) {
+            showToast('Please enter a passphrase', 'error');
+            encodeBtn.disabled = false;
+            return;
+          }
+          const result = await encryptPayload(messageBytes, pass);
+          payloadBytes = result.encrypted;
+          encryptedMeta = { salt: result.salt, iv: result.iv };
+          logStatus('Encrypted payload for text stego');
+        }
+        const invisiblePart = await buildTextEnvelope(payloadBytes, isEncrypted, encryptedMeta);
+        const encodedText = source + invisiblePart;
+        resultText.value = encodedText;
+        resultSection.style.display = 'block';
+        showToast('Message hidden in text!', 'success');
+        logStatus(`Encoded ${payloadBytes.length} bytes into text (encrypted: ${isEncrypted})`);
+      } catch (e) {
+        showToast('Encoding failed: ' + e.message, 'error');
+      }
+      encodeBtn.disabled = false;
+    });
+
+    copyBtn.addEventListener('click', () => {
+      copyToClipboard(resultText.value);
+    });
+
+    newBtn.addEventListener('click', () => {
+      sourceInput.value = '';
+      messageInput.value = '';
+      passInput.value = '';
+      usePassCheck.checked = false;
+      passSection.classList.remove('visible');
+      resultSection.style.display = 'none';
+      updateCharCounter('text-hide-message', 'text-hide-char-counter', MAX_MESSAGE_LENGTH);
+      logStatus('Reset text hide panel');
+    });
+  }
+
+  function initTextReveal() {
+    const inputArea = document.getElementById('text-rev-input');
+    const decodeBtn = document.getElementById('text-rev-decode');
+    const detectSection = document.getElementById('text-rev-detect-section');
+    const detection = document.getElementById('text-rev-detection');
+    const detectTitle = document.getElementById('text-rev-detect-title');
+    const detectMeta = document.getElementById('text-rev-detect-meta');
+    const resultSection = document.getElementById('text-rev-result-section');
+    const resultBox = document.getElementById('text-rev-result-box');
+    const resultText = document.getElementById('text-rev-result-text');
+    const passSection = document.getElementById('text-rev-pass-section');
+    const passInput = document.getElementById('text-rev-pass');
+    const decryptBtn = document.getElementById('text-rev-decrypt');
+
+    let pendingResult = null;
+
+    inputArea.addEventListener('input', () => {
+      decodeBtn.disabled = inputArea.value.trim().length === 0;
+      detectSection.style.display = 'none';
+      resultSection.style.display = 'none';
+      passSection.style.display = 'none';
+    });
+
+    decodeBtn.addEventListener('click', async () => {
+      const text = inputArea.value;
+      if (!text.trim()) {
+        showToast('Please enter text to decode', 'error');
+        return;
+      }
+      try {
+        const detectionResult = detectTextStego(text);
+        detectSection.style.display = 'block';
+        if (!detectionResult.found) {
+          detection.className = 'detection-result not-found';
+          detectTitle.textContent = '🔍 No invisible characters detected';
+          detectMeta.textContent = 'This text appears to be clean.';
+          showToast('No hidden message found', 'info');
+          return;
+        }
+        detection.className = 'detection-result' + (detectionResult.hasMagic ? ' found' : ' not-found');
+        if (detectionResult.hasMagic) {
+          detectTitle.textContent = '🦕 Bashful Stegosaurus payload detected!';
+          detectMeta.textContent = `Found ${detectionResult.charCount} invisible characters (${detectionResult.byteCount} bytes)`;
+        } else {
+          detectTitle.textContent = '⚠️ Odd Unicode characters found';
+          detectMeta.textContent = `Found ${detectionResult.charCount} invisible chars, but no magic header. May be random or different encoding.`;
+        }
+        const parsed = extractTextPayload(text);
+        if (!parsed.valid) {
+          if (detectionResult.hasMagic) {
+            showToast('Payload detected but corrupted', 'error');
+          }
+          return;
+        }
+        logStatus(`Found text stego payload: encrypted=${parsed.isEncrypted}, ${parsed.payload.length} bytes`);
+        if (parsed.isEncrypted) {
+          passSection.style.display = 'block';
+          resultSection.style.display = 'none';
+          pendingResult = parsed;
+          const tryDecrypt = async () => {
+            if (!pendingResult) return;
+            const pass = passInput.value;
+            if (!pass) {
+              showToast('Please enter the passphrase', 'error');
+              return;
+            }
+            const decResult = await decryptPayload(pendingResult.payload, pendingResult.salt, pendingResult.iv, pass);
+            if (!decResult.success) {
+              resultBox.className = 'result-box error';
+              resultText.className = 'result-text error';
+              resultText.textContent = decResult.error;
+              resultSection.style.display = 'block';
+              passSection.style.display = 'none';
+              showToast('Wrong passphrase', 'error');
+              return;
+            }
+            const message = bytesToUtf8(decResult.data);
+            resultBox.className = 'result-box success';
+            resultText.className = 'result-text';
+            resultText.textContent = message;
+            resultSection.style.display = 'block';
+            passSection.style.display = 'none';
+            pendingResult = null;
+            showToast('Message decrypted!', 'success');
+            logStatus('Decrypted text message successfully');
+          };
+          decryptBtn.onclick = tryDecrypt;
+          passInput.onkeydown = e => {
+            if (e.key === 'Enter') tryDecrypt();
+          };
+        } else {
+          const message = bytesToUtf8(parsed.payload);
+          resultBox.className = 'result-box success';
+          resultText.className = 'result-text';
+          resultText.textContent = message;
+          resultSection.style.display = 'block';
+          showToast('Message found!', 'success');
+          logStatus('Decoded plaintext message from text');
+        }
+      } catch (e) {
+        showToast('Decode failed: ' + e.message, 'error');
+      }
+    });
+  }
+
+  function initSmartScan() {
+    const textBtn = document.getElementById('scan-text-btn');
+    const imageBtn = document.getElementById('scan-image-btn');
+    const textArea = document.getElementById('scan-text-area');
+    const imageArea = document.getElementById('scan-image-area');
+    const textInput = document.getElementById('scan-text-input');
+    const textGo = document.getElementById('scan-text-go');
+    const imageUpload = document.getElementById('scan-img-upload');
+    const imageInput = document.getElementById('scan-img-input');
+    const imagePreview = document.getElementById('scan-img-preview');
+    const imageGo = document.getElementById('scan-img-go');
+    const resultSection = document.getElementById('scan-result-section');
+    const resultDiv = document.getElementById('scan-result');
+    const resultTitle = document.getElementById('scan-result-title');
+    const resultMeta = document.getElementById('scan-result-meta');
+    const passSection = document.getElementById('scan-pass-section');
+    const passInput = document.getElementById('scan-pass');
+    const decryptBtn = document.getElementById('scan-decrypt');
+    const decryptedSection = document.getElementById('scan-decrypted-section');
+    const decryptedText = document.getElementById('scan-decrypted-text');
+
+    let loadedImageData = null;
+    let pendingEnvelope = null;
+
+    textBtn.addEventListener('click', () => {
+      appState.currentScanMode = 'text';
+      textBtn.classList.add('active');
+      imageBtn.classList.remove('active');
+      textArea.classList.add('active');
+      imageArea.classList.remove('active');
+      resultSection.style.display = 'none';
+      passSection.style.display = 'none';
+      decryptedSection.style.display = 'none';
+    });
+
+    imageBtn.addEventListener('click', () => {
+      appState.currentScanMode = 'image';
+      imageBtn.classList.add('active');
+      textBtn.classList.remove('active');
+      imageArea.classList.add('active');
+      textArea.classList.remove('active');
+      resultSection.style.display = 'none';
+      passSection.style.display = 'none';
+      decryptedSection.style.display = 'none';
+    });
+
+    setupUploadZone('scan-img-upload', 'scan-img-input', async file => {
+      try {
+        const { imageData } = await loadImageToCanvas(file, imagePreview);
+        loadedImageData = imageData;
+        imageUpload.classList.add('has-file');
+        imagePreview.style.display = 'block';
+        imageGo.disabled = false;
+        logStatus(`Loaded image for scan: ${imageData.width}x${imageData.height}`);
+      } catch (e) {
+        showToast('Failed to load image', 'error');
+      }
+    });
+
+    textGo.addEventListener('click', async () => {
+      const text = textInput.value;
+      if (!text.trim()) {
+        showToast('Please enter text to scan', 'error');
+        return;
+      }
+      resultSection.style.display = 'block';
+      passSection.style.display = 'none';
+      decryptedSection.style.display = 'none';
+      const detection = detectTextStego(text);
+      if (!detection.found) {
+        resultDiv.className = 'detection-result not-found';
+        resultTitle.textContent = '✅ Clean text';
+        resultMeta.textContent = 'No invisible Unicode characters detected.';
+        showToast('Text is clean', 'info');
+        return;
+      }
+      resultDiv.className = 'detection-result';
+      if (detection.hasMagic) {
+        resultDiv.classList.add('found');
+        resultTitle.textContent = '🦕 Bashful Stegosaurus payload found!';
+        resultMeta.textContent = `${detection.charCount} invisible characters (${detection.byteCount} bytes)`;
+      } else {
+        resultTitle.textContent = '⚠️ Odd Unicode detected';
+        resultMeta.textContent = `${detection.charCount} invisible chars, but no magic header.`;
+      }
+      const parsed = extractTextPayload(text);
+      if (!parsed.valid || !detection.hasMagic) {
+        showToast('Invisible chars found but no valid payload', 'info');
+        return;
+      }
+      logStatus(`Scan found text payload: encrypted=${parsed.isEncrypted}`);
+      if (parsed.isEncrypted) {
+        passSection.style.display = 'block';
+        pendingEnvelope = parsed;
+        showToast('Encrypted payload detected - passphrase required', 'info');
+      } else {
+        const message = bytesToUtf8(parsed.payload);
+        decryptedText.textContent = message;
+        decryptedSection.style.display = 'block';
+        showToast('Message found!', 'success');
+        logStatus('Scan decoded plaintext message');
+      }
+    });
+
+    imageGo.addEventListener('click', async () => {
+      if (!loadedImageData) {
+        showToast('Please upload an image first', 'error');
+        return;
+      }
+      resultSection.style.display = 'block';
+      passSection.style.display = 'none';
+      decryptedSection.style.display = 'none';
+      try {
+        const result = await decodeImageLSB(loadedImageData);
+        if (!result.valid) {
+          resultDiv.className = 'detection-result not-found';
+          resultTitle.textContent = '✅ No payload detected';
+          resultMeta.textContent = 'This image does not contain a Bashful Stegosaurus payload.';
+          showToast('No hidden message in this image', 'info');
+          return;
+        }
+        resultDiv.className = 'detection-result found';
+        resultTitle.textContent = '🦕 Bashful Stegosaurus payload found!';
+        resultMeta.textContent = `Payload: ${result.payload.length} bytes (encrypted: ${result.isEncrypted})`;
+        logStatus(`Scan found image payload: encrypted=${result.isEncrypted}`);
+        if (result.isEncrypted) {
+          passSection.style.display = 'block';
+          pendingEnvelope = result;
+          showToast('Encrypted payload - passphrase required', 'info');
+        } else {
+          const message = bytesToUtf8(result.payload);
+          decryptedText.textContent = message;
+          decryptedSection.style.display = 'block';
+          showToast('Message found!', 'success');
+          logStatus('Scan decoded plaintext message');
+        }
+      } catch (e) {
+        showToast('Scan failed: ' + e.message, 'error');
+      }
+    });
+
+    decryptBtn.addEventListener('click', async () => {
+      if (!pendingEnvelope) return;
+      const pass = passInput.value;
+      if (!pass) {
+        showToast('Please enter the passphrase', 'error');
+        return;
+      }
+      const decResult = await decryptPayload(pendingEnvelope.payload, pendingEnvelope.salt, pendingEnvelope.iv, pass);
+      if (!decResult.success) {
+        resultDiv.className = 'detection-result';
+        resultTitle.textContent = '❌ Decryption failed';
+        resultMeta.textContent = decResult.error;
+        showToast('Wrong passphrase', 'error');
+        return;
+      }
+      const message = bytesToUtf8(decResult.data);
+      decryptedText.textContent = message;
+      decryptedSection.style.display = 'block';
+      passSection.style.display = 'none';
+      showToast('Message decrypted!', 'success');
+      logStatus('Scan decrypted message successfully');
+      pendingEnvelope = null;
+    });
+  }
+
+  function init() {
+    initTabs();
+    initImageHide();
+    initImageReveal();
+    initTextHide();
+    initTextReveal();
+    initSmartScan();
+    logStatus('Bashful Stegosaurus initialized');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.07.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.07.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; Hank Marquardt 2026 &middot; Version 2026.05.07.1
+</footer>
+</body>
+</html>
