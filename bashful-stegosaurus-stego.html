@@ -1913,21 +1913,16 @@
         logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
-          let encodedDataUrl = '';
           try {
-            encodedDataUrl = await blobToDataURL(appState.encodedImageBlob);
-          } catch (e) {
-            logStatus('Failed to convert encoded image: ' + e.message, 'error');
-          }
-          let thumb = '';
-          try {
-            thumb = await generateThumbnail(appState.carrierImageData, 320, 180);
-          } catch (e) {
-            logStatus('Failed to generate thumbnail: ' + e.message, 'error');
-          }
-          if (!encodedDataUrl) {
-            showToast('History save skipped — could not read encoded image', 'error');
-          } else {
+            const thumbCanvas = document.createElement('canvas');
+            const maxThumb = 480;
+            const ratio = Math.min(maxThumb / appState.carrierImageData.width, maxThumb / appState.carrierImageData.height, 1);
+            const tw = Math.round(appState.carrierImageData.width * ratio);
+            const th = Math.round(appState.carrierImageData.height * ratio);
+            thumbCanvas.width = tw;
+            thumbCanvas.height = th;
+            thumbCanvas.getContext('2d').drawImage(resultCanvas, 0, 0, tw, th);
+            const carrierData = thumbCanvas.toDataURL('image/jpeg', 0.8);
             saveHistoryRecord({
               type: 'image',
               messageLength: message.length,
@@ -1935,13 +1930,16 @@
               encrypted: isEncrypted,
               date: localDateStr(),
               apodSource: usingApod || false,
-              carrierData: encodedDataUrl,
-              carrierMime: 'image/png',
-              carrierPreview: thumb
+              carrierData,
+              carrierMime: 'image/jpeg',
+              carrierPreview: carrierData
             }).catch(e => {
               logStatus('History save failed: ' + e.message, 'error');
               showToast('History save failed: ' + e.message, 'error');
             });
+          } catch (e) {
+            logStatus('History thumbnail failed: ' + e.message, 'error');
+            showToast('History save skipped — ' + e.message, 'error');
           }
         }
       } catch (e) {
