@@ -1524,7 +1524,41 @@
 
   const HISTORY_KEY = 'bashful-stego-history';
   const MAX_HISTORY = 100;
-  const MAX_CARRIER_PREVIEW = 400;
+
+  let _idb = null;
+  function getIDB() {
+    if (!_idb) {
+      _idb = indexedDB.open('bashful-stego-carriers', 1);
+      _idb.onupgradeneeded = e => {
+        e.target.result.createObjectStore('carriers', { keyPath: 'id' });
+      };
+    }
+    return _idb;
+  }
+
+  function idbSave(id, data) {
+    return new Promise((resolve, reject) => {
+      const req = getIDB().transaction('carriers', 'readwrite').objectStore('carriers').put({ id, data });
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function idbLoad(id) {
+    return new Promise((resolve, reject) => {
+      const req = getIDB().transaction('carriers', 'readonly').objectStore('carriers').get(id);
+      req.onsuccess = () => resolve(req.result?.data ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function idbDelete(id) {
+    return new Promise((resolve, reject) => {
+      const req = getIDB().transaction('carriers', 'readwrite').objectStore('carriers').delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
 
   function loadHistory() {
     try {
@@ -1542,8 +1576,9 @@
   async function saveHistoryRecord(record) {
     const history = loadHistory();
     const finger = await hashBytes(utf8ToBytes(record.passphrase || ''));
+    const entryId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const entry = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      id: entryId,
       timestamp: new Date().toISOString(),
       type: record.type || 'image',
       messageLength: record.messageLength || 0,
@@ -1553,23 +1588,49 @@
       date: record.date || '',
       encrypted: record.encrypted || false,
       apodSource: record.apodSource || false,
-      carrierData: record.carrierData || '',
       carrierMime: record.carrierMime || null,
-      carrierPreview: record.carrierPreview || ''
+      carrierSize: record.carrierData ? record.carrierData.length : 0
     };
+    if (record.carrierData) {
+      try {
+        await idbSave(entryId, record.carrierData);
+      } catch (e) {
+        logStatus('IDB save failed: ' + e.message, 'error');
+      }
+    }
     history.unshift(entry);
-    if (history.length > MAX_HISTORY) history.splice(MAX_HISTORY);
+    if (history.length > MAX_HISTORY) {
+      const removed = history.splice(MAX_HISTORY);
+      removed.forEach(e => idbDelete(e.id).catch(() => {}));
+    }
     saveHistory(history);
     return entry;
   }
 
-  function renderHistory() {
-    const list = document.getElementById('history-list');
+  async function loadHistoryWithCarriers() {
     const history = loadHistory();
+    const withCarriers = await Promise.all(history.map(async entry => {
+      if (entry.carrierSize > 0) {
+        try {
+          entry._carrierData = await idbLoad(entry.id);
+        } catch {
+          entry._carrierData = null;
+        }
+      }
+      return entry;
+    }));
+    return withCarriers;
+  }
+
+  async function renderHistory() {
+    const list = document.getElementById('history-list');
+    const history = await loadHistoryWithCarriers();
     if (history.length === 0) {
       list.innerHTML = '<div id="history-empty" style="text-align:center;padding:32px;color:var(--muted);font-size:.9rem;">No encodes recorded yet.</div>';
       return;
     }
+    const entryMap = {};
+    history.forEach(e => { entryMap[e.id] = e; });
     list.innerHTML = history.map(entry => {
       const d = new Date(entry.timestamp);
       const dateStr = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -1577,12 +1638,14 @@
       const encIcon = entry.encrypted ? '🔐' : '📄';
       const apodBadge = entry.apodSource ? '<span style="background:rgba(45,106,79,.15);color:var(--accent);padding:1px 6px;border-radius:10px;font-size:.72rem;margin-left:4px;">APOD</span>' : '';
       let carrierPreview = '';
-      if (entry.carrierData && entry.carrierMime) {
+      const rawData = entry._carrierData || entry.carrierData || '';
+      const thumbSrc = entry._carrierData || entry.carrierPreview || '';
+      if (rawData && entry.carrierMime) {
         if (entry.carrierMime.startsWith('image/')) {
-          const imgSrc = entry.carrierPreview || entry.carrierData;
+          const imgSrc = thumbSrc || rawData;
           carrierPreview = `<div style="margin-top:6px;"><img src="${imgSrc}" style="max-width:320px;max-height:180px;border-radius:6px;border:1px solid var(--line);display:block;" alt="Carrier image" /></div>`;
         } else if (entry.carrierMime === 'text/plain') {
-          carrierPreview = `<div style="margin-top:6px;max-width:480px;"><textarea readonly rows="4" style="width:100%;max-height:160px;overflow-y:scroll;resize:none;padding:6px 8px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:6px;font-size:.78rem;font-family:ui-monospace,monospace;color:var(--ink);line-height:1.5;box-sizing:border-box;display:block;">${escapeHtml(entry.carrierData || '')}</textarea></div>`;
+          carrierPreview = `<div style="margin-top:6px;max-width:480px;"><textarea readonly rows="4" style="width:100%;max-height:160px;overflow-y:scroll;resize:none;padding:6px 8px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:6px;font-size:.78rem;font-family:ui-monospace,monospace;color:var(--ink);line-height:1.5;box-sizing:border-box;display:block;">${escapeHtml(rawData)}</textarea></div>`;
         }
       }
       return `<div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:start;gap:10px;">
@@ -1602,8 +1665,7 @@
     list.querySelectorAll('.use-history-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id;
-        const history = loadHistory();
-        const entry = history.find(e => e.id === id);
+        const entry = entryMap[id];
         if (!entry) return;
         loadHistoryEntry(entry);
       });
@@ -1611,6 +1673,7 @@
     list.querySelectorAll('.delete-history-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.id;
+        idbDelete(id).catch(() => {});
         const h = loadHistory().filter(e => e.id !== id);
         saveHistory(h);
         renderHistory();
@@ -2602,11 +2665,12 @@
 
   function loadHistoryEntry(entry) {
     const type = entry.type;
+    const carrierData = entry._carrierData ?? entry.carrierData ?? '';
     if (type === 'image') {
       switchTab('image-reveal');
       const preview = document.getElementById('img-rev-preview');
       const zone = document.getElementById('img-rev-upload');
-      if (entry.carrierData && entry.carrierMime) {
+      if (carrierData && entry.carrierMime) {
         const img = new Image();
         img.onload = () => {
           preview.width = img.width;
@@ -2618,7 +2682,7 @@
           document.getElementById('img-rev-decode').disabled = false;
           logStatus(`Loaded carrier image from history: ${img.width}x${img.height}`);
         };
-        img.src = entry.carrierData;
+        img.src = carrierData;
       }
       if (entry.encrypted && entry.passphrase) {
         const passInput = document.getElementById('img-rev-pass');
@@ -2632,7 +2696,7 @@
     } else if (type === 'text') {
       switchTab('text-reveal');
       const inputArea = document.getElementById('text-rev-input');
-      inputArea.value = entry.carrierData || '';
+      inputArea.value = carrierData;
       const decodeBtn = document.getElementById('text-rev-decode');
       decodeBtn.disabled = false;
       if (entry.encrypted && entry.passphrase) {
@@ -2653,9 +2717,12 @@
     renderHistory();
     document.getElementById('clear-history-btn').addEventListener('click', () => {
       if (confirm('Clear all encode history? This cannot be undone.')) {
-        saveHistory([]);
-        renderHistory();
-        showToast('History cleared', 'info');
+        const history = loadHistory();
+        Promise.allSettled(history.map(e => idbDelete(e.id))).finally(() => {
+          saveHistory([]);
+          renderHistory();
+          showToast('History cleared', 'info');
+        });
       }
     });
     document.getElementById('export-history-btn').addEventListener('click', () => {
