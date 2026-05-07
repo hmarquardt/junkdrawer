@@ -1615,16 +1615,12 @@
       date: record.date || '',
       encrypted: record.encrypted || false,
       apodSource: record.apodSource || false,
+      carrierData: record.carrierData || '',
       carrierMime: record.carrierMime || null,
-      carrierSize: record.carrierData ? record.carrierData.length : 0
+      carrierPreview: record.carrierPreview || '',
+      width: record.width || 0,
+      height: record.height || 0
     };
-    if (record.carrierData) {
-      try {
-        await idbSave(entryId, record.carrierData);
-      } catch (e) {
-        logStatus('IDB save failed: ' + e.message, 'error');
-      }
-    }
     history.unshift(entry);
     if (history.length > MAX_HISTORY) {
       const removed = history.splice(MAX_HISTORY);
@@ -1637,7 +1633,7 @@
   async function loadHistoryWithCarriers() {
     const history = loadHistory();
     const withCarriers = await Promise.all(history.map(async entry => {
-      if (entry.carrierSize > 0) {
+      if (entry.width > 0 && entry.height > 0) {
         try {
           entry._carrierData = await idbLoad(entry.id);
         } catch {
@@ -2003,16 +1999,23 @@
         logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
+          const entryId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
           try {
-            const thumbCanvas = document.createElement('canvas');
-            const maxThumb = 480;
-            const ratio = Math.min(maxThumb / appState.carrierImageData.width, maxThumb / appState.carrierImageData.height, 1);
-            const tw = Math.round(appState.carrierImageData.width * ratio);
-            const th = Math.round(appState.carrierImageData.height * ratio);
-            thumbCanvas.width = tw;
-            thumbCanvas.height = th;
-            thumbCanvas.getContext('2d').drawImage(resultCanvas, 0, 0, tw, th);
-            const carrierData = thumbCanvas.toDataURL('image/jpeg', 0.8);
+            const fullImageData = resultCanvas.getContext('2d').getImageData(0, 0, resultCanvas.width, resultCanvas.height);
+            idbSave(entryId, { imageData: fullImageData, width: fullImageData.width, height: fullImageData.height }).catch(e => {
+              logStatus('IDB save failed: ' + e.message, 'error');
+            });
+            const previewCanvas = document.createElement('canvas');
+            const maxPreview = 320;
+            const pr = Math.min(maxPreview / fullImageData.width, maxPreview / fullImageData.height, 1);
+            previewCanvas.width = Math.round(fullImageData.width * pr);
+            previewCanvas.height = Math.round(fullImageData.height * pr);
+            const fullSizeCanvas = document.createElement('canvas');
+            fullSizeCanvas.width = fullImageData.width;
+            fullSizeCanvas.height = fullImageData.height;
+            fullSizeCanvas.getContext('2d').putImageData(fullImageData, 0, 0);
+            previewCanvas.getContext('2d').drawImage(fullSizeCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+            const carrierPreview = previewCanvas.toDataURL('image/jpeg', 0.7);
             saveHistoryRecord({
               type: 'image',
               messageLength: message.length,
@@ -2020,15 +2023,15 @@
               encrypted: isEncrypted,
               date: localDateStr(),
               apodSource: usingApod || false,
-              carrierData,
-              carrierMime: 'image/jpeg',
-              carrierPreview: carrierData
+              carrierPreview,
+              width: fullImageData.width,
+              height: fullImageData.height
             }).catch(e => {
               logStatus('History save failed: ' + e.message, 'error');
               showToast('History save failed: ' + e.message, 'error');
             });
           } catch (e) {
-            logStatus('History thumbnail failed: ' + e.message, 'error');
+            logStatus('History save failed: ' + e.message, 'error');
             showToast('History save skipped — ' + e.message, 'error');
           }
         }
@@ -2692,12 +2695,22 @@
 
   function loadHistoryEntry(entry) {
     const type = entry.type;
-    const carrierData = entry._carrierData ?? entry.carrierData ?? '';
+    const carrierObj = entry._carrierData || null;
     if (type === 'image') {
       switchTab('image-reveal');
       const preview = document.getElementById('img-rev-preview');
       const zone = document.getElementById('img-rev-upload');
-      if (carrierData && entry.carrierMime) {
+      if (carrierObj && carrierObj.imageData) {
+        const { imageData } = carrierObj;
+        preview.width = imageData.width;
+        preview.height = imageData.height;
+        preview.getContext('2d').putImageData(imageData, 0, 0);
+        appState.revealImageData = imageData;
+        preview.style.display = 'block';
+        zone.classList.add('has-file');
+        document.getElementById('img-rev-decode').disabled = false;
+        logStatus(`Loaded carrier image from history: ${imageData.width}x${imageData.height}`);
+      } else if (entry.carrierPreview) {
         const img = new Image();
         img.onload = () => {
           preview.width = img.width;
@@ -2709,7 +2722,7 @@
           document.getElementById('img-rev-decode').disabled = false;
           logStatus(`Loaded carrier image from history: ${img.width}x${img.height}`);
         };
-        img.src = carrierData;
+        img.src = entry.carrierPreview;
       }
       if (entry.encrypted && entry.passphrase) {
         const passInput = document.getElementById('img-rev-pass');
