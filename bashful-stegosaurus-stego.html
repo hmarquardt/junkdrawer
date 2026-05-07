@@ -1554,7 +1554,8 @@
       encrypted: record.encrypted || false,
       apodSource: record.apodSource || false,
       carrierData: record.carrierData || '',
-      carrierMime: record.carrierMime || null
+      carrierMime: record.carrierMime || null,
+      carrierPreview: record.carrierPreview || ''
     };
     history.unshift(entry);
     if (history.length > MAX_HISTORY) history.splice(MAX_HISTORY);
@@ -1578,7 +1579,8 @@
       let carrierPreview = '';
       if (entry.carrierData && entry.carrierMime) {
         if (entry.carrierMime.startsWith('image/')) {
-          carrierPreview = `<div style="margin-top:6px;"><img src="${entry.carrierData}" style="max-width:320px;max-height:180px;border-radius:6px;border:1px solid var(--line);display:block;" alt="Carrier image" /></div>`;
+          const imgSrc = entry.carrierPreview || entry.carrierData;
+          carrierPreview = `<div style="margin-top:6px;"><img src="${imgSrc}" style="max-width:320px;max-height:180px;border-radius:6px;border:1px solid var(--line);display:block;" alt="Carrier image" /></div>`;
         } else if (entry.carrierMime === 'text/plain') {
           carrierPreview = `<div style="margin-top:6px;max-width:480px;"><textarea readonly rows="4" style="width:100%;max-height:160px;overflow-y:scroll;resize:none;padding:6px 8px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:6px;font-size:.78rem;font-family:ui-monospace,monospace;color:var(--ink);line-height:1.5;box-sizing:border-box;display:block;">${escapeHtml(entry.carrierData || '')}</textarea></div>`;
         }
@@ -1672,6 +1674,15 @@
   function canvasToBlob(canvas) {
     return new Promise(resolve => {
       canvas.toBlob(resolve, 'image/png');
+    });
+  }
+
+  function blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
   }
 
@@ -1902,6 +1913,7 @@
         logStatus(`Encoded ${envelope.length} bytes (encrypted: ${isEncrypted}, private: ${privateCheck.checked})`);
         if (!privateCheck.checked) {
           const passToRecord = usingApod ? (cachedApodPassphrase?.passphrase || activePass) : activePass;
+          const encodedDataUrl = await blobToDataURL(appState.encodedImageBlob);
           const thumb = await generateThumbnail(appState.carrierImageData, 320, 180);
           saveHistoryRecord({
             type: 'image',
@@ -1910,8 +1922,9 @@
             encrypted: isEncrypted,
             date: localDateStr(),
             apodSource: usingApod || false,
-            carrierData: thumb,
-            carrierMime: 'image/png'
+            carrierData: encodedDataUrl,
+            carrierMime: 'image/png',
+            carrierPreview: thumb
           }).catch(e => logStatus('History save failed: ' + e.message, 'error'));
         }
       } catch (e) {
