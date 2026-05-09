@@ -172,10 +172,21 @@ web-app-manifest-512x512.png
 
 Standalone pages can reference these with relative paths.
 
+## Agent Skills
+
+The `skills/` directory contains reusable agent workflows for common tasks. Skills are loaded by an agent when a task matches their description.
+
+### Available Skills
+
+| Skill | Purpose |
+|---|---|
+| `skills/new-page-workflow.md` | Guide for creating a new single-file HTML tool |
+| `skills/version-bump-workflow.md` | Guide for safely incrementing version numbers |
+
 ## Limitations
 
 - The homepage works best when the repository is public because it uses the GitHub public contents API.
 - GitHub API responses may be cached briefly.
 - Browser storage is per-browser and per-device.
-- Static apps cannot hide API keys from the user’s browser.
+- Static apps cannot hide API keys from the user's browser.
 - Public proxies and public market APIs can rate-limit, time out, or change behavior.
