@@ -1,0 +1,1128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prompt Archaeology</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>𓂀</text></svg>" />
+  <script src="https://cdn.jsdelivr.net/npm/dexie@4.0.11/dist/dexie.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
+  <style>
+    :root {
+      --sand-0: #f8efd8;
+      --sand-1: #ead39e;
+      --sand-2: #cda85d;
+      --gold: #d7a728;
+      --gold-2: #f3d57a;
+      --lapis: #123a67;
+      --lapis-2: #1d5a91;
+      --papyrus: #fff4cf;
+      --ink: #2c1c10;
+      --muted: #725c38;
+      --obsidian: #17120d;
+      --danger: #9d2f22;
+      --ok: #24684a;
+      --radius: 14px;
+      --bar-h: 66px;
+      --shadow: 0 10px 30px rgba(34, 20, 2, 0.22);
+      --font-ui: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      color: var(--ink);
+      font-family: var(--font-ui);
+      background:
+        radial-gradient(circle at 12% 8%, rgba(255, 233, 161, 0.82), transparent 28%),
+        radial-gradient(circle at 88% 0%, rgba(29, 90, 145, 0.26), transparent 34%),
+        linear-gradient(135deg, #d4ad62, #f8efd8 38%, #b78939 100%);
+    }
+
+    body::before {
+      content: "𓂀 𓋹 𓆣 𓃭 𓇳 𓉐 𓊽 𓏏 𓄿 𓊪 𓂀 𓋹 𓆣 𓃭 𓇳 𓉐 𓊽 𓏏 𓄿 𓊪";
+      position: fixed;
+      inset: -20px;
+      z-index: -1;
+      color: rgba(70, 38, 7, 0.08);
+      font-size: 54px;
+      line-height: 1.55;
+      letter-spacing: 18px;
+      transform: rotate(-8deg);
+      pointer-events: none;
+      word-break: break-all;
+    }
+
+    .app {
+      height: 100%;
+      display: grid;
+      grid-template-rows: var(--bar-h) minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 10px;
+    }
+
+    .toolbar,
+    .gallery-wrap {
+      border: 1px solid rgba(87, 54, 11, 0.28);
+      border-radius: var(--radius);
+      background: rgba(255, 244, 207, 0.88);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(9px);
+    }
+
+    .toolbar {
+      min-width: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: auto auto minmax(170px, 1fr) auto auto minmax(90px, 220px);
+      align-items: center;
+      gap: 7px;
+      padding: 7px 8px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 4px;
+      white-space: nowrap;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      color: var(--lapis);
+      line-height: 1.05;
+    }
+
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(18, 58, 103, 0.3);
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 25%, var(--gold-2), var(--gold));
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.25), 0 2px 8px rgba(0,0,0,0.18);
+      color: var(--lapis);
+      font-size: 18px;
+      flex: 0 0 auto;
+    }
+
+    .brand small {
+      display: block;
+      margin-top: 1px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .group {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      flex-wrap: nowrap;
+    }
+
+    input,
+    select,
+    textarea,
+    button { font: inherit; }
+
+    .search {
+      min-width: 120px;
+      width: 100%;
+      height: 32px;
+      border: 1px solid rgba(87, 54, 11, 0.28);
+      background: rgba(255, 252, 240, 0.92);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 7px 12px;
+      outline: none;
+    }
+
+    .search:focus,
+    select:focus,
+    button:focus-visible,
+    textarea:focus,
+    input:focus {
+      outline: 3px solid rgba(29, 90, 145, 0.28);
+      border-color: var(--lapis-2);
+    }
+
+    select,
+    .chip-select {
+      height: 32px;
+      border: 1px solid rgba(87, 54, 11, 0.28);
+      border-radius: 999px;
+      padding: 0 9px;
+      color: var(--ink);
+      background: rgba(255, 252, 240, 0.92);
+    }
+
+    button {
+      height: 32px;
+      min-width: 32px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid rgba(87, 54, 11, 0.28);
+      border-radius: 999px;
+      background: linear-gradient(180deg, rgba(255, 246, 219, 0.96), rgba(223, 188, 109, 0.88));
+      color: var(--ink);
+      cursor: pointer;
+      user-select: none;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(18, 58, 103, 0.4);
+      box-shadow: 0 6px 14px rgba(85, 52, 9, 0.2);
+    }
+
+    button:active { transform: translateY(0); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .primary {
+      background: linear-gradient(180deg, #f4ce5f, #c7931e);
+      color: #1d1407;
+      font-weight: 800;
+    }
+
+    .danger {
+      background: linear-gradient(180deg, #d66a5d, #9d2f22);
+      color: #fff7ec;
+    }
+
+    .mode-toggle {
+      display: none;
+      overflow: hidden;
+      border: 1px solid rgba(18, 58, 103, 0.28);
+      border-radius: 999px;
+      background: rgba(18, 58, 103, 0.08);
+    }
+
+    .mode-toggle.visible { display: flex; }
+    .mode-toggle button {
+      min-width: auto;
+      height: 30px;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      background: transparent;
+      color: var(--lapis);
+      padding: 0 9px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .mode-toggle button.active {
+      background: var(--lapis);
+      color: var(--gold-2);
+    }
+
+    .status {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .gallery-wrap {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 8px;
+      display: grid;
+      grid-template-rows: 1fr;
+    }
+
+    .gallery {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      align-content: start;
+      gap: 8px;
+      padding: 2px;
+      scrollbar-width: thin;
+    }
+
+    .card {
+      position: relative;
+      height: 118px;
+      border: 1px solid rgba(87, 54, 11, 0.24);
+      border-radius: 12px;
+      padding: 9px 8px 10px;
+      background: linear-gradient(145deg, rgba(255, 248, 221, 0.96), rgba(236, 207, 142, 0.88));
+      cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
+      overflow: hidden;
+    }
+
+    .card:hover {
+      border-color: rgba(18, 58, 103, 0.46);
+      box-shadow: 0 8px 18px rgba(85, 52, 9, 0.14), inset 0 1px 0 rgba(255,255,255,0.45);
+    }
+
+    .card::after {
+      content: "𓆣";
+      position: absolute;
+      right: 8px;
+      bottom: -8px;
+      font-size: 48px;
+      color: rgba(18, 58, 103, 0.08);
+      pointer-events: none;
+    }
+
+    .card.selected {
+      border-color: var(--lapis);
+      box-shadow: 0 0 0 3px rgba(18, 58, 103, 0.14), inset 0 1px 0 rgba(255,255,255,0.45);
+    }
+
+    .card-title {
+      margin: 0 0 5px;
+      max-width: calc(100% - 82px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--lapis);
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .badges {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+      margin-bottom: 5px;
+    }
+
+    .badge {
+      border-radius: 999px;
+      padding: 2px 6px;
+      background: rgba(18, 58, 103, 0.12);
+      color: var(--lapis);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .badge.format { background: rgba(215, 167, 40, 0.28); color: #5b3c04; }
+
+    .meta {
+      max-height: 34px;
+      overflow: hidden;
+      padding-right: 28px;
+      color: var(--muted);
+      font-size: 10.5px;
+      line-height: 1.25;
+    }
+
+    .card-actions {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      display: flex;
+      gap: 3px;
+      z-index: 2;
+    }
+
+    .card-actions button {
+      width: 24px;
+      min-width: 24px;
+      height: 24px;
+      font-size: 12px;
+      background: rgba(255, 250, 231, 0.9);
+    }
+
+    .viewer-wrap {
+      position: absolute;
+      inset: 8px;
+      z-index: 20;
+      min-height: 0;
+      border: 1px solid rgba(18, 58, 103, 0.35);
+      border-radius: var(--radius);
+      background: rgba(21, 17, 12, 0.88);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: none;
+      grid-template-rows: 38px minmax(0, 1fr);
+    }
+
+    .viewer-wrap.open { display: grid; }
+
+    .viewer-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 5px 7px 5px 12px;
+      border-bottom: 1px solid rgba(243, 213, 122, 0.22);
+      background: linear-gradient(90deg, rgba(18, 58, 103, 0.95), rgba(23, 18, 13, 0.95));
+      color: var(--gold-2);
+    }
+
+    .viewer-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .viewer-close {
+      width: 28px;
+      min-width: 28px;
+      height: 28px;
+      color: var(--gold-2);
+      border-color: rgba(243, 213, 122, 0.3);
+      background: rgba(255, 244, 207, 0.08);
+    }
+
+    .viewer-frame-wrap {
+      min-height: 0;
+      display: grid;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff9e7;
+    }
+
+    .empty {
+      min-width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    dialog {
+      width: min(980px, calc(100vw - 24px));
+      max-height: calc(100vh - 40px);
+      border: 1px solid rgba(87, 54, 11, 0.35);
+      border-radius: 18px;
+      padding: 0;
+      color: var(--ink);
+      background: var(--papyrus);
+      box-shadow: 0 30px 90px rgba(0,0,0,0.36);
+    }
+
+    dialog::backdrop { background: rgba(19, 11, 3, 0.62); backdrop-filter: blur(3px); }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(87, 54, 11, 0.22);
+      background: linear-gradient(90deg, rgba(215, 167, 40, 0.4), rgba(18, 58, 103, 0.12));
+    }
+
+    .modal-head h2 { margin: 0; color: var(--lapis); font-size: 18px; }
+    .modal-body { padding: 14px; overflow: auto; max-height: calc(100vh - 150px); }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.5fr 0.5fr;
+      gap: 10px;
+    }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 10px;
+      border: 1px solid rgba(87, 54, 11, 0.18);
+      border-radius: var(--radius);
+      background: rgba(255, 244, 207, 0.65);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    label input,
+    label select,
+    label textarea {
+      width: 100%;
+      border: 1px solid rgba(87, 54, 11, 0.28);
+      border-radius: 10px;
+      padding: 9px 10px;
+      color: var(--ink);
+      background: rgba(255, 252, 240, 0.92);
+      text-transform: none;
+      letter-spacing: normal;
+      font-weight: 500;
+    }
+
+    label textarea {
+      min-height: 310px;
+      resize: vertical;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.45;
+      color: #f7e9c4;
+      background: var(--obsidian);
+    }
+
+    .full { grid-column: 1 / -1; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    .hidden-file { display: none; }
+
+    @media (max-width: 980px) {
+      :root { --bar-h: 112px; }
+      .toolbar { grid-template-columns: 1fr auto auto; align-content: center; }
+      .brand { grid-column: 1 / -1; }
+      .status { display: none; }
+      .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="toolbar" aria-label="Prompt Archaeology toolbar">
+      <div class="brand" title="Prompt Archaeology">
+        <div class="brand-mark">𓂀</div>
+        <div>
+          Prompt Archaeology
+          <small>excavate useful fragments</small>
+        </div>
+      </div>
+
+      <div class="group">
+        <button class="primary" id="newBtn" aria-label="Create new item" title="New">＋</button>
+        <button id="importBtn" aria-label="Import files" title="Import files">⇪</button>
+        <input class="hidden-file" id="fileInput" type="file" multiple accept=".txt,.md,.html,.htm,text/plain,text/markdown,text/html" />
+      </div>
+
+      <input id="searchInput" class="search" type="search" placeholder="Search title, tags, description, or content…" aria-label="Search gallery" />
+
+      <select id="typeFilter" aria-label="Filter by type">
+        <option value="all">All</option>
+        <option value="prompt">Prompts</option>
+        <option value="spec">Specs</option>
+        <option value="artifact">Artifacts</option>
+      </select>
+
+      <div class="mode-toggle" id="modeToggle" aria-label="Markdown render mode">
+        <button id="formattedBtn" class="active" aria-label="Show markdown formatted">Formatted</button>
+        <button id="sourceBtn" aria-label="Show markdown source">Source</button>
+      </div>
+
+      <div class="group">
+        <button id="editBtn" aria-label="Edit selected item" title="Edit selected">✎</button>
+        <button id="dupBtn" aria-label="Duplicate selected item" title="Duplicate selected">⧉</button>
+        <button id="deleteBtn" class="danger" aria-label="Delete selected item" title="Delete selected">🗑</button>
+        <button id="exportBtn" aria-label="Export backup" title="Export backup">⇩</button>
+        <button id="importBackupBtn" aria-label="Import backup" title="Import backup">⟲</button>
+        <input class="hidden-file" id="backupInput" type="file" accept="application/json,.json" />
+      </div>
+
+      <div id="status" class="status" role="status" aria-live="polite">Opening the tomb…</div>
+    </header>
+
+    <section class="gallery-wrap" aria-label="Artifact gallery">
+      <div id="gallery" class="gallery"></div>
+      <main id="viewerWrap" class="viewer-wrap" aria-label="Rendered artifact viewer">
+        <div class="viewer-head">
+          <div id="viewerTitle" class="viewer-title">No fragment opened</div>
+          <button id="closeViewer" class="viewer-close" aria-label="Close rendered view" title="Close viewer">×</button>
+        </div>
+        <div class="viewer-frame-wrap">
+          <iframe id="viewer" sandbox="allow-scripts allow-forms allow-modals" title="Selected item viewer"></iframe>
+        </div>
+      </main>
+    </section>
+    <footer class="footer">
+      <span>Prompt Archaeology &copy; 2026</span>
+      <span>v1.0</span>
+    </footer>
+  </div>
+
+  <dialog id="editorDialog">
+    <form id="editorForm" method="dialog">
+      <div class="modal-head">
+        <h2 id="editorTitle">New artifact</h2>
+        <button type="button" id="closeEditor" aria-label="Close editor">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <label>Title
+            <input id="itemTitle" required />
+          </label>
+          <label>Kind
+            <select id="itemKind">
+              <option value="prompt">Prompt</option>
+              <option value="spec">Specification</option>
+              <option value="artifact">Artifact</option>
+            </select>
+          </label>
+          <label>Format
+            <select id="itemFormat">
+              <option value="txt">TXT</option>
+              <option value="md">Markdown</option>
+              <option value="html">HTML</option>
+            </select>
+          </label>
+          <label class="full">Description
+            <input id="itemDescription" placeholder="What is buried here?" />
+          </label>
+          <label class="full">Tags
+            <input id="itemTags" placeholder="comma, separated, tags" />
+          </label>
+          <label class="full">Content
+            <textarea id="itemContent" spellcheck="false"></textarea>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="cancelEditor">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    'use strict';
+
+    function assert(condition, message) {
+      if (!condition) throw new Error('Self-test failed: ' + message);
+    }
+
+    function runSelfTests() {
+      assert(typeof escapeHtml('<>&\"\'') === 'string', 'escapeHtml returns a string');
+      assert(escapeHtml('<tag>') === '&lt;tag&gt;', 'escapeHtml escapes angle brackets');
+      assert(extOf('demo.HTML') === 'html', 'extOf lowercases extensions');
+      assert(inferFromFile({ name: 'artifact.html' }).kind === 'artifact', 'HTML imports as artifact');
+      assert(inferFromFile({ name: 'notes.md' }).format === 'md', 'Markdown imports as md');
+      assert(makeSeedItems().length === 3, 'seed item count');
+      assert(makeSeedItems().every(item => typeof item.content === 'string' && item.content.length > 0), 'seed content is valid string data');
+      console.info('[Prompt Archaeology] self-tests passed');
+    }
+
+    if (!window.Dexie) {
+      document.body.innerHTML = '<div style="padding:24px;font:16px system-ui;color:#2c1c10;background:#fff4cf;min-height:100vh"><h1>Prompt Archaeology</h1><p>Dexie failed to load from the CDN. Check network access or replace the CDN script with a local copy.</p></div>';
+      throw new Error('Dexie failed to load');
+    }
+
+    const db = new Dexie('PromptArchaeologyDB');
+    db.version(1).stores({
+      items: 'id, title, kind, format, createdAt, updatedAt, sourceFileName'
+    });
+
+    const $ = (id) => document.getElementById(id);
+    const els = {
+      gallery: $('gallery'),
+      viewerWrap: $('viewerWrap'),
+      viewerTitle: $('viewerTitle'),
+      closeViewer: $('closeViewer'),
+      viewer: $('viewer'),
+      status: $('status'),
+      newBtn: $('newBtn'),
+      importBtn: $('importBtn'),
+      fileInput: $('fileInput'),
+      backupInput: $('backupInput'),
+      importBackupBtn: $('importBackupBtn'),
+      exportBtn: $('exportBtn'),
+      searchInput: $('searchInput'),
+      typeFilter: $('typeFilter'),
+      modeToggle: $('modeToggle'),
+      formattedBtn: $('formattedBtn'),
+      sourceBtn: $('sourceBtn'),
+      editBtn: $('editBtn'),
+      dupBtn: $('dupBtn'),
+      deleteBtn: $('deleteBtn'),
+      dialog: $('editorDialog'),
+      form: $('editorForm'),
+      editorTitle: $('editorTitle'),
+      closeEditor: $('closeEditor'),
+      cancelEditor: $('cancelEditor'),
+      itemTitle: $('itemTitle'),
+      itemKind: $('itemKind'),
+      itemFormat: $('itemFormat'),
+      itemDescription: $('itemDescription'),
+      itemTags: $('itemTags'),
+      itemContent: $('itemContent')
+    };
+
+    const state = {
+      items: [],
+      filtered: [],
+      selectedId: null,
+      openId: null,
+      mdMode: 'formatted',
+      editingId: null
+    };
+
+    const uuid = () => (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+    const now = () => new Date().toISOString();
+    const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const escapeHtml = (str = '') => String(str).replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
+    const bytes = (str = '') => new Blob([String(str)]).size;
+    const extOf = (name = '') => String(name).split('.').pop().toLowerCase();
+
+    function setStatus(message, good = false) {
+      els.status.textContent = message;
+      els.status.style.color = good ? 'var(--ok)' : 'var(--muted)';
+      clearTimeout(setStatus.timer);
+      setStatus.timer = setTimeout(() => {
+        els.status.textContent = state.items.length ? state.items.length + ' fragments cataloged' : 'No fragments yet';
+        els.status.style.color = 'var(--muted)';
+      }, 3600);
+    }
+
+    function inferFromFile(file) {
+      const ext = extOf(file.name);
+      const format = ext === 'md' ? 'md' : (ext === 'html' || ext === 'htm') ? 'html' : 'txt';
+      const kind = format === 'html' ? 'artifact' : format === 'md' ? 'spec' : 'prompt';
+      const title = String(file.name || 'Untitled').replace(/\.(txt|md|html|htm)$/i, '').replace(/[-_]+/g, ' ').trim() || file.name;
+      return { format, kind, title };
+    }
+
+    function makeSeedItems() {
+      const seedNow = now();
+      return [
+        {
+          id: uuid(),
+          title: 'Lost Prompt Fragment',
+          kind: 'prompt',
+          format: 'md',
+          description: 'A sample image prompt unearthed near the first toolbar.',
+          tags: ['sample', 'prompt', 'fragment'],
+          content: [
+            '# Lost Prompt Fragment',
+            '',
+            'Create a cinematic scene of an archaeologist discovering a glowing papyrus scroll inside a sandstone chamber.',
+            '',
+            '- Lapis blue shadows',
+            '- Gold rim lighting',
+            '- No readable text in the image',
+            '- Wide dramatic composition'
+          ].join('\n'),
+          createdAt: seedNow,
+          updatedAt: seedNow,
+          sourceFileName: '',
+          sizeBytes: 0
+        },
+        {
+          id: uuid(),
+          title: 'Papyrus Specification',
+          kind: 'spec',
+          format: 'md',
+          description: 'A compact markdown specification sample.',
+          tags: ['sample', 'spec', 'markdown'],
+          content: [
+            '# Papyrus Specification',
+            '',
+            '## Goal',
+            '',
+            'Build a tiny local-first archive for prompts, specs, and HTML artifacts.',
+            '',
+            '## Requirements',
+            '',
+            '| Feature | Notes |',
+            '|---|---|',
+            '| IndexedDB | Store large local documents |',
+            '| Iframe | Render selected artifacts |',
+            '| Markdown toggle | Formatted or source view |',
+            '',
+            '> Every useful prompt is a shard worth cataloging.'
+          ].join('\n'),
+          createdAt: seedNow,
+          updatedAt: seedNow,
+          sourceFileName: '',
+          sizeBytes: 0
+        },
+        {
+          id: uuid(),
+          title: 'Golden Scarab Demo',
+          kind: 'artifact',
+          format: 'html',
+          description: 'A tiny HTML artifact rendered inside the tomb viewer.',
+          tags: ['sample', 'html', 'artifact'],
+          content: '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui;background:radial-gradient(circle at 50% 20%,#ffeaa1,transparent 28%),linear-gradient(135deg,#101820,#123a67 50%,#d7a728);color:#fff4cf}.card{width:min(680px,90vw);padding:34px;border:1px solid rgba(255,234,161,.5);border-radius:26px;background:rgba(10,12,18,.72);box-shadow:0 30px 80px rgba(0,0,0,.35);text-align:center}.scarab{font-size:88px;filter:drop-shadow(0 0 18px #f3d57a)}h1{margin:.2rem 0;color:#f3d57a}.line{height:1px;background:linear-gradient(90deg,transparent,#f3d57a,transparent);margin:22px 0}p{font-size:18px;line-height:1.55}</style></head><body><div class="card"><div class="scarab">𓆣</div><h1>Golden Scarab Demo</h1><div class="line"></div><p>An HTML artifact has been recovered, cataloged, and rendered safely in the lower chamber.</p></div></body></html>',
+          createdAt: seedNow,
+          updatedAt: seedNow,
+          sourceFileName: '',
+          sizeBytes: 0
+        }
+      ].map(item => ({ ...item, sizeBytes: bytes(item.content) }));
+    }
+
+    async function seedIfEmpty() {
+      const count = await db.items.count();
+      if (count) return;
+      await db.items.bulkAdd(makeSeedItems());
+    }
+
+    async function loadItems() {
+      state.items = await db.items.orderBy('updatedAt').reverse().toArray();
+      filterItems();
+      if (!state.selectedId && state.items[0]) state.selectedId = state.items[0].id;
+      if (state.selectedId && !state.items.some(item => item.id === state.selectedId)) state.selectedId = state.items[0]?.id || null;
+      if (state.openId && !state.items.some(item => item.id === state.openId)) closeViewer();
+      renderGallery();
+      if (state.openId) renderOpenItem();
+      updateActionState();
+    }
+
+    function filterItems() {
+      const q = els.searchInput.value.trim().toLowerCase();
+      const kind = els.typeFilter.value;
+      state.filtered = state.items.filter(item => {
+        if (kind !== 'all' && item.kind !== kind) return false;
+        if (!q) return true;
+        const haystack = [item.title, item.description, item.kind, item.format, ...(item.tags || []), item.content].join(' ').toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+
+    function renderGallery() {
+      if (!state.filtered.length) {
+        els.gallery.innerHTML = '<div class="empty">No fragments found. Import files or create a new artifact.</div>';
+        return;
+      }
+      els.gallery.innerHTML = state.filtered.map(item => `
+        <article class="card ${item.id === state.openId ? 'selected' : ''}" data-id="${escapeHtml(item.id)}" tabindex="0" aria-label="Open ${escapeHtml(item.title)}">
+          <div class="card-actions">
+            <button data-act="edit" data-id="${escapeHtml(item.id)}" aria-label="Edit ${escapeHtml(item.title)}" title="Edit">✎</button>
+            <button data-act="duplicate" data-id="${escapeHtml(item.id)}" aria-label="Duplicate ${escapeHtml(item.title)}" title="Duplicate">⧉</button>
+            <button data-act="delete" data-id="${escapeHtml(item.id)}" aria-label="Delete ${escapeHtml(item.title)}" title="Delete">×</button>
+          </div>
+          <h3 class="card-title">${escapeHtml(item.title)}</h3>
+          <div class="badges">
+            <span class="badge">${escapeHtml(item.kind)}</span>
+            <span class="badge format">${escapeHtml(item.format)}</span>
+            <span class="badge format">${Math.max(1, Math.round((item.sizeBytes || 0) / 1024))}kb</span>
+          </div>
+          <div class="meta">Updated ${fmtDate(item.updatedAt)}<br>${escapeHtml((item.tags || []).slice(0, 4).join(' · ') || item.description || 'Unlabeled shard')}</div>
+        </article>
+      `).join('');
+    }
+
+    function viewerDoc(body, mode = 'plain') {
+      const isPlain = mode === 'plain';
+      const bg = isPlain ? '#17120d' : '#fff8df';
+      const color = isPlain ? '#f8e9be' : '#2c1c10';
+      const font = isPlain ? 'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace' : 'ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+      const maxWidth = isPlain ? 'none' : '1040px';
+      return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+        :root{color-scheme:light}body{margin:0;background:${bg};color:${color};font-family:${font};}
+        .wrap{max-width:${maxWidth};margin:0 auto;padding:28px;}
+        pre{white-space:pre-wrap;word-break:break-word;line-height:1.5;font-size:14px;margin:0;tab-size:2;}
+        h1,h2,h3{color:#123a67;line-height:1.15}a{color:#1d5a91}code{background:rgba(18,58,103,.1);padding:.15em .35em;border-radius:5px}pre code{background:transparent;padding:0}blockquote{border-left:4px solid #d7a728;margin-left:0;padding-left:1em;color:#725c38}table{border-collapse:collapse;width:100%;margin:1em 0}th,td{border:1px solid #d8bf7f;padding:.55em;text-align:left}th{background:#f3dfaa}img,video,iframe{max-width:100%}.source-title{position:sticky;top:0;margin:-28px -28px 18px;padding:8px 12px;background:#2a2118;color:#f3d57a;border-bottom:1px solid rgba(243,213,122,.25);font:700 12px ui-sans-serif,system-ui;text-transform:uppercase;letter-spacing:.08em}
+      </style></head><body><div class="wrap">${body}</div></body></html>`;
+    }
+
+    function openItem(id) {
+      state.selectedId = id;
+      state.openId = id;
+      els.viewerWrap.classList.add('open');
+      renderGallery();
+      renderOpenItem();
+      updateActionState();
+    }
+
+    function closeViewer() {
+      state.openId = null;
+      els.viewerWrap.classList.remove('open');
+      els.viewerTitle.textContent = 'No fragment opened';
+      els.viewer.srcdoc = '';
+      els.modeToggle.classList.remove('visible');
+      renderGallery();
+      updateActionState();
+    }
+
+    function renderOpenItem() {
+      const item = state.items.find(x => x.id === state.openId);
+      const showMdToggle = item && item.format === 'md';
+      els.modeToggle.classList.toggle('visible', Boolean(showMdToggle));
+      if (!item) {
+        closeViewer();
+        return;
+      }
+
+      els.viewerTitle.textContent = `${item.title} · ${item.kind}/${item.format}`;
+
+      if (item.format === 'html') {
+        els.viewer.srcdoc = item.content || '<!doctype html><p>Empty HTML artifact.</p>';
+        return;
+      }
+
+      if (item.format === 'md' && state.mdMode === 'formatted') {
+        const rawHtml = window.marked ? marked.parse(item.content || '') : `<pre>${escapeHtml(item.content || '')}</pre>`;
+        const html = window.DOMPurify ? DOMPurify.sanitize(rawHtml) : rawHtml;
+        els.viewer.srcdoc = viewerDoc(html || '<p><em>Empty markdown fragment.</em></p>', 'formatted');
+        return;
+      }
+
+      const label = item.format === 'md' ? 'Markdown source' : 'Text prompt source';
+      els.viewer.srcdoc = viewerDoc(`<div class="source-title">${escapeHtml(label)} · ${escapeHtml(item.title)}</div><pre>${escapeHtml(item.content || '')}</pre>`, 'plain');
+    }
+
+    function updateActionState() {
+      const has = Boolean(state.selectedId);
+      [els.editBtn, els.dupBtn, els.deleteBtn].forEach(btn => { btn.disabled = !has; });
+      els.formattedBtn.classList.toggle('active', state.mdMode === 'formatted');
+      els.sourceBtn.classList.toggle('active', state.mdMode === 'source');
+    }
+
+    function openEditor(item = null) {
+      state.editingId = item?.id || null;
+      els.editorTitle.textContent = item ? 'Edit fragment' : 'New fragment';
+      els.itemTitle.value = item?.title || '';
+      els.itemKind.value = item?.kind || 'prompt';
+      els.itemFormat.value = item?.format || 'md';
+      els.itemDescription.value = item?.description || '';
+      els.itemTags.value = (item?.tags || []).join(', ');
+      els.itemContent.value = item?.content || '';
+      els.dialog.showModal();
+      setTimeout(() => els.itemTitle.focus(), 50);
+    }
+
+    async function saveEditor() {
+      const title = els.itemTitle.value.trim();
+      if (!title) return;
+      const content = els.itemContent.value;
+      const item = {
+        title,
+        kind: els.itemKind.value,
+        format: els.itemFormat.value,
+        description: els.itemDescription.value.trim(),
+        tags: els.itemTags.value.split(',').map(t => t.trim()).filter(Boolean),
+        content,
+        updatedAt: now(),
+        sizeBytes: bytes(content)
+      };
+      if (state.editingId) {
+        await db.items.update(state.editingId, item);
+        state.selectedId = state.editingId;
+        if (state.openId === state.editingId) renderOpenItem();
+        setStatus('Fragment updated', true);
+      } else {
+        item.id = uuid();
+        item.createdAt = now();
+        item.sourceFileName = '';
+        await db.items.add(item);
+        state.selectedId = item.id;
+        setStatus('New fragment cataloged', true);
+      }
+      els.dialog.close();
+      await loadItems();
+    }
+
+    async function importFiles(files) {
+      const supported = ['txt', 'md', 'html', 'htm'];
+      let added = 0;
+      for (const file of files) {
+        try {
+          const ext = extOf(file.name);
+          if (!supported.includes(ext)) {
+            setStatus('Skipped unsupported file: ' + file.name);
+            continue;
+          }
+          const content = await file.text();
+          const inferred = inferFromFile(file);
+          const item = {
+            id: uuid(),
+            title: inferred.title,
+            kind: inferred.kind,
+            format: inferred.format,
+            description: 'Imported from ' + file.name,
+            tags: ['imported'],
+            content,
+            createdAt: now(),
+            updatedAt: now(),
+            sourceFileName: file.name,
+            sizeBytes: bytes(content)
+          };
+          await db.items.add(item);
+          state.selectedId = item.id;
+          added++;
+        } catch (err) {
+          console.error(err);
+          setStatus('Failed to import ' + file.name);
+        }
+      }
+      await loadItems();
+      setStatus(added ? 'Imported ' + added + ' file' + (added === 1 ? '' : 's') : 'No files imported', added > 0);
+    }
+
+    async function duplicateItem(id) {
+      const item = await db.items.get(id);
+      if (!item) return;
+      const copy = { ...item, id: uuid(), title: item.title + ' Copy', createdAt: now(), updatedAt: now(), sourceFileName: item.sourceFileName || '' };
+      await db.items.add(copy);
+      state.selectedId = copy.id;
+      await loadItems();
+      setStatus('Fragment duplicated', true);
+    }
+
+    async function deleteItem(id) {
+      const item = await db.items.get(id);
+      if (!item) return;
+      if (!confirm('Delete “' + item.title + '”? This removes it from local IndexedDB.')) return;
+      await db.items.delete(id);
+      if (state.selectedId === id) state.selectedId = null;
+      if (state.openId === id) closeViewer();
+      await loadItems();
+      setStatus('Fragment deleted');
+    }
+
+    async function exportBackup() {
+      const items = await db.items.toArray();
+      const payload = {
+        app: 'Prompt Archaeology',
+        version: 1,
+        exportedAt: now(),
+        items
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'prompt-archaeology-backup-' + new Date().toISOString().slice(0,10) + '.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setStatus('Backup exported', true);
+    }
+
+    async function importBackup(file) {
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const items = Array.isArray(parsed) ? parsed : parsed.items;
+        if (!Array.isArray(items)) throw new Error('Invalid backup shape');
+        const clean = items.map(raw => {
+          const content = String(raw.content || '');
+          const format = ['txt', 'md', 'html'].includes(raw.format) ? raw.format : 'txt';
+          const kind = ['prompt', 'spec', 'artifact'].includes(raw.kind) ? raw.kind : 'prompt';
+          return {
+            id: uuid(),
+            title: String(raw.title || 'Imported Fragment'),
+            kind,
+            format,
+            description: String(raw.description || ''),
+            tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
+            content,
+            createdAt: raw.createdAt || now(),
+            updatedAt: now(),
+            sourceFileName: raw.sourceFileName || file.name,
+            sizeBytes: bytes(content)
+          };
+        });
+        await db.items.bulkAdd(clean);
+        state.selectedId = clean[0]?.id || state.selectedId;
+        await loadItems();
+        setStatus('Imported ' + clean.length + ' backup fragments', true);
+      } catch (err) {
+        console.error(err);
+        setStatus('Invalid backup file');
+      }
+    }
+
+    els.gallery.addEventListener('click', async (event) => {
+      const actionBtn = event.target.closest('button[data-act]');
+      if (actionBtn) {
+        event.stopPropagation();
+        const id = actionBtn.dataset.id;
+        if (actionBtn.dataset.act === 'edit') openEditor(await db.items.get(id));
+        if (actionBtn.dataset.act === 'duplicate') duplicateItem(id);
+        if (actionBtn.dataset.act === 'delete') deleteItem(id);
+        return;
+      }
+      const card = event.target.closest('.card');
+      if (!card) return;
+      openItem(card.dataset.id);
+    });
+
+    els.gallery.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const card = event.target.closest('.card');
+      if (!card) return;
+      event.preventDefault();
+      openItem(card.dataset.id);
+    });
+
+    els.searchInput.addEventListener('input', () => { filterItems(); renderGallery(); });
+    els.typeFilter.addEventListener('change', () => { filterItems(); renderGallery(); });
+    els.newBtn.addEventListener('click', () => openEditor());
+    els.importBtn.addEventListener('click', () => els.fileInput.click());
+    els.fileInput.addEventListener('change', (e) => { importFiles(e.target.files); e.target.value = ''; });
+    els.exportBtn.addEventListener('click', exportBackup);
+    els.importBackupBtn.addEventListener('click', () => els.backupInput.click());
+    els.backupInput.addEventListener('change', (e) => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ''; });
+
+    els.formattedBtn.addEventListener('click', () => { state.mdMode = 'formatted'; renderOpenItem(); updateActionState(); });
+    els.sourceBtn.addEventListener('click', () => { state.mdMode = 'source'; renderOpenItem(); updateActionState(); });
+    els.closeViewer.addEventListener('click', closeViewer);
+
+    els.editBtn.addEventListener('click', async () => state.selectedId && openEditor(await db.items.get(state.selectedId)));
+    els.dupBtn.addEventListener('click', () => state.selectedId && duplicateItem(state.selectedId));
+    els.deleteBtn.addEventListener('click', () => state.selectedId && deleteItem(state.selectedId));
+
+    els.form.addEventListener('submit', (e) => { e.preventDefault(); saveEditor(); });
+    els.closeEditor.addEventListener('click', () => els.dialog.close());
+    els.cancelEditor.addEventListener('click', () => els.dialog.close());
+
+    document.addEventListener('keydown', (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        openEditor();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'e' && state.selectedId) {
+        event.preventDefault();
+        db.items.get(state.selectedId).then(openEditor);
+      }
+      if (event.key === 'Escape' && state.openId) closeViewer();
+    });
+
+    (async function init() {
+      try {
+        runSelfTests();
+        await seedIfEmpty();
+        await loadItems();
+        setStatus('Tomb opened', true);
+      } catch (err) {
+        console.error(err);
+        setStatus('Startup failed');
+        if (els.viewer) {
+          els.viewer.srcdoc = viewerDoc('<pre>' + escapeHtml(err && err.message ? err.message : String(err)) + '</pre>', 'plain');
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
