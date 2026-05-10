@@ -1,0 +1,1900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0f1f15">
+<title>Wildlife Field Recorder</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦉</text></svg>" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/dexie@4.0.11/dist/dexie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
+<style>
+:root {
+  --bg: #0b140f;
+  --bg-2: #111f18;
+  --bg-3: #1a2e24;
+  --bg-4: #223b2e;
+  --accent: #3cb371;
+  --accent-2: #2e8b57;
+  --accent-bright: #4ade80;
+  --accent-dim: #2f6b4a;
+  --danger: #e74c3c;
+  --danger-dim: #8b3a3a;
+  --warn: #f0ad4e;
+  --info: #5bc0de;
+  --text: #e8f5e9;
+  --text-muted: #8faa93;
+  --text-dim: #6a8a70;
+  --border: #2a4536;
+  --border-light: #3a5a46;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 4px 14px rgba(0,0,0,0.45);
+  --font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+*,*::before,*::after { box-sizing: border-box; }
+html,body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 16px; line-height: 1.45; -webkit-tap-highlight-color: transparent; }
+#app { max-width: 960px; margin: 0 auto; min-height: 100vh; display: grid; grid-template-rows: auto auto 1fr auto; }
+header { padding: 12px 14px 8px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); background: var(--bg-2); position: sticky; top: 0; z-index: 50; }
+header .brand { font-weight: 800; font-size: 1.05rem; letter-spacing: 0.02em; color: var(--accent-bright); white-space: nowrap; }
+header .brand span { opacity: 0.7; font-weight: 600; }
+header .status { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.status-chip { font-size: 0.72rem; padding: 3px 8px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border); color: var(--text-muted); }
+.status-chip.ok { background: rgba(74,222,128,0.12); color: var(--accent-bright); border-color: var(--accent-dim); }
+.status-chip.warn { background: rgba(240,173,78,0.12); color: var(--warn); border-color: #7a5a2a; }
+.status-chip.off { background: rgba(231,76,60,0.12); color: var(--danger); border-color: var(--danger-dim); }
+nav#tabs { display: flex; gap: 2px; overflow-x: auto; padding: 6px 10px 0; background: var(--bg-2); border-bottom: 1px solid var(--border); scrollbar-width: none; -ms-overflow-style: none; position: sticky; top: 47px; z-index: 40; }
+nav#tabs::-webkit-scrollbar { display: none; }
+nav#tabs button { flex: 0 0 auto; background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 10px; color: var(--text-muted); font-size: 0.82rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+nav#tabs button.active { color: var(--accent-bright); border-bottom-color: var(--accent-bright); }
+main { padding: 12px 14px 20px; overflow-y: auto; }
+section.tab { display: none; }
+section.tab.active { display: block; }
+h1,h2,h3 { margin: 0 0 10px; line-height: 1.25; color: var(--accent-bright); }
+h1 { font-size: 1.25rem; }
+h2 { font-size: 1.1rem; }
+h3 { font-size: 0.95rem; color: var(--text); }
+p { margin: 0 0 10px; }
+a { color: var(--accent-bright); }
+label { display: block; font-size: 0.82rem; color: var(--text-muted); margin: 10px 0 4px; }
+input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-3); color: var(--text); font-size: 0.95rem; }
+input[type="checkbox"] { width: auto; }
+textarea { min-height: 80px; resize: vertical; }
+button { cursor: pointer; font-family: var(--font); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); background: var(--bg-3); color: var(--text); font-size: 0.88rem; font-weight: 600; }
+.btn:hover { background: var(--bg-4); border-color: var(--accent-dim); }
+.btn-primary { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+.btn-primary:hover { background: var(--accent); border-color: var(--accent); }
+.btn-danger { background: var(--danger-dim); color: #fff; border-color: var(--danger-dim); }
+.btn-danger:hover { background: var(--danger); }
+.btn-small { padding: 5px 10px; font-size: 0.78rem; }
+.btn-group { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin: 10px 0; }
+.card-title { font-weight: 700; color: var(--accent-bright); font-size: 0.95rem; margin-bottom: 6px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.chip { font-size: 0.75rem; padding: 3px 8px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border); color: var(--text-muted); }
+.chip.ok { background: rgba(74,222,128,0.12); color: var(--accent-bright); border-color: var(--accent-dim); }
+.chip.warn { background: rgba(240,173,78,0.12); color: var(--warn); border-color: #7a5a2a; }
+.chip.danger { background: rgba(231,76,60,0.12); color: var(--danger); border-color: var(--danger-dim); }
+.chip.info { background: rgba(91,192,222,0.12); color: var(--info); border-color: #2a6b7a; }
+.empty { color: var(--text-dim); font-style: italic; padding: 16px 0; text-align: center; }
+.scroll { overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--text-muted); font-weight: 600; }
+.compact-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.compact-row:last-child { border-bottom: none; }
+.compact-row .meta { font-size: 0.78rem; color: var(--text-dim); }
+.audio-player { width: 100%; margin: 6px 0; }
+.map-wrap { height: 320px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+#map { height: 100%; width: 100%; background: var(--bg); }
+.leaflet-container { background: var(--bg); }
+.capture-wrap { text-align: center; padding: 20px 0; }
+.capture-btn { width: 160px; height: 160px; border-radius: 50%; border: 4px solid var(--accent-dim); background: var(--accent-2); color: #fff; font-size: 1.1rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px; box-shadow: var(--shadow); transition: transform .15s, background .15s; }
+.capture-btn:active { transform: scale(0.96); }
+.capture-btn.recording { background: var(--danger); border-color: var(--danger-dim); }
+.capture-hint { font-size: 0.82rem; color: var(--text-muted); margin-top: 10px; }
+.timer { font-size: 1.6rem; font-weight: 800; color: var(--accent-bright); margin: 8px 0; font-variant-numeric: tabular-nums; }
+.obs-card { border-left: 3px solid var(--accent-dim); }
+.obs-card.reptile { border-left-color: #4caf50; }
+.obs-card.bird { border-left-color: #2196f3; }
+.obs-card.amphibian { border-left-color: #ff9800; }
+.obs-card.mammal { border-left-color: #9c27b0; }
+.obs-card.insect { border-left-color: #cddc39; }
+.obs-card.plant { border-left-color: #8bc34a; }
+.obs-card.fungus { border-left-color: #795548; }
+.obs-card.weather { border-left-color: #607d8b; }
+.obs-card.habitat { border-left-color: #009688; }
+.filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.filter-bar input, .filter-bar select { flex: 1 1 140px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 100; }
+.modal-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.modal-head h3 { margin: 0; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.4rem; line-height: 1; }
+.log-line { font-size: 0.78rem; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-muted); }
+.log-line .time { color: var(--text-dim); font-family: var(--font-mono); margin-right: 8px; }
+.log-line.error { color: var(--danger); }
+.log-line.warn { color: var(--warn); }
+.log-line.info { color: var(--info); }
+.photo-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; background: var(--bg-3); }
+.photo-grid { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.form-row { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+.form-row label { margin: 0; flex: 0 0 auto; }
+.form-row input, .form-row select { flex: 1 1 auto; }
+.route-panel { background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 0.82rem; margin-top: 8px; }
+.route-panel h4 { margin: 0 0 4px; color: var(--accent-bright); font-size: 0.85rem; }
+.missing-gps { color: var(--warn); }
+.gap-list { list-style: none; padding: 0; margin: 4px 0; }
+.gap-list li { padding: 2px 0; font-size: 0.78rem; color: var(--text-muted); }
+@media (min-width: 640px) {
+  .map-wrap { height: 420px; }
+}
+@media (max-width: 380px) {
+  html, body { font-size: 15px; }
+  nav#tabs button { padding: 7px 8px; font-size: 0.78rem; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <div class="brand">🦉 Wildlife Field Recorder</div>
+  <div class="status">
+    <span id="net-chip" class="status-chip off">Offline</span>
+    <span id="gps-chip" class="status-chip off">GPS off</span>
+    <span id="queue-chip" class="status-chip">Queue 0</span>
+  </div>
+</header>
+<nav id="tabs">
+  <button data-tab="about" class="active">About</button>
+  <button data-tab="capture">Capture</button>
+  <button data-tab="process">Process</button>
+  <button data-tab="review">Review</button>
+  <button data-tab="trips">Trips</button>
+  <button data-tab="map">Map</button>
+  <button data-tab="importexport">Import/Export</button>
+  <button data-tab="setup">Setup</button>
+  <button data-tab="diagnostics">Diagnostics</button>
+</nav>
+<main>
+
+<!-- About -->
+<section id="tab-about" class="tab active">
+  <h1>Wildlife Field Recorder</h1>
+  <p>Offline-first field recorder for wildlife sightings, road cruising, birding, herping, and general nature observation.</p>
+  <div class="card">
+    <div class="card-title">How this works</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:0.82rem;color:var(--text-muted);">
+      <span class="chip">Capture</span> →
+      <span class="chip">Local Queue</span> →
+      <span class="chip">Process Audio</span> →
+      <span class="chip">Classify Subject</span> →
+      <span class="chip">Create/Update Trip</span> →
+      <span class="chip">Submit to Backend</span> →
+      <span class="chip">Attach Photos</span> →
+      <span class="chip">Review/Map</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Features</div>
+    <ul style="margin:0;padding:0 0 0 18px;color:var(--text-muted);font-size:0.9rem;">
+      <li>Quick voice notes with GPS and timestamp</li>
+      <li>Offline-first: everything saved locally</li>
+      <li>Weather snapshot when online</li>
+      <li>LLM transcription and classification</li>
+      <li>Auto-group observations into trips/routes</li>
+      <li>Submit enriched records + audio to LabBox</li>
+      <li>Attach photos to submitted observations</li>
+      <li>Review trips on a map with route lines</li>
+    </ul>
+  </div>
+  <p style="font-size:0.82rem;color:var(--text-dim);">Useful for herping, birding, road cruising, wildlife photography, and general naturalist notes.</p>
+</section>
+
+<!-- Capture -->
+<section id="tab-capture" class="tab">
+  <h2>Capture</h2>
+  <div class="capture-wrap">
+    <div id="capture-timer" class="timer" style="display:none;">00:00</div>
+    <button id="capture-btn" class="capture-btn" aria-label="Start recording">
+      <span id="capture-label">Capture</span>
+      <span id="capture-sub" style="font-size:0.75rem;font-weight:500;opacity:0.9;">Tap to record</span>
+    </button>
+    <div class="capture-hint" id="capture-status">Ready</div>
+  </div>
+  <div class="card">
+    <label for="capture-note">Optional typed hint</label>
+    <textarea id="capture-note" placeholder="great blue heron, water snake, chorus frogs..."></textarea>
+  </div>
+  <div id="capture-result" style="display:none;">
+    <div class="card">
+      <div class="card-title">Saved</div>
+      <div id="capture-summary" style="font-size:0.85rem;color:var(--text-muted);"></div>
+      <div class="btn-group">
+        <button id="capture-another" class="btn btn-primary">Record another</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Process / Submit -->
+<section id="tab-process" class="tab">
+  <h2>Process / Submit</h2>
+  <div class="card">
+    <div class="card-title">Queue</div>
+    <div id="process-buckets" style="font-size:0.85rem;color:var(--text-muted);"></div>
+    <div class="btn-group">
+      <button id="process-next" class="btn btn-primary">Process next</button>
+      <button id="process-all" class="btn">Process all</button>
+      <button id="build-trips" class="btn">Build trips</button>
+      <button id="submit-ready" class="btn btn-primary">Submit ready</button>
+      <button id="retry-failed" class="btn">Retry failed</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Dry run / Validate</div>
+    <button id="dry-run-btn" class="btn">Validate ready records</button>
+    <pre id="dry-run-result" style="margin-top:8px;font-size:0.8rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);overflow:auto;display:none;"></pre>
+  </div>
+  <div id="process-log" style="margin-top:10px;font-size:0.82rem;color:var(--text-muted);"></div>
+</section>
+
+<!-- Review -->
+<section id="tab-review" class="tab">
+  <h2>Review</h2>
+  <div class="filter-bar">
+    <input id="review-search" placeholder="Search..." />
+    <select id="review-filter-status">
+      <option value="">All statuses</option>
+      <option value="local">Local only</option>
+      <option value="transcribed">Transcribed</option>
+      <option value="classified">Classified</option>
+      <option value="ready">Ready to submit</option>
+      <option value="submitted">Submitted</option>
+      <option value="failed">Failed</option>
+    </select>
+    <select id="review-filter-category">
+      <option value="">All categories</option>
+      <option value="reptile">Reptile</option>
+      <option value="amphibian">Amphibian</option>
+      <option value="bird">Bird</option>
+      <option value="mammal">Mammal</option>
+      <option value="fish">Fish</option>
+      <option value="insect">Insect</option>
+      <option value="arachnid">Arachnid</option>
+      <option value="plant">Plant</option>
+      <option value="fungus">Fungus</option>
+      <option value="weather">Weather</option>
+      <option value="habitat">Habitat</option>
+      <option value="unknown">Unknown</option>
+      <option value="other">Other</option>
+    </select>
+    <select id="review-filter-trip">
+      <option value="">All trips</option>
+    </select>
+    <input type="date" id="review-filter-date" />
+  </div>
+  <div id="review-list"></div>
+</section>
+
+<!-- Trips -->
+<section id="tab-trips" class="tab">
+  <h2>Trips</h2>
+  <div class="btn-group">
+    <button id="trips-rebuild" class="btn">Rebuild trips</button>
+  </div>
+  <div id="trips-list"></div>
+</section>
+
+<!-- Map -->
+<section id="tab-map" class="tab">
+  <h2>Map</h2>
+  <div class="form-row">
+    <label for="map-trip-select">Trip</label>
+    <select id="map-trip-select"><option value="">Show all observations</option></select>
+  </div>
+  <div class="map-wrap"><div id="map"></div></div>
+  <div id="map-route-panel" class="route-panel" style="display:none;">
+    <h4>Route info</h4>
+    <div id="map-route-info"></div>
+    <ul id="map-missing-gps" class="gap-list"></ul>
+  </div>
+  <div class="btn-group" style="margin-top:10px;">
+    <button id="map-export-geojson" class="btn">Export GeoJSON</button>
+    <button id="map-export-gpx" class="btn">Export GPX</button>
+  </div>
+</section>
+
+<!-- Import / Export -->
+<section id="tab-importexport" class="tab">
+  <h2>Import / Export</h2>
+  <div class="card">
+    <div class="card-title">Export</div>
+    <div class="btn-group">
+      <button id="export-all" class="btn">Export all JSON</button>
+      <button id="export-obs" class="btn">Observations only</button>
+      <button id="export-trips" class="btn">Trips only</button>
+      <button id="export-audio-meta" class="btn">Audio metadata</button>
+      <button id="export-photo-meta" class="btn">Photo metadata</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Import</div>
+    <p style="font-size:0.82rem;color:var(--text-muted);">Import a JSON file previously exported by this app. Existing records with the same localId will be merged (newer wins).</p>
+    <input type="file" id="import-file" accept="application/json,.json" />
+    <pre id="import-result" style="margin-top:8px;font-size:0.8rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);display:none;"></pre>
+  </div>
+</section>
+
+<!-- Setup / Admin -->
+<section id="tab-setup" class="tab">
+  <h2>Setup / Admin</h2>
+  <div class="card">
+    <div class="card-title">LabBox Backend</div>
+    <label>API base URL</label>
+    <input id="cfg-api-base" value="https://lab.aismallbizguru.com/api" />
+    <label>LabBox app id</label>
+    <input id="cfg-app-id" value="wildlife-field-recorder" />
+    <label>Observations resource</label>
+    <input id="cfg-obs-resource" value="observations" />
+    <label>Trips resource</label>
+    <input id="cfg-trip-resource" value="trips" />
+    <label>LabBox bearer token</label>
+    <input id="cfg-token" type="password" placeholder="Bearer token" />
+    <div class="btn-group">
+      <button id="test-backend" class="btn btn-primary">Test connection</button>
+    </div>
+    <pre id="backend-test-result" style="margin-top:8px;font-size:0.8rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);display:none;"></pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">LLM / Transcription</div>
+    <label>Provider</label>
+    <select id="cfg-llm-provider">
+      <option value="openai">OpenAI-compatible</option>
+      <option value="openrouter">OpenRouter-compatible</option>
+      <option value="custom">Custom endpoint</option>
+      <option value="manual">Manual-only / no cloud</option>
+    </select>
+    <label>API base URL</label>
+    <input id="cfg-llm-base" placeholder="https://api.openai.com/v1" />
+    <label>API key</label>
+    <input id="cfg-llm-key" type="password" placeholder="API key" />
+    <label>Transcription model</label>
+    <input id="cfg-trans-model" value="whisper-1" />
+    <label>Text/classification model</label>
+    <input id="cfg-text-model" value="gpt-4.1-mini" />
+    <div class="form-row" style="margin-top:8px;">
+      <input type="checkbox" id="cfg-same-key" />
+      <label for="cfg-same-key" style="margin:0;">Use same key for transcription and text</label>
+    </div>
+    <div class="btn-group">
+      <button id="test-llm" class="btn btn-primary">Test LLM</button>
+    </div>
+    <pre id="llm-test-result" style="margin-top:8px;font-size:0.8rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);display:none;"></pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Capture Settings</div>
+    <label>Max audio recording seconds</label>
+    <input id="cfg-max-audio" type="number" value="120" />
+    <div class="form-row">
+      <input type="checkbox" id="cfg-auto-stop" checked />
+      <label for="cfg-auto-stop" style="margin:0;">Auto stop at max length</label>
+    </div>
+    <label>Weather fetch timeout seconds</label>
+    <input id="cfg-weather-timeout" type="number" value="8" />
+    <div class="form-row">
+      <input type="checkbox" id="cfg-gps-high" checked />
+      <label for="cfg-gps-high" style="margin:0;">GPS high accuracy</label>
+    </div>
+    <label>GPS timeout seconds</label>
+    <input id="cfg-gps-timeout" type="number" value="12" />
+    <label>Trip grouping window hours</label>
+    <input id="cfg-trip-hours" type="number" value="3" />
+    <label>Trip grouping distance miles</label>
+    <input id="cfg-trip-miles" type="number" value="5" />
+  </div>
+
+  <div class="card">
+    <div class="card-title">Storage Controls</div>
+    <div id="storage-stats" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;"></div>
+    <div class="btn-group">
+      <button id="clear-logs" class="btn btn-small">Clear only logs</button>
+      <button id="clear-all" class="btn btn-danger btn-small">Clear all local data</button>
+    </div>
+  </div>
+</section>
+
+<!-- Diagnostics -->
+<section id="tab-diagnostics" class="tab">
+  <h2>Diagnostics / Logs</h2>
+  <div class="card">
+    <div class="card-title">Capabilities</div>
+    <div id="diag-caps" style="font-size:0.85rem;color:var(--text-muted);"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Last Requests</div>
+    <div id="diag-requests" style="font-size:0.85rem;color:var(--text-muted);"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Storage</div>
+    <div id="diag-storage" style="font-size:0.85rem;color:var(--text-muted);"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">App Logs</div>
+    <div class="btn-group">
+      <button id="copy-diag" class="btn btn-small">Copy diagnostics to clipboard</button>
+      <button id="clear-diag-logs" class="btn btn-small">Clear logs</button>
+    </div>
+    <div id="diag-logs" style="margin-top:8px;max-height:360px;overflow:auto;font-family:var(--font-mono);font-size:0.78rem;"></div>
+  </div>
+</section>
+
+</main>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.1
+</footer>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+const APP_VERSION = '2026.05.10.1';
+
+/* ========================
+   DB (Dexie)
+   ======================== */
+const db = new Dexie('WildlifeFieldRecorder');
+db.version(1).stores({
+  observations: 'localId, createdAt, submitStatus, category, tripLocalId',
+  audioBlobs: 'blobId',
+  trips: 'localTripId, startedAt, submitStatus',
+  photos: 'localPhotoId, observationLocalId, uploadStatus',
+  logs: '++id, timestamp'
+});
+
+/* ========================
+   State / Settings
+   ======================== */
+const defaultSettings = {
+  apiBase: 'https://lab.aismallbizguru.com/api',
+  appId: 'wildlife-field-recorder',
+  observationsResource: 'observations',
+  tripsResource: 'trips',
+  token: '',
+  llmProvider: 'openai',
+  llmBase: '',
+  llmKey: '',
+  transModel: 'whisper-1',
+  textModel: 'gpt-4.1-mini',
+  sameKey: true,
+  maxAudioSeconds: 120,
+  autoStop: true,
+  weatherTimeout: 8,
+  gpsHighAccuracy: true,
+  gpsTimeout: 12,
+  tripWindowHours: 3,
+  tripWindowMiles: 5
+};
+
+function loadSettings() {
+  const s = { ...defaultSettings };
+  try {
+    const raw = localStorage.getItem('wfr_settings');
+    if (raw) Object.assign(s, JSON.parse(raw));
+  } catch(e) {}
+  return s;
+}
+function saveSettings(s) {
+  localStorage.setItem('wfr_settings', JSON.stringify(s));
+}
+let settings = loadSettings();
+
+/* ========================
+   Logger
+   ======================== */
+async function addLog(level, message) {
+  const rec = { timestamp: Date.now(), level, message: String(message) };
+  try { await db.logs.add(rec); } catch(e) { console.error('Log fail', e); }
+  renderDiagnostics();
+}
+function logInfo(m) { addLog('info', m); }
+function logWarn(m) { addLog('warn', m); }
+function logError(m) { addLog('error', m); }
+
+/* ========================
+   Utils
+   ======================== */
+function uuid() { return crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36)+Math.random().toString(36).slice(2)); }
+function fmtDate(d) { return new Date(d).toLocaleString(); }
+function fmtDuration(sec) { const m = Math.floor(sec/60), s = Math.floor(sec%60); return `${m}:${s.toString().padStart(2,'0')}`; }
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 3958.8; // miles
+  const toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function getSupportedMimeType() {
+  const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg', 'audio/wav'];
+  for (const t of types) if (MediaRecorder.isTypeSupported(t)) return t;
+  return '';
+}
+function blobToBase64(blob) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onloadend = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+}
+
+/* ========================
+   UI helpers
+   ======================== */
+const els = {};
+function $(id) { return document.getElementById(id); }
+function showTab(name) {
+  document.querySelectorAll('section.tab').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  const t = $('tab-' + name);
+  if (t) { t.classList.add('active'); if (name === 'map') setTimeout(() => mapInvalidate(), 50); }
+  if (name === 'review') loadReview();
+  if (name === 'trips') loadTrips();
+  if (name === 'process') loadProcess();
+  if (name === 'diagnostics') renderDiagnostics();
+  if (name === 'setup') loadSetup();
+  if (name === 'map') loadMapTab();
+}
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('nav#tabs button[data-tab]');
+  if (btn) { e.preventDefault(); showTab(btn.dataset.tab); }
+});
+
+/* ========================
+   Capture
+   ======================== */
+let recorder = null;
+let audioChunks = [];
+let captureStartTime = 0;
+let captureTimerId = null;
+let captureGPS = null;
+let captureWeather = null;
+let currentStream = null;
+
+function updateNetChip() {
+  const chip = $('net-chip');
+  if (navigator.onLine) { chip.textContent = 'Online'; chip.className = 'status-chip ok'; }
+  else { chip.textContent = 'Offline'; chip.className = 'status-chip off'; }
+}
+window.addEventListener('online', () => { updateNetChip(); logInfo('Network online'); });
+window.addEventListener('offline', () => { updateNetChip(); logWarn('Network offline'); });
+updateNetChip();
+
+async function fetchWeather(lat, lon) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), (settings.weatherTimeout || 8) * 1000);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(to);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    return { status: 'ok', apiUrl: url, fetchedAt: Date.now(), raw: data };
+  } catch(e) {
+    return { status: 'error', apiUrl: url, fetchedAt: Date.now(), raw: null, error: e.message };
+  }
+}
+
+function startCaptureTimer() {
+  captureStartTime = Date.now();
+  const el = $('capture-timer');
+  el.style.display = 'block';
+  const maxSec = (settings.maxAudioSeconds || 120);
+  captureTimerId = setInterval(() => {
+    const sec = Math.floor((Date.now() - captureStartTime) / 1000);
+    el.textContent = fmtDuration(sec);
+    if (settings.autoStop && sec >= maxSec) stopCapture();
+  }, 1000);
+}
+function stopCaptureTimer() {
+  if (captureTimerId) { clearInterval(captureTimerId); captureTimerId = null; }
+  $('capture-timer').style.display = 'none';
+}
+
+async function startCapture() {
+  if (recorder && recorder.state === 'recording') return;
+  audioChunks = [];
+  captureGPS = null;
+  captureWeather = null;
+  $('capture-result').style.display = 'none';
+  $('capture-status').textContent = 'Starting...';
+  const btn = $('capture-btn');
+  btn.classList.add('recording');
+  $('capture-label').textContent = 'Stop';
+  $('capture-sub').textContent = 'Tap to stop';
+
+  // GPS
+  if ('geolocation' in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        captureGPS = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracyMeters: pos.coords.accuracy,
+          altitude: pos.coords.altitude,
+          heading: pos.coords.heading,
+          speed: pos.coords.speed,
+          status: 'ok'
+        };
+        $('gps-chip').textContent = 'GPS ok'; $('gps-chip').className = 'status-chip ok';
+      },
+      err => {
+        captureGPS = { status: 'error', error: err.message };
+        $('gps-chip').textContent = 'GPS err'; $('gps-chip').className = 'status-chip warn';
+      },
+      { enableHighAccuracy: settings.gpsHighAccuracy, timeout: (settings.gpsTimeout || 12) * 1000, maximumAge: 60000 }
+    );
+  } else {
+    captureGPS = { status: 'unsupported' };
+  }
+
+  // Weather
+  if (navigator.onLine && captureGPS && captureGPS.status === 'ok') {
+    captureWeather = await fetchWeather(captureGPS.latitude, captureGPS.longitude);
+  } else {
+    captureWeather = { status: 'skipped' };
+  }
+
+  // Audio
+  try {
+    currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = getSupportedMimeType();
+    recorder = new MediaRecorder(currentStream, mime ? { mimeType: mime } : undefined);
+    recorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    recorder.onstop = () => onCaptureStop();
+    recorder.onerror = e => { logError('Recorder error: ' + e.message); stopCaptureTimer(); resetCaptureBtn(); };
+    recorder.start(1000);
+    startCaptureTimer();
+    $('capture-status').textContent = 'Recording...';
+    logInfo('Capture started');
+  } catch(e) {
+    logError('Audio start failed: ' + e.message);
+    $('capture-status').textContent = 'Audio error: ' + e.message;
+    stopCaptureTimer();
+    resetCaptureBtn();
+  }
+}
+
+function resetCaptureBtn() {
+  const btn = $('capture-btn');
+  btn.classList.remove('recording');
+  $('capture-label').textContent = 'Capture';
+  $('capture-sub').textContent = 'Tap to record';
+}
+
+async function onCaptureStop() {
+  stopCaptureTimer();
+  resetCaptureBtn();
+  $('capture-status').textContent = 'Saving...';
+  if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+
+  const durationSec = captureStartTime ? Math.round((Date.now() - captureStartTime) / 1000) : 0;
+  const mime = recorder && recorder.mimeType ? recorder.mimeType : 'audio/webm';
+  recorder = null;
+
+  const blob = audioChunks.length ? new Blob(audioChunks, { type: mime }) : null;
+  const localId = uuid();
+  const audioBlobId = blob ? ('audio-' + localId) : null;
+  if (blob && audioBlobId) {
+    try { await db.audioBlobs.put({ blobId: audioBlobId, blob, mimeType: mime, sizeBytes: blob.size, createdAt: Date.now() }); }
+    catch(e) { logError('Audio blob save failed: ' + e.message); }
+  }
+
+  const obs = {
+    localId,
+    createdAt: Date.now(),
+    startedAt: captureStartTime || Date.now(),
+    stoppedAt: Date.now(),
+    durationSeconds: durationSec,
+    latitude: captureGPS && captureGPS.status === 'ok' ? captureGPS.latitude : null,
+    longitude: captureGPS && captureGPS.status === 'ok' ? captureGPS.longitude : null,
+    accuracyMeters: captureGPS && captureGPS.status === 'ok' ? captureGPS.accuracyMeters : null,
+    altitude: captureGPS && captureGPS.status === 'ok' ? captureGPS.altitude : null,
+    heading: captureGPS && captureGPS.status === 'ok' ? captureGPS.heading : null,
+    speed: captureGPS && captureGPS.status === 'ok' ? captureGPS.speed : null,
+    gpsStatus: captureGPS ? captureGPS.status : 'unknown',
+    gpsError: captureGPS && captureGPS.error ? captureGPS.error : null,
+    weatherStatus: captureWeather ? captureWeather.status : 'unknown',
+    weatherApiUrl: captureWeather ? captureWeather.apiUrl : null,
+    weatherFetchedAt: captureWeather ? captureWeather.fetchedAt : null,
+    weatherRaw: captureWeather ? captureWeather.raw : null,
+    audioBlobId,
+    audioMimeType: mime,
+    audioSizeBytes: blob ? blob.size : 0,
+    userNoteText: $('capture-note').value.trim() || null,
+    transcriptionStatus: 'pending',
+    transcript: null,
+    classificationStatus: 'pending',
+    subjectCommonName: null,
+    subjectScientificName: null,
+    subjectConfidence: null,
+    category: null,
+    categoryConfidence: null,
+    tags: [],
+    behavior: null,
+    habitat: null,
+    count: null,
+    summary: null,
+    llmRaw: null,
+    tripLocalId: null,
+    backendObservationId: null,
+    backendFileIds: [],
+    photoFileIds: [],
+    photoLocalIds: [],
+    submitStatus: 'local',
+    submitError: null,
+    updatedAt: Date.now()
+  };
+
+  try {
+    await db.observations.put(obs);
+    logInfo('Observation saved ' + localId);
+    $('capture-status').textContent = 'Saved locally';
+    $('capture-result').style.display = 'block';
+    const summary = [];
+    summary.push('Time: ' + fmtDate(obs.createdAt));
+    if (obs.latitude != null) summary.push(`Location: ${obs.latitude.toFixed(5)}, ${obs.longitude.toFixed(5)}`);
+    else summary.push('Location: unavailable');
+    summary.push('Weather: ' + obs.weatherStatus);
+    summary.push('Audio: ' + (obs.audioSizeBytes > 0 ? fmtDuration(obs.durationSeconds) : 'none'));
+    summary.push('Status: ' + obs.submitStatus);
+    $('capture-summary').innerHTML = summary.map(s => '<div>' + escapeHtml(s) + '</div>').join('');
+    updateQueueChip();
+  } catch(e) {
+    logError('Observation save failed: ' + e.message);
+    $('capture-status').textContent = 'Save failed';
+  }
+}
+
+function stopCapture() {
+  if (recorder && recorder.state === 'recording') { recorder.stop(); }
+  else { onCaptureStop(); }
+}
+
+$('capture-btn').addEventListener('click', () => {
+  if ($('capture-btn').classList.contains('recording')) stopCapture(); else startCapture();
+});
+$('capture-another').addEventListener('click', () => {
+  $('capture-result').style.display = 'none';
+  $('capture-note').value = '';
+  $('capture-status').textContent = 'Ready';
+});
+
+/* ========================
+   Process / Submit
+   ======================== */
+async function loadProcess() {
+  const all = await db.observations.toArray();
+  const buckets = { local: 0, transcribed: 0, classified: 0, ready: 0, submitted: 0, failed: 0 };
+  for (const o of all) {
+    if (o.submitStatus === 'local') buckets.local++;
+    else if (o.submitStatus === 'transcribed') buckets.transcribed++;
+    else if (o.submitStatus === 'classified') buckets.classified++;
+    else if (o.submitStatus === 'ready') buckets.ready++;
+    else if (o.submitStatus === 'submitted') buckets.submitted++;
+    else if (o.submitStatus === 'failed') buckets.failed++;
+  }
+  $('process-buckets').innerHTML = Object.entries(buckets).map(([k,v]) => `<span class="chip">${k}: ${v}</span>`).join(' ');
+}
+
+$('process-next').addEventListener('click', async () => {
+  const obs = await db.observations.filter(o => o.transcriptionStatus !== 'done' || o.classificationStatus !== 'done').first();
+  if (!obs) { $('process-log').textContent = 'Nothing to process'; return; }
+  await processObservation(obs);
+});
+$('process-all').addEventListener('click', async () => {
+  const list = await db.observations.filter(o => o.transcriptionStatus !== 'done' || o.classificationStatus !== 'done').toArray();
+  for (const obs of list) await processObservation(obs);
+});
+$('build-trips').addEventListener('click', async () => { await buildTrips(); loadTrips(); loadProcess(); });
+$('submit-ready').addEventListener('click', async () => {
+  const ready = await db.observations.where('submitStatus').equals('ready').toArray();
+  for (const obs of ready) await submitObservation(obs);
+});
+$('retry-failed').addEventListener('click', async () => {
+  const failed = await db.observations.where('submitStatus').equals('failed').toArray();
+  for (const obs of failed) { obs.submitStatus = 'ready'; obs.submitError = null; await db.observations.put(obs); }
+  loadProcess(); updateQueueChip();
+});
+$('dry-run-btn').addEventListener('click', async () => {
+  const ready = await db.observations.where('submitStatus').equals('ready').toArray();
+  const out = ready.map(o => ({ localId: o.localId, category: o.category, subject: o.subjectCommonName, trip: o.tripLocalId, backendId: o.backendObservationId }));
+  $('dry-run-result').style.display = 'block';
+  $('dry-run-result').textContent = JSON.stringify(out, null, 2);
+});
+
+async function processObservation(obs) {
+  if (!obs.audioBlobId) { obs.transcriptionStatus = 'done'; obs.classificationStatus = 'done'; await db.observations.put(obs); return; }
+  if (settings.llmProvider === 'manual') {
+    obs.transcriptionStatus = 'done'; obs.transcript = obs.transcript || '';
+    obs.classificationStatus = 'done';
+    obs.submitStatus = 'ready';
+    await db.observations.put(obs);
+    return;
+  }
+  if (obs.transcriptionStatus !== 'done') {
+    try {
+      const audioRec = await db.audioBlobs.get(obs.audioBlobId);
+      if (!audioRec) throw new Error('Audio blob missing');
+      const trans = await transcribeAudio(audioRec.blob, obs.audioMimeType);
+      obs.transcript = trans;
+      obs.transcriptionStatus = 'done';
+      obs.updatedAt = Date.now();
+      await db.observations.put(obs);
+      logInfo('Transcribed ' + obs.localId);
+    } catch(e) {
+      logError('Transcription failed ' + obs.localId + ': ' + e.message);
+      obs.transcriptionStatus = 'error';
+      await db.observations.put(obs);
+      return;
+    }
+  }
+  if (obs.classificationStatus !== 'done') {
+    try {
+      const cls = await classifyObservation(obs);
+      Object.assign(obs, cls);
+      obs.classificationStatus = 'done';
+      obs.submitStatus = 'ready';
+      obs.updatedAt = Date.now();
+      await db.observations.put(obs);
+      logInfo('Classified ' + obs.localId);
+    } catch(e) {
+      logError('Classification failed ' + obs.localId + ': ' + e.message);
+      obs.classificationStatus = 'error';
+      await db.observations.put(obs);
+    }
+  }
+  loadProcess(); updateQueueChip();
+}
+
+async function transcribeAudio(blob, mime) {
+  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const key = settings.llmKey;
+  if (!key) throw new Error('No LLM key');
+  const fd = new FormData();
+  const ext = mime.includes('mp4') ? '.m4a' : mime.includes('ogg') ? '.ogg' : mime.includes('wav') ? '.wav' : '.webm';
+  fd.append('file', new File([blob], 'recording' + ext, { type: mime }));
+  fd.append('model', settings.transModel || 'whisper-1');
+  const r = await fetch(base + '/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
+  if (!r.ok) throw new Error('Transcription HTTP ' + r.status);
+  const data = await r.json();
+  return data.text || '';
+}
+
+async function classifyObservation(obs) {
+  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const key = settings.llmKey;
+  if (!key) throw new Error('No LLM key');
+  const weatherSummary = obs.weatherRaw && obs.weatherRaw.current ? `${obs.weatherRaw.current.temperature_2m}°F, ${obs.weatherRaw.current.relative_humidity_2m}% RH` : 'n/a';
+  const prompt = `You are helping classify a wildlife field observation from a short voice note.
+Return ONLY valid JSON.
+Input:
+- Transcript: ${obs.transcript || ''}
+- Timestamp: ${new Date(obs.createdAt).toISOString()}
+- Latitude: ${obs.latitude || ''}
+- Longitude: ${obs.longitude || ''}
+- Weather summary: ${weatherSummary}
+- User typed hint: ${obs.userNoteText || ''}
+Extract:
+{
+  "subjectCommonName": string | null,
+  "subjectScientificName": string | null,
+  "subjectConfidence": 0-1,
+  "category": "reptile" | "amphibian" | "bird" | "mammal" | "fish" | "insect" | "arachnid" | "plant" | "fungus" | "weather" | "habitat" | "unknown" | "other",
+  "categoryConfidence": 0-1,
+  "behavior": string | null,
+  "habitat": string | null,
+  "count": number | null,
+  "tags": string[],
+  "summary": string,
+  "needsHumanReview": boolean,
+  "reviewReason": string | null
+}`;
+  const r = await fetch(base + '/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: settings.textModel || 'gpt-4.1-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.2 })
+  });
+  if (!r.ok) throw new Error('Classification HTTP ' + r.status);
+  const data = await r.json();
+  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content ? data.choices[0].message.content : '{}';
+  const clean = content.replace(/```json\s?/i, '').replace(/```/g, '').trim();
+  const parsed = JSON.parse(clean);
+  return {
+    subjectCommonName: parsed.subjectCommonName || null,
+    subjectScientificName: parsed.subjectScientificName || null,
+    subjectConfidence: parsed.subjectConfidence || null,
+    category: parsed.category || 'unknown',
+    categoryConfidence: parsed.categoryConfidence || null,
+    behavior: parsed.behavior || null,
+    habitat: parsed.habitat || null,
+    count: parsed.count || null,
+    tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+    summary: parsed.summary || '',
+    llmRaw: content,
+    needsHumanReview: !!parsed.needsHumanReview,
+    reviewReason: parsed.reviewReason || null
+  };
+}
+
+/* ========================
+   Trips
+   ======================== */
+async function buildTrips() {
+  const all = await db.observations.orderBy('createdAt').toArray();
+  const tripHours = settings.tripWindowHours || 3;
+  const tripMiles = settings.tripWindowMiles || 5;
+  const trips = [];
+  let currentTrip = null;
+
+  for (const obs of all) {
+    if (!currentTrip) {
+      currentTrip = startTrip(obs);
+      continue;
+    }
+    const lastObs = await db.observations.get(currentTrip.observationLocalIds[currentTrip.observationLocalIds.length - 1]);
+    const hours = (obs.createdAt - lastObs.createdAt) / 3600000;
+    const dist = (obs.latitude != null && lastObs.latitude != null) ? haversine(lastObs.latitude, lastObs.longitude, obs.latitude, obs.longitude) : 0;
+    const timeOk = hours <= tripHours;
+    const distOk = (obs.latitude == null || lastObs.latitude == null) ? true : dist <= tripMiles;
+    if (timeOk && distOk) {
+      currentTrip.observationLocalIds.push(obs.localId);
+      currentTrip.endedAt = obs.createdAt;
+    } else {
+      trips.push(currentTrip);
+      currentTrip = startTrip(obs);
+    }
+  }
+  if (currentTrip) trips.push(currentTrip);
+
+  // Summarize each trip
+  for (const trip of trips) {
+    const obsList = await db.observations.where('localId').anyOf(trip.observationLocalIds).toArray();
+    trip.observationCount = obsList.length;
+    trip.categories = [...new Set(obsList.map(o => o.category).filter(Boolean))];
+    trip.subjectSummaries = obsList.map(o => o.subjectCommonName || o.summary || 'Observation').filter(Boolean);
+    const lats = obsList.map(o => o.latitude).filter(x => x != null);
+    const lons = obsList.map(o => o.longitude).filter(x => x != null);
+    trip.centerLatitude = lats.length ? lats.reduce((a,b)=>a+b,0)/lats.length : null;
+    trip.centerLongitude = lons.length ? lons.reduce((a,b)=>a+b,0)/lons.length : null;
+    trip.boundingBox = lats.length ? { minLat: Math.min(...lats), maxLat: Math.max(...lats), minLon: Math.min(...lons), maxLon: Math.max(...lons) } : null;
+    trip.totalDistanceEstimateMiles = 0;
+    const gpsObs = obsList.filter(o => o.latitude != null && o.longitude != null).sort((a,b) => a.createdAt - b.createdAt);
+    for (let i = 1; i < gpsObs.length; i++) {
+      trip.totalDistanceEstimateMiles += haversine(gpsObs[i-1].latitude, gpsObs[i-1].longitude, gpsObs[i].latitude, gpsObs[i].longitude);
+    }
+    trip.tripSummary = `${trip.observationCount} observation${trip.observationCount!==1?'s':''}`;
+    trip.title = trip.title || generateTripTitle(trip, obsList);
+    trip.updatedAt = Date.now();
+  }
+
+  await db.trips.clear();
+  for (const t of trips) await db.trips.put(t);
+  // Update observations with tripLocalId
+  for (const trip of trips) {
+    for (const id of trip.observationLocalIds) {
+      const o = await db.observations.get(id);
+      if (o) { o.tripLocalId = trip.localTripId; await db.observations.put(o); }
+    }
+  }
+  logInfo('Trips rebuilt: ' + trips.length);
+}
+
+function startTrip(obs) {
+  const dt = new Date(obs.createdAt);
+  const dateStr = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return {
+    localTripId: uuid(),
+    title: 'Trip — ' + dateStr,
+    startedAt: obs.createdAt,
+    endedAt: obs.createdAt,
+    observationLocalIds: [obs.localId],
+    observationCount: 1,
+    categories: [],
+    subjectSummaries: [],
+    centerLatitude: obs.latitude,
+    centerLongitude: obs.longitude,
+    boundingBox: null,
+    totalDistanceEstimateMiles: 0,
+    weatherSummary: null,
+    tripSummary: '',
+    habitats: [],
+    notableMoments: [],
+    needsReview: false,
+    backendTripId: null,
+    submitStatus: 'local',
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
+function generateTripTitle(trip, obsList) {
+  const dt = new Date(trip.startedAt);
+  const dateStr = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const cats = trip.categories.slice(0, 2).map(c => c.charAt(0).toUpperCase() + c.slice(1));
+  const hour = dt.getHours();
+  const timeLabel = hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening';
+  if (cats.length) return `${timeLabel} ${cats.join('/')} Run — ${dateStr}`;
+  return `Field Notes — ${dateStr}`;
+}
+
+async function loadTrips() {
+  const trips = await db.trips.orderBy('startedAt').reverse().toArray();
+  const container = $('trips-list');
+  if (!trips.length) { container.innerHTML = '<div class="empty">No trips yet</div>'; return; }
+  container.innerHTML = trips.map(t => {
+    const cats = t.categories.map(c => `<span class="chip">${c}</span>`).join(' ');
+    return `<div class="card">
+      <div class="card-title">${escapeHtml(t.title)}</div>
+      <div class="chips">${cats}<span class="chip">${t.observationCount} obs</span><span class="chip">${(t.totalDistanceEstimateMiles||0).toFixed(1)} mi</span><span class="chip ${t.submitStatus==='submitted'?'ok':'warn'}">${t.submitStatus}</span></div>
+      <div style="font-size:0.82rem;color:var(--text-muted);margin-top:6px;">${fmtDate(t.startedAt)} → ${fmtDate(t.endedAt)}</div>
+      <div class="btn-group" style="margin-top:8px;">
+        <button class="btn btn-small" data-trip-view="${t.localTripId}">View</button>
+        <button class="btn btn-small" data-trip-submit="${t.localTripId}">Submit</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+$('trips-rebuild').addEventListener('click', async () => { await buildTrips(); loadTrips(); });
+
+document.addEventListener('click', async e => {
+  const viewBtn = e.target.closest('button[data-trip-view]');
+  if (viewBtn) { await showTripDetail(viewBtn.dataset.tripView); }
+  const subBtn = e.target.closest('button[data-trip-submit]');
+  if (subBtn) { await submitTrip(subBtn.dataset.tripSubmit); }
+});
+
+async function showTripDetail(tripId) {
+  const trip = await db.trips.get(tripId);
+  if (!trip) return;
+  const obsList = await db.observations.where('localId').anyOf(trip.observationLocalIds).toArray();
+  const items = obsList.map(o => `<div class="compact-row"><div>${escapeHtml(o.subjectCommonName || o.category || 'Observation')}<div class="meta">${fmtDate(o.createdAt)}</div></div><span class="chip ${o.submitStatus==='submitted'?'ok':'warn'}">${o.submitStatus}</span></div>`).join('');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal-card"><div class="modal-head"><h3>${escapeHtml(trip.title)}</h3><button class="modal-close">&times;</button></div><div>${items}</div></div>`;
+  overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+  document.body.appendChild(overlay);
+}
+
+async function submitTrip(tripId) {
+  const trip = await db.trips.get(tripId);
+  if (!trip) return;
+  if (!settings.token) { logWarn('No backend token'); return; }
+  const payload = {
+    localTripId: trip.localTripId,
+    title: trip.title,
+    startedAt: trip.startedAt,
+    endedAt: trip.endedAt,
+    observationLocalIds: trip.observationLocalIds,
+    observationCount: trip.observationCount,
+    categories: trip.categories,
+    subjectSummaries: trip.subjectSummaries,
+    centerLatitude: trip.centerLatitude,
+    centerLongitude: trip.centerLongitude,
+    boundingBox: trip.boundingBox,
+    totalDistanceEstimateMiles: trip.totalDistanceEstimateMiles,
+    weatherSummary: trip.weatherSummary,
+    tripSummary: trip.tripSummary,
+    habitats: trip.habitats,
+    notableMoments: trip.notableMoments,
+    needsReview: trip.needsReview,
+    routeGeoJson: buildTripGeoJSON(trip),
+    appVersion: APP_VERSION
+  };
+  try {
+    const url = `${settings.apiBase}/${settings.appId}/${settings.tripsResource}`;
+    const r = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: payload }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    trip.backendTripId = data.id || data.data?.id || null;
+    trip.submitStatus = 'submitted';
+    await db.trips.put(trip);
+    logInfo('Trip submitted ' + trip.localTripId);
+    loadTrips();
+  } catch(e) {
+    logError('Trip submit failed: ' + e.message);
+  }
+}
+
+function buildTripGeoJSON(trip) {
+  const coords = [];
+  // async not allowed here, so we skip populating; will be done at export time
+  return null;
+}
+
+/* ========================
+   Review
+   ======================== */
+let reviewObsList = [];
+
+async function loadReview() {
+  reviewObsList = await db.observations.orderBy('createdAt').reverse().toArray();
+  populateTripFilter();
+  renderReview();
+}
+
+function populateTripFilter() {
+  const sel = $('review-filter-trip');
+  const old = sel.value;
+  sel.innerHTML = '<option value="">All trips</option>';
+  db.trips.orderBy('startedAt').reverse().toArray().then(trips => {
+    for (const t of trips) {
+      const opt = document.createElement('option');
+      opt.value = t.localTripId;
+      opt.textContent = t.title;
+      sel.appendChild(opt);
+    }
+    sel.value = old;
+  });
+}
+
+function renderReview() {
+  const q = $('review-search').value.toLowerCase();
+  const statusF = $('review-filter-status').value;
+  const catF = $('review-filter-category').value;
+  const tripF = $('review-filter-trip').value;
+  const dateF = $('review-filter-date').value;
+  const list = reviewObsList.filter(o => {
+    if (q && !((o.transcript||'').toLowerCase().includes(q) || (o.subjectCommonName||'').toLowerCase().includes(q) || o.localId.includes(q))) return false;
+    if (statusF && o.submitStatus !== statusF) return false;
+    if (catF && o.category !== catF) return false;
+    if (tripF && o.tripLocalId !== tripF) return false;
+    if (dateF) { const d = new Date(o.createdAt).toISOString().slice(0,10); if (d !== dateF) return false; }
+    return true;
+  });
+  const container = $('review-list');
+  if (!list.length) { container.innerHTML = '<div class="empty">No observations match</div>'; return; }
+  container.innerHTML = list.map(o => {
+    const catClass = o.category || '';
+    const chips = [];
+    chips.push(`<span class="chip ${o.submitStatus==='submitted'?'ok':'warn'}">${o.submitStatus}</span>`);
+    if (o.category) chips.push(`<span class="chip">${o.category}</span>`);
+    if (o.subjectCommonName) chips.push(`<span class="chip">${escapeHtml(o.subjectCommonName)}</span>`);
+    if (o.needsHumanReview) chips.push(`<span class="chip danger">needs review</span>`);
+    const gps = o.latitude != null ? `${o.latitude.toFixed(4)}, ${o.longitude.toFixed(4)}` : 'no GPS';
+    return `<div class="card obs-card ${catClass}" data-obs-id="${o.localId}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div><div class="card-title">${escapeHtml(o.subjectCommonName || o.category || 'Observation')}</div>
+        <div style="font-size:0.8rem;color:var(--text-muted);">${fmtDate(o.createdAt)} · ${gps}</div></div>
+        <div class="chips" style="flex-shrink:0;">${chips.join('')}</div>
+      </div>
+      ${o.transcript ? `<div style="font-size:0.85rem;margin-top:6px;color:var(--text-muted);">${escapeHtml(o.transcript)}</div>` : ''}
+      <div class="btn-group" style="margin-top:8px;">
+        <button class="btn btn-small" data-obs-edit="${o.localId}">Edit</button>
+        <button class="btn btn-small" data-obs-play="${o.localId}">Play audio</button>
+        <button class="btn btn-small" data-obs-add-photo="${o.localId}">Add photo</button>
+        <button class="btn btn-small" data-obs-download="${o.localId}">Download audio</button>
+      </div>
+      <div class="photo-grid" id="photos-${o.localId}"></div>
+    </div>`;
+  }).join('');
+  for (const o of list) renderPhotoThumbs(o.localId);
+}
+
+['review-search','review-filter-status','review-filter-category','review-filter-trip','review-filter-date'].forEach(id => {
+  $(id).addEventListener('input', renderReview);
+});
+
+document.addEventListener('click', async e => {
+  const editBtn = e.target.closest('button[data-obs-edit]');
+  if (editBtn) { await openObsEditor(editBtn.dataset.obsEdit); }
+  const playBtn = e.target.closest('button[data-obs-play]');
+  if (playBtn) { await playObsAudio(playBtn.dataset.obsPlay); }
+  const dlBtn = e.target.closest('button[data-obs-download]');
+  if (dlBtn) { await downloadObsAudio(dlBtn.dataset.obsDownload); }
+  const addPhotoBtn = e.target.closest('button[data-obs-add-photo]');
+  if (addPhotoBtn) { openPhotoPicker(addPhotoBtn.dataset.obsAddPhoto); }
+});
+
+async function openObsEditor(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal-card">
+    <div class="modal-head"><h3>Edit Observation</h3><button class="modal-close">&times;</button></div>
+    <label>Common name</label><input id="edit-common" value="${escapeHtml(obs.subjectCommonName||'')}"/>
+    <label>Scientific name</label><input id="edit-sci" value="${escapeHtml(obs.subjectScientificName||'')}"/>
+    <label>Category</label>
+    <select id="edit-category">${['reptile','amphibian','bird','mammal','fish','insect','arachnid','plant','fungus','weather','habitat','unknown','other'].map(c => `<option value="${c}" ${obs.category===c?'selected':''}>${c}</option>`).join('')}</select>
+    <label>Tags (comma separated)</label><input id="edit-tags" value="${escapeHtml((obs.tags||[]).join(', '))}"/>
+    <label>Behavior</label><input id="edit-behavior" value="${escapeHtml(obs.behavior||'')}"/>
+    <label>Habitat</label><input id="edit-habitat" value="${escapeHtml(obs.habitat||'')}"/>
+    <label>Transcript</label><textarea id="edit-transcript">${escapeHtml(obs.transcript||'')}</textarea>
+    <label>Notes</label><textarea id="edit-notes">${escapeHtml(obs.userNoteText||'')}</textarea>
+    <div class="btn-group" style="margin-top:10px;">
+      <button id="edit-save" class="btn btn-primary">Save</button>
+      <button id="edit-submit" class="btn">Mark ready</button>
+      <button id="edit-delete" class="btn btn-danger">Delete local</button>
+    </div>
+  </div>`;
+  overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+  $('edit-save').onclick = async () => {
+    obs.subjectCommonName = $('edit-common').value.trim() || null;
+    obs.subjectScientificName = $('edit-sci').value.trim() || null;
+    obs.category = $('edit-category').value;
+    obs.tags = $('edit-tags').value.split(',').map(s => s.trim()).filter(Boolean);
+    obs.behavior = $('edit-behavior').value.trim() || null;
+    obs.habitat = $('edit-habitat').value.trim() || null;
+    obs.transcript = $('edit-transcript').value.trim() || null;
+    obs.userNoteText = $('edit-notes').value.trim() || null;
+    obs.updatedAt = Date.now();
+    await db.observations.put(obs);
+    overlay.remove(); renderReview(); loadProcess(); updateQueueChip();
+  };
+  $('edit-submit').onclick = async () => {
+    obs.submitStatus = 'ready'; obs.submitError = null; obs.updatedAt = Date.now();
+    await db.observations.put(obs);
+    overlay.remove(); renderReview(); loadProcess(); updateQueueChip();
+  };
+  $('edit-delete').onclick = async () => {
+    if (!confirm('Delete this local observation?')) return;
+    await db.observations.delete(obs.localId);
+    if (obs.audioBlobId) await db.audioBlobs.delete(obs.audioBlobId);
+    const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
+    for (const ph of photos) await db.photos.delete(ph.localPhotoId);
+    overlay.remove(); renderReview(); updateQueueChip();
+  };
+  document.body.appendChild(overlay);
+}
+
+async function playObsAudio(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.audioBlobId) return;
+  const rec = await db.audioBlobs.get(obs.audioBlobId);
+  if (!rec) { logWarn('Audio blob missing'); return; }
+  const url = URL.createObjectURL(rec.blob);
+  const a = new Audio(url);
+  a.play();
+  a.onended = () => URL.revokeObjectURL(url);
+}
+
+async function downloadObsAudio(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.audioBlobId) return;
+  const rec = await db.audioBlobs.get(obs.audioBlobId);
+  if (!rec) return;
+  const url = URL.createObjectURL(rec.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const ext = rec.mimeType.includes('mp4') ? '.m4a' : rec.mimeType.includes('ogg') ? '.ogg' : rec.mimeType.includes('wav') ? '.wav' : '.webm';
+  a.download = `obs-${localId}${ext}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/* ========================
+   Photos
+   ======================== */
+function openPhotoPicker(obsLocalId) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
+  input.onchange = async () => {
+    if (!input.files.length) return;
+    for (const file of input.files) await handlePhotoFile(obsLocalId, file);
+    renderPhotoThumbs(obsLocalId);
+    renderReview();
+  };
+  input.click();
+}
+
+async function handlePhotoFile(obsLocalId, file) {
+  const obs = await db.observations.get(obsLocalId);
+  if (!obs) return;
+  const localPhotoId = 'photo-' + uuid();
+  const blob = file.slice(0, file.size, file.type);
+  const photo = {
+    localPhotoId,
+    observationLocalId: obsLocalId,
+    backendObservationId: obs.backendObservationId,
+    createdAt: Date.now(),
+    blobId: localPhotoId,
+    mimeType: file.type,
+    sizeBytes: file.size,
+    originalFilename: file.name,
+    caption: '',
+    uploadStatus: 'pending',
+    backendFileId: null,
+    backendFileUrl: null,
+    uploadError: null,
+    updatedAt: Date.now()
+  };
+  try {
+    await db.photos.put(photo);
+    // Store actual blob separately to avoid large object issues in main table
+    await db.audioBlobs.put({ blobId: localPhotoId, blob, mimeType: file.type, sizeBytes: file.size, createdAt: Date.now() });
+    obs.photoLocalIds = obs.photoLocalIds || [];
+    obs.photoLocalIds.push(localPhotoId);
+    await db.observations.put(obs);
+    logInfo('Photo added ' + localPhotoId);
+    if (obs.backendObservationId && settings.token) await uploadPhoto(photo);
+  } catch(e) {
+    logError('Photo save failed: ' + e.message);
+  }
+}
+
+async function uploadPhoto(photo) {
+  const obs = await db.observations.get(photo.observationLocalId);
+  if (!obs || !obs.backendObservationId) return;
+  const rec = await db.audioBlobs.get(photo.blobId);
+  if (!rec) { photo.uploadStatus = 'error'; photo.uploadError = 'Blob missing'; await db.photos.put(photo); return; }
+  const url = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
+  const fd = new FormData();
+  const ext = photo.mimeType.includes('png') ? '.png' : photo.mimeType.includes('webp') ? '.webp' : '.jpg';
+  fd.append('file', new File([rec.blob], (photo.originalFilename || 'photo') + ext, { type: photo.mimeType }));
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token }, body: fd });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    photo.backendFileId = data.id || data.data?.id || null;
+    photo.backendFileUrl = data.url || data.data?.url || null;
+    photo.uploadStatus = 'uploaded';
+    photo.uploadError = null;
+    await db.photos.put(photo);
+    // Update observation file list
+    obs.photoFileIds = obs.photoFileIds || [];
+    if (photo.backendFileId && !obs.photoFileIds.includes(photo.backendFileId)) obs.photoFileIds.push(photo.backendFileId);
+    await db.observations.put(obs);
+    logInfo('Photo uploaded ' + photo.localPhotoId);
+  } catch(e) {
+    photo.uploadStatus = 'pending';
+    photo.uploadError = e.message;
+    await db.photos.put(photo);
+    logError('Photo upload failed: ' + e.message);
+  }
+}
+
+async function renderPhotoThumbs(obsLocalId) {
+  const container = $('photos-' + obsLocalId);
+  if (!container) return;
+  const photos = await db.photos.where('observationLocalId').equals(obsLocalId).toArray();
+  if (!photos.length) { container.innerHTML = ''; return; }
+  container.innerHTML = photos.map(p => {
+    const statusChip = p.uploadStatus === 'uploaded' ? '<span class="chip ok">up</span>' : '<span class="chip warn">pending</span>';
+    return `<div style="position:relative;">
+      <img class="photo-thumb" data-photo-id="${p.localPhotoId}" alt="photo" />
+      <div style="position:absolute;top:2px;left:2px;">${statusChip}</div>
+    </div>`;
+  }).join('');
+  for (const p of photos) {
+    const rec = await db.audioBlobs.get(p.blobId);
+    if (rec) {
+      const img = container.querySelector(`img[data-photo-id="${p.localPhotoId}"]`);
+      if (img) img.src = URL.createObjectURL(rec.blob);
+    }
+  }
+}
+
+/* ========================
+   Map
+   ======================== */
+let map = null;
+let mapLayer = null;
+let mapMarkers = [];
+let mapRouteLine = null;
+
+function initMap() {
+  if (map) return;
+  map = L.map('map').setView([38.3553, -87.5675], 13);
+  const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: 'Map data: &copy; OpenStreetMap, SRTM | Map style: &copy; OpenTopoMap' });
+  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' });
+  topo.addTo(map);
+  L.control.layers({ Topographic: topo, Standard: osm }).addTo(map);
+}
+function mapInvalidate() { if (map) setTimeout(() => map.invalidateSize(), 100); }
+
+async function loadMapTab() {
+  initMap();
+  const sel = $('map-trip-select');
+  const trips = await db.trips.orderBy('startedAt').reverse().toArray();
+  const old = sel.value;
+  sel.innerHTML = '<option value="">Show all observations</option>';
+  for (const t of trips) { const o = document.createElement('option'); o.value = t.localTripId; o.textContent = t.title; sel.appendChild(o); }
+  sel.value = old;
+  await refreshMap();
+}
+
+$('map-trip-select').addEventListener('change', refreshMap);
+
+async function refreshMap() {
+  if (!map) return;
+  // clear
+  for (const m of mapMarkers) map.removeLayer(m);
+  mapMarkers = [];
+  if (mapRouteLine) { map.removeLayer(mapRouteLine); mapRouteLine = null; }
+
+  const tripId = $('map-trip-select').value;
+  let obsList;
+  if (tripId) {
+    const trip = await db.trips.get(tripId);
+    obsList = trip ? await db.observations.where('localId').anyOf(trip.observationLocalIds).toArray() : [];
+  } else {
+    obsList = await db.observations.toArray();
+  }
+  const gpsObs = obsList.filter(o => o.latitude != null && o.longitude != null).sort((a,b) => a.createdAt - b.createdAt);
+  const missing = obsList.filter(o => o.latitude == null || o.longitude == null);
+
+  const catColors = { reptile:'#4caf50', amphibian:'#ff9800', bird:'#2196f3', mammal:'#9c27b0', fish:'#00bcd4', insect:'#cddc39', arachnid:'#795548', plant:'#8bc34a', fungus:'#795548', weather:'#607d8b', habitat:'#009688', unknown:'#9e9e9e', other:'#9e9e9e' };
+
+  for (const o of gpsObs) {
+    const color = catColors[o.category] || '#3cb371';
+    const m = L.circleMarker([o.latitude, o.longitude], { radius: 8, color, fillColor: color, fillOpacity: 0.85 }).addTo(map);
+    const popup = `<div style="font-size:0.85rem;"><strong>${escapeHtml(o.subjectCommonName || o.category || 'Observation')}</strong><br/>${fmtDate(o.createdAt)}<br/>${escapeHtml((o.transcript||'').slice(0,120))}</div>`;
+    m.bindPopup(popup);
+    mapMarkers.push(m);
+  }
+
+  if (tripId && gpsObs.length > 1) {
+    const latlngs = gpsObs.map(o => [o.latitude, o.longitude]);
+    mapRouteLine = L.polyline(latlngs, { color: '#4ade80', weight: 3, opacity: 0.8 }).addTo(map);
+    map.fitBounds(mapRouteLine.getBounds(), { padding: [20,20] });
+  } else if (gpsObs.length === 1) {
+    map.setView([gpsObs[0].latitude, gpsObs[0].longitude], 14);
+  } else if (gpsObs.length > 1) {
+    const group = new L.featureGroup(mapMarkers);
+    map.fitBounds(group.getBounds(), { padding: [20,20] });
+  }
+
+  const panel = $('map-route-panel');
+  if (tripId) {
+    panel.style.display = 'block';
+    const dist = gpsObs.length > 1 ? gpsObs.reduce((sum,o,i) => { if (i===0) return 0; return sum + haversine(gpsObs[i-1].latitude, gpsObs[i-1].longitude, o.latitude, o.longitude); }, 0) : 0;
+    $('map-route-info').innerHTML = `<div>Waypoints: ${gpsObs.length}</div><div>Missing GPS: ${missing.length}</div><div>Distance: ${dist.toFixed(2)} mi</div>`;
+    const gapList = $('map-missing-gps');
+    if (missing.length) {
+      gapList.innerHTML = missing.map(o => `<li class="missing-gps">${fmtDate(o.createdAt)} — ${escapeHtml(o.subjectCommonName || o.category || 'no subject')}</li>`).join('');
+    } else { gapList.innerHTML = ''; }
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+$('map-export-geojson').addEventListener('click', async () => {
+  const tripId = $('map-trip-select').value;
+  const geo = await exportGeoJSON(tripId);
+  const blob = new Blob([JSON.stringify(geo, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `trip-${tripId || 'all'}.geojson`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+$('map-export-gpx').addEventListener('click', async () => {
+  const tripId = $('map-trip-select').value;
+  const gpx = await exportGPX(tripId);
+  const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `trip-${tripId || 'all'}.gpx`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+async function exportGeoJSON(tripId) {
+  let obsList;
+  if (tripId) {
+    const trip = await db.trips.get(tripId);
+    obsList = trip ? await db.observations.where('localId').anyOf(trip.observationLocalIds).toArray() : [];
+  } else { obsList = await db.observations.toArray(); }
+  const gpsObs = obsList.filter(o => o.latitude != null && o.longitude != null).sort((a,b) => a.createdAt - b.createdAt);
+  const features = [];
+  if (gpsObs.length > 1) {
+    features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: gpsObs.map(o => [o.longitude, o.latitude]) }, properties: { type: 'route', tripLocalId: tripId || 'all', observationCount: gpsObs.length } });
+  }
+  for (const o of gpsObs) {
+    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [o.longitude, o.latitude] }, properties: { localId: o.localId, subjectCommonName: o.subjectCommonName, category: o.category, timestamp: new Date(o.createdAt).toISOString(), transcriptSnippet: (o.transcript||'').slice(0,200), backendObservationId: o.backendObservationId } });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+async function exportGPX(tripId) {
+  let obsList;
+  if (tripId) {
+    const trip = await db.trips.get(tripId);
+    obsList = trip ? await db.observations.where('localId').anyOf(trip.observationLocalIds).toArray() : [];
+  } else { obsList = await db.observations.toArray(); }
+  const gpsObs = obsList.filter(o => o.latitude != null && o.longitude != null).sort((a,b) => a.createdAt - b.createdAt);
+  let gpx = '<?xml version="1.0" encoding="UTF-8"?><gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>';
+  for (const o of gpsObs) {
+    gpx += `<trkpt lat="${o.latitude}" lon="${o.longitude}"><time>${new Date(o.createdAt).toISOString()}</time></trkpt>`;
+  }
+  gpx += '</trkseg></trk></gpx>';
+  return gpx;
+}
+
+/* ========================
+   Backend submit
+   ======================== */
+async function submitObservation(obs) {
+  if (!settings.token) { logWarn('No backend token'); return; }
+  if (!settings.apiBase) { logWarn('No API base'); return; }
+  // Avoid duplicates
+  if (obs.backendObservationId) {
+    // Update instead
+    await updateBackendObservation(obs);
+    return;
+  }
+  const payload = {
+    localId: obs.localId,
+    tripLocalId: obs.tripLocalId,
+    backendTripId: obs.backendTripId,
+    createdAt: obs.createdAt,
+    startedAt: obs.startedAt,
+    stoppedAt: obs.stoppedAt,
+    durationSeconds: obs.durationSeconds,
+    latitude: obs.latitude,
+    longitude: obs.longitude,
+    accuracyMeters: obs.accuracyMeters,
+    altitude: obs.altitude,
+    heading: obs.heading,
+    speed: obs.speed,
+    gpsStatus: obs.gpsStatus,
+    weatherStatus: obs.weatherStatus,
+    weatherFetchedAt: obs.weatherFetchedAt,
+    weatherRaw: obs.weatherRaw,
+    transcript: obs.transcript,
+    subjectCommonName: obs.subjectCommonName,
+    subjectScientificName: obs.subjectScientificName,
+    subjectConfidence: obs.subjectConfidence,
+    category: obs.category,
+    categoryConfidence: obs.categoryConfidence,
+    behavior: obs.behavior,
+    habitat: obs.habitat,
+    count: obs.count,
+    tags: obs.tags,
+    summary: obs.summary,
+    userNoteText: obs.userNoteText,
+    llmRaw: obs.llmRaw,
+    photoCount: (obs.photoLocalIds || []).length,
+    appVersion: APP_VERSION
+  };
+  try {
+    const url = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}`;
+    const r = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: payload }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    obs.backendObservationId = data.id || data.data?.id || null;
+    obs.submitStatus = 'submitted';
+    obs.submitError = null;
+    await db.observations.put(obs);
+    // Upload audio if present and not already uploaded
+    if (obs.audioBlobId && obs.audioSizeBytes > 0) {
+      const audioRec = await db.audioBlobs.get(obs.audioBlobId);
+      if (audioRec) {
+        const furl = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
+        const fd = new FormData();
+        const ext = audioRec.mimeType.includes('mp4') ? '.m4a' : audioRec.mimeType.includes('ogg') ? '.ogg' : audioRec.mimeType.includes('wav') ? '.wav' : '.webm';
+        fd.append('file', new File([audioRec.blob], 'audio' + ext, { type: audioRec.mimeType }));
+        const ar = await fetch(furl, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token }, body: fd });
+        if (ar.ok) {
+          const ad = await ar.json();
+          const fid = ad.id || ad.data?.id;
+          if (fid) { obs.backendFileIds = obs.backendFileIds || []; obs.backendFileIds.push(fid); await db.observations.put(obs); }
+        }
+      }
+    }
+    // Upload pending photos
+    const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
+    for (const ph of photos) { if (ph.uploadStatus !== 'uploaded') await uploadPhoto(ph); }
+    logInfo('Observation submitted ' + obs.localId);
+    loadProcess(); updateQueueChip();
+  } catch(e) {
+    obs.submitStatus = 'failed';
+    obs.submitError = e.message;
+    await db.observations.put(obs);
+    logError('Submit failed ' + obs.localId + ': ' + e.message);
+    loadProcess(); updateQueueChip();
+  }
+}
+
+async function updateBackendObservation(obs) {
+  if (!obs.backendObservationId) return;
+  const payload = {
+    localId: obs.localId,
+    tripLocalId: obs.tripLocalId,
+    backendTripId: obs.backendTripId,
+    createdAt: obs.createdAt,
+    startedAt: obs.startedAt,
+    stoppedAt: obs.stoppedAt,
+    durationSeconds: obs.durationSeconds,
+    latitude: obs.latitude,
+    longitude: obs.longitude,
+    accuracyMeters: obs.accuracyMeters,
+    altitude: obs.altitude,
+    heading: obs.heading,
+    speed: obs.speed,
+    gpsStatus: obs.gpsStatus,
+    weatherStatus: obs.weatherStatus,
+    weatherFetchedAt: obs.weatherFetchedAt,
+    weatherRaw: obs.weatherRaw,
+    transcript: obs.transcript,
+    subjectCommonName: obs.subjectCommonName,
+    subjectScientificName: obs.subjectScientificName,
+    subjectConfidence: obs.subjectConfidence,
+    category: obs.category,
+    categoryConfidence: obs.categoryConfidence,
+    behavior: obs.behavior,
+    habitat: obs.habitat,
+    count: obs.count,
+    tags: obs.tags,
+    summary: obs.summary,
+    userNoteText: obs.userNoteText,
+    llmRaw: obs.llmRaw,
+    photoCount: (obs.photoLocalIds || []).length,
+    appVersion: APP_VERSION
+  };
+  try {
+    const url = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}`;
+    const r = await fetch(url, { method: 'PATCH', headers: { Authorization: 'Bearer ' + settings.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: payload }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    logInfo('Observation updated ' + obs.localId);
+  } catch(e) {
+    logError('Update failed ' + obs.localId + ': ' + e.message);
+  }
+}
+
+/* ========================
+   Import / Export
+   ======================== */
+async function exportAll() {
+  const [observations, trips, photos, logs] = await Promise.all([
+    db.observations.toArray(), db.trips.toArray(), db.photos.toArray(), db.logs.toArray()
+  ]);
+  return { version: APP_VERSION, exportedAt: Date.now(), observations, trips, photos, logs };
+}
+
+$('export-all').addEventListener('click', async () => {
+  const data = await exportAll();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `wfr-export-all-${Date.now()}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('export-obs').addEventListener('click', async () => {
+  const observations = await db.observations.toArray();
+  const blob = new Blob([JSON.stringify({ version: APP_VERSION, exportedAt: Date.now(), observations }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `wfr-export-obs-${Date.now()}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('export-trips').addEventListener('click', async () => {
+  const trips = await db.trips.toArray();
+  const blob = new Blob([JSON.stringify({ version: APP_VERSION, exportedAt: Date.now(), trips }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `wfr-export-trips-${Date.now()}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('export-audio-meta').addEventListener('click', async () => {
+  const audioBlobs = await db.audioBlobs.toArray();
+  const meta = audioBlobs.map(r => ({ blobId: r.blobId, mimeType: r.mimeType, sizeBytes: r.sizeBytes, createdAt: r.createdAt }));
+  const blob = new Blob([JSON.stringify({ version: APP_VERSION, exportedAt: Date.now(), audioMeta: meta }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `wfr-export-audio-meta-${Date.now()}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('export-photo-meta').addEventListener('click', async () => {
+  const photos = await db.photos.toArray();
+  const meta = photos.map(p => ({ localPhotoId: p.localPhotoId, observationLocalId: p.observationLocalId, mimeType: p.mimeType, sizeBytes: p.sizeBytes, uploadStatus: p.uploadStatus, backendFileId: p.backendFileId, createdAt: p.createdAt }));
+  const blob = new Blob([JSON.stringify({ version: APP_VERSION, exportedAt: Date.now(), photoMeta: meta }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `wfr-export-photo-meta-${Date.now()}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+$('import-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const el = $('import-result');
+  try {
+    const data = JSON.parse(text);
+    let obsCount = 0, tripCount = 0, photoCount = 0;
+    if (Array.isArray(data.observations)) {
+      for (const o of data.observations) {
+        const existing = await db.observations.get(o.localId);
+        if (!existing || (existing.updatedAt || 0) < (o.updatedAt || 0)) { await db.observations.put(o); obsCount++; }
+      }
+    }
+    if (Array.isArray(data.trips)) {
+      for (const t of data.trips) {
+        const existing = await db.trips.get(t.localTripId);
+        if (!existing || (existing.updatedAt || 0) < (t.updatedAt || 0)) { await db.trips.put(t); tripCount++; }
+      }
+    }
+    if (Array.isArray(data.photos)) {
+      for (const p of data.photos) { await db.photos.put(p); photoCount++; }
+    }
+    el.style.display = 'block';
+    el.textContent = `Imported: ${obsCount} observations, ${tripCount} trips, ${photoCount} photos`;
+    logInfo('Import complete');
+    updateQueueChip();
+  } catch(err) {
+    el.style.display = 'block';
+    el.textContent = 'Import error: ' + err.message;
+  }
+});
+
+/* ========================
+   Setup / Admin
+   ======================== */
+function loadSetup() {
+  $('cfg-api-base').value = settings.apiBase;
+  $('cfg-app-id').value = settings.appId;
+  $('cfg-obs-resource').value = settings.observationsResource;
+  $('cfg-trip-resource').value = settings.tripsResource;
+  $('cfg-token').value = settings.token;
+  $('cfg-llm-provider').value = settings.llmProvider;
+  $('cfg-llm-base').value = settings.llmBase;
+  $('cfg-llm-key').value = settings.llmKey;
+  $('cfg-trans-model').value = settings.transModel;
+  $('cfg-text-model').value = settings.textModel;
+  $('cfg-same-key').checked = settings.sameKey;
+  $('cfg-max-audio').value = settings.maxAudioSeconds;
+  $('cfg-auto-stop').checked = settings.autoStop;
+  $('cfg-weather-timeout').value = settings.weatherTimeout;
+  $('cfg-gps-high').checked = settings.gpsHighAccuracy;
+  $('cfg-gps-timeout').value = settings.gpsTimeout;
+  $('cfg-trip-hours').value = settings.tripWindowHours;
+  $('cfg-trip-miles').value = settings.tripWindowMiles;
+  refreshStorageStats();
+}
+
+function saveFromSetup() {
+  settings.apiBase = $('cfg-api-base').value.trim();
+  settings.appId = $('cfg-app-id').value.trim();
+  settings.observationsResource = $('cfg-obs-resource').value.trim();
+  settings.tripsResource = $('cfg-trip-resource').value.trim();
+  settings.token = $('cfg-token').value.trim();
+  settings.llmProvider = $('cfg-llm-provider').value;
+  settings.llmBase = $('cfg-llm-base').value.trim();
+  settings.llmKey = $('cfg-llm-key').value.trim();
+  settings.transModel = $('cfg-trans-model').value.trim();
+  settings.textModel = $('cfg-text-model').value.trim();
+  settings.sameKey = $('cfg-same-key').checked;
+  settings.maxAudioSeconds = parseInt($('cfg-max-audio').value, 10) || 120;
+  settings.autoStop = $('cfg-auto-stop').checked;
+  settings.weatherTimeout = parseInt($('cfg-weather-timeout').value, 10) || 8;
+  settings.gpsHighAccuracy = $('cfg-gps-high').checked;
+  settings.gpsTimeout = parseInt($('cfg-gps-timeout').value, 10) || 12;
+  settings.tripWindowHours = parseInt($('cfg-trip-hours').value, 10) || 3;
+  settings.tripWindowMiles = parseInt($('cfg-trip-miles').value, 10) || 5;
+  saveSettings(settings);
+}
+
+[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-token'), $('cfg-llm-provider'), $('cfg-llm-base'), $('cfg-llm-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-same-key'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
+  if (!el) return;
+  el.addEventListener('change', saveFromSetup);
+  if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('input', saveFromSetup);
+});
+
+$('test-backend').addEventListener('click', async () => {
+  const el = $('backend-test-result');
+  el.style.display = 'block';
+  el.textContent = 'Testing...';
+  const results = [];
+  try {
+    const healthUrl = settings.apiBase.replace(/\/$/, '') + '/health';
+    const hr = await fetch(healthUrl, { headers: settings.token ? { Authorization: 'Bearer ' + settings.token } : {} });
+    results.push('Health: HTTP ' + hr.status);
+  } catch(e) { results.push('Health error: ' + e.message); }
+  if (settings.token) {
+    try {
+      const url = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}`;
+      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + settings.token } });
+      results.push('List obs: HTTP ' + r.status);
+    } catch(e) { results.push('List obs error: ' + e.message); }
+  }
+  el.textContent = results.join('\n');
+});
+
+$('test-llm').addEventListener('click', async () => {
+  const el = $('llm-test-result');
+  el.style.display = 'block';
+  el.textContent = 'Testing...';
+  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const key = settings.llmKey;
+  if (!key) { el.textContent = 'No API key'; return; }
+  try {
+    const r = await fetch(base + '/models', { headers: { Authorization: 'Bearer ' + key } });
+    el.textContent = 'Models endpoint: HTTP ' + r.status;
+  } catch(e) { el.textContent = 'Error: ' + e.message; }
+});
+
+async function refreshStorageStats() {
+  const [obsCount, tripCount, photoCount, logCount, audioCount] = await Promise.all([
+    db.observations.count(), db.trips.count(), db.photos.count(), db.logs.count(), db.audioBlobs.count()
+  ]);
+  const subCount = await db.observations.where('submitStatus').equals('submitted').count();
+  const penPhotos = await db.photos.where('uploadStatus').equals('pending').count();
+  const upPhotos = await db.photos.where('uploadStatus').equals('uploaded').count();
+  let est = '';
+  if (navigator.storage && navigator.storage.estimate) {
+    const e = await navigator.storage.estimate();
+    est = ` · Used ${Math.round((e.usage||0)/1024/1024)} MB`;
+  }
+  $('storage-stats').innerHTML = `Observations: ${obsCount} (${subCount} submitted) · Trips: ${tripCount} · Audio blobs: ${audioCount} · Photos: ${photoCount} (${penPhotos} pending, ${upPhotos} uploaded) · Logs: ${logCount}${est}`;
+}
+
+$('clear-logs').addEventListener('click', async () => { await db.logs.clear(); logInfo('Logs cleared'); refreshStorageStats(); });
+$('clear-all').addEventListener('click', async () => {
+  if (!confirm('This will erase ALL local data including observations, audio, trips, and photos. This cannot be undone. Continue?')) return;
+  await db.delete();
+  location.reload();
+});
+
+/* ========================
+   Diagnostics
+   ======================== */
+function renderDiagnostics() {
+  const caps = [];
+  caps.push('Online: ' + (navigator.onLine ? 'yes' : 'no'));
+  caps.push('MediaRecorder: ' + (typeof MediaRecorder !== 'undefined' ? 'yes' : 'no'));
+  caps.push('Geolocation: ' + ('geolocation' in navigator ? 'yes' : 'no'));
+  caps.push('IndexedDB: ' + ('indexedDB' in window ? 'yes' : 'no'));
+  caps.push('Network Information: ' + (navigator.connection ? 'yes' : 'no'));
+  caps.push('File/Photo upload: ' + (typeof FormData !== 'undefined' ? 'yes' : 'no'));
+  $('diag-caps').innerHTML = caps.map(c => `<div>${escapeHtml(c)}</div>`).join('');
+
+  const reqs = [];
+  // show last request statuses from settings stored in memory? Not persisted, just generic
+  reqs.push('Last weather: see logs');
+  reqs.push('Last LLM: see logs');
+  reqs.push('Last backend: see logs');
+  reqs.push('Last photo upload: see logs');
+  $('diag-requests').innerHTML = reqs.map(r => `<div>${escapeHtml(r)}</div>`).join('');
+
+  navigator.storage && navigator.storage.estimate && navigator.storage.estimate().then(e => {
+    $('diag-storage').innerHTML = `<div>Usage: ${Math.round((e.usage||0)/1024/1024)} MB</div><div>Quota: ${Math.round((e.quota||0)/1024/1024)} MB</div>`;
+  });
+
+  db.logs.orderBy('timestamp').reverse().limit(200).toArray().then(rows => {
+    $('diag-logs').innerHTML = rows.map(r => `<div class="log-line ${r.level}"><span class="time">${new Date(r.timestamp).toLocaleTimeString()}</span>${escapeHtml(r.message)}</div>`).join('');
+  });
+}
+
+$('copy-diag').addEventListener('click', async () => {
+  const caps = $('diag-caps').innerText;
+  const storage = $('diag-storage').innerText;
+  const logs = $('diag-logs').innerText;
+  const text = [caps, storage, logs].join('\n\n');
+  try { await navigator.clipboard.writeText(text); alert('Diagnostics copied'); } catch(e) { logError('Clipboard failed: ' + e.message); }
+});
+$('clear-diag-logs').addEventListener('click', async () => { await db.logs.clear(); renderDiagnostics(); });
+
+/* ========================
+   Queue chip
+   ======================== */
+async function updateQueueChip() {
+  const count = await db.observations.where('submitStatus').notEqual('submitted').count();
+  $('queue-chip').textContent = 'Queue ' + count;
+}
+
+/* ========================
+   Init
+   ======================== */
+async function init() {
+  logInfo('Wildlife Field Recorder ' + APP_VERSION + ' started');
+  updateQueueChip();
+  loadSetup();
+  showTab('about');
+}
+init();
+})();
+</script>
+</body>
+</html>
