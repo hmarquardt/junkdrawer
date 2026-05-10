@@ -54,6 +54,11 @@ textarea { min-height: 110px; resize: vertical; }
 .span8 { grid-column: span 8; }
 .span12 { grid-column: span 12; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.tabs button { padding: 7px 11px; color: var(--muted); }
+.tabs button.active { color: #fff; background: var(--accent-2); border-color: var(--accent-2); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
 .status { color: var(--muted); font-size: 0.85rem; margin-top: 8px; min-height: 1.3em; }
 .pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; color: var(--muted); background: #0e171b; font-size: 0.76rem; }
 .pill.good { color: var(--good); border-color: #396943; }
@@ -80,11 +85,20 @@ tr:last-child td { border-bottom: 0; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .callout { border-left: 3px solid var(--accent); background: #0f181d; padding: 10px; border-radius: 6px; color: var(--muted); font-size: 0.86rem; }
 .empty { color: var(--dim); font-style: italic; padding: 12px; text-align: center; }
+.log-list { display: grid; gap: 6px; max-height: 520px; overflow: auto; }
+.log-line { border: 1px solid var(--line); border-radius: 6px; background: #0f181d; padding: 8px 10px; color: var(--muted); font-size: 0.82rem; }
+.log-line .time { color: var(--dim); font-family: var(--mono); margin-right: 8px; }
+.log-line.error { border-color: #6d3936; color: #ffc9c5; }
+.log-line.warn { border-color: #735b2e; color: #f4d08a; }
+.log-line.info { border-color: #2c6074; color: #a6ddf8; }
+.diag-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.diag-grid code { color: var(--text); word-break: break-all; }
 footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 @media (max-width: 860px) {
   .span3, .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
   header { align-items: flex-start; flex-direction: column; }
   .split { grid-template-columns: 1fr; }
+  .diag-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -101,7 +115,12 @@ footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(
     </div>
   </header>
 
-  <main class="grid">
+  <nav class="tabs" aria-label="Pattern Lab sections">
+    <button class="active" data-tab="analysis" type="button">Analysis</button>
+    <button data-tab="logs" type="button">Logs</button>
+  </nav>
+
+  <main id="tab-analysis" class="grid tab-panel active">
     <section class="card span4">
       <h2>Data Source</h2>
       <label for="api-base">API base</label>
@@ -207,9 +226,26 @@ footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(
     </section>
   </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; Wildlife Pattern Lab &middot; version 2026.05.10.1
+  <section id="tab-logs" class="tab-panel">
+    <div class="grid">
+      <section class="card span12">
+        <h2>Diagnostics Log</h2>
+        <div class="toolbar">
+          <button id="test-backend" class="primary" type="button">Test backend</button>
+          <button id="copy-logs" type="button">Copy logs</button>
+          <button id="clear-logs" class="danger" type="button">Clear logs</button>
+        </div>
+        <div id="diagnostics" class="diag-grid" style="margin-top:10px;"></div>
+      </section>
+      <section class="card span12">
+        <div id="log-list" class="log-list"></div>
+      </section>
+    </div>
+  </section>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; Wildlife Pattern Lab &middot; version 2026.05.10.2
 </footer>
 </div>
 
@@ -217,7 +253,7 @@ footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.10.1';
+const APP_VERSION = '2026.05.10.2';
 const DB_NAME = 'WildlifePatternLab';
 const LS_KEY = 'wpl_settings_v1';
 
@@ -227,6 +263,12 @@ db.version(1).stores({
   observations: 'localId, createdAt, category, subjectCommonName, backendId',
   trips: 'localTripId, startedAt, backendId',
   kv: 'key'
+});
+db.version(2).stores({
+  observations: 'localId, createdAt, category, subjectCommonName, backendId',
+  trips: 'localTripId, startedAt, backendId',
+  kv: 'key',
+  logs: '++id, timestamp, level'
 });
 
 const defaultSettings = {
@@ -240,6 +282,7 @@ const defaultSettings = {
 let settings = loadSettings();
 let observations = [];
 let trips = [];
+let logs = [];
 
 function loadSettings() {
   try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') }; }
@@ -267,9 +310,48 @@ function setStatus(id, msg, kind) {
   el.textContent = msg || '';
   el.style.color = kind === 'bad' ? 'var(--bad)' : kind === 'good' ? 'var(--good)' : kind === 'warn' ? 'var(--warn)' : 'var(--muted)';
 }
+async function addLog(level, message, details) {
+  const rec = { timestamp: Date.now(), level, message: String(message), details: details || null };
+  logs.unshift(rec);
+  logs = logs.slice(0, 200);
+  try { await db.logs.add(rec); } catch(e) {}
+  renderLogs();
+}
+function logInfo(message, details) { return addLog('info', message, details); }
+function logWarn(message, details) { return addLog('warn', message, details); }
+function logError(message, details) { return addLog('error', message, details); }
+async function loadLogs() {
+  try { logs = (await db.logs.orderBy('timestamp').reverse().limit(200).toArray()); }
+  catch(e) { logs = []; }
+  renderLogs();
+}
+function renderLogs() {
+  const list = $('log-list');
+  if (!list) return;
+  list.innerHTML = logs.length ? logs.map(l => {
+    const detail = l.details ? '<div class="mini">' + escapeHtml(JSON.stringify(l.details)) + '</div>' : '';
+    return '<div class="log-line ' + escapeHtml(l.level) + '"><span class="time">' + escapeHtml(new Date(l.timestamp).toLocaleTimeString()) + '</span>' + escapeHtml(l.message) + detail + '</div>';
+  }).join('') : '<div class="empty">No log entries yet</div>';
+  renderDiagnostics();
+}
+function renderDiagnostics() {
+  const el = $('diagnostics');
+  if (!el) return;
+  el.innerHTML = [
+    ['Online', navigator.onLine ? 'yes' : 'no'],
+    ['Origin', location.origin],
+    ['API base', settings.apiBase || 'unset'],
+    ['Token', settings.token ? 'set (' + settings.token.slice(0, 6) + '...)' : 'not set'],
+    ['Observations', observations.length],
+    ['Trips', trips.length],
+    ['IndexedDB', 'indexedDB' in window ? 'yes' : 'no'],
+    ['Last error', (logs.find(l => l.level === 'error') || {}).message || 'none']
+  ].map(([k,v]) => '<div class="card"><div class="mini">' + escapeHtml(k) + '</div><code>' + escapeHtml(v) + '</code></div>').join('');
+}
 function updateOnline() {
   $('online-pill').textContent = navigator.onLine ? 'online' : 'offline';
   $('online-pill').className = 'pill ' + (navigator.onLine ? 'good' : 'bad');
+  renderDiagnostics();
 }
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -296,6 +378,24 @@ async function httpError(response) {
     try { detail = (await response.text()).slice(0, 240); } catch(_e) {}
   }
   return new Error('HTTP ' + response.status + (detail ? ': ' + detail : ''));
+}
+async function fetchJsonWithLog(label, url) {
+  const started = performance.now();
+  logInfo('Request started: ' + label, { url });
+  try {
+    const response = await fetch(url, { headers: authHeaders(), mode: 'cors' });
+    const ms = Math.round(performance.now() - started);
+    logInfo('Response received: ' + label, { url, status: response.status, ms });
+    if (!response.ok) throw await httpError(response);
+    return await response.json();
+  } catch(e) {
+    const ms = Math.round(performance.now() - started);
+    const hint = e instanceof TypeError && /fetch/i.test(e.message)
+      ? 'Browser could not complete fetch. Common causes: CORS preflight, network block, ad/privacy extension, DNS/TLS, or the API origin not allowing this page origin.'
+      : null;
+    logError('Request failed: ' + label + ': ' + e.message, { url, ms, hint });
+    throw e;
+  }
 }
 
 function weatherCodeLabel(code) {
@@ -389,8 +489,10 @@ async function loadCache() {
   trips = await db.trips.orderBy('startedAt').toArray();
   $('cache-pill').textContent = observations.length + ' cached obs';
   $('cache-pill').className = 'pill ' + (observations.length ? 'good' : 'warn');
+  logInfo('Cache loaded', { observations: observations.length, trips: trips.length });
   populateTargets();
   renderAll();
+  renderDiagnostics();
 }
 async function saveDataset(obsRows, tripRows, source) {
   const obs = obsRows.map(normalizeRecord).filter(Boolean);
@@ -402,27 +504,41 @@ async function saveDataset(obsRows, tripRows, source) {
     if (tripList.length) await db.trips.bulkPut(tripList);
     await db.kv.put({ key: 'lastLoad', value: { at: Date.now(), source, obs: obs.length, trips: tripList.length } });
   });
+  logInfo('Dataset saved', { source, observations: obs.length, trips: tripList.length });
   await loadCache();
 }
 async function pullBackend() {
   saveSettings();
-  if (!settings.token) { setStatus('source-status', 'Enter a backend token first.', 'bad'); return; }
+  if (!settings.token) { setStatus('source-status', 'Enter a backend token first.', 'bad'); logWarn('Pull skipped: missing backend token'); return; }
   setStatus('source-status', 'Pulling backend records...', 'warn');
   try {
     const obsUrl = apiBase() + '/' + settings.appId + '/' + settings.observationsResource;
     const tripUrl = apiBase() + '/' + settings.appId + '/' + settings.tripsResource;
-    const [obsResp, tripResp] = await Promise.all([
-      fetch(obsUrl, { headers: authHeaders() }),
-      fetch(tripUrl, { headers: authHeaders() })
-    ]);
-    if (!obsResp.ok) throw await httpError(obsResp);
-    if (!tripResp.ok) throw await httpError(tripResp);
-    const obsJson = await obsResp.json();
-    const tripJson = await tripResp.json();
+    const obsJson = await fetchJsonWithLog('observations', obsUrl);
+    const tripJson = await fetchJsonWithLog('trips', tripUrl);
     await saveDataset(obsJson.records || obsJson.data || obsJson || [], tripJson.records || tripJson.data || tripJson || [], 'backend');
     setStatus('source-status', 'Pulled ' + observations.length + ' observations and ' + trips.length + ' trips.', 'good');
   } catch(e) {
     setStatus('source-status', 'Backend pull failed: ' + e.message, 'bad');
+    logError('Backend pull failed: ' + e.message);
+  }
+}
+async function testBackend() {
+  saveSettings();
+  if (!settings.token) { logWarn('Backend test skipped: missing token'); return; }
+  setStatus('source-status', 'Testing backend...', 'warn');
+  try {
+    const healthUrl = apiBase() + '/health';
+    logInfo('Health request started', { url: healthUrl });
+    const health = await fetch(healthUrl, { mode: 'cors' });
+    logInfo('Health response', { status: health.status, body: (await health.text()).slice(0, 180) });
+    const obsJson = await fetchJsonWithLog('observations test', apiBase() + '/' + settings.appId + '/' + settings.observationsResource);
+    const tripJson = await fetchJsonWithLog('trips test', apiBase() + '/' + settings.appId + '/' + settings.tripsResource);
+    logInfo('Backend test complete', { observations: (obsJson.records || []).length, trips: (tripJson.records || []).length });
+    setStatus('source-status', 'Backend test passed. See Logs tab for details.', 'good');
+  } catch(e) {
+    logError('Backend test failed: ' + e.message);
+    setStatus('source-status', 'Backend test failed: ' + e.message, 'bad');
   }
 }
 async function importFile(file) {
@@ -434,8 +550,10 @@ async function importFile(file) {
     const tripRows = data.trips || [];
     await saveDataset(obsRows, tripRows, 'import:' + file.name);
     setStatus('import-status', 'Imported ' + observations.length + ' observations.', 'good');
+    logInfo('Import complete', { file: file.name, observations: observations.length, trips: trips.length });
   } catch(e) {
     setStatus('import-status', 'Import failed: ' + e.message, 'bad');
+    logError('Import failed: ' + e.message, { file: file.name });
   }
 }
 async function exportCache() {
@@ -694,6 +812,30 @@ function wireEvents() {
   $('target-value').addEventListener('change', renderAll);
   $('lookback-days').addEventListener('input', renderAll);
   $('refresh-analysis').addEventListener('click', renderAll);
+  $('test-backend').addEventListener('click', testBackend);
+  $('clear-logs').addEventListener('click', async () => {
+    await db.logs.clear();
+    logs = [];
+    renderLogs();
+  });
+  $('copy-logs').addEventListener('click', async () => {
+    const text = logs.map(l => '[' + new Date(l.timestamp).toISOString() + '] ' + l.level + ' ' + l.message + (l.details ? ' ' + JSON.stringify(l.details) : '')).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      logInfo('Logs copied to clipboard');
+    } catch(e) {
+      logError('Copy logs failed: ' + e.message);
+    }
+  });
+  document.querySelectorAll('button[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => showTab(btn.dataset.tab));
+  });
+}
+
+function showTab(name) {
+  document.querySelectorAll('button[data-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + name));
+  if (name === 'logs') renderLogs();
 }
 
 async function init() {
@@ -704,7 +846,9 @@ async function init() {
   loadSettingsForm();
   wireEvents();
   updateOnline();
+  await loadLogs();
   await loadCache();
+  logInfo('Wildlife Pattern Lab ' + APP_VERSION + ' started', { origin: location.origin });
 }
 
 init();
