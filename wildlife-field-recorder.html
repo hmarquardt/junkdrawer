@@ -436,9 +436,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.3" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.3
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.4" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.4
 </footer>
 </div>
 
@@ -446,7 +446,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.10.3';
+const APP_VERSION = '2026.05.10.4';
 
 /* ========================
    DB (Dexie)
@@ -515,6 +515,20 @@ function logError(m) { addLog('error', m); }
 function uuid() { return crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36)+Math.random().toString(36).slice(2)); }
 function fmtDate(d) { return new Date(d).toLocaleString(); }
 function fmtDuration(sec) { const m = Math.floor(sec/60), s = Math.floor(sec%60); return `${m}:${s.toString().padStart(2,'0')}`; }
+function apiBase() { return (settings.apiBase || '').replace(/\/$/, ''); }
+function authHeaders(extra = {}) {
+  return { Authorization: 'Bearer ' + settings.token, ...extra };
+}
+async function httpError(response) {
+  let detail = '';
+  try {
+    const body = await response.clone().json();
+    if (body && body.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+  } catch(e) {
+    try { detail = (await response.text()).slice(0, 240); } catch(_e) {}
+  }
+  return new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
+}
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 3958.8; // miles
   const toRad = x => x * Math.PI / 180;
@@ -831,7 +845,10 @@ $('submit-ready').addEventListener('click', async () => {
     try { await submitObservation(obs); done++; }
     catch (e) { errs++; logError('Submit: ' + e.message); }
   }
-  $('process-log').textContent = `Submit complete. ${done} succeeded, ${errs} failed.`;
+  loadProcess(); updateQueueChip();
+  $('process-log').textContent = errs
+    ? `Submit failed for ${errs} of ${ready.length} record(s). ${done} succeeded. See diagnostics for details.`
+    : `Submit complete. ${done} succeeded.`;
 });
 $('retry-failed').addEventListener('click', async () => {
   $('process-log').textContent = 'Checking for failed records...';
@@ -902,6 +919,9 @@ async function processObservation(obs) {
   } catch(e) {
     logError('Process failed ' + obs.localId + ': ' + e.message);
     statusMsg = 'Error: ' + e.message;
+    loadProcess();
+    updateQueueChip();
+    throw e;
   }
   loadProcess();
   updateQueueChip();
@@ -1121,7 +1141,7 @@ async function showTripDetail(tripId) {
 async function submitTrip(tripId) {
   const trip = await db.trips.get(tripId);
   if (!trip) return;
-  if (!settings.token) { logWarn('No backend token'); return; }
+  if (!settings.token) { const err = new Error('No backend token'); logWarn(err.message); throw err; }
   const payload = {
     localTripId: trip.localTripId,
     title: trip.title,
@@ -1144,9 +1164,9 @@ async function submitTrip(tripId) {
     appVersion: APP_VERSION
   };
   try {
-    const url = `${settings.apiBase}/${settings.appId}/${settings.tripsResource}`;
-    const r = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: payload }) });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const url = `${apiBase()}/${settings.appId}/${settings.tripsResource}`;
+    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload }) });
+    if (!r.ok) throw await httpError(r);
     const data = await r.json();
     trip.backendTripId = data.id || data.data?.id || null;
     trip.submitStatus = 'submitted';
@@ -1155,6 +1175,7 @@ async function submitTrip(tripId) {
     loadTrips();
   } catch(e) {
     logError('Trip submit failed: ' + e.message);
+    throw e;
   }
 }
 
@@ -1380,14 +1401,19 @@ async function uploadPhoto(photo) {
   const obs = await db.observations.get(photo.observationLocalId);
   if (!obs || !obs.backendObservationId) return;
   const rec = await db.audioBlobs.get(photo.blobId);
-  if (!rec) { photo.uploadStatus = 'error'; photo.uploadError = 'Blob missing'; await db.photos.put(photo); return; }
-  const url = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
+  if (!rec) {
+    photo.uploadStatus = 'error';
+    photo.uploadError = 'Blob missing';
+    await db.photos.put(photo);
+    throw new Error('Photo blob missing');
+  }
+  const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
   const fd = new FormData();
   const ext = photo.mimeType.includes('png') ? '.png' : photo.mimeType.includes('webp') ? '.webp' : '.jpg';
   fd.append('file', new File([rec.blob], (photo.originalFilename || 'photo') + ext, { type: photo.mimeType }));
   try {
-    const r = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token }, body: fd });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const r = await fetch(url, { method: 'POST', headers: authHeaders(), body: fd });
+    if (!r.ok) throw await httpError(r);
     const data = await r.json();
     photo.backendFileId = data.id || data.data?.id || null;
     photo.backendFileUrl = data.url || data.data?.url || null;
@@ -1404,6 +1430,7 @@ async function uploadPhoto(photo) {
     photo.uploadError = e.message;
     await db.photos.put(photo);
     logError('Photo upload failed: ' + e.message);
+    throw e;
   }
 }
 
@@ -1570,8 +1597,8 @@ async function exportGPX(tripId) {
    Backend submit
    ======================== */
 async function submitObservation(obs) {
-  if (!settings.token) { logWarn('No backend token'); return; }
-  if (!settings.apiBase) { logWarn('No API base'); return; }
+  if (!settings.token) { const err = new Error('No backend token'); logWarn(err.message); throw err; }
+  if (!settings.apiBase) { const err = new Error('No API base'); logWarn(err.message); throw err; }
   // Avoid duplicates
   if (obs.backendObservationId) {
     // Update instead
@@ -1613,9 +1640,9 @@ async function submitObservation(obs) {
     appVersion: APP_VERSION
   };
   try {
-    const url = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}`;
-    const r = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: payload }) });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}`;
+    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload }) });
+    if (!r.ok) throw await httpError(r);
     const data = await r.json();
     obs.backendObservationId = data.id || data.data?.id || null;
     obs.submitStatus = 'submitted';
@@ -1625,15 +1652,17 @@ async function submitObservation(obs) {
     if (obs.audioBlobId && obs.audioSizeBytes > 0) {
       const audioRec = await db.audioBlobs.get(obs.audioBlobId);
       if (audioRec) {
-        const furl = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
+        const furl = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
         const fd = new FormData();
         const ext = audioRec.mimeType.includes('mp4') ? '.m4a' : audioRec.mimeType.includes('ogg') ? '.ogg' : audioRec.mimeType.includes('wav') ? '.wav' : '.webm';
         fd.append('file', new File([audioRec.blob], 'audio' + ext, { type: audioRec.mimeType }));
-        const ar = await fetch(furl, { method: 'POST', headers: { Authorization: 'Bearer ' + settings.token }, body: fd });
+        const ar = await fetch(furl, { method: 'POST', headers: authHeaders(), body: fd });
         if (ar.ok) {
           const ad = await ar.json();
           const fid = ad.id || ad.data?.id;
           if (fid) { obs.backendFileIds = obs.backendFileIds || []; obs.backendFileIds.push(fid); await db.observations.put(obs); }
+        } else {
+          throw await httpError(ar);
         }
       }
     }
@@ -1648,6 +1677,7 @@ async function submitObservation(obs) {
     await db.observations.put(obs);
     logError('Submit failed ' + obs.localId + ': ' + e.message);
     loadProcess(); updateQueueChip();
+    throw e;
   }
 }
 
@@ -1688,12 +1718,24 @@ async function updateBackendObservation(obs) {
     appVersion: APP_VERSION
   };
   try {
-    const url = `${settings.apiBase}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}`;
-    const r = await fetch(url, { method: 'PATCH', headers: { Authorization: 'Bearer ' + settings.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: payload }) });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}`;
+    const r = await fetch(url, { method: 'PATCH', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload }) });
+    if (!r.ok) throw await httpError(r);
+    const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
+    for (const ph of photos) { if (ph.uploadStatus !== 'uploaded') await uploadPhoto(ph); }
+    obs.submitStatus = 'submitted';
+    obs.submitError = null;
+    obs.updatedAt = Date.now();
+    await db.observations.put(obs);
     logInfo('Observation updated ' + obs.localId);
+    loadProcess(); updateQueueChip();
   } catch(e) {
+    obs.submitStatus = 'failed';
+    obs.submitError = e.message;
+    await db.observations.put(obs);
     logError('Update failed ' + obs.localId + ': ' + e.message);
+    loadProcess(); updateQueueChip();
+    throw e;
   }
 }
 
@@ -1831,28 +1873,34 @@ $('test-backend').addEventListener('click', async () => {
   el.style.display = 'block';
   el.textContent = 'Testing...';
   const results = [];
-  const base = settings.apiBase.replace(/\/$/, '');
+  const base = apiBase();
   results.push('API base: ' + base);
   results.push('App id: ' + settings.appId);
   results.push('Token: ' + (settings.token ? 'set (' + settings.token.slice(0, 8) + '...)': 'NOT SET'));
   try {
     const healthUrl = base + '/health';
-    const hr = await fetch(healthUrl, { headers: settings.token ? { Authorization: 'Bearer ' + settings.token } : {} });
+    const hr = await fetch(healthUrl, { headers: settings.token ? authHeaders() : {} });
     const ht = await hr.text();
     results.push('Health GET ' + healthUrl + ' => HTTP ' + hr.status + ' | ' + ht.slice(0, 200));
   } catch(e) { results.push('Health error: ' + e.message); }
   if (settings.token) {
     try {
       const url = `${base}/${settings.appId}/${settings.observationsResource}`;
-      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + settings.token } });
+      const r = await fetch(url, { headers: authHeaders() });
       const rt = await r.text();
       results.push('List obs GET ' + url + ' => HTTP ' + r.status + ' | ' + rt.slice(0, 200));
+      if (r.status === 403 && rt.includes('Insufficient scope')) {
+        results.push('Scope needed: {"' + settings.appId + '":["read","write"]}');
+      }
     } catch(e) { results.push('List obs error: ' + e.message); }
     try {
       const url = `${base}/${settings.appId}/${settings.tripsResource}`;
-      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + settings.token } });
+      const r = await fetch(url, { headers: authHeaders() });
       const rt = await r.text();
       results.push('List trips GET ' + url + ' => HTTP ' + r.status + ' | ' + rt.slice(0, 200));
+      if (r.status === 403 && rt.includes('Insufficient scope')) {
+        results.push('Scope needed: {"' + settings.appId + '":["read","write"]}');
+      }
     } catch(e) { results.push('List trips error: ' + e.message); }
   } else {
     results.push('Skipped resource tests (no token)');
