@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#101820">
+<title>Wildlife Pattern Lab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+<script src="https://cdn.jsdelivr.net/npm/dexie@4.0.11/dist/dexie.min.js"></script>
+<style>
+:root {
+  --bg: #0b1114;
+  --panel: #121b20;
+  --panel-2: #18252b;
+  --line: #28404a;
+  --line-2: #385862;
+  --text: #eef7f5;
+  --muted: #9ab1b0;
+  --dim: #6f8988;
+  --accent: #58c4a7;
+  --accent-2: #2f8f79;
+  --warn: #e8b85f;
+  --bad: #e77b75;
+  --good: #7fdc8a;
+  --info: #7db7e8;
+  --radius: 8px;
+  --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.45; }
+body { padding: 0; }
+.shell { max-width: 1220px; margin: 0 auto; padding: 16px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0 14px; border-bottom: 1px solid var(--line); }
+h1 { margin: 0; color: var(--accent); font-size: 1.35rem; }
+h2 { margin: 0 0 10px; color: var(--accent); font-size: 1.05rem; }
+h3 { margin: 0 0 8px; font-size: 0.92rem; }
+p { margin: 0 0 10px; color: var(--muted); }
+button, input, select, textarea { font: inherit; }
+button { border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); color: var(--text); padding: 8px 12px; font-weight: 700; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+button.danger { border-color: #7e3d3a; color: #ffd6d3; }
+label { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 0.82rem; }
+input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #0f181d; color: var(--text); padding: 8px 10px; }
+textarea { min-height: 110px; resize: vertical; }
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; margin-top: 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.span3 { grid-column: span 3; }
+.span4 { grid-column: span 4; }
+.span5 { grid-column: span 5; }
+.span6 { grid-column: span 6; }
+.span7 { grid-column: span 7; }
+.span8 { grid-column: span 8; }
+.span12 { grid-column: span 12; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.status { color: var(--muted); font-size: 0.85rem; margin-top: 8px; min-height: 1.3em; }
+.pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; color: var(--muted); background: #0e171b; font-size: 0.76rem; }
+.pill.good { color: var(--good); border-color: #396943; }
+.pill.warn { color: var(--warn); border-color: #745b2d; }
+.pill.bad { color: var(--bad); border-color: #793f3a; }
+.metric { display: grid; gap: 2px; }
+.metric strong { font-size: 1.45rem; color: var(--text); font-variant-numeric: tabular-nums; }
+.metric span { color: var(--muted); font-size: 0.8rem; }
+.mini { color: var(--dim); font-size: 0.78rem; }
+.chart { width: 100%; height: 190px; border: 1px solid var(--line); border-radius: 6px; background: #0c1519; display: block; }
+.table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; min-width: 720px; font-size: 0.84rem; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 700; background: #101a1f; position: sticky; top: 0; }
+tr:last-child td { border-bottom: 0; }
+.score { font-weight: 800; }
+.score.high { color: var(--good); }
+.score.mid { color: var(--warn); }
+.score.low { color: var(--dim); }
+.condition-list { display: grid; gap: 6px; }
+.condition-row { display: grid; grid-template-columns: 120px 1fr auto; gap: 8px; align-items: center; color: var(--muted); font-size: 0.82rem; }
+.bar { height: 8px; background: #0c1519; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--accent); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.callout { border-left: 3px solid var(--accent); background: #0f181d; padding: 10px; border-radius: 6px; color: var(--muted); font-size: 0.86rem; }
+.empty { color: var(--dim); font-style: italic; padding: 12px; text-align: center; }
+footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+@media (max-width: 860px) {
+  .span3, .span4, .span5, .span6, .span7, .span8, .span12 { grid-column: span 12; }
+  header { align-items: flex-start; flex-direction: column; }
+  .split { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div>
+      <h1>Wildlife Pattern Lab</h1>
+      <p style="margin:4px 0 0;">Backend-backed trend and forecast workspace for Wildlife Field Recorder data.</p>
+    </div>
+    <div class="toolbar">
+      <span id="online-pill" class="pill">network</span>
+      <span id="cache-pill" class="pill">cache idle</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="card span4">
+      <h2>Data Source</h2>
+      <label for="api-base">API base</label>
+      <input id="api-base" value="https://lab.aismallbizguru.com/api">
+      <label for="app-id">App id</label>
+      <input id="app-id" value="wildlife-field-recorder">
+      <div class="split">
+        <div>
+          <label for="obs-resource">Observations</label>
+          <input id="obs-resource" value="observations">
+        </div>
+        <div>
+          <label for="trip-resource">Trips</label>
+          <input id="trip-resource" value="trips">
+        </div>
+      </div>
+      <label for="token">Bearer token</label>
+      <input id="token" type="password" placeholder="Stored locally in this browser">
+      <div class="toolbar" style="margin-top:10px;">
+        <button id="save-settings">Save</button>
+        <button id="pull-backend" class="primary">Pull backend</button>
+        <button id="clear-cache" class="danger">Clear cache</button>
+      </div>
+      <div id="source-status" class="status" role="status"></div>
+    </section>
+
+    <section class="card span4">
+      <h2>Import / Export</h2>
+      <p>Use this on a laptop with backend data, or import a JSON export from the phone recorder.</p>
+      <input id="import-file" type="file" accept="application/json,.json">
+      <div class="toolbar" style="margin-top:10px;">
+        <button id="export-cache">Export cache</button>
+      </div>
+      <div id="import-status" class="status" role="status"></div>
+    </section>
+
+    <section class="card span4">
+      <h2>Analysis Filter</h2>
+      <label for="target-kind">Forecast target</label>
+      <select id="target-kind">
+        <option value="category">Category</option>
+        <option value="subject">Subject common name</option>
+      </select>
+      <label for="target-value">Target value</label>
+      <select id="target-value"></select>
+      <label for="lookback-days">Lookback days</label>
+      <input id="lookback-days" type="number" value="365" min="1">
+      <div class="toolbar" style="margin-top:10px;">
+        <button id="refresh-analysis" class="primary">Refresh analysis</button>
+      </div>
+      <div id="filter-status" class="status" role="status"></div>
+    </section>
+
+    <section class="card span12">
+      <h2>Dataset Health</h2>
+      <div id="health-grid" class="grid" style="margin-top:0;"></div>
+    </section>
+
+    <section class="card span7">
+      <h2>Condition Forecast</h2>
+      <div id="forecast-summary" class="callout"></div>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table>
+          <thead><tr><th>Time</th><th>Weather</th><th>Temp</th><th>Precip</th><th>Wind</th><th>Match</th><th>Why</th></tr></thead>
+          <tbody id="forecast-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card span5">
+      <h2>Best Windows</h2>
+      <div id="best-windows" class="condition-list"></div>
+    </section>
+
+    <section class="card span6">
+      <h2>Time Of Day</h2>
+      <canvas id="hour-chart" class="chart" width="760" height="240"></canvas>
+    </section>
+
+    <section class="card span6">
+      <h2>Temperature Bands</h2>
+      <canvas id="temp-chart" class="chart" width="760" height="240"></canvas>
+    </section>
+
+    <section class="card span6">
+      <h2>Precipitation Signal</h2>
+      <canvas id="precip-chart" class="chart" width="760" height="240"></canvas>
+    </section>
+
+    <section class="card span6">
+      <h2>Weather Conditions</h2>
+      <div id="condition-list" class="condition-list"></div>
+    </section>
+
+    <section class="card span12">
+      <h2>Similar Past Observations</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Subject</th><th>Category</th><th>Weather</th><th>Location</th><th>Notes</th></tr></thead>
+          <tbody id="similar-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; Wildlife Pattern Lab &middot; version 2026.05.10.1
+</footer>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+const APP_VERSION = '2026.05.10.1';
+const DB_NAME = 'WildlifePatternLab';
+const LS_KEY = 'wpl_settings_v1';
+
+const $ = id => document.getElementById(id);
+const db = new Dexie(DB_NAME);
+db.version(1).stores({
+  observations: 'localId, createdAt, category, subjectCommonName, backendId',
+  trips: 'localTripId, startedAt, backendId',
+  kv: 'key'
+});
+
+const defaultSettings = {
+  apiBase: 'https://lab.aismallbizguru.com/api',
+  appId: 'wildlife-field-recorder',
+  observationsResource: 'observations',
+  tripsResource: 'trips',
+  token: ''
+};
+
+let settings = loadSettings();
+let observations = [];
+let trips = [];
+
+function loadSettings() {
+  try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') }; }
+  catch(e) { return { ...defaultSettings }; }
+}
+function saveSettings() {
+  settings = {
+    apiBase: $('api-base').value.trim(),
+    appId: $('app-id').value.trim(),
+    observationsResource: $('obs-resource').value.trim(),
+    tripsResource: $('trip-resource').value.trim(),
+    token: $('token').value.trim()
+  };
+  localStorage.setItem(LS_KEY, JSON.stringify(settings));
+}
+function loadSettingsForm() {
+  $('api-base').value = settings.apiBase;
+  $('app-id').value = settings.appId;
+  $('obs-resource').value = settings.observationsResource;
+  $('trip-resource').value = settings.tripsResource;
+  $('token').value = settings.token;
+}
+function setStatus(id, msg, kind) {
+  const el = $(id);
+  el.textContent = msg || '';
+  el.style.color = kind === 'bad' ? 'var(--bad)' : kind === 'good' ? 'var(--good)' : kind === 'warn' ? 'var(--warn)' : 'var(--muted)';
+}
+function updateOnline() {
+  $('online-pill').textContent = navigator.onLine ? 'online' : 'offline';
+  $('online-pill').className = 'pill ' + (navigator.onLine ? 'good' : 'bad');
+}
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtDate(v) {
+  if (!v) return 'n/a';
+  const d = typeof v === 'number' ? new Date(v) : new Date(v);
+  return isNaN(d.getTime()) ? 'n/a' : d.toLocaleString();
+}
+function toMillis(v) {
+  if (!v) return 0;
+  if (typeof v === 'number') return v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+}
+function apiBase() { return (settings.apiBase || '').replace(/\/$/, ''); }
+function authHeaders(extra = {}) { return { Authorization: 'Bearer ' + settings.token, ...extra }; }
+async function httpError(response) {
+  let detail = '';
+  try {
+    const body = await response.clone().json();
+    if (body && body.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+  } catch(e) {
+    try { detail = (await response.text()).slice(0, 240); } catch(_e) {}
+  }
+  return new Error('HTTP ' + response.status + (detail ? ': ' + detail : ''));
+}
+
+function weatherCodeLabel(code) {
+  const labels = {
+    0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'cloudy',
+    45: 'fog', 48: 'freezing fog', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle',
+    56: 'freezing drizzle', 57: 'freezing drizzle', 61: 'light rain', 63: 'rain', 65: 'heavy rain',
+    66: 'freezing rain', 67: 'freezing rain', 71: 'light snow', 73: 'snow', 75: 'heavy snow',
+    77: 'snow grains', 80: 'rain showers', 81: 'rain showers', 82: 'heavy rain showers',
+    85: 'snow showers', 86: 'heavy snow showers', 95: 'thunderstorm', 96: 'thunderstorm with hail',
+    99: 'thunderstorm with hail'
+  };
+  return labels[code] || 'weather ' + code;
+}
+function obsCurrent(o) {
+  return o && o.weatherRaw && o.weatherRaw.current ? o.weatherRaw.current : null;
+}
+function obsWeather(o) {
+  const c = obsCurrent(o);
+  if (!c) return o.weatherStatus || 'n/a';
+  const bits = [];
+  if (c.weather_code != null) bits.push(weatherCodeLabel(c.weather_code));
+  if (c.temperature_2m != null) bits.push(Math.round(c.temperature_2m) + '&deg;F');
+  if (c.precipitation != null && c.precipitation > 0) bits.push(c.precipitation + ' in precip');
+  if (c.pressure_msl != null) bits.push(Math.round(c.pressure_msl) + ' hPa');
+  return bits.join(' | ') || 'weather';
+}
+function tempOf(o) {
+  const c = obsCurrent(o);
+  return c && c.temperature_2m != null ? Number(c.temperature_2m) : null;
+}
+function precipOf(o) {
+  const c = obsCurrent(o);
+  if (!c) return null;
+  return Number(c.precipitation || c.rain || c.showers || c.snowfall || 0);
+}
+function conditionOf(o) {
+  const c = obsCurrent(o);
+  return c && c.weather_code != null ? weatherCodeLabel(c.weather_code) : (o.weatherStatus || 'unknown');
+}
+function hourOf(o) {
+  const t = toMillis(o.createdAt);
+  return t ? new Date(t).getHours() : null;
+}
+function tempBand(v) {
+  if (v == null || isNaN(v)) return 'n/a';
+  if (v < 40) return '<40';
+  if (v < 50) return '40s';
+  if (v < 60) return '50s';
+  if (v < 70) return '60s';
+  if (v < 80) return '70s';
+  if (v < 90) return '80s';
+  return '90+';
+}
+function precipBand(v) {
+  if (v == null || isNaN(v)) return 'n/a';
+  if (v <= 0) return 'dry';
+  if (v < 0.03) return 'trace';
+  if (v < 0.12) return 'light';
+  return 'wet';
+}
+
+function normalizeRecord(row) {
+  const data = row && row.data ? row.data : row;
+  if (!data || typeof data !== 'object') return null;
+  const localId = data.localId || row.id || crypto.randomUUID();
+  return {
+    ...data,
+    localId,
+    backendId: row && row.id ? row.id : data.backendObservationId || null,
+    createdAt: toMillis(data.createdAt) || Date.now(),
+    startedAt: toMillis(data.startedAt) || toMillis(data.createdAt) || Date.now(),
+    stoppedAt: toMillis(data.stoppedAt) || null,
+    weatherFetchedAt: toMillis(data.weatherFetchedAt) || null
+  };
+}
+function normalizeTrip(row) {
+  const data = row && row.data ? row.data : row;
+  if (!data || typeof data !== 'object') return null;
+  return {
+    ...data,
+    localTripId: data.localTripId || row.id || crypto.randomUUID(),
+    backendId: row && row.id ? row.id : data.backendTripId || null,
+    startedAt: toMillis(data.startedAt) || Date.now(),
+    endedAt: toMillis(data.endedAt) || null
+  };
+}
+
+async function loadCache() {
+  observations = await db.observations.orderBy('createdAt').toArray();
+  trips = await db.trips.orderBy('startedAt').toArray();
+  $('cache-pill').textContent = observations.length + ' cached obs';
+  $('cache-pill').className = 'pill ' + (observations.length ? 'good' : 'warn');
+  populateTargets();
+  renderAll();
+}
+async function saveDataset(obsRows, tripRows, source) {
+  const obs = obsRows.map(normalizeRecord).filter(Boolean);
+  const tripList = tripRows.map(normalizeTrip).filter(Boolean);
+  await db.transaction('rw', db.observations, db.trips, db.kv, async () => {
+    await db.observations.clear();
+    await db.trips.clear();
+    if (obs.length) await db.observations.bulkPut(obs);
+    if (tripList.length) await db.trips.bulkPut(tripList);
+    await db.kv.put({ key: 'lastLoad', value: { at: Date.now(), source, obs: obs.length, trips: tripList.length } });
+  });
+  await loadCache();
+}
+async function pullBackend() {
+  saveSettings();
+  if (!settings.token) { setStatus('source-status', 'Enter a backend token first.', 'bad'); return; }
+  setStatus('source-status', 'Pulling backend records...', 'warn');
+  try {
+    const obsUrl = apiBase() + '/' + settings.appId + '/' + settings.observationsResource;
+    const tripUrl = apiBase() + '/' + settings.appId + '/' + settings.tripsResource;
+    const [obsResp, tripResp] = await Promise.all([
+      fetch(obsUrl, { headers: authHeaders() }),
+      fetch(tripUrl, { headers: authHeaders() })
+    ]);
+    if (!obsResp.ok) throw await httpError(obsResp);
+    if (!tripResp.ok) throw await httpError(tripResp);
+    const obsJson = await obsResp.json();
+    const tripJson = await tripResp.json();
+    await saveDataset(obsJson.records || obsJson.data || obsJson || [], tripJson.records || tripJson.data || tripJson || [], 'backend');
+    setStatus('source-status', 'Pulled ' + observations.length + ' observations and ' + trips.length + ' trips.', 'good');
+  } catch(e) {
+    setStatus('source-status', 'Backend pull failed: ' + e.message, 'bad');
+  }
+}
+async function importFile(file) {
+  if (!file) return;
+  setStatus('import-status', 'Importing ' + file.name + '...', 'warn');
+  try {
+    const data = JSON.parse(await file.text());
+    const obsRows = data.observations || data.records || [];
+    const tripRows = data.trips || [];
+    await saveDataset(obsRows, tripRows, 'import:' + file.name);
+    setStatus('import-status', 'Imported ' + observations.length + ' observations.', 'good');
+  } catch(e) {
+    setStatus('import-status', 'Import failed: ' + e.message, 'bad');
+  }
+}
+async function exportCache() {
+  const blob = new Blob([JSON.stringify({ version: APP_VERSION, exportedAt: Date.now(), observations, trips }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'wildlife-pattern-lab-cache-' + Date.now() + '.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function filteredObservations() {
+  const days = Math.max(1, parseInt($('lookback-days').value, 10) || 365);
+  const cutoff = Date.now() - days * 86400000;
+  return observations.filter(o => o.createdAt >= cutoff);
+}
+function targetObservations(base) {
+  const kind = $('target-kind').value;
+  const val = $('target-value').value;
+  if (!val) return base;
+  if (kind === 'subject') return base.filter(o => (o.subjectCommonName || '').toLowerCase() === val.toLowerCase());
+  return base.filter(o => (o.category || '').toLowerCase() === val.toLowerCase());
+}
+function populateTargets() {
+  const kind = $('target-kind').value || 'category';
+  const old = $('target-value').value;
+  const values = [...new Set(observations.map(o => kind === 'subject' ? o.subjectCommonName : o.category).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  $('target-value').innerHTML = values.map(v => '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>').join('');
+  if (values.includes(old)) $('target-value').value = old;
+}
+
+function renderAll() {
+  const base = filteredObservations();
+  const target = targetObservations(base);
+  renderHealth(base);
+  renderCharts(target);
+  renderConditions(target);
+  renderForecast(base, target);
+  renderSimilar(target);
+  setStatus('filter-status', target.length + ' matching observation(s) from ' + base.length + ' in lookback window.', target.length ? 'good' : 'warn');
+}
+function renderHealth(base) {
+  const withGps = base.filter(o => o.latitude != null && o.longitude != null).length;
+  const withWeather = base.filter(o => o.weatherRaw && o.weatherRaw.current).length;
+  const withHourly = base.filter(o => o.weatherRaw && o.weatherRaw.hourly).length;
+  const cats = new Set(base.map(o => o.category).filter(Boolean)).size;
+  const subjects = new Set(base.map(o => o.subjectCommonName).filter(Boolean)).size;
+  const dates = base.map(o => o.createdAt).filter(Boolean).sort((a,b)=>a-b);
+  const latestWeather = latestWeatherObservation(base);
+  const weatherAge = latestWeather && latestWeather.weatherFetchedAt ? Math.round((Date.now() - latestWeather.weatherFetchedAt) / 3600000) : null;
+  const items = [
+    ['Observations', base.length],
+    ['Date range', dates.length ? new Date(dates[0]).toLocaleDateString() + ' to ' + new Date(dates[dates.length - 1]).toLocaleDateString() : 'n/a'],
+    ['GPS coverage', pct(withGps, base.length)],
+    ['Weather coverage', pct(withWeather, base.length)],
+    ['Hourly forecasts cached', withHourly],
+    ['Categories', cats],
+    ['Subjects', subjects],
+    ['Latest weather age', weatherAge == null ? 'n/a' : weatherAge + 'h']
+  ];
+  $('health-grid').innerHTML = items.map(([label, value]) => '<div class="card span3 metric"><strong>' + escapeHtml(value) + '</strong><span>' + escapeHtml(label) + '</span></div>').join('');
+}
+function pct(n, d) { return d ? Math.round(n / d * 100) + '%' : '0%'; }
+
+function drawBarChart(canvasId, labels, values, color) {
+  const canvas = $(canvasId);
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0c1519';
+  ctx.fillRect(0, 0, w, h);
+  const pad = 28;
+  const max = Math.max(1, ...values);
+  const bw = (w - pad * 2) / values.length;
+  ctx.strokeStyle = '#28404a';
+  ctx.beginPath();
+  ctx.moveTo(pad, h - pad);
+  ctx.lineTo(w - pad, h - pad);
+  ctx.stroke();
+  values.forEach((v, i) => {
+    const barH = (h - pad * 2) * (v / max);
+    const x = pad + i * bw + 2;
+    const y = h - pad - barH;
+    ctx.fillStyle = color || '#58c4a7';
+    ctx.fillRect(x, y, Math.max(2, bw - 4), barH);
+    if (bw > 22 || i % 2 === 0) {
+      ctx.fillStyle = '#9ab1b0';
+      ctx.font = '11px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText(labels[i], x + bw / 2 - 2, h - 8);
+    }
+  });
+}
+function countBy(rows, fn, labels) {
+  const map = new Map(labels ? labels.map(l => [l, 0]) : []);
+  rows.forEach(r => {
+    const key = fn(r);
+    if (key == null) return;
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return map;
+}
+function renderCharts(target) {
+  const hours = Array.from({ length: 24 }, (_, i) => String(i));
+  const byHour = countBy(target, o => hourOf(o), hours.map(Number));
+  drawBarChart('hour-chart', hours, hours.map(h => byHour.get(Number(h)) || 0), '#7db7e8');
+  const tempLabels = ['<40','40s','50s','60s','70s','80s','90+','n/a'];
+  const byTemp = countBy(target, o => tempBand(tempOf(o)), tempLabels);
+  drawBarChart('temp-chart', tempLabels, tempLabels.map(l => byTemp.get(l) || 0), '#58c4a7');
+  const precipLabels = ['dry','trace','light','wet','n/a'];
+  const byPrecip = countBy(target, o => precipBand(precipOf(o)), precipLabels);
+  drawBarChart('precip-chart', precipLabels, precipLabels.map(l => byPrecip.get(l) || 0), '#e8b85f');
+}
+function renderConditions(target) {
+  const map = countBy(target, conditionOf);
+  const rows = [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0, 12);
+  const max = Math.max(1, ...rows.map(r => r[1]));
+  $('condition-list').innerHTML = rows.length ? rows.map(([k,v]) =>
+    '<div class="condition-row"><span>' + escapeHtml(k) + '</span><div class="bar"><span style="width:' + Math.round(v/max*100) + '%"></span></div><strong>' + v + '</strong></div>'
+  ).join('') : '<div class="empty">No condition data</div>';
+}
+
+function latestWeatherObservation(base) {
+  return base.filter(o => o.weatherRaw && (o.weatherRaw.hourly || o.weatherRaw.current))
+    .sort((a,b) => (b.weatherFetchedAt || b.createdAt) - (a.weatherFetchedAt || a.createdAt))[0] || null;
+}
+function hourlyForecastFrom(obs) {
+  if (!obs || !obs.weatherRaw || !obs.weatherRaw.hourly) return [];
+  const h = obs.weatherRaw.hourly;
+  const times = h.time || [];
+  return times.map((time, i) => ({
+    time,
+    at: toMillis(time),
+    temperature: numAt(h.temperature_2m, i),
+    precipProb: numAt(h.precipitation_probability, i),
+    weatherCode: numAt(h.weather_code, i),
+    wind: numAt(h.wind_speed_10m, i)
+  })).filter(r => r.at);
+}
+function numAt(arr, i) {
+  if (!Array.isArray(arr)) return null;
+  const v = arr[i];
+  return v == null ? null : Number(v);
+}
+function profileFrom(rows) {
+  const temps = rows.map(tempOf).filter(v => v != null && !isNaN(v));
+  const hours = rows.map(hourOf).filter(v => v != null);
+  const precip = rows.map(precipOf).filter(v => v != null && !isNaN(v));
+  const cond = countBy(rows, conditionOf);
+  return {
+    count: rows.length,
+    avgTemp: avg(temps),
+    tempSpread: Math.max(8, stddev(temps) || 12),
+    hourCounts: countBy(rows, hourOf),
+    avgPrecip: avg(precip) || 0,
+    conditionCounts: cond,
+    topCondition: [...cond.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0] || null
+  };
+}
+function avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null; }
+function stddev(arr) {
+  if (arr.length < 2) return null;
+  const m = avg(arr);
+  return Math.sqrt(avg(arr.map(v => (v - m) ** 2)));
+}
+function scoreHour(row, profile) {
+  const h = new Date(row.at).getHours();
+  const exact = profile.hourCounts.get(h) || 0;
+  const near = (profile.hourCounts.get((h + 23) % 24) || 0) + (profile.hourCounts.get((h + 1) % 24) || 0);
+  return Math.min(1, (exact + near * 0.45) / Math.max(1, profile.count * 0.25));
+}
+function scoreTemp(row, profile) {
+  if (row.temperature == null || profile.avgTemp == null) return 0.45;
+  const diff = Math.abs(row.temperature - profile.avgTemp);
+  return Math.max(0, 1 - diff / (profile.tempSpread * 2));
+}
+function scorePrecip(row, profile) {
+  if (row.precipProb == null) return 0.45;
+  const forecastWet = row.precipProb / 100;
+  const historicWet = Math.min(1, (profile.avgPrecip || 0) * 8);
+  return 1 - Math.min(1, Math.abs(forecastWet - historicWet));
+}
+function scoreCondition(row, profile) {
+  const label = row.weatherCode == null ? null : weatherCodeLabel(row.weatherCode);
+  if (!label || !profile.conditionCounts.size) return 0.45;
+  return Math.min(1, (profile.conditionCounts.get(label) || 0) / Math.max(1, profile.count * 0.4));
+}
+function scoreForecastRow(row, profile) {
+  const hour = scoreHour(row, profile);
+  const temp = scoreTemp(row, profile);
+  const precip = scorePrecip(row, profile);
+  const condition = scoreCondition(row, profile);
+  const sample = Math.min(1, profile.count / 20);
+  const score = (hour * 0.28 + temp * 0.32 + precip * 0.16 + condition * 0.14 + sample * 0.1) * 100;
+  const why = [];
+  why.push('hour ' + Math.round(hour * 100));
+  why.push('temp ' + Math.round(temp * 100));
+  why.push('precip ' + Math.round(precip * 100));
+  if (profile.topCondition) why.push('usual: ' + profile.topCondition);
+  return { score: Math.round(score), why: why.join(', ') };
+}
+function scoreClass(score) {
+  return score >= 70 ? 'high' : score >= 45 ? 'mid' : 'low';
+}
+function renderForecast(base, target) {
+  const latest = latestWeatherObservation(base);
+  const rows = hourlyForecastFrom(latest);
+  const future = rows.filter(r => r.at >= Date.now() - 3600000).slice(0, 36);
+  const profile = profileFrom(target);
+  const targetLabel = $('target-value').value || 'all observations';
+  if (!latest || !future.length) {
+    $('forecast-summary').textContent = 'No cached hourly forecast is available. Pull backend data from a recent phone observation or import a recorder export with weatherRaw.hourly.';
+    $('forecast-rows').innerHTML = '<tr><td colspan="7" class="empty">No forecast rows</td></tr>';
+    $('best-windows').innerHTML = '<div class="empty">No cached forecast</div>';
+    return;
+  }
+  const ageHours = latest.weatherFetchedAt ? Math.round((Date.now() - latest.weatherFetchedAt) / 3600000) : null;
+  const scored = future.map(r => ({ ...r, ...scoreForecastRow(r, profile) }));
+  $('forecast-summary').innerHTML = 'Using the latest cached weather feed from <strong>' + escapeHtml(fmtDate(latest.weatherFetchedAt || latest.createdAt)) + '</strong>' +
+    (ageHours != null ? ' (' + ageHours + 'h old)' : '') + '. Target <strong>' + escapeHtml(targetLabel) + '</strong> has ' + profile.count + ' historical sample(s). Scores are condition similarity, not certainty.';
+  $('forecast-rows').innerHTML = scored.slice(0, 24).map(r => {
+    const cls = scoreClass(r.score);
+    return '<tr><td>' + escapeHtml(fmtDate(r.at)) + '</td><td>' + escapeHtml(weatherCodeLabel(r.weatherCode)) + '</td><td>' + fmtNum(r.temperature, 0, '&deg;F') + '</td><td>' + fmtNum(r.precipProb, 0, '%') + '</td><td>' + fmtNum(r.wind, 0, ' mph') + '</td><td class="score ' + cls + '">' + r.score + '</td><td>' + escapeHtml(r.why) + '</td></tr>';
+  }).join('');
+  const best = scored.slice().sort((a,b)=>b.score-a.score).slice(0, 8);
+  $('best-windows').innerHTML = best.map(r => {
+    const cls = scoreClass(r.score);
+    return '<div class="condition-row"><span>' + escapeHtml(new Date(r.at).toLocaleString(undefined, { weekday:'short', hour:'numeric' })) + '</span><div class="bar"><span style="width:' + r.score + '%"></span></div><strong class="score ' + cls + '">' + r.score + '</strong><div class="mini" style="grid-column:1 / -1;">' + escapeHtml(weatherCodeLabel(r.weatherCode)) + ', ' + fmtNum(r.temperature, 0, 'F') + ', precip ' + fmtNum(r.precipProb, 0, '%') + '</div></div>';
+  }).join('');
+}
+function fmtNum(v, digits, suffix) {
+  return v == null || isNaN(v) ? 'n/a' : Number(v).toFixed(digits) + (suffix || '');
+}
+function renderSimilar(target) {
+  const rows = target.slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0, 40);
+  $('similar-rows').innerHTML = rows.length ? rows.map(o => {
+    const loc = o.latitude != null ? Number(o.latitude).toFixed(4) + ', ' + Number(o.longitude).toFixed(4) : 'n/a';
+    return '<tr><td>' + escapeHtml(fmtDate(o.createdAt)) + '</td><td>' + escapeHtml(o.subjectCommonName || '') + '</td><td>' + escapeHtml(o.category || '') + '</td><td>' + obsWeather(o) + '</td><td>' + escapeHtml(loc) + '</td><td>' + escapeHtml((o.transcript || o.userNoteText || o.summary || '').slice(0, 180)) + '</td></tr>';
+  }).join('') : '<tr><td colspan="6" class="empty">No matching observations</td></tr>';
+}
+
+function wireEvents() {
+  window.addEventListener('online', updateOnline);
+  window.addEventListener('offline', updateOnline);
+  $('save-settings').addEventListener('click', () => { saveSettings(); setStatus('source-status', 'Settings saved.', 'good'); });
+  $('pull-backend').addEventListener('click', pullBackend);
+  $('clear-cache').addEventListener('click', async () => {
+    if (!confirm('Clear cached analysis data in this browser?')) return;
+    await db.observations.clear();
+    await db.trips.clear();
+    await loadCache();
+  });
+  $('import-file').addEventListener('change', e => importFile(e.target.files[0]));
+  $('export-cache').addEventListener('click', exportCache);
+  $('target-kind').addEventListener('change', () => { populateTargets(); renderAll(); });
+  $('target-value').addEventListener('change', renderAll);
+  $('lookback-days').addEventListener('input', renderAll);
+  $('refresh-analysis').addEventListener('click', renderAll);
+}
+
+async function init() {
+  if (!window.Dexie) {
+    document.body.innerHTML = '<div style="padding:20px;color:white;font:16px system-ui">Dexie failed to load. IndexedDB analysis cache is unavailable.</div>';
+    return;
+  }
+  loadSettingsForm();
+  wireEvents();
+  updateOnline();
+  await loadCache();
+}
+
+init();
+})();
+</script>
+</body>
+</html>
