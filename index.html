@@ -207,29 +207,31 @@
     }
 
     .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-      gap: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
       margin-top: 22px;
     }
 
     .card {
       position: relative;
-      display: flex;
-      flex-direction: column;
-      min-height: 190px;
-      padding: 20px;
+      display: grid;
+      grid-template-columns: 56px minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      min-height: 86px;
+      padding: 14px 16px;
       overflow: hidden;
       text-decoration: none;
       border: 1px solid rgba(255,255,255,.14);
-      border-radius: var(--radius);
+      border-radius: 18px;
       background: linear-gradient(145deg, var(--card), rgba(255,255,255,.045));
-      box-shadow: 0 14px 38px rgba(0,0,0,.23);
+      box-shadow: 0 10px 26px rgba(0,0,0,.18);
       transition: transform .18s ease, border-color .18s ease, background .18s ease;
     }
 
     .card:hover {
-      transform: translateY(-4px) rotate(-.25deg);
+      transform: translateY(-1px);
       border-color: rgba(255,255,255,.32);
       background: linear-gradient(145deg, var(--card2), rgba(255,255,255,.065));
     }
@@ -237,14 +239,12 @@
     .card::before {
       content: "";
       position: absolute;
-      inset: auto -30px -50px auto;
-      width: 145px;
-      height: 145px;
-      border-radius: 40px;
+      inset: 0 auto 0 0;
+      width: 4px;
+      height: auto;
+      border-radius: 0;
       background: var(--accent, var(--hot));
-      opacity: .22;
-      filter: blur(10px);
-      transform: rotate(24deg);
+      opacity: .95;
     }
 
     .icon {
@@ -255,22 +255,33 @@
       border-radius: 18px;
       background: rgba(255,255,255,.13);
       font-size: 27px;
-      margin-bottom: 18px;
+      flex: 0 0 auto;
     }
 
     .card h2 {
       position: relative;
       z-index: 1;
-      margin: 0 0 10px;
-      font-size: 22px;
-      line-height: 1.1;
+      margin: 0 0 4px;
+      font-size: 18px;
+      line-height: 1.2;
       letter-spacing: -0.025em;
+    }
+
+    .card-main {
+      min-width: 0;
+    }
+
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
     }
 
     .path {
       position: relative;
       z-index: 1;
-      margin: auto 0 0;
       color: var(--muted);
       font-size: 13px;
       word-break: break-all;
@@ -282,7 +293,26 @@
       color: rgba(247,243,255,.72);
       font-size: 14px;
       line-height: 1.35;
-      margin: 0 0 20px;
+      margin: 0;
+    }
+
+    .version {
+      color: rgba(247,243,255,.6);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: rgba(0,0,0,.16);
+      white-space: nowrap;
+    }
+
+    .open-indicator {
+      position: relative;
+      z-index: 1;
+      color: rgba(247,243,255,.55);
+      font-size: 22px;
+      padding-left: 8px;
     }
 
     .status {
@@ -327,6 +357,9 @@
       .hero { padding: 26px; }
       .toolbar { grid-template-columns: 1fr; }
       .select, .button { width: 100%; }
+      .card { grid-template-columns: 48px minmax(0, 1fr); }
+      .icon { width: 44px; height: 44px; font-size: 23px; border-radius: 14px; }
+      .open-indicator { display: none; }
     }
   </style>
 </head>
@@ -355,8 +388,9 @@
     <div id="status" class="status">Looking through the drawer...</div>
     <section class="grid" id="grid" aria-live="polite"></section>
 
-    <footer>
-      Built as one static file. No build step. No server. Mildly suspicious amount of personality.
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.1">
+      &copy; 2026 Hank Marquardt &middot; Junk Drawer Index &middot; version 2026.05.10.1
     </footer>
   </main>
 
@@ -445,23 +479,20 @@
 
       const cacheKey = `junkDrawer:${state.repoInfo.owner}/${state.repoInfo.repo}/${CONFIG.branch}/${CONFIG.rootPath || "root"}`;
       const cached = getCache(cacheKey);
+      const manifest = await loadManifest();
+      state.manifest = manifest || {};
 
       if (!forceRefresh && CONFIG.useCache && cached) {
-        state.pages = cached.pages;
-        state.manifest = cached.manifest || {};
+        state.pages = normalizePages(cached.rawPages || cached.pages || [], state.manifest);
         render();
-        status.textContent = "Loaded from local cache. Use Refresh to ask GitHub again.";
+        status.textContent = "Loaded from local cache with the latest manifest. Use Refresh to ask GitHub again.";
         return;
       }
 
-      const [pages, manifest] = await Promise.all([
-        scanDirectory(CONFIG.rootPath, 0),
-        loadManifest()
-      ]);
+      const pages = await scanDirectory(CONFIG.rootPath, 0);
 
-      state.manifest = manifest || {};
       state.pages = normalizePages(pages, state.manifest);
-      setCache(cacheKey, { pages: state.pages, manifest: state.manifest });
+      setCache(cacheKey, { rawPages: pages });
       render();
       status.textContent = `Found ${state.pages.length} page${state.pages.length === 1 ? "" : "s"}.`;
     }
@@ -527,24 +558,46 @@
 
     function normalizePages(items, manifest) {
       const pagesConfig = manifest.pages || {};
+      const byPath = new Map();
 
-      return items
-        .map((item, index) => {
+      items.forEach((item, index) => {
           const relativePath = stripRoot(item.path);
           const custom = pagesConfig[relativePath] || pagesConfig[item.path] || {};
-          if (custom.hide) return null;
+          if (custom.hide) return;
 
-          const title = custom.title || titleFromFile(relativePath);
-          return {
+          const title = custom.title || item.title || titleFromFile(relativePath);
+          byPath.set(relativePath, {
             title,
             path: relativePath,
             url: encodePath(relativePath),
-            description: custom.description || autoDescription(relativePath),
-            emoji: custom.emoji || emojis[index % emojis.length],
-            accent: custom.accent || accents[index % accents.length]
-          };
-        })
-        .filter(Boolean);
+            description: custom.description || item.description || autoDescription(relativePath),
+            emoji: custom.emoji || item.emoji || emojis[index % emojis.length],
+            accent: custom.accent || item.accent || accents[index % accents.length],
+            version: custom.version || ""
+          });
+        });
+
+      Object.entries(pagesConfig).forEach(([path, custom], index) => {
+        const relativePath = stripRoot(path);
+        if (!relativePath.toLowerCase().endsWith(".html")) return;
+        if (!CONFIG.includeIndex && isThisIndex(relativePath)) return;
+        if (custom.hide) {
+          byPath.delete(relativePath);
+          return;
+        }
+        if (byPath.has(relativePath)) return;
+        byPath.set(relativePath, {
+          title: custom.title || titleFromFile(relativePath),
+          path: relativePath,
+          url: encodePath(relativePath),
+          description: custom.description || autoDescription(relativePath),
+          emoji: custom.emoji || emojis[(items.length + index) % emojis.length],
+          accent: custom.accent || accents[(items.length + index) % accents.length],
+          version: custom.version || ""
+        });
+      });
+
+      return [...byPath.values()];
     }
 
     function render() {
@@ -576,9 +629,15 @@
       grid.innerHTML = pages.map(page => `
         <a class="card" href="${page.url}" style="--accent:${escapeAttr(page.accent)}">
           <div class="icon" aria-hidden="true">${escapeHtml(page.emoji)}</div>
-          <h2>${escapeHtml(page.title)}</h2>
-          <p class="tagline">${escapeHtml(page.description)}</p>
-          <p class="path">${escapeHtml(page.path)}</p>
+          <div class="card-main">
+            <h2>${escapeHtml(page.title)}</h2>
+            <p class="tagline">${escapeHtml(page.description)}</p>
+            <div class="card-meta">
+              <span class="path">${escapeHtml(page.path)}</span>
+              ${page.version ? `<span class="version">v${escapeHtml(page.version)}</span>` : ""}
+            </div>
+          </div>
+          <div class="open-indicator" aria-hidden="true">›</div>
         </a>
       `).join("");
     }
