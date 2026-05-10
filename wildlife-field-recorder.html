@@ -111,6 +111,7 @@ th { color: var(--text-muted); font-weight: 600; }
 .filter-bar input, .filter-bar select { flex: 1 1 140px; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 100; }
 .modal-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; }
+.modal-card.trip-modal { max-width: 920px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .modal-head h3 { margin: 0; }
 .modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.4rem; line-height: 1; }
@@ -136,6 +137,14 @@ th { color: var(--text-muted); font-weight: 600; }
 .missing-gps { color: var(--warn); }
 .gap-list { list-style: none; padding: 0; margin: 4px 0; }
 .gap-list li { padding: 2px 0; font-size: 0.78rem; color: var(--text-muted); }
+.trip-detail-map { height: 340px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; margin: 10px 0; background: var(--bg); }
+.trip-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.trip-table { min-width: 760px; margin: 0; }
+.trip-table th, .trip-table td { vertical-align: top; }
+.trip-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-3); display: block; }
+.trip-thumb-placeholder { width: 56px; height: 56px; border-radius: var(--radius-sm); border: 1px dashed var(--border); color: var(--text-dim); display: grid; place-items: center; font-size: 0.72rem; }
+.trip-popup { min-width: 180px; color: #1f2933; }
+.trip-popup img { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; float: right; margin: 0 0 6px 8px; }
 @media (min-width: 640px) {
   .map-wrap { height: 420px; }
 }
@@ -444,9 +453,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.5" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.5
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.6" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.6
 </footer>
 </div>
 
@@ -454,7 +463,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.10.5';
+const APP_VERSION = '2026.05.10.6';
 
 /* ========================
    DB (Dexie)
@@ -559,6 +568,13 @@ function observationWeather(o) {
   else if (current.surface_pressure != null) parts.push(Math.round(current.surface_pressure) + ' hPa');
   if (current.relative_humidity_2m != null) parts.push(current.relative_humidity_2m + '% RH');
   return parts.join(' · ') || 'weather ok';
+}
+function shortWeather(o) {
+  const current = o && o.weatherRaw && o.weatherRaw.current ? o.weatherRaw.current : null;
+  if (!current) return o && o.weatherStatus ? o.weatherStatus : 'n/a';
+  const condition = current.weather_code != null ? weatherCodeLabel(current.weather_code) : 'weather';
+  const temp = current.temperature_2m != null ? Math.round(current.temperature_2m) + '°F' : null;
+  return [condition, temp].filter(Boolean).join(', ');
 }
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 3958.8; // miles
@@ -1223,13 +1239,105 @@ async function renameTrip(tripId) {
 async function showTripDetail(tripId) {
   const trip = await db.trips.get(tripId);
   if (!trip) return;
-  const obsList = await db.observations.where('localId').anyOf(trip.observationLocalIds).toArray();
-  const items = obsList.map(o => `<div class="compact-row"><div>${escapeHtml(o.subjectCommonName || o.category || 'Observation')}<div class="meta">${fmtDate(o.createdAt)}</div></div><span class="chip ${o.submitStatus==='submitted'?'ok':'warn'}">${o.submitStatus}</span></div>`).join('');
+  const obsList = (await db.observations.where('localId').anyOf(trip.observationLocalIds).toArray()).sort((a,b) => a.createdAt - b.createdAt);
+  const photoUrls = new Map();
+  const objectUrls = [];
+  for (const obs of obsList) {
+    const url = await firstPhotoObjectUrl(obs);
+    if (url) {
+      photoUrls.set(obs.localId, url);
+      objectUrls.push(url);
+    }
+  }
+  const mapId = 'trip-map-' + trip.localTripId.replace(/[^a-z0-9_-]/gi, '');
+  const rows = obsList.map((o, idx) => {
+    const img = photoUrls.get(o.localId);
+    const thumb = img ? `<img class="trip-thumb" src="${img}" alt="Observation photo">` : '<div class="trip-thumb-placeholder">No photo</div>';
+    const gps = o.latitude != null ? `${o.latitude.toFixed(5)}, ${o.longitude.toFixed(5)}` : 'No GPS';
+    const details = [o.behavior, o.habitat, o.summary].filter(Boolean).join(' · ');
+    return `<tr>
+      <td>${idx + 1}</td>
+      <td>${thumb}</td>
+      <td><strong>${escapeHtml(o.subjectCommonName || o.category || 'Observation')}</strong><div class="meta">${escapeHtml(o.category || 'uncategorized')} · ${escapeHtml(o.submitStatus || 'local')}</div></td>
+      <td>${fmtDate(o.createdAt)}</td>
+      <td>${escapeHtml(gps)}</td>
+      <td>${escapeHtml(observationWeather(o))}</td>
+      <td>${escapeHtml((o.transcript || o.userNoteText || details || '').slice(0, 180))}</td>
+    </tr>`;
+  }).join('');
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal-card"><div class="modal-head"><h3>${escapeHtml(trip.title)}</h3><button class="modal-close">&times;</button></div><div>${items}</div></div>`;
-  overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+  overlay.innerHTML = `<div class="modal-card trip-modal">
+    <div class="modal-head"><h3>${escapeHtml(trip.title)}</h3><button class="modal-close">&times;</button></div>
+    <div class="chips">
+      <span class="chip">${obsList.length} obs</span>
+      <span class="chip">${(trip.totalDistanceEstimateMiles || 0).toFixed(1)} mi</span>
+      <span class="chip">${fmtDate(trip.startedAt)} → ${fmtDate(trip.endedAt)}</span>
+      ${trip.weatherSummary ? `<span class="chip">${escapeHtml(trip.weatherSummary)}</span>` : ''}
+    </div>
+    <div id="${mapId}" class="trip-detail-map"></div>
+    <div class="trip-table-wrap">
+      <table class="trip-table">
+        <thead><tr><th>#</th><th>Photo</th><th>Observation</th><th>Time</th><th>GPS</th><th>Weather</th><th>Notes</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="empty">No observations in this trip</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>`;
+  let detailMap = null;
+  const close = () => {
+    if (detailMap) detailMap.remove();
+    for (const url of objectUrls) URL.revokeObjectURL(url);
+    overlay.remove();
+  };
+  overlay.querySelector('.modal-close').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
   document.body.appendChild(overlay);
+  setTimeout(() => { detailMap = renderTripDetailMap(mapId, obsList, photoUrls); }, 50);
+}
+
+async function firstPhotoObjectUrl(obs) {
+  const localIds = obs.photoLocalIds || [];
+  if (!localIds.length) return null;
+  const photo = await db.photos.get(localIds[0]);
+  if (!photo || !photo.blobId) return null;
+  const rec = await db.audioBlobs.get(photo.blobId);
+  if (!rec || !rec.blob) return null;
+  return URL.createObjectURL(rec.blob);
+}
+
+function renderTripDetailMap(mapId, obsList, photoUrls) {
+  const gpsObs = obsList.filter(o => o.latitude != null && o.longitude != null).sort((a,b) => a.createdAt - b.createdAt);
+  const el = $(mapId);
+  if (!el) return null;
+  if (!gpsObs.length) {
+    el.innerHTML = '<div class="empty">No GPS points for this trip</div>';
+    return null;
+  }
+  const tripMap = L.map(mapId);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OpenStreetMap contributors' }).addTo(tripMap);
+  const latlngs = gpsObs.map(o => [o.latitude, o.longitude]);
+  if (latlngs.length > 1) {
+    L.polyline(latlngs, { color: '#4ade80', weight: 3, opacity: 0.85 }).addTo(tripMap);
+  }
+  gpsObs.forEach((o, idx) => {
+    const img = photoUrls.get(o.localId);
+    const popup = `<div class="trip-popup">
+      ${img ? `<img src="${img}" alt="">` : ''}
+      <strong>${idx + 1}. ${escapeHtml(o.subjectCommonName || o.category || 'Observation')}</strong><br>
+      ${escapeHtml(fmtDate(o.createdAt))}<br>
+      ${escapeHtml(shortWeather(o))}<br>
+      ${escapeHtml((o.transcript || o.userNoteText || o.summary || '').slice(0, 160))}
+    </div>`;
+    L.circleMarker([o.latitude, o.longitude], {
+      radius: 7,
+      color: '#e8f5e9',
+      weight: 2,
+      fillColor: '#3cb371',
+      fillOpacity: 0.95
+    }).addTo(tripMap).bindPopup(popup);
+  });
+  tripMap.fitBounds(latlngs, { padding: [24, 24], maxZoom: 16 });
+  return tripMap;
 }
 
 async function submitTrip(tripId) {
