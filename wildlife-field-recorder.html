@@ -121,6 +121,13 @@ th { color: var(--text-muted); font-weight: 600; }
 .log-line.info { color: var(--info); }
 .photo-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; background: var(--bg-3); }
 .photo-grid { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.review-list { display: grid; gap: 8px; }
+.review-card { margin: 0; padding: 10px; }
+.review-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.review-title { font-weight: 750; color: var(--text); overflow-wrap: anywhere; }
+.review-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.76rem; color: var(--text-dim); margin-top: 3px; }
+.review-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.review-actions { margin: 8px 0 0; }
 .form-row { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
 .form-row label { margin: 0; flex: 0 0 auto; }
 .form-row input, .form-row select { flex: 1 1 auto; }
@@ -214,6 +221,7 @@ th { color: var(--text-muted); font-weight: 600; }
       <div class="card-title">Saved</div>
       <div id="capture-summary" style="font-size:0.85rem;color:var(--text-muted);"></div>
       <div class="btn-group">
+        <button id="capture-add-photo" class="btn">Add photos</button>
         <button id="capture-another" class="btn btn-primary">Record another</button>
       </div>
     </div>
@@ -229,8 +237,8 @@ th { color: var(--text-muted); font-weight: 600; }
     <div class="btn-group">
       <button id="process-next" class="btn btn-primary">Process next</button>
       <button id="process-all" class="btn">Process all</button>
-      <button id="build-trips" class="btn">Build trips</button>
-      <button id="submit-ready" class="btn btn-primary">Submit ready</button>
+      <button id="build-trips" class="btn">Build/name trips</button>
+      <button id="submit-ready" class="btn btn-primary">Submit ready with trips</button>
       <button id="retry-failed" class="btn">Retry failed</button>
     </div>
   </div>
@@ -284,7 +292,7 @@ th { color: var(--text-muted); font-weight: 600; }
 <section id="tab-trips" class="tab">
   <h2>Trips</h2>
   <div class="btn-group">
-    <button id="trips-rebuild" class="btn">Rebuild trips</button>
+    <button id="trips-rebuild" class="btn">Build/name trips</button>
   </div>
   <div id="trips-list"></div>
 </section>
@@ -436,9 +444,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.5
 </footer>
 </div>
 
@@ -446,7 +454,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.10.4';
+const APP_VERSION = '2026.05.10.5';
 
 /* ========================
    DB (Dexie)
@@ -529,6 +537,29 @@ async function httpError(response) {
   }
   return new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
 }
+function weatherCodeLabel(code) {
+  const labels = {
+    0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'cloudy',
+    45: 'fog', 48: 'freezing fog', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle',
+    56: 'freezing drizzle', 57: 'freezing drizzle', 61: 'light rain', 63: 'rain', 65: 'heavy rain',
+    66: 'freezing rain', 67: 'freezing rain', 71: 'light snow', 73: 'snow', 75: 'heavy snow',
+    77: 'snow grains', 80: 'rain showers', 81: 'rain showers', 82: 'heavy rain showers',
+    85: 'snow showers', 86: 'heavy snow showers', 95: 'thunderstorm', 96: 'thunderstorm with hail',
+    99: 'thunderstorm with hail'
+  };
+  return labels[code] || 'weather';
+}
+function observationWeather(o) {
+  const current = o && o.weatherRaw && o.weatherRaw.current ? o.weatherRaw.current : null;
+  if (!current) return o && o.weatherStatus ? o.weatherStatus : 'weather n/a';
+  const parts = [];
+  if (current.weather_code != null) parts.push(weatherCodeLabel(current.weather_code));
+  if (current.temperature_2m != null) parts.push(Math.round(current.temperature_2m) + '°F');
+  if (current.pressure_msl != null) parts.push(Math.round(current.pressure_msl) + ' hPa');
+  else if (current.surface_pressure != null) parts.push(Math.round(current.surface_pressure) + ' hPa');
+  if (current.relative_humidity_2m != null) parts.push(current.relative_humidity_2m + '% RH');
+  return parts.join(' · ') || 'weather ok';
+}
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 3958.8; // miles
   const toRad = x => x * Math.PI / 180;
@@ -580,7 +611,9 @@ let captureStartTime = 0;
 let captureTimerId = null;
 let captureGPS = null;
 let captureWeather = null;
+let captureContextPromise = null;
 let currentStream = null;
+let lastCapturedLocalId = null;
 
 function updateNetChip() {
   const chip = $('net-chip');
@@ -592,7 +625,7 @@ window.addEventListener('offline', () => { updateNetChip(); logWarn('Network off
 updateNetChip();
 
 async function fetchWeather(lat, lon) {
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), (settings.weatherTimeout || 8) * 1000);
@@ -604,6 +637,28 @@ async function fetchWeather(lat, lon) {
   } catch(e) {
     return { status: 'error', apiUrl: url, fetchedAt: Date.now(), raw: null, error: e.message };
   }
+}
+
+function getCurrentPosition() {
+  return new Promise(resolve => {
+    if (!('geolocation' in navigator)) {
+      resolve({ status: 'unsupported' });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracyMeters: pos.coords.accuracy,
+        altitude: pos.coords.altitude,
+        heading: pos.coords.heading,
+        speed: pos.coords.speed,
+        status: 'ok'
+      }),
+      err => resolve({ status: 'error', error: err.message }),
+      { enableHighAccuracy: settings.gpsHighAccuracy, timeout: (settings.gpsTimeout || 12) * 1000, maximumAge: 60000 }
+    );
+  });
 }
 
 function startCaptureTimer() {
@@ -627,6 +682,7 @@ async function startCapture() {
   audioChunks = [];
   captureGPS = null;
   captureWeather = null;
+  captureContextPromise = null;
   $('capture-result').style.display = 'none';
   $('capture-status').textContent = 'Starting...';
   const btn = $('capture-btn');
@@ -634,37 +690,17 @@ async function startCapture() {
   $('capture-label').textContent = 'Stop';
   $('capture-sub').textContent = 'Tap to stop';
 
-  // GPS
-  if ('geolocation' in navigator) {
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        captureGPS = {
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracyMeters: pos.coords.accuracy,
-          altitude: pos.coords.altitude,
-          heading: pos.coords.heading,
-          speed: pos.coords.speed,
-          status: 'ok'
-        };
-        $('gps-chip').textContent = 'GPS ok'; $('gps-chip').className = 'status-chip ok';
-      },
-      err => {
-        captureGPS = { status: 'error', error: err.message };
-        $('gps-chip').textContent = 'GPS err'; $('gps-chip').className = 'status-chip warn';
-      },
-      { enableHighAccuracy: settings.gpsHighAccuracy, timeout: (settings.gpsTimeout || 12) * 1000, maximumAge: 60000 }
-    );
-  } else {
-    captureGPS = { status: 'unsupported' };
-  }
-
-  // Weather
-  if (navigator.onLine && captureGPS && captureGPS.status === 'ok') {
-    captureWeather = await fetchWeather(captureGPS.latitude, captureGPS.longitude);
-  } else {
-    captureWeather = { status: 'skipped' };
-  }
+  captureContextPromise = getCurrentPosition().then(async gps => {
+    captureGPS = gps;
+    if (captureGPS.status === 'ok') {
+      $('gps-chip').textContent = 'GPS ok'; $('gps-chip').className = 'status-chip ok';
+      captureWeather = navigator.onLine ? await fetchWeather(captureGPS.latitude, captureGPS.longitude) : { status: 'skipped' };
+    } else {
+      $('gps-chip').textContent = captureGPS.status === 'unsupported' ? 'GPS n/a' : 'GPS err';
+      $('gps-chip').className = 'status-chip warn';
+      captureWeather = { status: 'skipped' };
+    }
+  });
 
   // Audio
   try {
@@ -698,6 +734,9 @@ async function onCaptureStop() {
   resetCaptureBtn();
   $('capture-status').textContent = 'Saving...';
   if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+  if (captureContextPromise) {
+    try { await captureContextPromise; } catch(e) { logWarn('Capture context failed: ' + e.message); }
+  }
 
   const durationSec = captureStartTime ? Math.round((Date.now() - captureStartTime) / 1000) : 0;
   const mime = recorder && recorder.mimeType ? recorder.mimeType : 'audio/webm';
@@ -759,6 +798,7 @@ async function onCaptureStop() {
 
   try {
     await db.observations.put(obs);
+    lastCapturedLocalId = localId;
     logInfo('Observation saved ' + localId);
     $('capture-status').textContent = 'Saved locally';
     $('capture-result').style.display = 'block';
@@ -766,7 +806,7 @@ async function onCaptureStop() {
     summary.push('Time: ' + fmtDate(obs.createdAt));
     if (obs.latitude != null) summary.push(`Location: ${obs.latitude.toFixed(5)}, ${obs.longitude.toFixed(5)}`);
     else summary.push('Location: unavailable');
-    summary.push('Weather: ' + obs.weatherStatus);
+    summary.push('Weather: ' + observationWeather(obs));
     summary.push('Audio: ' + (obs.audioSizeBytes > 0 ? fmtDuration(obs.durationSeconds) : 'none'));
     summary.push('Status: ' + obs.submitStatus);
     $('capture-summary').innerHTML = summary.map(s => '<div>' + escapeHtml(s) + '</div>').join('');
@@ -789,6 +829,9 @@ $('capture-another').addEventListener('click', () => {
   $('capture-result').style.display = 'none';
   $('capture-note').value = '';
   $('capture-status').textContent = 'Ready';
+});
+$('capture-add-photo').addEventListener('click', () => {
+  if (lastCapturedLocalId) openPhotoPicker(lastCapturedLocalId);
 });
 
 /* ========================
@@ -832,22 +875,30 @@ $('process-all').addEventListener('click', async () => {
 });
 $('build-trips').addEventListener('click', async () => {
   $('process-log').textContent = 'Building trips...';
-  await buildTrips(); loadTrips(); loadProcess();
-  $('process-log').textContent = 'Trips rebuilt.';
+  const trips = await buildTrips({ promptForNames: true });
+  loadTrips(); loadProcess();
+  $('process-log').textContent = `Trips rebuilt: ${trips.length}.`;
 });
 $('submit-ready').addEventListener('click', async () => {
   $('process-log').textContent = 'Checking for ready records...';
+  const trips = await buildTrips({ promptForNames: true });
   const ready = await db.observations.where('submitStatus').equals('ready').toArray();
   if (!ready.length) { $('process-log').textContent = 'No ready records to submit'; return; }
-  $('process-log').textContent = `Submitting ${ready.length} record(s)...`;
+  $('process-log').textContent = `Submitting ${ready.length} record(s) across ${trips.length} trip(s)...`;
   let done = 0, errs = 0;
-  for (const obs of ready) {
+  const readyTripIds = [...new Set(ready.map(o => o.tripLocalId).filter(Boolean))];
+  for (const tripId of readyTripIds) {
+    try { await submitTrip(tripId); }
+    catch(e) { errs++; logError('Trip submit: ' + e.message); }
+  }
+  const refreshed = await db.observations.where('submitStatus').equals('ready').toArray();
+  for (const obs of refreshed) {
     try { await submitObservation(obs); done++; }
     catch (e) { errs++; logError('Submit: ' + e.message); }
   }
   loadProcess(); updateQueueChip();
   $('process-log').textContent = errs
-    ? `Submit failed for ${errs} of ${ready.length} record(s). ${done} succeeded. See diagnostics for details.`
+    ? `Submit had ${errs} failure(s). ${done} observation(s) succeeded. See diagnostics for details.`
     : `Submit complete. ${done} succeeded.`;
 });
 $('retry-failed').addEventListener('click', async () => {
@@ -1001,8 +1052,10 @@ Extract:
 /* ========================
    Trips
    ======================== */
-async function buildTrips() {
+async function buildTrips(options = {}) {
   const all = await db.observations.orderBy('createdAt').toArray();
+  const existingTrips = await db.trips.toArray();
+  const existingById = new Map(existingTrips.map(t => [t.localTripId, t]));
   const tripHours = settings.tripWindowHours || 3;
   const tripMiles = settings.tripWindowMiles || 5;
   const trips = [];
@@ -1010,7 +1063,7 @@ async function buildTrips() {
 
   for (const obs of all) {
     if (!currentTrip) {
-      currentTrip = startTrip(obs);
+      currentTrip = startTrip(obs, existingById);
       continue;
     }
     const lastObs = await db.observations.get(currentTrip.observationLocalIds[currentTrip.observationLocalIds.length - 1]);
@@ -1023,7 +1076,7 @@ async function buildTrips() {
       currentTrip.endedAt = obs.createdAt;
     } else {
       trips.push(currentTrip);
-      currentTrip = startTrip(obs);
+      currentTrip = startTrip(obs, existingById);
     }
   }
   if (currentTrip) trips.push(currentTrip);
@@ -1046,7 +1099,14 @@ async function buildTrips() {
     }
     trip.tripSummary = `${trip.observationCount} observation${trip.observationCount!==1?'s':''}`;
     trip.title = trip.title || generateTripTitle(trip, obsList);
+    trip.weatherSummary = summarizeTripWeather(obsList);
     trip.updatedAt = Date.now();
+    if (options.promptForNames && !trip.userNamed) {
+      const proposed = trip.title || generateTripTitle(trip, obsList);
+      const name = prompt(`Name this trip (${trip.observationCount} observation${trip.observationCount === 1 ? '' : 's'}, ${fmtDate(trip.startedAt)}):`, proposed);
+      trip.title = (name && name.trim()) || proposed;
+      trip.userNamed = true;
+    }
   }
 
   await db.trips.clear();
@@ -1059,14 +1119,17 @@ async function buildTrips() {
     }
   }
   logInfo('Trips rebuilt: ' + trips.length);
+  return trips;
 }
 
-function startTrip(obs) {
+function startTrip(obs, existingById = new Map()) {
   const dt = new Date(obs.createdAt);
   const dateStr = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const localTripId = 'trip-' + obs.localId;
+  const existing = existingById.get(localTripId) || {};
   return {
-    localTripId: uuid(),
-    title: 'Trip — ' + dateStr,
+    localTripId,
+    title: existing.title || 'Trip — ' + dateStr,
     startedAt: obs.createdAt,
     endedAt: obs.createdAt,
     observationLocalIds: [obs.localId],
@@ -1082,11 +1145,25 @@ function startTrip(obs) {
     habitats: [],
     notableMoments: [],
     needsReview: false,
-    backendTripId: null,
-    submitStatus: 'local',
-    createdAt: Date.now(),
+    backendTripId: existing.backendTripId || null,
+    submitStatus: existing.submitStatus || 'local',
+    userNamed: !!existing.userNamed,
+    createdAt: existing.createdAt || Date.now(),
     updatedAt: Date.now()
   };
+}
+
+function summarizeTripWeather(obsList) {
+  const withWeather = obsList.filter(o => o.weatherRaw && o.weatherRaw.current);
+  if (!withWeather.length) return null;
+  const temps = withWeather.map(o => o.weatherRaw.current.temperature_2m).filter(v => v != null);
+  const pressures = withWeather.map(o => o.weatherRaw.current.pressure_msl || o.weatherRaw.current.surface_pressure).filter(v => v != null);
+  const codes = withWeather.map(o => o.weatherRaw.current.weather_code).filter(v => v != null);
+  const bits = [];
+  if (codes.length) bits.push(weatherCodeLabel(codes[0]));
+  if (temps.length) bits.push(Math.round(temps.reduce((a,b)=>a+b,0) / temps.length) + '°F avg');
+  if (pressures.length) bits.push(Math.round(pressures.reduce((a,b)=>a+b,0) / pressures.length) + ' hPa');
+  return bits.join(' · ');
 }
 
 function generateTripTitle(trip, obsList) {
@@ -1109,22 +1186,39 @@ async function loadTrips() {
       <div class="card-title">${escapeHtml(t.title)}</div>
       <div class="chips">${cats}<span class="chip">${t.observationCount} obs</span><span class="chip">${(t.totalDistanceEstimateMiles||0).toFixed(1)} mi</span><span class="chip ${t.submitStatus==='submitted'?'ok':'warn'}">${t.submitStatus}</span></div>
       <div style="font-size:0.82rem;color:var(--text-muted);margin-top:6px;">${fmtDate(t.startedAt)} → ${fmtDate(t.endedAt)}</div>
+      ${t.weatherSummary ? `<div style="font-size:0.8rem;color:var(--text-dim);margin-top:4px;">${escapeHtml(t.weatherSummary)}</div>` : ''}
       <div class="btn-group" style="margin-top:8px;">
         <button class="btn btn-small" data-trip-view="${t.localTripId}">View</button>
+        <button class="btn btn-small" data-trip-rename="${t.localTripId}">Rename</button>
         <button class="btn btn-small" data-trip-submit="${t.localTripId}">Submit</button>
       </div>
     </div>`;
   }).join('');
 }
 
-$('trips-rebuild').addEventListener('click', async () => { await buildTrips(); loadTrips(); });
+$('trips-rebuild').addEventListener('click', async () => { await buildTrips({ promptForNames: true }); loadTrips(); });
 
 document.addEventListener('click', async e => {
   const viewBtn = e.target.closest('button[data-trip-view]');
   if (viewBtn) { await showTripDetail(viewBtn.dataset.tripView); }
   const subBtn = e.target.closest('button[data-trip-submit]');
   if (subBtn) { await submitTrip(subBtn.dataset.tripSubmit); }
+  const renameBtn = e.target.closest('button[data-trip-rename]');
+  if (renameBtn) { await renameTrip(renameBtn.dataset.tripRename); }
 });
+
+async function renameTrip(tripId) {
+  const trip = await db.trips.get(tripId);
+  if (!trip) return;
+  const name = prompt('Trip name:', trip.title || '');
+  if (!name || !name.trim()) return;
+  trip.title = name.trim();
+  trip.userNamed = true;
+  trip.updatedAt = Date.now();
+  await db.trips.put(trip);
+  loadTrips();
+  populateTripFilter();
+}
 
 async function showTripDetail(tripId) {
   const trip = await db.trips.get(tripId);
@@ -1142,6 +1236,10 @@ async function submitTrip(tripId) {
   const trip = await db.trips.get(tripId);
   if (!trip) return;
   if (!settings.token) { const err = new Error('No backend token'); logWarn(err.message); throw err; }
+  if (trip.backendTripId) {
+    await applyBackendTripToObservations(trip);
+    return;
+  }
   const payload = {
     localTripId: trip.localTripId,
     title: trip.title,
@@ -1171,11 +1269,24 @@ async function submitTrip(tripId) {
     trip.backendTripId = data.id || data.data?.id || null;
     trip.submitStatus = 'submitted';
     await db.trips.put(trip);
+    await applyBackendTripToObservations(trip);
     logInfo('Trip submitted ' + trip.localTripId);
     loadTrips();
   } catch(e) {
     logError('Trip submit failed: ' + e.message);
     throw e;
+  }
+}
+
+async function applyBackendTripToObservations(trip) {
+  for (const localId of trip.observationLocalIds || []) {
+    const obs = await db.observations.get(localId);
+    if (obs) {
+      obs.backendTripId = trip.backendTripId;
+      obs.tripLocalId = trip.localTripId;
+      obs.updatedAt = Date.now();
+      await db.observations.put(obs);
+    }
   }
 }
 
@@ -1189,9 +1300,12 @@ function buildTripGeoJSON(trip) {
    Review
    ======================== */
 let reviewObsList = [];
+let reviewTripTitles = new Map();
 
 async function loadReview() {
   reviewObsList = await db.observations.orderBy('createdAt').reverse().toArray();
+  const trips = await db.trips.toArray();
+  reviewTripTitles = new Map(trips.map(t => [t.localTripId, t.title]));
   populateTripFilter();
   renderReview();
 }
@@ -1227,25 +1341,36 @@ function renderReview() {
   });
   const container = $('review-list');
   if (!list.length) { container.innerHTML = '<div class="empty">No observations match</div>'; return; }
+  container.className = 'review-list';
   container.innerHTML = list.map(o => {
     const catClass = o.category || '';
     const chips = [];
     chips.push(`<span class="chip ${o.submitStatus==='submitted'?'ok':'warn'}">${o.submitStatus}</span>`);
     if (o.category) chips.push(`<span class="chip">${o.category}</span>`);
-    if (o.subjectCommonName) chips.push(`<span class="chip">${escapeHtml(o.subjectCommonName)}</span>`);
     if (o.needsHumanReview) chips.push(`<span class="chip danger">needs review</span>`);
     const gps = o.latitude != null ? `${o.latitude.toFixed(4)}, ${o.longitude.toFixed(4)}` : 'no GPS';
-    return `<div class="card obs-card ${catClass}" data-obs-id="${o.localId}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-        <div><div class="card-title">${escapeHtml(o.subjectCommonName || o.category || 'Observation')}</div>
-        <div style="font-size:0.8rem;color:var(--text-muted);">${fmtDate(o.createdAt)} · ${gps}</div></div>
-        <div class="chips" style="flex-shrink:0;">${chips.join('')}</div>
+    const trip = o.tripLocalId ? (reviewTripTitles.get(o.tripLocalId) || `trip ${o.tripLocalId.replace(/^trip-/, '').slice(0, 8)}`) : 'no trip';
+    const photos = (o.photoLocalIds || []).length;
+    const text = o.transcript || o.userNoteText || o.summary || '';
+    return `<div class="card obs-card review-card ${catClass}" data-obs-id="${o.localId}">
+      <div class="review-main">
+        <div>
+          <div class="review-title">${escapeHtml(o.subjectCommonName || o.category || 'Observation')}</div>
+          <div class="review-meta">
+            <span>${fmtDate(o.createdAt)}</span>
+            <span>${escapeHtml(gps)}</span>
+            <span>${escapeHtml(trip)}</span>
+            <span>${photos} photo${photos === 1 ? '' : 's'}</span>
+            <span>${escapeHtml(observationWeather(o))}</span>
+          </div>
+        </div>
+        <div class="chips" style="justify-content:flex-end;margin:0;">${chips.join('')}</div>
       </div>
-      ${o.transcript ? `<div style="font-size:0.85rem;margin-top:6px;color:var(--text-muted);">${escapeHtml(o.transcript)}</div>` : ''}
-      <div class="btn-group" style="margin-top:8px;">
+      ${text ? `<div class="review-note">${escapeHtml(text)}</div>` : ''}
+      <div class="btn-group review-actions">
         <button class="btn btn-small" data-obs-edit="${o.localId}">Edit</button>
         <button class="btn btn-small" data-obs-play="${o.localId}">Play audio</button>
-        <button class="btn btn-small" data-obs-add-photo="${o.localId}">Add photo</button>
+        <button class="btn btn-small" data-obs-add-photo="${o.localId}">Add photos</button>
         <button class="btn btn-small" data-obs-download="${o.localId}">Download audio</button>
       </div>
       <div class="photo-grid" id="photos-${o.localId}"></div>
@@ -1352,6 +1477,7 @@ async function downloadObsAudio(localId) {
 function openPhotoPicker(obsLocalId) {
   const input = document.createElement('input');
   input.type = 'file';
+  input.multiple = true;
   input.accept = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
   input.onchange = async () => {
     if (!input.files.length) return;
