@@ -436,9 +436,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.3
 </footer>
 </div>
 
@@ -446,7 +446,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.10.2';
+const APP_VERSION = '2026.05.10.3';
 
 /* ========================
    DB (Dexie)
@@ -784,84 +784,128 @@ async function loadProcess() {
   const all = await db.observations.toArray();
   const buckets = { local: 0, transcribed: 0, classified: 0, ready: 0, submitted: 0, failed: 0 };
   for (const o of all) {
-    if (o.submitStatus === 'local') buckets.local++;
-    else if (o.submitStatus === 'transcribed') buckets.transcribed++;
-    else if (o.submitStatus === 'classified') buckets.classified++;
-    else if (o.submitStatus === 'ready') buckets.ready++;
-    else if (o.submitStatus === 'submitted') buckets.submitted++;
+    if (o.submitStatus === 'submitted') buckets.submitted++;
     else if (o.submitStatus === 'failed') buckets.failed++;
+    else if (o.submitStatus === 'ready') buckets.ready++;
+    else if (o.classificationStatus === 'done') buckets.classified++;
+    else if (o.transcriptionStatus === 'done') buckets.transcribed++;
+    else buckets.local++;
   }
   $('process-buckets').innerHTML = Object.entries(buckets).map(([k,v]) => `<span class="chip">${k}: ${v}</span>`).join(' ');
 }
 
 $('process-next').addEventListener('click', async () => {
+  $('process-log').textContent = 'Finding next unprocessed observation...';
   const obs = await db.observations.filter(o => o.transcriptionStatus !== 'done' || o.classificationStatus !== 'done').first();
   if (!obs) { $('process-log').textContent = 'Nothing to process'; return; }
-  await processObservation(obs);
+  const label = obs.subjectCommonName || obs.localId.slice(0, 8);
+  $('process-log').textContent = `Processing "${label}"...`;
+  try { await processObservation(obs); }
+  catch (e) { $('process-log').textContent = 'Process error: ' + e.message; return; }
+  $('process-log').textContent = `Done processing "${label}".`;
 });
 $('process-all').addEventListener('click', async () => {
+  $('process-log').textContent = 'Finding all unprocessed observations...';
   const list = await db.observations.filter(o => o.transcriptionStatus !== 'done' || o.classificationStatus !== 'done').toArray();
-  for (const obs of list) await processObservation(obs);
+  if (!list.length) { $('process-log').textContent = 'Nothing to process'; return; }
+  $('process-log').textContent = `Processing ${list.length} observation(s)...`;
+  let done = 0, errs = 0;
+  for (const obs of list) {
+    try { await processObservation(obs); done++; }
+    catch (e) { errs++; logError('Batch process: ' + e.message); }
+  }
+  $('process-log').textContent = `Batch complete. ${done} succeeded, ${errs} failed.`;
 });
-$('build-trips').addEventListener('click', async () => { await buildTrips(); loadTrips(); loadProcess(); });
+$('build-trips').addEventListener('click', async () => {
+  $('process-log').textContent = 'Building trips...';
+  await buildTrips(); loadTrips(); loadProcess();
+  $('process-log').textContent = 'Trips rebuilt.';
+});
 $('submit-ready').addEventListener('click', async () => {
+  $('process-log').textContent = 'Checking for ready records...';
   const ready = await db.observations.where('submitStatus').equals('ready').toArray();
-  for (const obs of ready) await submitObservation(obs);
+  if (!ready.length) { $('process-log').textContent = 'No ready records to submit'; return; }
+  $('process-log').textContent = `Submitting ${ready.length} record(s)...`;
+  let done = 0, errs = 0;
+  for (const obs of ready) {
+    try { await submitObservation(obs); done++; }
+    catch (e) { errs++; logError('Submit: ' + e.message); }
+  }
+  $('process-log').textContent = `Submit complete. ${done} succeeded, ${errs} failed.`;
 });
 $('retry-failed').addEventListener('click', async () => {
+  $('process-log').textContent = 'Checking for failed records...';
   const failed = await db.observations.where('submitStatus').equals('failed').toArray();
+  if (!failed.length) { $('process-log').textContent = 'No failed records to retry'; return; }
   for (const obs of failed) { obs.submitStatus = 'ready'; obs.submitError = null; await db.observations.put(obs); }
   loadProcess(); updateQueueChip();
+  $('process-log').textContent = `${failed.length} failed record(s) marked ready.`;
 });
 $('dry-run-btn').addEventListener('click', async () => {
   const ready = await db.observations.where('submitStatus').equals('ready').toArray();
   const out = ready.map(o => ({ localId: o.localId, category: o.category, subject: o.subjectCommonName, trip: o.tripLocalId, backendId: o.backendObservationId }));
   $('dry-run-result').style.display = 'block';
   $('dry-run-result').textContent = JSON.stringify(out, null, 2);
+  $('process-log').textContent = `Dry run: ${ready.length} ready record(s).`;
 });
 
 async function processObservation(obs) {
-  if (!obs.audioBlobId) { obs.transcriptionStatus = 'done'; obs.classificationStatus = 'done'; await db.observations.put(obs); return; }
-  if (settings.llmProvider === 'manual') {
-    obs.transcriptionStatus = 'done'; obs.transcript = obs.transcript || '';
-    obs.classificationStatus = 'done';
-    obs.submitStatus = 'ready';
-    await db.observations.put(obs);
-    return;
-  }
-  if (obs.transcriptionStatus !== 'done') {
-    try {
-      const audioRec = await db.audioBlobs.get(obs.audioBlobId);
-      if (!audioRec) throw new Error('Audio blob missing');
-      const trans = await transcribeAudio(audioRec.blob, obs.audioMimeType);
-      obs.transcript = trans;
+  let statusMsg = '';
+  try {
+    if (!obs.audioBlobId) {
       obs.transcriptionStatus = 'done';
-      obs.updatedAt = Date.now();
+      obs.classificationStatus = 'done';
       await db.observations.put(obs);
-      logInfo('Transcribed ' + obs.localId);
-    } catch(e) {
-      logError('Transcription failed ' + obs.localId + ': ' + e.message);
-      obs.transcriptionStatus = 'error';
-      await db.observations.put(obs);
-      return;
-    }
-  }
-  if (obs.classificationStatus !== 'done') {
-    try {
-      const cls = await classifyObservation(obs);
-      Object.assign(obs, cls);
+      statusMsg = 'No audio — marked done';
+    } else if (settings.llmProvider === 'manual') {
+      obs.transcriptionStatus = 'done';
+      obs.transcript = obs.transcript || '';
       obs.classificationStatus = 'done';
       obs.submitStatus = 'ready';
-      obs.updatedAt = Date.now();
       await db.observations.put(obs);
-      logInfo('Classified ' + obs.localId);
-    } catch(e) {
-      logError('Classification failed ' + obs.localId + ': ' + e.message);
-      obs.classificationStatus = 'error';
-      await db.observations.put(obs);
+      statusMsg = 'Manual mode — marked ready';
+    } else {
+      if (obs.transcriptionStatus !== 'done') {
+        try {
+          const audioRec = await db.audioBlobs.get(obs.audioBlobId);
+          if (!audioRec) throw new Error('Audio blob missing');
+          const trans = await transcribeAudio(audioRec.blob, obs.audioMimeType);
+          obs.transcript = trans;
+          obs.transcriptionStatus = 'done';
+          obs.updatedAt = Date.now();
+          await db.observations.put(obs);
+          logInfo('Transcribed ' + obs.localId);
+          statusMsg = 'Transcribed';
+        } catch(e) {
+          obs.transcriptionStatus = 'error';
+          await db.observations.put(obs);
+          throw e;
+        }
+      }
+      if (obs.classificationStatus !== 'done') {
+        try {
+          const cls = await classifyObservation(obs);
+          Object.assign(obs, cls);
+          obs.classificationStatus = 'done';
+          obs.submitStatus = 'ready';
+          obs.updatedAt = Date.now();
+          await db.observations.put(obs);
+          logInfo('Classified ' + obs.localId);
+          statusMsg = 'Classified';
+        } catch(e) {
+          obs.classificationStatus = 'error';
+          await db.observations.put(obs);
+          throw e;
+        }
+      }
     }
+  } catch(e) {
+    logError('Process failed ' + obs.localId + ': ' + e.message);
+    statusMsg = 'Error: ' + e.message;
   }
-  loadProcess(); updateQueueChip();
+  loadProcess();
+  updateQueueChip();
+  return statusMsg;
 }
 
 async function transcribeAudio(blob, mime) {
