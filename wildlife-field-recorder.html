@@ -543,9 +543,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.6" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.6
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.7" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.7
 </footer>
 </div>
 
@@ -553,7 +553,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.11.6';
+const APP_VERSION = '2026.05.11.7';
 
 /* ========================
    DB (Dexie)
@@ -2597,13 +2597,17 @@ function extractArrayFromResponse(data) {
 
 function normalizeServerRecord(item) {
   if (!item) return item;
+  let payload = item;
+  // Unwrap common server response wrappers
+  if (item.data && typeof item.data === 'object' && !Array.isArray(item.data)) payload = item.data;
   if (item.attributes && typeof item.attributes === 'object') {
-    const rec = { ...item.attributes, id: item.id, backendId: item.id };
-    if (item.localId) rec.localId = item.localId;
-    if (item.localTripId) rec.localTripId = item.localTripId;
-    return rec;
+    payload = { ...item.attributes };
   }
-  return item;
+  const rec = { ...payload };
+  if (item.id && !rec.id) rec.id = item.id;
+  if (item.backendId && !rec.backendId) rec.backendId = item.backendId;
+  if (!rec.backendId && rec.id) rec.backendId = rec.id;
+  return rec;
 }
 
 async function fetchServerObservations() {
@@ -2614,7 +2618,7 @@ async function fetchServerObservations() {
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
     const arr = extractArrayFromResponse(data).map(normalizeServerRecord);
-    logInfo('Server observations fetched: ' + arr.length);
+    if (arr.length) { logInfo('Server observations fetched: ' + arr.length + ' | first keys: ' + Object.keys(arr[0]).join(', ') + ' | sample id=' + (arr[0].localId || arr[0].id || 'n/a')); }
     return arr;
   } catch(e) { logWarn('Server observations fetch failed: ' + e.message); return []; }
 }
@@ -2627,7 +2631,7 @@ async function fetchServerTrips() {
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
     const arr = extractArrayFromResponse(data).map(normalizeServerRecord);
-    logInfo('Server trips fetched: ' + arr.length);
+    if (arr.length) { logInfo('Server trips fetched: ' + arr.length + ' | first keys: ' + Object.keys(arr[0]).join(', ') + ' | sample id=' + (arr[0].localTripId || arr[0].id || 'n/a')); }
     return arr;
   } catch(e) { logWarn('Server trips fetch failed: ' + e.message); return []; }
 }
@@ -2661,6 +2665,22 @@ function flattenObservation(obs) {
   };
 }
 
+function getTripObsIds(trip) {
+  if (Array.isArray(trip.observationLocalIds) && trip.observationLocalIds.length) return trip.observationLocalIds;
+  if (Array.isArray(trip.observationIds) && trip.observationIds.length) return trip.observationIds;
+  if (Array.isArray(trip.observations)) {
+    return trip.observations.map(o => (typeof o === 'string' ? o : (o.localId || o.id)));
+  }
+  return [];
+}
+
+function getObsTripRef(obs) {
+  return {
+    tripLocalId: obs.tripLocalId || obs.trip_local_id || obs.tripId || obs.trip_id || null,
+    backendTripId: obs.backendTripId || obs.backend_trip_id || null
+  };
+}
+
 async function loadHistory() {
   const container = $('history-list');
   container.innerHTML = '<div class="empty">Loading…</div>';
@@ -2681,11 +2701,11 @@ async function loadHistory() {
     const id = t.localTripId || t.id;
     if (tripMap.has(id)) {
       const existing = tripMap.get(id);
-      existing.backendTripId = t.id || existing.backendTripId;
+      existing.backendTripId = t.id || t.backendId || existing.backendTripId;
       existing.submitStatus = t.submitStatus || existing.submitStatus;
       existing.source = 'merged';
     } else {
-      tripMap.set(id, { ...t, localTripId: id, observations: [], source: 'server', serverOnly: true });
+      tripMap.set(id, { ...t, localTripId: id, backendTripId: t.id || t.backendId || null, observations: [], source: 'server', serverOnly: true });
     }
   }
 
@@ -2706,9 +2726,9 @@ async function loadHistory() {
   const unsorted = [];
   for (const flat of obsMap.values()) {
     let assigned = false;
-    // First: match by explicit observationLocalIds list on the trip
+    // First: match by explicit observation ID lists on the trip
     for (const trip of tripMap.values()) {
-      const ids = trip.observationLocalIds || [];
+      const ids = getTripObsIds(trip);
       if (ids.includes(flat.id)) {
         trip.observations.push(flat);
         assigned = true;
@@ -2717,13 +2737,14 @@ async function loadHistory() {
     }
     // Second: match by trip reference on the observation itself
     if (!assigned) {
+      const ref = getObsTripRef(flat);
       for (const trip of tripMap.values()) {
-        if (flat.backendTripId && (trip.backendTripId === flat.backendTripId)) {
+        if (ref.backendTripId && (trip.backendTripId === ref.backendTripId)) {
           trip.observations.push(flat);
           assigned = true;
           break;
         }
-        if (flat.tripLocalId && (trip.localTripId === flat.tripLocalId)) {
+        if (ref.tripLocalId && (trip.localTripId === ref.tripLocalId)) {
           trip.observations.push(flat);
           assigned = true;
           break;
@@ -2732,6 +2753,18 @@ async function loadHistory() {
     }
     if (!assigned) unsorted.push(flat);
   }
+
+  // Debug: log first server trip/obs shapes
+  if (serverTrips.length) {
+    const t0 = serverTrips[0];
+    logInfo('History server trip0 keys: ' + Object.keys(t0).join(', ') + ' | obsIds=' + JSON.stringify(getTripObsIds(t0)));
+  }
+  if (serverObs.length) {
+    const o0 = serverObs[0];
+    const ref = getObsTripRef(o0);
+    logInfo('History server obs0 keys: ' + Object.keys(o0).join(', ') + ' | tripRef=' + JSON.stringify(ref));
+  }
+  logInfo(`History: ${obsMap.size} total obs, ${unsorted.length} unsorted, ${Array.from(tripMap.values()).reduce((s, t) => s + t.observations.length, 0)} matched to trips`);
 
   // Sort trip observations by timestamp
   for (const trip of tripMap.values()) {
@@ -2833,9 +2866,23 @@ async function showHistoryTripMap(tripId) {
   if (!trip) trip = serverTrips.find(t => (t.localTripId || t.id) === tripId);
   if (!trip) return;
 
-  const ids = trip.observationLocalIds || [];
+  const ids = getTripObsIds(trip);
   let obsList = localObs.filter(o => ids.includes(o.localId));
   for (const o of serverObs) { if (ids.includes(o.localId || o.id) && !obsList.find(x => x.localId === (o.localId || o.id))) obsList.push(o); }
+  // Also include observations that reference this trip by tripLocalId or backendTripId
+  const tripId = trip.localTripId || trip.id;
+  const backendId = trip.backendTripId || trip.id;
+  for (const o of localObs) {
+    if ((o.tripLocalId && o.tripLocalId === tripId) || (o.backendTripId && o.backendTripId === backendId)) {
+      if (!obsList.find(x => x.localId === o.localId)) obsList.push(o);
+    }
+  }
+  for (const o of serverObs) {
+    const ref = getObsTripRef(o);
+    if ((ref.tripLocalId && ref.tripLocalId === tripId) || (ref.backendTripId && ref.backendTripId === backendId)) {
+      if (!obsList.find(x => x.localId === (o.localId || o.id))) obsList.push(o);
+    }
+  }
   obsList.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 
   const gpsObs = obsList.filter(o => o.latitude != null && o.longitude != null);
