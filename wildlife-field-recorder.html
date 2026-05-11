@@ -145,6 +145,40 @@ th { color: var(--text-muted); font-weight: 600; }
 .trip-thumb-placeholder { width: 56px; height: 56px; border-radius: var(--radius-sm); border: 1px dashed var(--border); color: var(--text-dim); display: grid; place-items: center; font-size: 0.72rem; }
 .trip-popup { min-width: 180px; color: #1f2933; }
 .trip-popup img { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; float: right; margin: 0 0 6px 8px; }
+#menu-toggle { display: none; background: none; border: none; color: var(--text); font-size: 1.4rem; padding: 4px 8px; cursor: pointer; }
+@media (max-width: 639px) {
+  #menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
+  nav#tabs {
+    display: none;
+    position: fixed;
+    top: 47px;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+    max-height: calc(100vh - 47px);
+    overflow-y: auto;
+    box-shadow: var(--shadow);
+  }
+  nav#tabs.open { display: flex; }
+  nav#tabs button {
+    width: 100%;
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    border-left: 3px solid transparent;
+    border-bottom-color: var(--border);
+    font-size: 0.9rem;
+  }
+  nav#tabs button.active {
+    border-bottom-color: var(--border);
+    border-left-color: var(--accent-bright);
+    color: var(--accent-bright);
+  }
+}
 @media (min-width: 640px) {
   .map-wrap { height: 420px; }
 }
@@ -163,6 +197,7 @@ th { color: var(--text-muted); font-weight: 600; }
     <span id="gps-chip" class="status-chip off">GPS off</span>
     <span id="queue-chip" class="status-chip">Queue 0</span>
   </div>
+  <button id="menu-toggle" aria-label="Menu" aria-expanded="false" aria-controls="tabs">☰</button>
 </header>
 <nav id="tabs">
   <button data-tab="about" class="active">About</button>
@@ -453,9 +488,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.10.6" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.10.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.10.6
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.2
 </footer>
 </div>
 
@@ -463,7 +498,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.10.6';
+const APP_VERSION = '2026.05.11.2';
 
 /* ========================
    DB (Dexie)
@@ -611,11 +646,31 @@ function showTab(name) {
   if (name === 'diagnostics') renderDiagnostics();
   if (name === 'setup') loadSetup();
   if (name === 'map') loadMapTab();
+  const tabs = $('tabs');
+  if (tabs) { tabs.classList.remove('open'); }
+  const toggle = $('menu-toggle');
+  if (toggle) { toggle.setAttribute('aria-expanded', 'false'); }
 }
 
 document.addEventListener('click', e => {
   const btn = e.target.closest('nav#tabs button[data-tab]');
   if (btn) { e.preventDefault(); showTab(btn.dataset.tab); }
+});
+
+$('menu-toggle').addEventListener('click', () => {
+  const tabs = $('tabs');
+  const toggle = $('menu-toggle');
+  const open = tabs.classList.toggle('open');
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+});
+
+document.addEventListener('click', e => {
+  const tabs = $('tabs');
+  const toggle = $('menu-toggle');
+  if (tabs && tabs.classList.contains('open') && !tabs.contains(e.target) && !toggle.contains(e.target)) {
+    tabs.classList.remove('open');
+    toggle.setAttribute('aria-expanded', 'false');
+  }
 });
 
 /* ========================
@@ -1207,6 +1262,7 @@ async function loadTrips() {
         <button class="btn btn-small" data-trip-view="${t.localTripId}">View</button>
         <button class="btn btn-small" data-trip-rename="${t.localTripId}">Rename</button>
         <button class="btn btn-small" data-trip-submit="${t.localTripId}">Submit</button>
+        <button class="btn btn-small btn-danger" data-trip-delete="${t.localTripId}">Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -1221,6 +1277,11 @@ document.addEventListener('click', async e => {
   if (subBtn) { await submitTrip(subBtn.dataset.tripSubmit); }
   const renameBtn = e.target.closest('button[data-trip-rename]');
   if (renameBtn) { await renameTrip(renameBtn.dataset.tripRename); }
+  const delBtn = e.target.closest('button[data-trip-delete]');
+  if (delBtn) {
+    const trip = await db.trips.get(delBtn.dataset.tripDelete);
+    if (trip) { if (confirm(`Delete trip "${trip.title}"? Observations will remain but be unlinked.`)) { await deleteTrip(trip); loadTrips(); populateTripFilter(); } }
+  }
 });
 
 async function renameTrip(tripId) {
@@ -1480,6 +1541,7 @@ function renderReview() {
         <button class="btn btn-small" data-obs-play="${o.localId}">Play audio</button>
         <button class="btn btn-small" data-obs-add-photo="${o.localId}">Add photos</button>
         <button class="btn btn-small" data-obs-download="${o.localId}">Download audio</button>
+        <button class="btn btn-small btn-danger" data-obs-delete="${o.localId}">Delete</button>
       </div>
       <div class="photo-grid" id="photos-${o.localId}"></div>
     </div>`;
@@ -1500,6 +1562,11 @@ document.addEventListener('click', async e => {
   if (dlBtn) { await downloadObsAudio(dlBtn.dataset.obsDownload); }
   const addPhotoBtn = e.target.closest('button[data-obs-add-photo]');
   if (addPhotoBtn) { openPhotoPicker(addPhotoBtn.dataset.obsAddPhoto); }
+  const delBtn = e.target.closest('button[data-obs-delete]');
+  if (delBtn) {
+    const obs = await db.observations.get(delBtn.dataset.obsDelete);
+    if (obs) { if (confirm('Delete observation?')) { await deleteObservation(obs); renderReview(); updateQueueChip(); } }
+  }
 });
 
 async function openObsEditor(localId) {
@@ -1544,11 +1611,8 @@ async function openObsEditor(localId) {
     overlay.remove(); renderReview(); loadProcess(); updateQueueChip();
   };
   $('edit-delete').onclick = async () => {
-    if (!confirm('Delete this local observation?')) return;
-    await db.observations.delete(obs.localId);
-    if (obs.audioBlobId) await db.audioBlobs.delete(obs.audioBlobId);
-    const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
-    for (const ph of photos) await db.photos.delete(ph.localPhotoId);
+    if (!confirm('Delete observation?')) return;
+    await deleteObservation(obs);
     overlay.remove(); renderReview(); updateQueueChip();
   };
   document.body.appendChild(overlay);
@@ -1971,6 +2035,75 @@ async function updateBackendObservation(obs) {
     loadProcess(); updateQueueChip();
     throw e;
   }
+}
+
+/* ========================
+   Delete (local + backend)
+   ======================== */
+async function deleteObservationBackend(obs) {
+  if (!obs.backendObservationId || !settings.token) return;
+  const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}`;
+  try {
+    const r = await fetch(url, { method: 'DELETE', headers: authHeaders() });
+    if (!r.ok) throw await httpError(r);
+    logInfo('Observation deleted from backend ' + obs.localId);
+  } catch(e) {
+    logError('Backend observation delete failed ' + obs.localId + ': ' + e.message);
+    throw e;
+  }
+}
+
+async function deleteTripBackend(trip) {
+  if (!trip.backendTripId || !settings.token) return;
+  const url = `${apiBase()}/${settings.appId}/${settings.tripsResource}/${trip.backendTripId}`;
+  try {
+    const r = await fetch(url, { method: 'DELETE', headers: authHeaders() });
+    if (!r.ok) throw await httpError(r);
+    logInfo('Trip deleted from backend ' + trip.localTripId);
+  } catch(e) {
+    logError('Backend trip delete failed ' + trip.localTripId + ': ' + e.message);
+    throw e;
+  }
+}
+
+async function deleteObservation(obs) {
+  if (!obs) return;
+  // Try backend delete if it was submitted
+  if (obs.backendObservationId && settings.token) {
+    if (navigator.onLine) {
+      try { await deleteObservationBackend(obs); } catch(e) {
+        if (!confirm('Backend delete failed. Delete local copy only?')) return;
+      }
+    } else {
+      if (!confirm('Offline — backend record not deleted yet. Delete local copy only?')) return;
+    }
+  }
+  await db.observations.delete(obs.localId);
+  if (obs.audioBlobId) await db.audioBlobs.delete(obs.audioBlobId);
+  const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
+  for (const ph of photos) await db.photos.delete(ph.localPhotoId);
+  logInfo('Observation deleted locally ' + obs.localId);
+}
+
+async function deleteTrip(trip) {
+  if (!trip) return;
+  // Try backend delete if it was submitted
+  if (trip.backendTripId && settings.token) {
+    if (navigator.onLine) {
+      try { await deleteTripBackend(trip); } catch(e) {
+        if (!confirm('Backend delete failed. Delete local copy only?')) return;
+      }
+    } else {
+      if (!confirm('Offline — backend record not deleted yet. Delete local copy only?')) return;
+    }
+  }
+  // Remove trip reference from observations
+  for (const localId of trip.observationLocalIds || []) {
+    const obs = await db.observations.get(localId);
+    if (obs) { obs.tripLocalId = null; obs.backendTripId = null; obs.updatedAt = Date.now(); await db.observations.put(obs); }
+  }
+  await db.trips.delete(trip.localTripId);
+  logInfo('Trip deleted locally ' + trip.localTripId);
 }
 
 /* ========================
