@@ -543,9 +543,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.5" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.5
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.6" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.6
 </footer>
 </div>
 
@@ -553,7 +553,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.11.5';
+const APP_VERSION = '2026.05.11.6';
 
 /* ========================
    DB (Dexie)
@@ -2579,6 +2579,33 @@ $('clear-diag-logs').addEventListener('click', async () => { await db.logs.clear
 /* ========================
    Server fetch helpers
    ======================== */
+function extractArrayFromResponse(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.data)) return data.data;
+  if (data && Array.isArray(data.results)) return data.results;
+  if (data && Array.isArray(data.items)) return data.items;
+  if (data && typeof data === 'object') {
+    for (const key of Object.keys(data)) {
+      if (Array.isArray(data[key])) {
+        logInfo('Server response: found array in property "' + key + '" (' + data[key].length + ' items)');
+        return data[key];
+      }
+    }
+  }
+  return [];
+}
+
+function normalizeServerRecord(item) {
+  if (!item) return item;
+  if (item.attributes && typeof item.attributes === 'object') {
+    const rec = { ...item.attributes, id: item.id, backendId: item.id };
+    if (item.localId) rec.localId = item.localId;
+    if (item.localTripId) rec.localTripId = item.localTripId;
+    return rec;
+  }
+  return item;
+}
+
 async function fetchServerObservations() {
   if (!settings.token) return [];
   const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}`;
@@ -2586,7 +2613,9 @@ async function fetchServerObservations() {
     const r = await fetch(url, { headers: authHeaders() });
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
-    return Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+    const arr = extractArrayFromResponse(data).map(normalizeServerRecord);
+    logInfo('Server observations fetched: ' + arr.length);
+    return arr;
   } catch(e) { logWarn('Server observations fetch failed: ' + e.message); return []; }
 }
 
@@ -2597,7 +2626,9 @@ async function fetchServerTrips() {
     const r = await fetch(url, { headers: authHeaders() });
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
-    return Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+    const arr = extractArrayFromResponse(data).map(normalizeServerRecord);
+    logInfo('Server trips fetched: ' + arr.length);
+    return arr;
   } catch(e) { logWarn('Server trips fetch failed: ' + e.message); return []; }
 }
 
@@ -2623,7 +2654,10 @@ function flattenObservation(obs) {
     longitude: obs.longitude,
     gpsStatus: obs.gpsStatus,
     duration: obs.durationSeconds,
-    source: obs.localId ? 'local' : 'server'
+    source: obs.localId ? 'local' : 'server',
+    tripLocalId: obs.tripLocalId || null,
+    backendTripId: obs.backendTripId || null,
+    backendObservationId: obs.backendObservationId || null
   };
 }
 
@@ -2672,12 +2706,28 @@ async function loadHistory() {
   const unsorted = [];
   for (const flat of obsMap.values()) {
     let assigned = false;
+    // First: match by explicit observationLocalIds list on the trip
     for (const trip of tripMap.values()) {
       const ids = trip.observationLocalIds || [];
       if (ids.includes(flat.id)) {
         trip.observations.push(flat);
         assigned = true;
         break;
+      }
+    }
+    // Second: match by trip reference on the observation itself
+    if (!assigned) {
+      for (const trip of tripMap.values()) {
+        if (flat.backendTripId && (trip.backendTripId === flat.backendTripId)) {
+          trip.observations.push(flat);
+          assigned = true;
+          break;
+        }
+        if (flat.tripLocalId && (trip.localTripId === flat.tripLocalId)) {
+          trip.observations.push(flat);
+          assigned = true;
+          break;
+        }
       }
     }
     if (!assigned) unsorted.push(flat);
