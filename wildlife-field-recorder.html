@@ -146,6 +146,19 @@ th { color: var(--text-muted); font-weight: 600; }
 .trip-popup { min-width: 180px; color: #1f2933; }
 .trip-popup img { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; float: right; margin: 0 0 6px 8px; }
 #menu-toggle { display: none; background: none; border: none; color: var(--text); font-size: 1.4rem; padding: 4px 8px; cursor: pointer; }
+#camera-overlay { display: none; }
+#camera-overlay.open { display: flex; }
+#camera-overlay .modal-card { max-width: 640px; padding: 0; overflow: hidden; background: var(--bg); border: none; border-radius: var(--radius); }
+#camera-video { width: 100%; display: block; background: #000; }
+#camera-shutter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: 64px; height: 64px; border-radius: 50%; border: 4px solid #fff; background: var(--danger); cursor: pointer; box-shadow: var(--shadow); }
+#camera-shutter:active { transform: translateX(-50%) scale(0.94); }
+#camera-cancel { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.55); border: none; color: #fff; font-size: 1.2rem; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+#camera-zoom { position: absolute; bottom: 60px; left: 10%; width: 80%; }
+#camera-rec-badge { position: absolute; top: 8px; left: 8px; }
+#capture-photo-preview { margin: 10px 0; }
+#capture-photo-preview img { width: 120px; height: 120px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.camera-icon-btn { width: 120px; height: 120px; border-radius: 50%; border: 4px solid var(--accent-dim); background: var(--bg-3); color: var(--accent-bright); font-size: 1.1rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px; box-shadow: var(--shadow); transition: transform .15s, background .15s; cursor: pointer; }
+.camera-icon-btn:active { transform: scale(0.96); }
 @media (max-width: 639px) {
   #menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
   nav#tabs {
@@ -250,11 +263,19 @@ th { color: var(--text-muted); font-weight: 600; }
   <h2>Capture</h2>
   <div class="capture-wrap">
     <div id="capture-timer" class="timer" style="display:none;">00:00</div>
-    <button id="capture-btn" class="capture-btn" aria-label="Start recording">
+    <button id="camera-capture-btn" class="camera-icon-btn" aria-label="Start sighting capture with camera">
+      <span>📷</span>
+      <span style="font-size:0.75rem;font-weight:500;opacity:0.9;">Capture Sighting</span>
+    </button>
+    <button id="capture-btn" class="capture-btn" aria-label="Start recording" style="display:none;">
       <span id="capture-label">Capture</span>
       <span id="capture-sub" style="font-size:0.75rem;font-weight:500;opacity:0.9;">Tap to record</span>
     </button>
     <div class="capture-hint" id="capture-status">Ready</div>
+    <div id="capture-photo-preview" style="display:none;"></div>
+    <div id="capture-discard-wrap" style="display:none;margin-top:10px;">
+      <button id="capture-discard" class="btn btn-danger">Discard</button>
+    </div>
   </div>
   <div class="card">
     <label for="capture-note">Optional typed hint</label>
@@ -271,6 +292,19 @@ th { color: var(--text-muted); font-weight: 600; }
     </div>
   </div>
 </section>
+
+<!-- Camera Overlay -->
+<div class="modal-overlay" id="camera-overlay">
+  <div class="modal-card">
+    <div style="position:relative; background:#000;">
+      <video id="camera-video" autoplay playsinline muted></video>
+      <span id="camera-rec-badge" class="status-chip ok">Recording annotation…</span>
+      <button id="camera-cancel" aria-label="Cancel camera">✕</button>
+      <input type="range" id="camera-zoom" hidden aria-label="Zoom" />
+      <button id="camera-shutter" aria-label="Take photo"></button>
+    </div>
+  </div>
+</div>
 
 <!-- Process / Submit -->
 <section id="tab-process" class="tab">
@@ -488,9 +522,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.3
 </footer>
 </div>
 
@@ -498,7 +532,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.11.2';
+const APP_VERSION = '2026.05.11.3';
 
 /* ========================
    DB (Dexie)
@@ -685,6 +719,10 @@ let captureWeather = null;
 let captureContextPromise = null;
 let currentStream = null;
 let lastCapturedLocalId = null;
+let cameraStream = null;
+let cameraTrack = null;
+let sessionPhoto = null;   // { blob, mimeType, url } or null
+let discarding = false;    // true when user taps Discard
 
 function updateNetChip() {
   const chip = $('net-chip');
@@ -748,18 +786,27 @@ function stopCaptureTimer() {
   $('capture-timer').style.display = 'none';
 }
 
-async function startCapture() {
+async function startCapture(opts = {}) {
   if (recorder && recorder.state === 'recording') return;
   audioChunks = [];
   captureGPS = null;
   captureWeather = null;
   captureContextPromise = null;
+  discarding = false;
   $('capture-result').style.display = 'none';
   $('capture-status').textContent = 'Starting...';
   const btn = $('capture-btn');
+  btn.style.display = 'inline-flex';
+  $('camera-capture-btn').style.display = 'none';
   btn.classList.add('recording');
-  $('capture-label').textContent = 'Stop';
-  $('capture-sub').textContent = 'Tap to stop';
+  if (opts.stopLabel) {
+    $('capture-label').textContent = opts.stopLabel;
+    $('capture-sub').textContent = opts.stopSub || 'Tap to save';
+  } else {
+    $('capture-label').textContent = 'Stop';
+    $('capture-sub').textContent = 'Tap to stop';
+  }
+  $('capture-discard-wrap').style.display = 'block';
 
   captureContextPromise = getCurrentPosition().then(async gps => {
     captureGPS = gps;
@@ -796,13 +843,27 @@ async function startCapture() {
 function resetCaptureBtn() {
   const btn = $('capture-btn');
   btn.classList.remove('recording');
+  btn.style.display = 'none';
+  $('camera-capture-btn').style.display = 'inline-flex';
   $('capture-label').textContent = 'Capture';
   $('capture-sub').textContent = 'Tap to record';
+  $('capture-discard-wrap').style.display = 'none';
+  $('capture-photo-preview').style.display = 'none';
+  $('capture-photo-preview').innerHTML = '';
 }
 
 async function onCaptureStop() {
   stopCaptureTimer();
   resetCaptureBtn();
+  if (discarding) {
+    if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+    // clean up audio blob
+    audioChunks = [];
+    if (sessionPhoto && sessionPhoto.url) { URL.revokeObjectURL(sessionPhoto.url); sessionPhoto = null; }
+    $('capture-status').textContent = 'Discarded';
+    logInfo('Capture discarded');
+    return;
+  }
   $('capture-status').textContent = 'Saving...';
   if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
   if (captureContextPromise) {
@@ -819,6 +880,15 @@ async function onCaptureStop() {
   if (blob && audioBlobId) {
     try { await db.audioBlobs.put({ blobId: audioBlobId, blob, mimeType: mime, sizeBytes: blob.size, createdAt: Date.now() }); }
     catch(e) { logError('Audio blob save failed: ' + e.message); }
+  }
+
+  // Attach session photo if present
+  let photoLocalIds = [];
+  if (sessionPhoto && sessionPhoto.blob) {
+    const photoId = await handlePhotoBlob(localId, sessionPhoto.blob, sessionPhoto.mimeType || 'image/jpeg', 'sighting.jpg');
+    if (photoId) photoLocalIds.push(photoId);
+    if (sessionPhoto.url) { URL.revokeObjectURL(sessionPhoto.url); }
+    sessionPhoto = null;
   }
 
   const obs = {
@@ -861,7 +931,7 @@ async function onCaptureStop() {
     backendObservationId: null,
     backendFileIds: [],
     photoFileIds: [],
-    photoLocalIds: [],
+    photoLocalIds,
     submitStatus: 'local',
     submitError: null,
     updatedAt: Date.now()
@@ -879,6 +949,7 @@ async function onCaptureStop() {
     else summary.push('Location: unavailable');
     summary.push('Weather: ' + observationWeather(obs));
     summary.push('Audio: ' + (obs.audioSizeBytes > 0 ? fmtDuration(obs.durationSeconds) : 'none'));
+    if (photoLocalIds.length) summary.push('Photos: ' + photoLocalIds.length);
     summary.push('Status: ' + obs.submitStatus);
     $('capture-summary').innerHTML = summary.map(s => '<div>' + escapeHtml(s) + '</div>').join('');
     updateQueueChip();
@@ -893,9 +964,118 @@ function stopCapture() {
   else { onCaptureStop(); }
 }
 
+function discardCaptureSession() {
+  discarding = true;
+  stopCameraOnly();
+  if (recorder && recorder.state === 'recording') { stopCapture(); }
+  else { onCaptureStop(); }
+}
+
+/* ========================
+   Camera helpers
+   ======================== */
+async function openCameraOverlay() {
+  const overlay = $('camera-overlay');
+  const video = $('camera-video');
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = cameraStream;
+    await video.play();
+    cameraTrack = cameraStream.getVideoTracks()[0];
+    setupZoomControl(cameraTrack, $('camera-zoom'));
+    overlay.classList.add('open');
+    logInfo('Camera opened');
+  } catch(e) {
+    logWarn('Camera open failed: ' + e.message);
+    $('capture-status').textContent = 'Camera unavailable. Audio annotation is still recording.';
+  }
+}
+
+function setupZoomControl(track, inputEl) {
+  const capabilities = track.getCapabilities?.();
+  if (!capabilities || !capabilities.zoom) { inputEl.hidden = true; return; }
+  const zoom = capabilities.zoom;
+  inputEl.hidden = false;
+  inputEl.min = zoom.min;
+  inputEl.max = zoom.max;
+  inputEl.step = zoom.step || 0.1;
+  inputEl.value = track.getSettings?.().zoom || zoom.min;
+  inputEl.oninput = async () => {
+    try { await track.applyConstraints({ advanced: [{ zoom: Number(inputEl.value) }] }); }
+    catch(err) { logWarn('Zoom apply failed: ' + err.message); }
+  };
+}
+
+async function capturePhotoFromCamera() {
+  const video = $('camera-video');
+  if (cameraTrack && 'ImageCapture' in window) {
+    try {
+      const imageCapture = new ImageCapture(cameraTrack);
+      const blob = await imageCapture.takePhoto();
+      return blob;
+    } catch(err) { logWarn('ImageCapture failed, falling back to canvas: ' + err.message); }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 1920;
+  canvas.height = video.videoHeight || 1080;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => { if (blob) resolve(blob); else reject(new Error('Canvas photo capture failed')); }, 'image/jpeg', 0.92);
+  });
+}
+
+function stopCameraOnly() {
+  const overlay = $('camera-overlay');
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); }
+  cameraStream = null;
+  cameraTrack = null;
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function handlePhotoBlob(obsLocalId, blob, mimeType, filename) {
+  const localPhotoId = 'photo-' + uuid();
+  const photo = {
+    localPhotoId,
+    observationLocalId: obsLocalId,
+    backendObservationId: null,
+    createdAt: Date.now(),
+    blobId: localPhotoId,
+    mimeType: mimeType || 'image/jpeg',
+    sizeBytes: blob.size,
+    originalFilename: filename || 'photo.jpg',
+    caption: '',
+    uploadStatus: 'pending',
+    backendFileId: null,
+    backendFileUrl: null,
+    uploadError: null,
+    updatedAt: Date.now()
+  };
+  try {
+    await db.photos.put(photo);
+    await db.audioBlobs.put({ blobId: localPhotoId, blob, mimeType: photo.mimeType, sizeBytes: blob.size, createdAt: Date.now() });
+    logInfo('Photo saved ' + localPhotoId);
+    return localPhotoId;
+  } catch(e) {
+    logError('Photo save failed: ' + e.message);
+    return null;
+  }
+}
+
+/* ========================
+   Capture event wiring
+   ======================== */
+$('camera-capture-btn').addEventListener('click', async () => {
+  await startCapture({ stopLabel: 'Stop & Save', stopSub: 'Tap to save sighting' });
+  await openCameraOverlay();
+});
 $('capture-btn').addEventListener('click', () => {
   if ($('capture-btn').classList.contains('recording')) stopCapture(); else startCapture();
 });
+$('capture-discard').addEventListener('click', () => { discardCaptureSession(); });
 $('capture-another').addEventListener('click', () => {
   $('capture-result').style.display = 'none';
   $('capture-note').value = '';
@@ -903,6 +1083,32 @@ $('capture-another').addEventListener('click', () => {
 });
 $('capture-add-photo').addEventListener('click', () => {
   if (lastCapturedLocalId) openPhotoPicker(lastCapturedLocalId);
+});
+
+// Camera overlay controls
+$('camera-shutter').addEventListener('click', async () => {
+  try {
+    const blob = await capturePhotoFromCamera();
+    sessionPhoto = { blob, mimeType: blob.type || 'image/jpeg', url: URL.createObjectURL(blob) };
+    stopCameraOnly();
+    $('capture-photo-preview').innerHTML = `<img src="${sessionPhoto.url}" alt="Captured photo">`;
+    $('capture-photo-preview').style.display = 'block';
+    $('capture-status').textContent = 'Photo captured. Audio still recording…';
+    logInfo('Photo captured during session');
+  } catch(e) {
+    logError('Photo capture failed: ' + e.message);
+    $('capture-status').textContent = 'Photo capture failed. Audio still recording…';
+  }
+});
+$('camera-cancel').addEventListener('click', () => {
+  stopCameraOnly();
+  $('capture-status').textContent = 'Camera cancelled. Audio still recording…';
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  stopCameraOnly();
+  if (recorder && recorder.state === 'recording') recorder.stop();
 });
 
 /* ========================
