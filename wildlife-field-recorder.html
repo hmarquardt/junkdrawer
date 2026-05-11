@@ -149,6 +149,25 @@ th { color: var(--text-muted); font-weight: 600; }
 #camera-overlay { display: none; }
 #camera-overlay.open { display: flex; }
 #camera-overlay .modal-card { max-width: 640px; padding: 0; overflow: hidden; background: var(--bg); border: none; border-radius: var(--radius); }
+.history-trip { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.history-trip-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--bg-3); cursor: pointer; flex-wrap: wrap; }
+.history-trip-head .trip-title { font-weight: 700; color: var(--accent-bright); flex: 1 1 auto; }
+.history-trip-body { padding: 8px 12px; display: none; }
+.history-trip-body.open { display: block; }
+.history-obs { display: grid; grid-template-columns: 130px 90px 1fr 140px 1fr auto auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+.history-obs:last-child { border-bottom: none; }
+.history-obs .history-time { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.75rem; }
+.history-obs .history-cat { text-transform: capitalize; }
+.history-obs .history-species { font-weight: 600; color: var(--text); }
+.history-obs .history-weather { color: var(--text-dim); font-size: 0.75rem; }
+.history-obs .history-transcript { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-photo-tooltip { position: absolute; z-index: 50; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px; display: none; box-shadow: var(--shadow); }
+.history-photo-tooltip.open { display: block; }
+.history-photo-tooltip img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); margin: 2px; }
+@media (max-width: 639px) {
+  .history-obs { grid-template-columns: 1fr; gap: 4px; padding: 10px 0; }
+  .history-obs .history-time, .history-obs .history-cat, .history-obs .history-species, .history-obs .history-weather, .history-obs .history-transcript { white-space: normal; }
+}
 #camera-video { width: 100%; display: block; background: #000; }
 #camera-shutter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: 64px; height: 64px; border-radius: 50%; border: 4px solid #fff; background: var(--danger); cursor: pointer; box-shadow: var(--shadow); }
 #camera-shutter:active { transform: translateX(-50%) scale(0.94); }
@@ -219,9 +238,8 @@ th { color: var(--text-muted); font-weight: 600; }
   <button data-tab="review">Review</button>
   <button data-tab="trips">Trips</button>
   <button data-tab="map">Map</button>
-  <button data-tab="importexport">Import/Export</button>
-  <button data-tab="setup">Setup</button>
-  <button data-tab="diagnostics">Diagnostics</button>
+  <button data-tab="history">History</button>
+  <button data-tab="admin">Admin</button>
 </nav>
 <main>
 
@@ -394,30 +412,20 @@ th { color: var(--text-muted); font-weight: 600; }
   </div>
 </section>
 
-<!-- Import / Export -->
-<section id="tab-importexport" class="tab">
-  <h2>Import / Export</h2>
-  <div class="card">
-    <div class="card-title">Export</div>
-    <div class="btn-group">
-      <button id="export-all" class="btn">Export all JSON</button>
-      <button id="export-obs" class="btn">Observations only</button>
-      <button id="export-trips" class="btn">Trips only</button>
-      <button id="export-audio-meta" class="btn">Audio metadata</button>
-      <button id="export-photo-meta" class="btn">Photo metadata</button>
-    </div>
+<!-- History -->
+<section id="tab-history" class="tab">
+  <h2>History</h2>
+  <div class="btn-group" style="margin-bottom:10px;">
+    <button id="history-refresh" class="btn btn-small">↻ Refresh</button>
+    <span id="history-source-chip" class="status-chip" style="display:none;"></span>
   </div>
-  <div class="card">
-    <div class="card-title">Import</div>
-    <p style="font-size:0.82rem;color:var(--text-muted);">Import a JSON file previously exported by this app. Existing records with the same localId will be merged (newer wins).</p>
-    <input type="file" id="import-file" accept="application/json,.json" />
-    <pre id="import-result" style="margin-top:8px;font-size:0.8rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);display:none;"></pre>
-  </div>
+  <div id="history-list"></div>
 </section>
 
-<!-- Setup / Admin -->
-<section id="tab-setup" class="tab">
-  <h2>Setup / Admin</h2>
+<!-- Admin -->
+<section id="tab-admin" class="tab">
+  <h2>Admin</h2>
+
   <div class="card">
     <div class="card-title">LabBox Backend</div>
     <label>API base URL</label>
@@ -493,38 +501,51 @@ th { color: var(--text-muted); font-weight: 600; }
       <button id="clear-all" class="btn btn-danger btn-small">Clear all local data</button>
     </div>
   </div>
-</section>
 
-<!-- Diagnostics -->
-<section id="tab-diagnostics" class="tab">
-  <h2>Diagnostics / Logs</h2>
   <div class="card">
-    <div class="card-title">Capabilities</div>
-    <div id="diag-caps" style="font-size:0.85rem;color:var(--text-muted);"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">Last Requests</div>
-    <div id="diag-requests" style="font-size:0.85rem;color:var(--text-muted);"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">Storage</div>
-    <div id="diag-storage" style="font-size:0.85rem;color:var(--text-muted);"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">App Logs</div>
+    <div class="card-title">Import / Export</div>
     <div class="btn-group">
-      <button id="copy-diag" class="btn btn-small">Copy diagnostics to clipboard</button>
-      <button id="clear-diag-logs" class="btn btn-small">Clear logs</button>
+      <button id="export-all" class="btn">Export all JSON</button>
+      <button id="export-obs" class="btn">Observations only</button>
+      <button id="export-trips" class="btn">Trips only</button>
+      <button id="export-audio-meta" class="btn">Audio metadata</button>
+      <button id="export-photo-meta" class="btn">Photo metadata</button>
     </div>
-    <div id="diag-logs" style="margin-top:8px;max-height:360px;overflow:auto;font-family:var(--font-mono);font-size:0.78rem;"></div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-top:10px;">Import a JSON file previously exported by this app. Existing records with the same localId will be merged (newer wins).</p>
+    <input type="file" id="import-file" accept="application/json,.json" />
+    <pre id="import-result" style="margin-top:8px;font-size:0.8rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);display:none;"></pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Diagnostics / Logs</div>
+    <div class="card">
+      <div class="card-title">Capabilities</div>
+      <div id="diag-caps" style="font-size:0.85rem;color:var(--text-muted);"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Last Requests</div>
+      <div id="diag-requests" style="font-size:0.85rem;color:var(--text-muted);"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Storage</div>
+      <div id="diag-storage" style="font-size:0.85rem;color:var(--text-muted);"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">App Logs</div>
+      <div class="btn-group">
+        <button id="copy-diag" class="btn btn-small">Copy diagnostics to clipboard</button>
+        <button id="clear-diag-logs" class="btn btn-small">Clear logs</button>
+      </div>
+      <div id="diag-logs" style="margin-top:8px;max-height:360px;overflow:auto;font-family:var(--font-mono);font-size:0.78rem;"></div>
+    </div>
   </div>
 </section>
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.05.11.5
 </footer>
 </div>
 
@@ -532,7 +553,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.05.11.4';
+const APP_VERSION = '2026.05.11.5';
 
 /* ========================
    DB (Dexie)
@@ -677,8 +698,8 @@ function showTab(name) {
   if (name === 'review') loadReview();
   if (name === 'trips') loadTrips();
   if (name === 'process') loadProcess();
-  if (name === 'diagnostics') renderDiagnostics();
-  if (name === 'setup') loadSetup();
+  if (name === 'history') loadHistory();
+  if (name === 'admin') { loadSetup(); renderDiagnostics(); }
   if (name === 'map') loadMapTab();
   const tabs = $('tabs');
   if (tabs) { tabs.classList.remove('open'); }
@@ -2554,6 +2575,307 @@ $('copy-diag').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(text); alert('Diagnostics copied'); } catch(e) { logError('Clipboard failed: ' + e.message); }
 });
 $('clear-diag-logs').addEventListener('click', async () => { await db.logs.clear(); renderDiagnostics(); });
+
+/* ========================
+   Server fetch helpers
+   ======================== */
+async function fetchServerObservations() {
+  if (!settings.token) return [];
+  const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}`;
+  try {
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) throw await httpError(r);
+    const data = await r.json();
+    return Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+  } catch(e) { logWarn('Server observations fetch failed: ' + e.message); return []; }
+}
+
+async function fetchServerTrips() {
+  if (!settings.token) return [];
+  const url = `${apiBase()}/${settings.appId}/${settings.tripsResource}`;
+  try {
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) throw await httpError(r);
+    const data = await r.json();
+    return Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+  } catch(e) { logWarn('Server trips fetch failed: ' + e.message); return []; }
+}
+
+/* ========================
+   History
+   ======================== */
+function flattenObservation(obs) {
+  const w = obs.weatherRaw && obs.weatherRaw.current ? obs.weatherRaw.current : {};
+  return {
+    id: obs.localId || obs.id,
+    timestamp: obs.createdAt || obs.startedAt || Date.now(),
+    category: obs.category || 'unknown',
+    species: obs.subjectCommonName || null,
+    transcript: obs.transcript || obs.userNoteText || null,
+    weather: {
+      condition: weatherCodeLabel(w.weather_code) || 'n/a',
+      tempF: w.temperature_2m != null ? Math.round(w.temperature_2m) + '°F' : 'n/a',
+      pressure: w.pressure_msl != null ? Math.round(w.pressure_msl) + ' hPa' : (w.surface_pressure != null ? Math.round(w.surface_pressure) + ' hPa' : 'n/a')
+    },
+    audioBlobId: obs.audioBlobId || null,
+    photoLocalIds: obs.photoLocalIds || [],
+    latitude: obs.latitude,
+    longitude: obs.longitude,
+    gpsStatus: obs.gpsStatus,
+    duration: obs.durationSeconds,
+    source: obs.localId ? 'local' : 'server'
+  };
+}
+
+async function loadHistory() {
+  const container = $('history-list');
+  container.innerHTML = '<div class="empty">Loading…</div>';
+
+  const [localTrips, localObs, serverTrips, serverObs] = await Promise.all([
+    db.trips.orderBy('startedAt').reverse().toArray(),
+    db.observations.orderBy('createdAt').reverse().toArray(),
+    fetchServerTrips(),
+    fetchServerObservations()
+  ]);
+
+  // Build unified trip map
+  const tripMap = new Map();
+  for (const t of localTrips) {
+    tripMap.set(t.localTripId, { ...t, observations: [], source: 'local', serverOnly: false });
+  }
+  for (const t of serverTrips) {
+    const id = t.localTripId || t.id;
+    if (tripMap.has(id)) {
+      const existing = tripMap.get(id);
+      existing.backendTripId = t.id || existing.backendTripId;
+      existing.submitStatus = t.submitStatus || existing.submitStatus;
+      existing.source = 'merged';
+    } else {
+      tripMap.set(id, { ...t, localTripId: id, observations: [], source: 'server', serverOnly: true });
+    }
+  }
+
+  // Build unified observation map
+  const obsMap = new Map();
+  for (const o of localObs) {
+    const flat = flattenObservation(o);
+    obsMap.set(flat.id, flat);
+  }
+  for (const o of serverObs) {
+    const id = o.localId || o.id;
+    if (!obsMap.has(id)) {
+      obsMap.set(id, flattenObservation(o));
+    }
+  }
+
+  // Assign observations to trips
+  const unsorted = [];
+  for (const flat of obsMap.values()) {
+    let assigned = false;
+    for (const trip of tripMap.values()) {
+      const ids = trip.observationLocalIds || [];
+      if (ids.includes(flat.id)) {
+        trip.observations.push(flat);
+        assigned = true;
+        break;
+      }
+    }
+    if (!assigned) unsorted.push(flat);
+  }
+
+  // Sort trip observations by timestamp
+  for (const trip of tripMap.values()) {
+    trip.observations.sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  const trips = Array.from(tripMap.values()).sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+
+  // Source chip
+  const chip = $('history-source-chip');
+  if (!settings.token) { chip.textContent = 'Local only — no token'; chip.className = 'status-chip warn'; chip.style.display = 'inline-block'; }
+  else if (serverObs.length === 0 && serverTrips.length === 0) { chip.textContent = 'Local only — server fetch failed or empty'; chip.className = 'status-chip warn'; chip.style.display = 'inline-block'; }
+  else { chip.textContent = `Merged: ${localObs.length} local + ${serverObs.length} server obs`; chip.className = 'status-chip ok'; chip.style.display = 'inline-block'; }
+
+  // Render
+  let html = '';
+  if (!trips.length && !unsorted.length) {
+    container.innerHTML = '<div class="empty">No observations yet</div>';
+    return;
+  }
+
+  for (const trip of trips) {
+    const obsCount = trip.observations.length;
+    const dist = (trip.totalDistanceEstimateMiles || 0).toFixed(1);
+    const sourceChip = trip.serverOnly ? '<span class="chip info">server only</span>' : (trip.source === 'merged' ? '<span class="chip ok">merged</span>' : '');
+    html += `<div class="history-trip">
+      <div class="history-trip-head" data-history-trip="${escapeHtml(trip.localTripId)}">
+        <span class="trip-title">${escapeHtml(trip.title || 'Untitled trip')}</span>
+        <span class="chip">${obsCount} obs</span>
+        <span class="chip">${dist} mi</span>
+        ${trip.weatherSummary ? `<span class="chip">${escapeHtml(trip.weatherSummary)}</span>` : ''}
+        ${sourceChip}
+        <button class="btn btn-small" data-history-map="${escapeHtml(trip.localTripId)}">🗺 Map</button>
+      </div>
+      <div class="history-trip-body" id="history-body-${escapeHtml(trip.localTripId)}">
+        ${renderHistoryObsRows(trip.observations)}
+      </div>
+    </div>`;
+  }
+
+  if (unsorted.length) {
+    html += `<div class="history-trip">
+      <div class="history-trip-head" data-history-trip="unsorted">
+        <span class="trip-title">Unsorted observations</span>
+        <span class="chip">${unsorted.length} obs</span>
+      </div>
+      <div class="history-trip-body" id="history-body-unsorted">
+        ${renderHistoryObsRows(unsorted)}
+      </div>
+    </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function renderHistoryObsRows(observations) {
+  if (!observations.length) return '<div class="empty" style="padding:8px 0;">No observations</div>';
+  return observations.map(o => {
+    const hasAudio = o.audioBlobId ? '' : ' disabled';
+    const hasPhotos = o.photoLocalIds.length ? '' : ' disabled';
+    const sourceChip = o.source === 'server' ? '<span class="chip info">server</span>' : '';
+    return `<div class="history-obs">
+      <span class="history-time">${fmtDate(o.timestamp)}</span>
+      <span class="history-cat">${escapeHtml(o.category)}</span>
+      <span class="history-species">${escapeHtml(o.species || '—')}</span>
+      <span class="history-weather">${escapeHtml(o.weather.condition)} · ${escapeHtml(o.weather.tempF)} · ${escapeHtml(o.weather.pressure)}</span>
+      <span class="history-transcript" title="${escapeHtml(o.transcript || '')}">${escapeHtml((o.transcript || '').slice(0, 80))}</span>
+      <button class="btn btn-small" data-history-play="${escapeHtml(o.id)}"${hasAudio}>▶</button>
+      <button class="btn btn-small" data-history-photos="${escapeHtml(o.id)}"${hasPhotos}>🖼</button>
+      ${sourceChip}
+    </div>`;
+  }).join('');
+}
+
+// History interactions
+document.addEventListener('click', async e => {
+  const tripHead = e.target.closest('.history-trip-head');
+  if (tripHead && tripHead.dataset.historyTrip) {
+    const body = $('history-body-' + tripHead.dataset.historyTrip);
+    if (body) body.classList.toggle('open');
+  }
+  const mapBtn = e.target.closest('button[data-history-map]');
+  if (mapBtn) { await showHistoryTripMap(mapBtn.dataset.historyMap); }
+  const playBtn = e.target.closest('button[data-history-play]');
+  if (playBtn) { await playObsAudio(playBtn.dataset.historyPlay); }
+  const photoBtn = e.target.closest('button[data-history-photos]');
+  if (photoBtn) { await showHistoryPhotoTooltip(photoBtn, photoBtn.dataset.historyPhotos); }
+});
+
+$('history-refresh').addEventListener('click', loadHistory);
+
+async function showHistoryTripMap(tripId) {
+  const [localTrips, localObs, serverTrips, serverObs] = await Promise.all([
+    db.trips.toArray(), db.observations.toArray(), fetchServerTrips(), fetchServerObservations()
+  ]);
+
+  // Find trip and its observations
+  let trip = localTrips.find(t => t.localTripId === tripId);
+  if (!trip) trip = serverTrips.find(t => (t.localTripId || t.id) === tripId);
+  if (!trip) return;
+
+  const ids = trip.observationLocalIds || [];
+  let obsList = localObs.filter(o => ids.includes(o.localId));
+  for (const o of serverObs) { if (ids.includes(o.localId || o.id) && !obsList.find(x => x.localId === (o.localId || o.id))) obsList.push(o); }
+  obsList.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+  const gpsObs = obsList.filter(o => o.latitude != null && o.longitude != null);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const mapId = 'history-map-' + Date.now();
+  overlay.innerHTML = `<div class="modal-card" style="max-width:720px;padding:0;overflow:hidden;">
+    <div class="modal-head" style="padding:10px 14px;background:var(--bg-3);"><h3 style="margin:0;">${escapeHtml(trip.title || 'Trip map')}</h3><button class="modal-close">&times;</button></div>
+    <div id="${mapId}" style="height:420px;width:100%;background:var(--bg);"></div>
+  </div>`;
+
+  const close = () => overlay.remove();
+  overlay.querySelector('.modal-close').onclick = close;
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) close(); });
+  document.body.appendChild(overlay);
+
+  if (!gpsObs.length) {
+    $(mapId).innerHTML = '<div class="empty" style="padding:40px 0;">No GPS points for this trip</div>';
+    return;
+  }
+
+  setTimeout(() => {
+    const hmap = L.map(mapId);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(hmap);
+    const catColors = { reptile:'#4caf50', amphibian:'#ff9800', bird:'#2196f3', mammal:'#9c27b0', fish:'#00bcd4', insect:'#cddc39', arachnid:'#795548', plant:'#8bc34a', fungus:'#795548', weather:'#607d8b', habitat:'#009688', unknown:'#9e9e9e', other:'#9e9e9e' };
+    const latlngs = [];
+    for (const o of gpsObs) {
+      const color = catColors[o.category] || '#3cb371';
+      const flat = flattenObservation(o);
+      const popup = `<div style="font-size:0.85rem;">
+        <strong>${escapeHtml(flat.species || flat.category || 'Observation')}</strong><br/>
+        ${fmtDate(o.createdAt || o.timestamp)}<br/>
+        ${escapeHtml(flat.weather.condition)} · ${escapeHtml(flat.weather.tempF)}<br/>
+        ${escapeHtml((flat.transcript || '').slice(0,120))}
+      </div>`;
+      L.circleMarker([o.latitude, o.longitude], { radius: 8, color, fillColor: color, fillOpacity: 0.85 }).addTo(hmap).bindPopup(popup);
+      latlngs.push([o.latitude, o.longitude]);
+    }
+    if (latlngs.length > 1) {
+      L.polyline(latlngs, { color: '#4ade80', weight: 3, opacity: 0.8 }).addTo(hmap);
+    }
+    hmap.fitBounds(latlngs, { padding: [20, 20] });
+  }, 50);
+}
+
+async function showHistoryPhotoTooltip(anchorEl, obsLocalId) {
+  // Remove any existing tooltip
+  const existing = document.querySelector('.history-photo-tooltip');
+  if (existing) existing.remove();
+
+  const obs = await db.observations.get(obsLocalId);
+  if (!obs || !obs.photoLocalIds || !obs.photoLocalIds.length) return;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'history-photo-tooltip open';
+  const photos = await db.photos.where('observationLocalId').equals(obsLocalId).toArray();
+  if (!photos.length) { tooltip.remove(); return; }
+
+  for (const p of photos) {
+    const rec = await db.audioBlobs.get(p.blobId);
+    if (rec) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(rec.blob);
+      img.alt = 'photo';
+      img.onclick = () => {
+        const big = document.createElement('div');
+        big.className = 'modal-overlay';
+        big.innerHTML = `<div class="modal-card" style="padding:8px;text-align:center;"><img src="${img.src}" style="max-width:100%;max-height:80vh;border-radius:var(--radius-sm);" alt="photo" /></div>`;
+        big.onclick = () => big.remove();
+        document.body.appendChild(big);
+      };
+      tooltip.appendChild(img);
+    }
+  }
+
+  const rect = anchorEl.getBoundingClientRect();
+  tooltip.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  tooltip.style.left = (rect.left + window.scrollX - 80) + 'px';
+  document.body.appendChild(tooltip);
+
+  // Close on outside click
+  const close = ev => {
+    if (!tooltip.contains(ev.target) && ev.target !== anchorEl) {
+      tooltip.remove();
+      document.removeEventListener('click', close);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close), 10);
+}
 
 /* ========================
    Queue chip
