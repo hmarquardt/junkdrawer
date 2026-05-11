@@ -119,6 +119,10 @@
   .output-section h4 { margin: 0 0 .25rem; font-size: .9rem; color: var(--text); font-weight: 600; }
   .output-section pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: .9rem; line-height: 1.45; color: var(--text); }
 
+  /* Verification panel */
+  #verificationPanel { border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; background: var(--panel); }
+  #verificationDiff .output-box { margin-top: .5rem; }
+
   /* Light theme overrides */
   html.light { --bg: #f8fafc; --panel: #ffffff; --panel-2: #f1f5f9; --border: #cbd5e1; --text: #0f172a; --text-dim: #475569; --accent: #2563eb; --accent-2: #059669; --warn: #d97706; --error: #dc2626; --ok: #059669; }
   html.light .error-box { background: rgba(220,38,38,.08); border-color: rgba(220,38,38,.25); color: #7f1d1d; }
@@ -368,9 +372,9 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.5" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.5
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.6" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.6
   </footer>
 </div>
 
@@ -610,24 +614,36 @@ function buildPrimaryUserPrompt(rubric, conversation) {
 function buildReviewSystemPrompt() {
   return `You are a rigorous MAIBA evaluation reviewer. You review an existing Q1–Q8 evaluation against the rubric and the original conversation.
 
-CRITICAL: Your entire response must be a single, valid JSON object. Do not include ANY text before or after the JSON. Do not use markdown code fences. Do not add explanations, apologies, or commentary. Output ONLY the JSON.
+Your response must be a single JSON object with exactly two fields:
 
-Schema:
-{
-  "verdict": "Pass|Needs Fixes|Invalid",
-  "confidence": 0.0,
-  "issues": [
-    {
-      "severity": "low|medium|high",
-      "field": "Q1|Q2|Q3|Q4|Q5|Q6|Q7|Q8|overall",
-      "issue": "string",
-      "evidence": "string",
-      "suggested_fix": "string"
-    }
-  ],
-  "proposed_q1_to_q8_output": "string (the complete corrected Q1–Q8 plain text, or empty if Pass)",
-  "summary": "string"
-}
+1. "comparison" — A brief (2-4 sentences) natural-language comparison. Explain what changed and why. Be concise.
+2. "corrected_q1_to_q8" — The complete corrected Q1–Q8 evaluation in the EXACT SAME format as the original. If no changes are needed, return the original text unchanged.
+
+The Q1–Q8 format must use these exact question labels:
+
+Q1. How do you evaluate the AI's first response in this conversation?
+[answer]
+
+Q2. Please explain your selection in Q1.
+[answer]
+
+Q3. How do you evaluate the AI's responses across the full conversation?
+[answer]
+
+Q4. Please explain your selection in Q3.
+[answer]
+
+Q5. Across the full conversation, which of the following response quality dimensions need to be improved?
+[answer]
+
+Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.
+[answer]
+
+Q7. Based on your overall review of this conversation, does the AI appear to have met the user's goal(s)?
+[answer]
+
+Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?
+[answer]
 
 Checklist:
 - Does Q2 support Q1?
@@ -639,11 +655,13 @@ Checklist:
 - Are any Q1–Q8 fields missing?
 - Are there unsupported claims, hallucinated facts, or invented quotes?
 - Does feedback use direct quotes where applicable?
-- Is the rating too generous under the conservative tie-break rule?`;
+- Is the rating too generous under the conservative tie-break rule?
+
+CRITICAL: Output ONLY the JSON object. No markdown fences. No text before or after.`;
 }
 
 function buildReviewUserPrompt(rubric, conversation, currentOutput) {
-  return `## Rubric\n${rubric}\n\n---\n\n## Original Conversation\n${conversation}\n\n---\n\n## Current Q1–Q8 Evaluation\n${currentOutput}\n\n---\n\n## Instructions\nReview the evaluation. Output ONLY the JSON object described in your system instructions. If fixes are needed, include the full corrected Q1–Q8 plain text in proposed_q1_to_q8_output.`;
+  return `## Rubric\n${rubric}\n\n---\n\n## Original Conversation\n${conversation}\n\n---\n\n## Current Q1–Q8 Evaluation\n${currentOutput}\n\n---\n\n## Instructions\nReview the evaluation. Output ONLY the JSON object described in your system instructions. Provide a brief comparison and the full corrected Q1–Q8 in the exact same format.`;
 }
 
 /* ----------------------------------------------------------------
@@ -691,24 +709,66 @@ function parseReviewJson(text) {
   return extractJsonObject(text);
 }
 
+/* Generate plain-text Q1–Q8 from parsed JSON */
 function renderQ1ToQ8(parsed) {
   const fields = [
-    { key: 'Q1', label: "Q1. How do you evaluate the AI's first response in this conversation?", val: parsed.q1, copyable: false },
-    { key: 'Q2', label: "Q2. Please explain your selection in Q1.", val: parsed.q2, copyable: true },
-    { key: 'Q3', label: "Q3. How do you evaluate the AI's responses across the full conversation?", val: parsed.q3, copyable: false },
-    { key: 'Q4', label: "Q4. Please explain your selection in Q3.", val: parsed.q4, copyable: true },
-    { key: 'Q5', label: "Q5. Across the full conversation, which of the following response quality dimensions need to be improved?", val: parsed.q5, copyable: false },
-    { key: 'Q6', label: "Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.", val: parsed.q6, copyable: true },
-    { key: 'Q7', label: "Q7. Based on your overall review of this conversation, does the AI appear to have met the user's goal(s)?", val: parsed.q7, copyable: false },
-    { key: 'Q8', label: "Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?", val: parsed.q8, copyable: false }
+    ['Q1. How do you evaluate the AI\'s first response in this conversation?', parsed.q1],
+    ['Q2. Please explain your selection in Q1.', parsed.q2],
+    ['Q3. How do you evaluate the AI\'s responses across the full conversation?', parsed.q3],
+    ['Q4. Please explain your selection in Q3.', parsed.q4],
+    ['Q5. Across the full conversation, which of the following response quality dimensions need to be improved?', parsed.q5],
+    ['Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.', parsed.q6],
+    ['Q7. Based on your overall review of this conversation, does the AI appear to have met the user\'s goal(s)?', parsed.q7],
+    ['Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?', parsed.q8]
   ];
-  return fields.map(f => {
-    const btn = f.copyable ? `<button class="copy-btn" data-copy-field="${f.key}" title="Copy ${f.key} to clipboard">📋</button>` : '';
-    return `<div class="output-section" data-section="${f.key}">
-  <h4>${escapeHtml(f.label)}${btn}</h4>
-  <pre>${escapeHtml(f.val ?? '')}</pre>
-</div>`;
-  }).join('');
+  return fields.map(([label, val]) => `${label}\n${val ?? ''}`).join('\n\n');
+}
+
+/* Render plain-text Q1–Q8 into HTML sections with copy buttons */
+function displayQ1ToQ8(plainText) {
+  const labels = [
+    'Q1. How do you evaluate the AI\'s first response in this conversation?',
+    'Q2. Please explain your selection in Q1.',
+    'Q3. How do you evaluate the AI\'s responses across the full conversation?',
+    'Q4. Please explain your selection in Q3.',
+    'Q5. Across the full conversation, which of the following response quality dimensions need to be improved?',
+    'Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.',
+    'Q7. Based on your overall review of this conversation, does the AI appear to have met the user\'s goal(s)?',
+    'Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?'
+  ];
+  const copyable = { Q2: true, Q4: true, Q6: true };
+  const sections = [];
+  let remaining = plainText;
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i];
+    const key = `Q${i + 1}`;
+    const re = new RegExp(`^${escapeRegex(label)}\\n`);
+    const idx = remaining.search(re);
+    if (idx === -1) continue;
+    const start = idx + label.length + 1;
+    let end = remaining.length;
+    if (i + 1 < labels.length) {
+      const nextRe = new RegExp(`\\n${escapeRegex(labels[i + 1])}\\n`);
+      const nextIdx = remaining.slice(start).search(nextRe);
+      if (nextIdx !== -1) end = start + nextIdx;
+    }
+    const val = remaining.slice(start, end).trim();
+    remaining = remaining.slice(end);
+    const btn = copyable[key] ? `<button class="copy-btn" data-copy-field="${key}" title="Copy ${key} to clipboard">📋</button>` : '';
+    sections.push(`<div class="output-section" data-section="${key}">
+  <h4>${escapeHtml(label)}${btn}</h4>
+  <pre>${escapeHtml(val)}</pre>
+</div>`);
+  }
+  if (!sections.length) {
+    // Fallback: just wrap the whole thing in a pre
+    return `<pre style="white-space:pre-wrap;font-family:inherit;font-size:.9rem;line-height:1.45;">${escapeHtml(plainText)}</pre>`;
+  }
+  return sections.join('');
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function extractFieldFromText(text, labelRegex) {
@@ -991,7 +1051,7 @@ $('#btnEvaluate').addEventListener('click', async () => {
       showError('evaluationMeta', 'Warning: model did not return valid JSON. Fallback text extraction used. Check Debug tab.');
     }
 
-    $('#evaluationOutput').innerHTML = rendered;
+    $('#evaluationOutput').innerHTML = displayQ1ToQ8(rendered);
     $('#evaluationOutput').classList.remove('empty');
     $('#btnCopyOutput').disabled = false;
     $('#btnVerify').disabled = false;
@@ -1099,20 +1159,24 @@ $('#btnCopyOutput').addEventListener('click', async () => {
 });
 
 /* Copy individual Q2/Q4/Q6 sections */
-$('#evaluationOutput').addEventListener('click', async (e) => {
-  const btn = e.target.closest('.copy-btn');
-  if (!btn) return;
-  const section = btn.closest('.output-section');
-  const pre = section?.querySelector('pre');
-  if (!pre) return;
-  const text = pre.textContent;
-  try {
-    await navigator.clipboard.writeText(text);
-    const orig = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = orig, 1200);
-  } catch(e){}
-});
+function attachCopyHandler(container) {
+  container.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    const section = btn.closest('.output-section');
+    const pre = section?.querySelector('pre');
+    if (!pre) return;
+    const text = pre.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = orig, 1200);
+    } catch(e){}
+  });
+}
+attachCopyHandler($('#evaluationOutput'));
+attachCopyHandler($('#verificationDiff'));
 
 $('#btnSaveHistory').addEventListener('click', async () => {
   if (!currentRecord) return;
@@ -1174,17 +1238,18 @@ $('#btnVerify').addEventListener('click', async () => {
     currentRecord.verificationCompletionTokens = result.usage?.completion_tokens ?? null;
     currentRecord.verificationTotalTokens = result.usage?.total_tokens ?? null;
 
-    const verdict = String(parsed.verdict || 'Invalid');
-    const proposed = String(parsed.proposed_q1_to_q8_output || '').trim();
+    const comparison = String(parsed.comparison || '').trim();
+    const proposed = String(parsed.corrected_q1_to_q8 || '').trim();
 
     const vpt = result.usage?.prompt_tokens ?? '?';
     const vct = result.usage?.completion_tokens ?? '?';
     const vtt = result.usage?.total_tokens ?? '?';
 
-    if (verdict === 'Pass' || !proposed || proposed === currentRecord.renderedQ1ToQ8Output) {
+    const noChanges = !proposed || proposed === currentRecord.renderedQ1ToQ8Output;
+
+    if (noChanges) {
       currentRecord.verificationStatus = 'pass';
-      $('#verificationSummary').textContent = `Verdict: ${verdict} (confidence: ${parsed.confidence ?? '?'})
-${parsed.summary || 'No issues found.'}\nReview tokens: ${vpt} prompt + ${vct} completion = ${vtt} total`;
+      $('#verificationSummary').innerHTML = `<strong>Reviewer check passed.</strong> ${escapeHtml(comparison) || 'No changes needed.'}<br><span style="font-size:.8rem;color:var(--text-dim);">Review tokens: ${vpt} prompt + ${vct} completion = ${vtt} total</span>`;
       $('#verificationSummary').className = 'warn-box';
       $('#verificationDiff').innerHTML = '';
       $('#verificationPanel').classList.remove('hide');
@@ -1193,7 +1258,7 @@ ${parsed.summary || 'No issues found.'}\nReview tokens: ${vpt} prompt + ${vct} c
     } else {
       currentRecord.verificationStatus = 'needs_fixes';
       currentRecord.proposedQ1ToQ8Output = proposed;
-      showDiff(currentRecord.renderedQ1ToQ8Output, proposed, parsed);
+      showDiff(currentRecord.renderedQ1ToQ8Output, proposed, comparison);
       $('#verificationPanel').classList.remove('hide');
       $('#btnApplyFixes').classList.remove('hide');
       $('#btnRejectFixes').textContent = 'Reject Proposed Fixes';
@@ -1219,9 +1284,7 @@ $('#btnApplyFixes').addEventListener('click', async () => {
   currentRecord.renderedQ1ToQ8Output = currentRecord.proposedQ1ToQ8Output;
   currentRecord.verificationApplied = true;
   currentRecord.updatedAt = new Date().toISOString();
-  // Re-parse to render with copy buttons
-  const parsed = parsePrimaryJson(currentRecord.rawPrimaryOutput) || fallbackExtractQ1ToQ8(currentRecord.renderedQ1ToQ8Output);
-  $('#evaluationOutput').innerHTML = renderQ1ToQ8(parsed);
+  $('#evaluationOutput').innerHTML = displayQ1ToQ8(currentRecord.renderedQ1ToQ8Output);
   $('#verificationPanel').classList.add('hide');
   if (!$('#privacyMode').checked) await dbSave(currentRecord);
 });
@@ -1235,22 +1298,16 @@ $('#btnRejectFixes').addEventListener('click', async () => {
 });
 
 /* ----------------------------------------------------------------
-   Diff engine
+   Diff engine — show clean comparison + proposed evaluation
    ---------------------------------------------------------------- */
-function showDiff(current, proposed, parsedReview) {
+function showDiff(currentText, proposedText, comparisonText) {
   const summaryEl = document.getElementById('verificationSummary');
   const diffEl = document.getElementById('verificationDiff');
 
   summaryEl.className = 'warn-box';
-  let summaryText = `Verdict: ${parsedReview.verdict} (confidence: ${parsedReview.confidence ?? '?'})\n${parsedReview.summary || ''}`;
-  if (parsedReview.issues && parsedReview.issues.length) {
-    summaryText += '\n\nIssues:';
-    for (const iss of parsedReview.issues) {
-      summaryText += `\n[${iss.severity}] ${iss.field}: ${iss.issue}`;
-    }
-  }
-  summaryEl.textContent = summaryText;
+  summaryEl.innerHTML = `<strong>Reviewer found issues.</strong> ${escapeHtml(comparisonText)}`;
 
+  // Build a side-by-side or stacked view of changed fields
   const parseFields = (text) => {
     const map = {};
     for (let i = 1; i <= 8; i++) {
@@ -1260,25 +1317,44 @@ function showDiff(current, proposed, parsedReview) {
     return map;
   };
 
-  const curMap = parseFields(current);
-  const propMap = parseFields(proposed);
+  const curMap = parseFields(currentText);
+  const propMap = parseFields(proposedText);
 
-  diffEl.innerHTML = '';
-  const header = document.createElement('div');
-  header.className = 'diff-row';
-  header.innerHTML = '<div class="field">Field</div><div class="old">Current</div><div class="new">Proposed</div>';
-  diffEl.appendChild(header);
+  // Build proposed output with changed sections highlighted
+  let changedKeys = [];
+  let proposedHtml = '';
+  const labels = [
+    "Q1. How do you evaluate the AI's first response in this conversation?",
+    "Q2. Please explain your selection in Q1.",
+    "Q3. How do you evaluate the AI's responses across the full conversation?",
+    "Q4. Please explain your selection in Q3.",
+    "Q5. Across the full conversation, which of the following response quality dimensions need to be improved?",
+    "Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.",
+    "Q7. Based on your overall review of this conversation, does the AI appear to have met the user's goal(s)?",
+    "Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?"
+  ];
+  const copyable = { Q2: true, Q4: true, Q6: true };
 
-  for (let i = 1; i <= 8; i++) {
-    const key = `Q${i}`;
-    const a = curMap[key] || '';
-    const b = propMap[key] || '';
-    if (a === b) continue;
-    const row = document.createElement('div');
-    row.className = 'diff-row';
-    row.innerHTML = `<div class="field">${key}</div><div class="old">${escapeHtml(a)}</div><div class="new">${escapeHtml(b)}</div>`;
-    diffEl.appendChild(row);
+  for (let i = 0; i < labels.length; i++) {
+    const key = `Q${i + 1}`;
+    const cur = curMap[key] || '';
+    const prop = propMap[key] || '';
+    const changed = cur !== prop;
+    if (changed) changedKeys.push(key);
+    const btn = copyable[key] ? `<button class="copy-btn" data-copy-field="${key}" title="Copy ${key} to clipboard">📋</button>` : '';
+    const highlight = changed ? 'style="background:rgba(251,191,36,.08);border-left:3px solid var(--warn);padding-left:.5rem;"' : '';
+    proposedHtml += `<div class="output-section" data-section="${key}" ${highlight}>
+  <h4>${escapeHtml(labels[i])}${btn}${changed ? ' <span style="color:var(--warn);font-size:.75rem;">(changed)</span>' : ''}</h4>
+  <pre>${escapeHtml(prop)}</pre>
+</div>`;
   }
+
+  diffEl.innerHTML = `
+    <div class="mt-2">
+      <h3 style="font-size:.9rem;color:var(--text-dim);margin:.5rem 0;">Proposed Evaluation — Changed fields: ${changedKeys.join(', ') || 'none'}</h3>
+      <div class="output-box" style="max-height:24rem;overflow:auto;">${proposedHtml}</div>
+    </div>
+  `;
 }
 
 /* ----------------------------------------------------------------
@@ -1342,8 +1418,7 @@ async function refreshHistory() {
         // Switch to evaluate tab
         $$('.tab-btn')[0].click();
       } else if (action === 'restore-out') {
-        const parsed = parsePrimaryJson(rec.rawPrimaryOutput) || fallbackExtractQ1ToQ8(rec.renderedQ1ToQ8Output || '');
-        $('#evaluationOutput').innerHTML = renderQ1ToQ8(parsed);
+        $('#evaluationOutput').innerHTML = displayQ1ToQ8(rec.renderedQ1ToQ8Output || '');
         $('#evaluationOutput').classList.remove('empty');
         $('#btnCopyOutput').disabled = false;
         $('#btnVerify').disabled = false;
@@ -1365,7 +1440,7 @@ async function refreshHistory() {
 function showHistoryDetail(rec) {
   detailRecordId = rec.id;
   $('#detailConversation').textContent = rec.conversationText || '(empty)';
-  $('#detailOutput').textContent = rec.renderedQ1ToQ8Output || '(empty)';
+  $('#detailOutput').innerHTML = displayQ1ToQ8(rec.renderedQ1ToQ8Output || '');
   $('#detailAuditComments').value = rec.auditComments || '';
   const pt = rec.primaryPromptTokens ?? '?';
   const ct = rec.primaryCompletionTokens ?? '?';
@@ -1399,8 +1474,7 @@ $('#btnDetailRestoreOut').addEventListener('click', async () => {
   if (!detailRecordId) return;
   const rec = (await dbGetAll()).find(x => x.id === detailRecordId);
   if (!rec) return;
-  const parsed = parsePrimaryJson(rec.rawPrimaryOutput) || fallbackExtractQ1ToQ8(rec.renderedQ1ToQ8Output || '');
-  $('#evaluationOutput').innerHTML = renderQ1ToQ8(parsed);
+  $('#evaluationOutput').innerHTML = displayQ1ToQ8(rec.renderedQ1ToQ8Output || '');
   $('#evaluationOutput').classList.remove('empty');
   $('#btnCopyOutput').disabled = false;
   $('#btnVerify').disabled = false;
