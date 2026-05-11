@@ -94,13 +94,35 @@
   .mt-2 { margin-top: 1rem; }
   .mb-1 { margin-bottom: .5rem; }
 
-  .debug-raw { background: #0a0f1a; border: 1px solid var(--border); border-radius: var(--radius); padding: .6rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .8rem; white-space: pre-wrap; color: #9ca3af; max-height: 320px; overflow-y: auto; }
+  .debug-raw { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: .6rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .8rem; white-space: pre-wrap; color: var(--text-dim); max-height: 320px; overflow-y: auto; }
   .debug-label { font-size: .75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .08em; margin: .75rem 0 .25rem; }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+  /* Theme toggle */
+  .theme-toggle { display: inline-flex; align-items: center; gap: .35rem; margin-left: auto; font-size: .85rem; color: var(--text-dim); cursor: pointer; user-select: none; }
+  .theme-toggle input { appearance: none; width: 2.2rem; height: 1.15rem; background: var(--border); border-radius: 999px; position: relative; cursor: pointer; outline: none; border: none; padding: 0; }
+  .theme-toggle input::after { content: ''; position: absolute; top: .12rem; left: .12rem; width: .9rem; height: .9rem; background: var(--text); border-radius: 50%; transition: transform .2s ease; }
+  .theme-toggle input:checked { background: var(--accent); }
+  .theme-toggle input:checked::after { transform: translateX(1.05rem); background: #fff; }
+
+  /* Output sections with copy buttons */
+  .output-section { position: relative; padding: .5rem 0; border-bottom: 1px dashed var(--border); }
+  .output-section:last-child { border-bottom: none; }
+  .output-section .copy-btn { position: absolute; top: .25rem; right: 0; background: transparent; border: 1px solid var(--border); color: var(--text-dim); border-radius: var(--radius); padding: .15rem .4rem; font-size: .75rem; cursor: pointer; opacity: .6; }
+  .output-section .copy-btn:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
+  .output-section h4 { margin: 0 0 .25rem; font-size: .9rem; color: var(--text); font-weight: 600; }
+  .output-section pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: .9rem; line-height: 1.45; color: var(--text); }
+
+  /* Light theme overrides */
+  html.light { --bg: #f8fafc; --panel: #ffffff; --panel-2: #f1f5f9; --border: #cbd5e1; --text: #0f172a; --text-dim: #475569; --accent: #2563eb; --accent-2: #059669; --warn: #d97706; --error: #dc2626; --ok: #059669; }
+  html.light .error-box { background: rgba(220,38,38,.08); border-color: rgba(220,38,38,.25); color: #7f1d1d; }
+  html.light .warn-box { background: rgba(217,119,6,.08); border-color: rgba(217,119,6,.25); color: #78350f; }
+  html.light .model-item:hover, html.light .model-item.active { background: rgba(37,99,235,.10); }
+  html.light ::-webkit-scrollbar-thumb { background: #94a3b8; }
 </style>
 </head>
 <body>
@@ -112,6 +134,11 @@
     <span id="pill-models" class="pill">Models: Not checked</span>
     <span id="pill-db" class="pill">IndexedDB: Ready</span>
     <span id="pill-call" class="pill">Last API Call: Idle</span>
+    <label class="theme-toggle" title="Toggle light/dark theme">
+      <span>☀️</span>
+      <input id="themeToggle" type="checkbox" />
+      <span>🌙</span>
+    </label>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Main tabs">
@@ -309,9 +336,9 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.2" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.2
   </footer>
 </div>
 
@@ -330,6 +357,7 @@ const LS_KEY_MODEL_REV = 'maiba.model.review';
 const LS_KEY_MAX_TOKENS = 'maiba.settings.maxTokens';
 const LS_KEY_JSON_MODE = 'maiba.settings.internalJsonMode';
 const LS_KEY_PRIVACY = 'maiba.settings.privacyMode';
+const LS_KEY_THEME = 'maiba.settings.theme';
 
 const DB_NAME = 'maibaRubricEvaluatorDB';
 const STORE = 'evaluations';
@@ -615,16 +643,22 @@ function parseReviewJson(text) {
 
 function renderQ1ToQ8(parsed) {
   const fields = [
-    ['Q1. How do you evaluate the AI\'s first response in this conversation?', parsed.q1],
-    ['Q2. Please explain your selection in Q1.', parsed.q2],
-    ['Q3. How do you evaluate the AI\'s responses across the full conversation?', parsed.q3],
-    ['Q4. Please explain your selection in Q3.', parsed.q4],
-    ['Q5. Across the full conversation, which of the following response quality dimensions need to be improved?', parsed.q5],
-    ['Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.', parsed.q6],
-    ['Q7. Based on your overall review of this conversation, does the AI appear to have met the user\'s goal(s)?', parsed.q7],
-    ['Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?', parsed.q8]
+    { key: 'Q1', label: "Q1. How do you evaluate the AI's first response in this conversation?", val: parsed.q1, copyable: false },
+    { key: 'Q2', label: "Q2. Please explain your selection in Q1.", val: parsed.q2, copyable: true },
+    { key: 'Q3', label: "Q3. How do you evaluate the AI's responses across the full conversation?", val: parsed.q3, copyable: false },
+    { key: 'Q4', label: "Q4. Please explain your selection in Q3.", val: parsed.q4, copyable: true },
+    { key: 'Q5', label: "Q5. Across the full conversation, which of the following response quality dimensions need to be improved?", val: parsed.q5, copyable: false },
+    { key: 'Q6', label: "Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.", val: parsed.q6, copyable: true },
+    { key: 'Q7', label: "Q7. Based on your overall review of this conversation, does the AI appear to have met the user's goal(s)?", val: parsed.q7, copyable: false },
+    { key: 'Q8', label: "Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?", val: parsed.q8, copyable: false }
   ];
-  return fields.map(([label, val]) => `${label}\n${val ?? ''}`).join('\n\n');
+  return fields.map(f => {
+    const btn = f.copyable ? `<button class="copy-btn" data-copy-field="${f.key}" title="Copy ${f.key} to clipboard">📋</button>` : '';
+    return `<div class="output-section" data-section="${f.key}">
+  <h4>${escapeHtml(f.label)}${btn}</h4>
+  <pre>${escapeHtml(f.val ?? '')}</pre>
+</div>`;
+  }).join('');
 }
 
 function extractFieldFromText(text, labelRegex) {
@@ -907,7 +941,8 @@ $('#btnEvaluate').addEventListener('click', async () => {
       showError('evaluationMeta', 'Warning: model did not return valid JSON. Fallback text extraction used. Check Debug tab.');
     }
 
-    $('#evaluationOutput').textContent = rendered;
+    $('#evaluationOutput').innerHTML = rendered;
+    $('#evaluationOutput').classList.remove('empty');
     $('#btnCopyOutput').disabled = false;
     $('#btnVerify').disabled = false;
     $('#btnSaveHistory').disabled = false;
@@ -963,13 +998,28 @@ function updateConversationMeta() {
   $('#conversationMeta').textContent = `${len} chars / ~${Math.ceil(len/4)} tokens`;
 }
 
+/* ----------------------------------------------------------------
+   Theme toggle
+   ---------------------------------------------------------------- */
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'light') html.classList.add('light');
+  else html.classList.remove('light');
+}
+
+$('#themeToggle').addEventListener('change', () => {
+  const theme = $('#themeToggle').checked ? 'light' : 'dark';
+  applyTheme(theme);
+  lsSet(LS_KEY_THEME, theme);
+});
+
 $('#btnLoadExample').addEventListener('click', () => {
   $('#conversationInput').value = `User: How do I reset my password?\nAssistant: You can reset your password by clicking the "Forgot Password" link on the login page and following the instructions sent to your email.\nUser: I didn't get the email.\nAssistant: Please check your spam folder. If it's not there, contact support@example.com.`;
   updateConversationMeta();
 });
 
 $('#btnClearOutput').addEventListener('click', () => {
-  $('#evaluationOutput').textContent = 'Results will appear here after evaluation.';
+  $('#evaluationOutput').innerHTML = 'Results will appear here after evaluation.';
   $('#evaluationOutput').classList.add('empty');
   $('#btnCopyOutput').disabled = true;
   $('#btnVerify').disabled = true;
@@ -979,9 +1029,27 @@ $('#btnClearOutput').addEventListener('click', () => {
 });
 
 $('#btnCopyOutput').addEventListener('click', async () => {
-  const text = $('#evaluationOutput').textContent;
+  const text = currentRecord?.renderedQ1ToQ8Output || '';
   if (!text) return;
   try { await navigator.clipboard.writeText(text); } catch(e){}
+});
+
+/* Copy individual Q2/Q4/Q6 sections */
+$('#evaluationOutput').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.copy-btn');
+  if (!btn) return;
+  const field = btn.dataset.copyField;
+  const section = btn.closest('.output-section');
+  const pre = section?.querySelector('pre');
+  if (!pre) return;
+  const label = section.querySelector('h4')?.childNodes[0]?.textContent?.trim() || field;
+  const text = `${label}\n${pre.textContent}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1200);
+  } catch(e){}
 });
 
 $('#btnSaveHistory').addEventListener('click', async () => {
@@ -1078,7 +1146,9 @@ $('#btnApplyFixes').addEventListener('click', async () => {
   currentRecord.renderedQ1ToQ8Output = currentRecord.proposedQ1ToQ8Output;
   currentRecord.verificationApplied = true;
   currentRecord.updatedAt = new Date().toISOString();
-  $('#evaluationOutput').textContent = currentRecord.renderedQ1ToQ8Output;
+  // Re-parse to render with copy buttons
+  const parsed = parsePrimaryJson(currentRecord.rawPrimaryOutput) || fallbackExtractQ1ToQ8(currentRecord.renderedQ1ToQ8Output);
+  $('#evaluationOutput').innerHTML = renderQ1ToQ8(parsed);
   $('#verificationPanel').classList.add('hide');
   if (!$('#privacyMode').checked) await dbSave(currentRecord);
 });
@@ -1194,7 +1264,8 @@ async function refreshHistory() {
         // Switch to evaluate tab
         $$('.tab-btn')[0].click();
       } else if (action === 'restore-out') {
-        $('#evaluationOutput').textContent = rec.renderedQ1ToQ8Output || '';
+        const parsed = parsePrimaryJson(rec.rawPrimaryOutput) || fallbackExtractQ1ToQ8(rec.renderedQ1ToQ8Output || '');
+        $('#evaluationOutput').innerHTML = renderQ1ToQ8(parsed);
         $('#evaluationOutput').classList.remove('empty');
         $('#btnCopyOutput').disabled = false;
         $('#btnVerify').disabled = false;
@@ -1254,6 +1325,9 @@ async function init() {
   $('#maxTokens').value = lsGet(LS_KEY_MAX_TOKENS) || DEFAULT_MAX_TOKENS;
   $('#internalJsonMode').checked = lsGet(LS_KEY_JSON_MODE) !== 'false';
   $('#privacyMode').checked = lsGet(LS_KEY_PRIVACY) === 'true';
+  const savedTheme = lsGet(LS_KEY_THEME) || 'dark';
+  $('#themeToggle').checked = savedTheme === 'light';
+  applyTheme(savedTheme);
 
   // Load rubric
   const savedRubric = lsGet(LS_KEY_RUBRIC) || '';
