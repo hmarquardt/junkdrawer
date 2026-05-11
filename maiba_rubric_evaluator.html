@@ -336,9 +336,9 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.2
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.3
   </footer>
 </div>
 
@@ -576,7 +576,9 @@ function buildPrimaryUserPrompt(rubric, conversation) {
 }
 
 function buildReviewSystemPrompt() {
-  return `You are a rigorous MAIBA evaluation reviewer. You review an existing Q1–Q8 evaluation against the rubric and the original conversation. You must respond with a single JSON object and no other text.
+  return `You are a rigorous MAIBA evaluation reviewer. You review an existing Q1–Q8 evaluation against the rubric and the original conversation.
+
+CRITICAL: Your entire response must be a single, valid JSON object. Do not include ANY text before or after the JSON. Do not use markdown code fences. Do not add explanations, apologies, or commentary. Output ONLY the JSON.
 
 Schema:
 {
@@ -616,29 +618,45 @@ function buildReviewUserPrompt(rubric, conversation, currentOutput) {
    Parsing / Rendering
    ---------------------------------------------------------------- */
 function stripFences(text) {
-  return text.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  // Strip markdown code fences, even if nested or with language tags
+  return text
+    .replace(/^\s*```(?:json)?\s*/gim, '')
+    .replace(/\s*```\s*$/gim, '')
+    .trim();
 }
 
-function parsePrimaryJson(text) {
+/* Robust JSON extraction using brace-balancing to find outermost JSON object */
+function extractJsonObject(text) {
   const clean = stripFences(text);
+  // Try the whole thing first
   try {
     const obj = JSON.parse(clean);
     if (obj && typeof obj === 'object') return obj;
   } catch (e) {}
-  // Try to extract first JSON object from text
-  const first = clean.indexOf('{');
-  const last = clean.lastIndexOf('}');
-  if (first !== -1 && last !== -1 && last > first) {
-    try {
-      const obj = JSON.parse(clean.slice(first, last + 1));
-      if (obj && typeof obj === 'object') return obj;
-    } catch (e) {}
+  // Search for the first balanced JSON object via brace counting
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (ch === '{' && !depth) { start = i; depth = 1; }
+    else if (ch === '{' && depth > 0) depth++;
+    else if (ch === '}' && depth > 0) { depth--; if (!depth && start !== -1) {
+      try {
+        const obj = JSON.parse(clean.slice(start, i + 1));
+        if (obj && typeof obj === 'object') return obj;
+      } catch (e) {}
+      start = -1;
+    }}
   }
   return null;
 }
 
+function parsePrimaryJson(text) {
+  return extractJsonObject(text);
+}
+
 function parseReviewJson(text) {
-  return parsePrimaryJson(text);
+  return extractJsonObject(text);
 }
 
 function renderQ1ToQ8(parsed) {
@@ -926,7 +944,7 @@ $('#btnEvaluate').addEventListener('click', async () => {
     }
 
     const raw = result.content;
-    $('#debugRawPrimary').textContent = raw;
+    $('#debugRawPrimary').textContent = `Tokens: ${result.usage?.prompt_tokens ?? '?'} prompt + ${result.usage?.completion_tokens ?? '?'} completion = ${result.usage?.total_tokens ?? '?'} total\n\n${raw}`;
 
     let parsed = parsePrimaryJson(raw);
     let rendered;
@@ -968,8 +986,21 @@ $('#btnEvaluate').addEventListener('click', async () => {
       verificationApplied: false,
       preVerificationOutput: '',
       userNotes: '',
-      status: 'complete'
+      status: 'complete',
+      primaryPromptTokens: result.usage?.prompt_tokens ?? null,
+      primaryCompletionTokens: result.usage?.completion_tokens ?? null,
+      primaryTotalTokens: result.usage?.total_tokens ?? null,
+      verificationPromptTokens: null,
+      verificationCompletionTokens: null,
+      verificationTotalTokens: null
     };
+
+    // Show token counts
+    const pt = result.usage?.prompt_tokens ?? '?';
+    const ct = result.usage?.completion_tokens ?? '?';
+    const tt = result.usage?.total_tokens ?? '?';
+    $('#evaluationMeta').textContent = `Tokens: ${pt} prompt + ${ct} completion = ${tt} total`;
+    $('#debugLastError').textContent = '';
 
     // Auto-save unless privacy mode
     if (!$('#privacyMode').checked) {
@@ -1094,7 +1125,7 @@ $('#btnVerify').addEventListener('click', async () => {
     }
 
     const raw = result.content;
-    $('#debugRawReview').textContent = raw;
+    $('#debugRawReview').textContent = `Tokens: ${result.usage?.prompt_tokens ?? '?'} prompt + ${result.usage?.completion_tokens ?? '?'} completion = ${result.usage?.total_tokens ?? '?'} total\n\n${raw}`;
 
     const parsed = parseReviewJson(raw);
     $('#debugParsedReview').textContent = parsed ? JSON.stringify(parsed, null, 2) : 'Parse failed';
@@ -1108,13 +1139,21 @@ $('#btnVerify').addEventListener('click', async () => {
 
     currentRecord.rawVerificationOutput = raw;
     currentRecord.parsedVerificationJson = parsed;
+    currentRecord.verificationPromptTokens = result.usage?.prompt_tokens ?? null;
+    currentRecord.verificationCompletionTokens = result.usage?.completion_tokens ?? null;
+    currentRecord.verificationTotalTokens = result.usage?.total_tokens ?? null;
 
     const verdict = String(parsed.verdict || 'Invalid');
     const proposed = String(parsed.proposed_q1_to_q8_output || '').trim();
 
+    const vpt = result.usage?.prompt_tokens ?? '?';
+    const vct = result.usage?.completion_tokens ?? '?';
+    const vtt = result.usage?.total_tokens ?? '?';
+
     if (verdict === 'Pass' || !proposed || proposed === currentRecord.renderedQ1ToQ8Output) {
       currentRecord.verificationStatus = 'pass';
-      $('#verificationSummary').textContent = `Verdict: ${verdict} (confidence: ${parsed.confidence ?? '?'})\n${parsed.summary || 'No issues found.'}`;
+      $('#verificationSummary').textContent = `Verdict: ${verdict} (confidence: ${parsed.confidence ?? '?'})
+${parsed.summary || 'No issues found.'}\nReview tokens: ${vpt} prompt + ${vct} completion = ${vtt} total`;
       $('#verificationSummary').className = 'warn-box';
       $('#verificationDiff').innerHTML = '';
       $('#verificationPanel').classList.remove('hide');
@@ -1127,6 +1166,9 @@ $('#btnVerify').addEventListener('click', async () => {
       $('#verificationPanel').classList.remove('hide');
       $('#btnApplyFixes').classList.remove('hide');
       $('#btnRejectFixes').textContent = 'Reject Proposed Fixes';
+      // Append review tokens to existing meta
+      const existing = $('#evaluationMeta').textContent || '';
+      $('#evaluationMeta').textContent = existing + (existing ? ' | ' : '') + `Review tokens: ${vpt}+${vct}=${vtt}`;
     }
 
     // Update record in DB if exists
