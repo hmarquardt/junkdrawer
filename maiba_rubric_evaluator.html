@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MAIBA Rubric Evaluator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>" />
+<style>
+  :root {
+    --bg: #0b0f17;
+    --panel: #111827;
+    --panel-2: #0f1525;
+    --border: #1f2937;
+    --text: #e5e7eb;
+    --text-dim: #94a3b8;
+    --accent: #60a5fa;
+    --accent-2: #34d399;
+    --warn: #fbbf24;
+    --error: #f87171;
+    --ok: #34d399;
+    --font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --radius: 8px;
+    --shadow: 0 4px 12px rgba(0,0,0,0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font); }
+  button { font-family: inherit; cursor: pointer; }
+  textarea, input, select { font-family: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: .5rem .7rem; outline: none; }
+  textarea:focus, input:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; }
+  select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394a3b8' fill='none' stroke-width='2'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right .6rem center; padding-right: 1.6rem; }
+  label { color: var(--text-dim); font-size: .85rem; }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 1rem; }
+  header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: .5rem; }
+  header h1 { font-size: 1.15rem; margin: 0; letter-spacing: .2px; }
+  .pill { display: inline-flex; align-items: center; gap: .35rem; font-size: .75rem; padding: .25rem .55rem; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); color: var(--text-dim); }
+  .pill.ok { color: var(--ok); border-color: rgba(52,211,153,.35); }
+  .pill.warn { color: var(--warn); border-color: rgba(251,191,36,.35); }
+  .pill.error { color: var(--error); border-color: rgba(248,113,113,.35); }
+  .pill.loading { color: var(--accent); border-color: rgba(96,165,250,.35); }
+
+  .tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+  .tab-btn { background: transparent; border: none; color: var(--text-dim); padding: .55rem .85rem; font-size: .9rem; border-bottom: 2px solid transparent; }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn:hover { color: var(--text); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 980px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
+  .card h2 { margin: 0 0 .5rem; font-size: 1rem; color: var(--text); }
+  .card h3 { margin: .75rem 0 .35rem; font-size: .9rem; color: var(--text-dim); }
+
+  .btn { background: var(--accent); color: #0b0f17; border: none; padding: .45rem .75rem; border-radius: var(--radius); font-weight: 600; font-size: .85rem; }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.danger { background: var(--error); color: #fff; }
+  .btn.success { background: var(--ok); color: #064e3b; }
+
+  .toolbar { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+
+  .output-box { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem; min-height: 8rem; white-space: pre-wrap; font-size: .9rem; line-height: 1.45; }
+  .output-box.empty { color: var(--text-dim); font-style: italic; }
+
+  .status-line { font-size: .8rem; color: var(--text-dim); margin-top: .35rem; }
+  .error-box { background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.35); color: #fecaca; padding: .6rem .8rem; border-radius: var(--radius); margin-top: .5rem; font-size: .85rem; }
+  .warn-box { background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35); color: #fde68a; padding: .6rem .8rem; border-radius: var(--radius); margin-top: .5rem; font-size: .85rem; }
+
+  .diff-row { display: grid; grid-template-columns: 60px 1fr 1fr; gap: .5rem; align-items: start; padding: .35rem 0; border-bottom: 1px solid var(--border); font-size: .85rem; }
+  .diff-row .field { color: var(--accent); font-weight: 600; }
+  .diff-row .old { color: var(--error); }
+  .diff-row .new { color: var(--ok); }
+  .diff-row .same { color: var(--text-dim); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 500; }
+  tr:hover td { background: rgba(255,255,255,.03); }
+
+  .model-select-wrap { position: relative; }
+  .model-select-wrap input { width: 100%; }
+  .model-list { position: absolute; left: 0; right: 0; top: 100%; margin-top: .25rem; max-height: 220px; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); z-index: 50; display: none; }
+  .model-list.open { display: block; }
+  .model-item { padding: .4rem .6rem; cursor: pointer; font-size: .85rem; color: var(--text); border-bottom: 1px solid var(--border); }
+  .model-item:hover, .model-item.active { background: rgba(96,165,250,.15); }
+  .model-item small { color: var(--text-dim); font-size: .75rem; display: block; }
+
+  .hide { display: none !important; }
+  .mt-1 { margin-top: .5rem; }
+  .mt-2 { margin-top: 1rem; }
+  .mb-1 { margin-bottom: .5rem; }
+
+  .debug-raw { background: #0a0f1a; border: 1px solid var(--border); border-radius: var(--radius); padding: .6rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .8rem; white-space: pre-wrap; color: #9ca3af; max-height: 320px; overflow-y: auto; }
+  .debug-label { font-size: .75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .08em; margin: .75rem 0 .25rem; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>MAIBA Rubric Evaluator</h1>
+    <span id="pill-rubric" class="pill">Rubric: Missing</span>
+    <span id="pill-key" class="pill">API Key: Missing</span>
+    <span id="pill-models" class="pill">Models: Not checked</span>
+    <span id="pill-db" class="pill">IndexedDB: Ready</span>
+    <span id="pill-call" class="pill">Last API Call: Idle</span>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Main tabs">
+    <button class="tab-btn active" role="tab" aria-selected="true" data-tab="evaluate">Evaluate</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="history">History</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="admin">Admin</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="debug">Prompt Preview / Debug</button>
+  </nav>
+
+  <!-- Evaluate -->
+  <section id="tab-evaluate" class="tab-panel active" role="tabpanel">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Conversation Input</h2>
+        <label for="conversationInput">Paste conversation transcript below. Include user and assistant turns. Preserve quotes where possible. Remove PII if necessary.</label>
+        <textarea id="conversationInput" rows="14" class="mt-1" placeholder="User: ...&#10;Assistant: ..."></textarea>
+        <input type="file" id="conversationFile" accept=".txt,.md,.json" class="mt-1" />
+        <div class="toolbar">
+          <button id="btnEvaluate" class="btn">Evaluate</button>
+          <button id="btnClearInput" class="btn secondary">Clear Input</button>
+          <button id="btnLoadExample" class="btn secondary">Load Example</button>
+        </div>
+        <div id="conversationMeta" class="status-line"></div>
+      </div>
+      <div class="card">
+        <h2>Evaluation Output</h2>
+        <div id="evaluationOutput" class="output-box empty">Results will appear here after evaluation.</div>
+        <div class="toolbar">
+          <button id="btnCopyOutput" class="btn secondary" disabled>Copy Q1–Q8 Output</button>
+          <button id="btnVerify" class="btn secondary" disabled>Verify / Sniff Test</button>
+          <button id="btnSaveHistory" class="btn secondary" disabled>Save to History</button>
+          <button id="btnClearOutput" class="btn secondary">Clear Output</button>
+        </div>
+        <div id="verificationPanel" class="mt-2 hide">
+          <h3>Verification Review</h3>
+          <div id="verificationSummary" class="warn-box"></div>
+          <div id="verificationDiff"></div>
+          <div class="toolbar mt-1">
+            <button id="btnApplyFixes" class="btn success">Apply Proposed Fixes</button>
+            <button id="btnRejectFixes" class="btn danger">Reject Proposed Fixes</button>
+          </div>
+        </div>
+        <div id="evaluationMeta" class="status-line"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section id="tab-history" class="tab-panel" role="tabpanel">
+    <div class="card">
+      <h2>History</h2>
+      <input id="historySearch" type="text" placeholder="Search conversation, output, model, date, notes…" />
+      <div class="mt-1" style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Processing Model</th>
+              <th>Q1</th>
+              <th>Q3</th>
+              <th>Q5</th>
+              <th>Q7</th>
+              <th>Verification</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="historyTable"></tbody>
+        </table>
+      </div>
+      <div id="historyEmpty" class="mt-1" style="color:var(--text-dim);font-size:.9rem;">No history records yet.</div>
+      <div class="mt-2" id="historyDetail" class="hide"></div>
+    </div>
+  </section>
+
+  <!-- Admin -->
+  <section id="tab-admin" class="tab-panel" role="tabpanel">
+    <div class="grid-2">
+      <div class="card">
+        <h2>OpenRouter API Key</h2>
+        <label for="apiKeyInput">API Key</label>
+        <input id="apiKeyInput" type="password" placeholder="sk-or-…" class="mt-1" style="width:100%;" />
+        <div class="toolbar">
+          <button id="btnSaveKey" class="btn">Save Key</button>
+          <button id="btnClearKey" class="btn secondary">Clear Key</button>
+          <button id="btnTestKey" class="btn">Test Key / Load Models</button>
+        </div>
+        <div id="keyStatus" class="status-line"></div>
+      </div>
+      <div class="card">
+        <h2>Rubric Management</h2>
+        <label for="rubricInput">Active Rubric</label>
+        <textarea id="rubricInput" rows="10" class="mt-1" placeholder="Paste the MAIBA rubric here…"></textarea>
+        <input type="file" id="rubricFile" accept=".txt,.md" class="mt-1" />
+        <div class="toolbar">
+          <button id="btnSaveRubric" class="btn">Save Rubric</button>
+          <button id="btnReloadRubric" class="btn secondary">Reload Saved</button>
+          <button id="btnClearRubric" class="btn secondary">Clear Rubric</button>
+        </div>
+        <div id="rubricMeta" class="status-line"></div>
+        <details class="mt-1">
+          <summary style="color:var(--text-dim);cursor:pointer;font-size:.85rem;">Active Rubric Preview</summary>
+          <div id="rubricPreview" class="output-box mt-1" style="min-height:4rem;font-size:.8rem;max-height:12rem;overflow:auto;"></div>
+        </details>
+      </div>
+    </div>
+
+    <div class="card mt-2">
+      <h2>Model Selectors</h2>
+      <div class="grid-2">
+        <div>
+          <label>Processing Model</label>
+          <div class="model-select-wrap mt-1">
+            <input id="modelProcessingSearch" type="text" placeholder="Search models…" autocomplete="off" />
+            <div id="modelProcessingList" class="model-list"></div>
+          </div>
+          <div id="modelProcessingSelected" class="status-line"></div>
+        </div>
+        <div>
+          <label>Review / Adjudication Model</label>
+          <div class="model-select-wrap mt-1">
+            <input id="modelReviewSearch" type="text" placeholder="Search models…" autocomplete="off" />
+            <div id="modelReviewList" class="model-list"></div>
+          </div>
+          <div id="modelReviewSelected" class="status-line"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mt-2">
+      <h2>Advanced Settings</h2>
+      <div class="grid-2">
+        <div>
+          <label for="maxTokens">Max tokens per call</label>
+          <input id="maxTokens" type="number" min="512" max="32000" value="4000" class="mt-1" />
+        </div>
+        <div>
+          <label style="display:flex;align-items:center;gap:.5rem;margin-top:1.2rem;">
+            <input id="internalJsonMode" type="checkbox" checked />
+            Use internal JSON mode when supported
+          </label>
+          <label style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem;">
+            <input id="privacyMode" type="checkbox" />
+            Privacy mode (do not auto-save to history)
+          </label>
+        </div>
+      </div>
+      <div class="toolbar mt-1">
+        <button id="btnSaveSettings" class="btn">Save Settings</button>
+      </div>
+    </div>
+
+    <div class="card mt-2">
+      <h2>History Pruning</h2>
+      <div class="toolbar">
+        <button id="btnDeleteAllHistory" class="btn danger">Delete All History</button>
+        <button id="btnPrune7" class="btn secondary">Prune > 7 days</button>
+        <button id="btnPrune30" class="btn secondary">Prune > 30 days</button>
+        <button id="btnPrune90" class="btn secondary">Prune > 90 days</button>
+        <button id="btnKeep25" class="btn secondary">Keep last 25</button>
+        <button id="btnKeep100" class="btn secondary">Keep last 100</button>
+        <button id="btnKeep500" class="btn secondary">Keep last 500</button>
+        <button id="btnExportHistory" class="btn secondary">Export JSON</button>
+        <input type="file" id="importHistoryFile" accept=".json" class="hide" />
+        <button id="btnImportHistory" class="btn secondary">Import JSON</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Debug -->
+  <section id="tab-debug" class="tab-panel" role="tabpanel">
+    <div class="card">
+      <h2>Prompt Preview</h2>
+      <div class="debug-label">Primary System Prompt</div>
+      <div id="debugPrimarySystem" class="debug-raw"></div>
+      <div class="debug-label">Primary User Prompt</div>
+      <div id="debugPrimaryUser" class="debug-raw"></div>
+      <div class="debug-label">Verification System Prompt</div>
+      <div id="debugReviewSystem" class="debug-raw"></div>
+      <div class="debug-label">Verification User Prompt</div>
+      <div id="debugReviewUser" class="debug-raw"></div>
+    </div>
+    <div class="card mt-2">
+      <h2>Raw Outputs</h2>
+      <div class="debug-label">Raw Primary Model Output</div>
+      <div id="debugRawPrimary" class="debug-raw"></div>
+      <div class="debug-label">Raw Verification Model Output</div>
+      <div id="debugRawReview" class="debug-raw"></div>
+      <div class="debug-label">Parsed Primary JSON</div>
+      <div id="debugParsedPrimary" class="debug-raw"></div>
+      <div class="debug-label">Parsed Verification JSON</div>
+      <div id="debugParsedReview" class="debug-raw"></div>
+      <div class="debug-label">Last Error Details</div>
+      <div id="debugLastError" class="debug-raw"></div>
+    </div>
+  </section>
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER -->
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.1
+  </footer>
+</div>
+
+<script>
+/* ================================================================
+   MAIBA Rubric Evaluator — Single-file vanilla JS app
+   ================================================================ */
+
+/* ----------------------------------------------------------------
+   Constants / Config
+   ---------------------------------------------------------------- */
+const LS_KEY_API = 'maiba.openrouter.apiKey';
+const LS_KEY_RUBRIC = 'maiba.rubric.active';
+const LS_KEY_MODEL_PROC = 'maiba.model.processing';
+const LS_KEY_MODEL_REV = 'maiba.model.review';
+const LS_KEY_MAX_TOKENS = 'maiba.settings.maxTokens';
+const LS_KEY_JSON_MODE = 'maiba.settings.internalJsonMode';
+const LS_KEY_PRIVACY = 'maiba.settings.privacyMode';
+
+const DB_NAME = 'maibaRubricEvaluatorDB';
+const STORE = 'evaluations';
+const DEFAULT_MAX_TOKENS = 4000;
+
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+
+/* ----------------------------------------------------------------
+   State
+   ---------------------------------------------------------------- */
+let db = null;
+let models = [];
+let currentRecord = null; // in-memory evaluation record before saving
+let activeRubricHash = '';
+
+/* ----------------------------------------------------------------
+   DOM refs
+   ---------------------------------------------------------------- */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+/* ----------------------------------------------------------------
+   localStorage helpers
+   ---------------------------------------------------------------- */
+function lsGet(k) { try { return localStorage.getItem(k); } catch(e){ return null; } }
+function lsSet(k,v) { try { localStorage.setItem(k,v); } catch(e){} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch(e){} }
+
+/* ----------------------------------------------------------------
+   IndexedDB
+   ---------------------------------------------------------------- */
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      const s = d.createObjectStore(STORE, { keyPath: 'id' });
+      s.createIndex('createdAt', 'createdAt', { unique: false });
+      s.createIndex('processingModel', 'processingModel', { unique: false });
+      s.createIndex('reviewModel', 'reviewModel', { unique: false });
+      s.createIndex('rubricHash', 'rubricHash', { unique: false });
+    };
+  });
+}
+
+async function dbSave(record) {
+  if (!db) return;
+  const tx = db.transaction(STORE, 'readwrite');
+  const store = tx.objectStore(STORE);
+  return new Promise((res, rej) => {
+    const r = store.put(record);
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function dbDelete(id) {
+  if (!db) return;
+  const tx = db.transaction(STORE, 'readwrite');
+  const store = tx.objectStore(STORE);
+  return new Promise((res, rej) => {
+    const r = store.delete(id);
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function dbGetAll() {
+  if (!db) return [];
+  const tx = db.transaction(STORE, 'readonly');
+  const store = tx.objectStore(STORE);
+  return new Promise((res, rej) => {
+    const r = store.getAll();
+    r.onsuccess = () => res(r.result || []);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function dbPruneOlderThan(days) {
+  const all = await dbGetAll();
+  const cutoff = Date.now() - days * 86400000;
+  for (const rec of all) {
+    if (new Date(rec.createdAt).getTime() < cutoff) await dbDelete(rec.id);
+  }
+}
+
+async function dbKeepLastN(n) {
+  const all = await dbGetAll();
+  all.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  for (let i = n; i < all.length; i++) await dbDelete(all[i].id);
+}
+
+/* ----------------------------------------------------------------
+   Crypto helpers
+   ---------------------------------------------------------------- */
+async function sha256(text) {
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* ----------------------------------------------------------------
+   UI helpers
+   ---------------------------------------------------------------- */
+function setPill(id, text, type) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'pill' + (type ? ' ' + type : '');
+}
+
+function showError(containerId, msg) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const box = document.createElement('div');
+  box.className = 'error-box';
+  box.textContent = msg;
+  el.innerHTML = '';
+  el.appendChild(box);
+}
+
+function clearError(containerId) {
+  const el = document.getElementById(containerId);
+  if (el) el.innerHTML = '';
+}
+
+/* ----------------------------------------------------------------
+   OpenRouter API
+   ---------------------------------------------------------------- */
+function getHeaders() {
+  const key = lsGet(LS_KEY_API);
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${key || ''}`,
+    'HTTP-Referer': window.location.href,
+    'X-OpenRouter-Title': 'MAIBA Rubric Evaluator'
+  };
+}
+
+async function fetchModels() {
+  setPill('pill-models', 'Loading…', 'loading');
+  try {
+    const res = await fetch(`${OPENROUTER_BASE}/models`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    models = (data.data || []).sort((a,b) => a.id.localeCompare(b.id));
+    setPill('pill-models', `Loaded ${models.length} models`, 'ok');
+    populateModelLists();
+    return models;
+  } catch (e) {
+    setPill('pill-models', 'Failed', 'error');
+    console.error('Model fetch failed', e);
+    return [];
+  }
+}
+
+async function callOpenRouterChat({ model, messages, temperature, max_tokens, useJsonMode = false }) {
+  setPill('pill-call', 'Running…', 'loading');
+  const body = { model, messages, temperature, max_tokens };
+  if (useJsonMode) body.response_format = { type: 'json_object' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) throw new Error('Authentication error (401/403). Check your API key.');
+      if (res.status === 429) throw new Error('Rate limited (429). Please wait and retry.');
+      const txt = await res.text();
+      throw new Error(`OpenRouter error ${res.status}: ${txt}`);
+    }
+    const data = await res.json();
+    const choice = (data.choices || [])[0];
+    const content = choice?.message?.content || '';
+    setPill('pill-call', 'Success', 'ok');
+    return { content, usage: data.usage, model: data.model, raw: data };
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') throw new Error('Request timed out after 120 seconds.');
+    // If JSON mode might have caused failure, caller can retry without it
+    throw e;
+  }
+}
+
+/* ----------------------------------------------------------------
+   Prompt builders
+   ---------------------------------------------------------------- */
+function buildPrimarySystemPrompt() {
+  return `You are a meticulous MAIBA conversation quality evaluator. Apply the provided rubric exactly. Do not invent facts. Evaluate only the provided conversation. Use direct quotes from the assistant response when supporting Q2, Q4, and Q6. Apply the conservative tie-break rule. Ensure Q5 mirrors every failed dimension mentioned in Q2 and Q4. If the conversation has one turn, Q3/Q4 may match Q1/Q2.
+
+You must respond with a single JSON object and no other text. Do not use markdown code fences. Use this exact schema:
+
+{
+  "q1": "Very Good|Good|Just Okay|Bad|Very Bad",
+  "q2": "string (bullet points: dimension, success/failure/mixed, impact, short evidence quote)",
+  "q3": "Very Good|Good|Just Okay|Bad|Very Bad",
+  "q4": "string (bullet points)",
+  "q5": "Comma-separated list from: Understands User Intent, Accuracy, Personalization, Actionability, Clarity, Style/Tone, Safety. If none: None",
+  "q6": "string (one bullet per Q5 dimension, with explanation, evidence quote, and recommendation. If Q5 is None: N/A)",
+  "q7": "Yes - the AI appears to have met all of the user's goals|Yes - the AI appears to have met some (but not all) of the user's goals|No - the AI did not seem to have met any of the user's goals|Not sure - I could not infer whether the AI did or did-not meet any of the user's goals.",
+  "q8": "A single conversation|Multiple conversations|I'm not sure"
+}`;
+}
+
+function buildPrimaryUserPrompt(rubric, conversation) {
+  return `## Rubric\n${rubric}\n\n---\n\n## Conversation to Evaluate\n${conversation}\n\n---\n\n## Instructions\nRespond with ONLY the JSON object described in your system instructions. Do not add commentary before or after the JSON.`;
+}
+
+function buildReviewSystemPrompt() {
+  return `You are a rigorous MAIBA evaluation reviewer. You review an existing Q1–Q8 evaluation against the rubric and the original conversation. You must respond with a single JSON object and no other text.
+
+Schema:
+{
+  "verdict": "Pass|Needs Fixes|Invalid",
+  "confidence": 0.0,
+  "issues": [
+    {
+      "severity": "low|medium|high",
+      "field": "Q1|Q2|Q3|Q4|Q5|Q6|Q7|Q8|overall",
+      "issue": "string",
+      "evidence": "string",
+      "suggested_fix": "string"
+    }
+  ],
+  "proposed_q1_to_q8_output": "string (the complete corrected Q1–Q8 plain text, or empty if Pass)",
+  "summary": "string"
+}
+
+Checklist:
+- Does Q2 support Q1?
+- Does Q4 support Q3?
+- Does Q5 contain every failed dimension named in Q2 and Q4?
+- Does Q6 explain every dimension in Q5?
+- Does Q7 logically follow from Q1–Q6?
+- Does Q8 follow the single-vs-multiple conversation rule?
+- Are any Q1–Q8 fields missing?
+- Are there unsupported claims, hallucinated facts, or invented quotes?
+- Does feedback use direct quotes where applicable?
+- Is the rating too generous under the conservative tie-break rule?`;
+}
+
+function buildReviewUserPrompt(rubric, conversation, currentOutput) {
+  return `## Rubric\n${rubric}\n\n---\n\n## Original Conversation\n${conversation}\n\n---\n\n## Current Q1–Q8 Evaluation\n${currentOutput}\n\n---\n\n## Instructions\nReview the evaluation. Output ONLY the JSON object described in your system instructions. If fixes are needed, include the full corrected Q1–Q8 plain text in proposed_q1_to_q8_output.`;
+}
+
+/* ----------------------------------------------------------------
+   Parsing / Rendering
+   ---------------------------------------------------------------- */
+function stripFences(text) {
+  return text.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+}
+
+function parsePrimaryJson(text) {
+  const clean = stripFences(text);
+  try {
+    const obj = JSON.parse(clean);
+    if (obj && typeof obj === 'object') return obj;
+  } catch (e) {}
+  // Try to extract first JSON object from text
+  const first = clean.indexOf('{');
+  const last = clean.lastIndexOf('}');
+  if (first !== -1 && last !== -1 && last > first) {
+    try {
+      const obj = JSON.parse(clean.slice(first, last + 1));
+      if (obj && typeof obj === 'object') return obj;
+    } catch (e) {}
+  }
+  return null;
+}
+
+function parseReviewJson(text) {
+  return parsePrimaryJson(text);
+}
+
+function renderQ1ToQ8(parsed) {
+  const fields = [
+    ['Q1. How do you evaluate the AI\'s first response in this conversation?', parsed.q1],
+    ['Q2. Please explain your selection in Q1.', parsed.q2],
+    ['Q3. How do you evaluate the AI\'s responses across the full conversation?', parsed.q3],
+    ['Q4. Please explain your selection in Q3.', parsed.q4],
+    ['Q5. Across the full conversation, which of the following response quality dimensions need to be improved?', parsed.q5],
+    ['Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.', parsed.q6],
+    ['Q7. Based on your overall review of this conversation, does the AI appear to have met the user\'s goal(s)?', parsed.q7],
+    ['Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?', parsed.q8]
+  ];
+  return fields.map(([label, val]) => `${label}\n${val ?? ''}`).join('\n\n');
+}
+
+function extractFieldFromText(text, labelRegex) {
+  const m = text.match(labelRegex);
+  if (!m) return '';
+  const start = m.index + m[0].length;
+  const next = text.search(/\nQ\d\./);
+  const end = next > start ? next : text.length;
+  return text.slice(start, end).trim();
+}
+
+function fallbackExtractQ1ToQ8(text) {
+  // If JSON fails entirely, try to pull Q1..Q8 from plain text
+  const out = {};
+  for (let i = 1; i <= 8; i++) {
+    const re = new RegExp(`Q${i}\\.[^\\n]*\\n`);
+    out[`q${i}`] = extractFieldFromText(text, re);
+  }
+  return out;
+}
+
+function safeParseRatingQ1(text) {
+  const m = String(text).match(/Q1[^\n]*\n(.*)/);
+  return m ? m[1].trim() : '';
+}
+function safeParseRatingQ3(text) {
+  const m = String(text).match(/Q3[^\n]*\n(.*)/);
+  return m ? m[1].trim() : '';
+}
+function safeParseQ5(text) {
+  const m = String(text).match(/Q5[^\n]*\n(.*)/);
+  return m ? m[1].trim() : '';
+}
+function safeParseQ7(text) {
+  const m = String(text).match(/Q7[^\n]*\n(.*)/);
+  return m ? m[1].trim() : '';
+}
+
+/* ----------------------------------------------------------------
+   Model dropdowns
+   ---------------------------------------------------------------- */
+function populateModelLists() {
+  const createList = (listId, inputId, selectedId, lsKey) => {
+    const listEl = document.getElementById(listId);
+    const inputEl = document.getElementById(inputId);
+    const selectedEl = document.getElementById(selectedId);
+    const saved = lsGet(lsKey);
+    const render = (filter = '') => {
+      listEl.innerHTML = '';
+      const f = filter.toLowerCase();
+      let count = 0;
+      for (const m of models) {
+        const id = m.id || '';
+        const name = (m.name || id).toLowerCase();
+        if (f && !id.includes(f) && !name.includes(f)) continue;
+        const item = document.createElement('div');
+        item.className = 'model-item';
+        if (saved === id) item.classList.add('active');
+        const ctx = m.context_length ? `${(m.context_length/1000).toFixed(0)}k` : '?';
+        const pp = m.pricing?.prompt != null ? `$${Number(m.pricing.prompt).toFixed(6)}` : '?';
+        const cp = m.pricing?.completion != null ? `$${Number(m.pricing.completion).toFixed(6)}` : '?';
+        item.innerHTML = `<div>${escapeHtml(id)}</div><small>ctx ${ctx} — prompt ${pp} / completion ${cp}</small>`;
+        item.addEventListener('click', () => {
+          lsSet(lsKey, id);
+          inputEl.value = id;
+          selectedEl.textContent = `Selected: ${id}`;
+          listEl.classList.remove('open');
+          render(); // refresh active styling
+        });
+        listEl.appendChild(item);
+        count++;
+      }
+      if (!count) {
+        const empty = document.createElement('div');
+        empty.className = 'model-item';
+        empty.textContent = 'No models match filter';
+        listEl.appendChild(empty);
+      }
+    };
+    inputEl.addEventListener('input', () => render(inputEl.value));
+    inputEl.addEventListener('focus', () => { listEl.classList.add('open'); render(inputEl.value); });
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+      if (!inputEl.contains(e.target) && !listEl.contains(e.target)) listEl.classList.remove('open');
+    });
+    if (saved) selectedEl.textContent = `Selected: ${saved}`;
+    render();
+  };
+
+  createList('modelProcessingList', 'modelProcessingSearch', 'modelProcessingSelected', LS_KEY_MODEL_PROC);
+  createList('modelReviewList', 'modelReviewSearch', 'modelReviewSelected', LS_KEY_MODEL_REV);
+
+  // Defaults
+  const defaults = {
+    [LS_KEY_MODEL_PROC]: 'minimax/minimax-m2.7',
+    [LS_KEY_MODEL_REV]: 'moonshotai/kimi-k2.6'
+  };
+  for (const [key, val] of Object.entries(defaults)) {
+    if (!lsGet(key) && models.some(m => m.id === val)) {
+      lsSet(key, val);
+    }
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+}
+
+/* ----------------------------------------------------------------
+   Tab switching
+   ---------------------------------------------------------------- */
+$$('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    $$('.tab-btn').forEach(b => { b.classList.toggle('active', b === btn); b.setAttribute('aria-selected', b === btn); });
+    $$('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
+    if (tab === 'history') refreshHistory();
+    if (tab === 'debug') refreshDebug();
+  });
+});
+
+/* ----------------------------------------------------------------
+   Admin actions
+   ---------------------------------------------------------------- */
+$('#btnSaveKey').addEventListener('click', () => {
+  const v = $('#apiKeyInput').value.trim();
+  if (!v) return;
+  lsSet(LS_KEY_API, v);
+  $('#apiKeyInput').value = '';
+  updatePills();
+  $('#keyStatus').textContent = 'Key saved. It is stored locally in your browser.';
+});
+$('#btnClearKey').addEventListener('click', () => {
+  lsDel(LS_KEY_API);
+  $('#apiKeyInput').value = '';
+  updatePills();
+  $('#keyStatus').textContent = 'Key cleared.';
+});
+$('#btnTestKey').addEventListener('click', async () => {
+  $('#keyStatus').textContent = 'Testing…';
+  await fetchModels();
+  $('#keyStatus').textContent = models.length ? `Loaded ${models.length} models.` : 'Failed to load models. Check key and network.';
+});
+
+$('#btnSaveRubric').addEventListener('click', async () => {
+  const v = $('#rubricInput').value;
+  lsSet(LS_KEY_RUBRIC, v);
+  activeRubricHash = await sha256(v);
+  updatePills();
+  $('#rubricMeta').textContent = `Saved. ${v.length} chars / ~${Math.ceil(v.length/4)} tokens.`;
+  $('#rubricPreview').textContent = v || '(empty)';
+});
+$('#btnReloadRubric').addEventListener('click', () => {
+  const v = lsGet(LS_KEY_RUBRIC) || '';
+  $('#rubricInput').value = v;
+  $('#rubricPreview').textContent = v || '(empty)';
+  updatePills();
+});
+$('#btnClearRubric').addEventListener('click', () => {
+  $('#rubricInput').value = '';
+  lsDel(LS_KEY_RUBRIC);
+  activeRubricHash = '';
+  updatePills();
+});
+$('#rubricFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const text = await f.text();
+  $('#rubricInput').value = text;
+  activeRubricHash = await sha256(text);
+  updatePills();
+});
+
+$('#btnSaveSettings').addEventListener('click', () => {
+  lsSet(LS_KEY_MAX_TOKENS, String(parseInt($('#maxTokens').value,10) || DEFAULT_MAX_TOKENS));
+  lsSet(LS_KEY_JSON_MODE, String($('#internalJsonMode').checked));
+  lsSet(LS_KEY_PRIVACY, String($('#privacyMode').checked));
+  alert('Settings saved.');
+});
+
+$('#conversationFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const text = await f.text();
+  $('#conversationInput').value = text;
+  updateConversationMeta();
+});
+
+/* ----------------------------------------------------------------
+   History pruning actions
+   ---------------------------------------------------------------- */
+$('#btnDeleteAllHistory').addEventListener('click', async () => {
+  if (!confirm('Delete ALL history? This cannot be undone.')) return;
+  const all = await dbGetAll();
+  for (const r of all) await dbDelete(r.id);
+  refreshHistory();
+});
+$('#btnPrune7').addEventListener('click', async () => { await dbPruneOlderThan(7); refreshHistory(); });
+$('#btnPrune30').addEventListener('click', async () => { await dbPruneOlderThan(30); refreshHistory(); });
+$('#btnPrune90').addEventListener('click', async () => { await dbPruneOlderThan(90); refreshHistory(); });
+$('#btnKeep25').addEventListener('click', async () => { await dbKeepLastN(25); refreshHistory(); });
+$('#btnKeep100').addEventListener('click', async () => { await dbKeepLastN(100); refreshHistory(); });
+$('#btnKeep500').addEventListener('click', async () => { await dbKeepLastN(500); refreshHistory(); });
+
+$('#btnExportHistory').addEventListener('click', async () => {
+  const all = await dbGetAll();
+  const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `maiba-history-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  URL.revokeObjectURL(url);
+});
+$('#btnImportHistory').addEventListener('click', () => $('#importHistoryFile').click());
+$('#importHistoryFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const arr = JSON.parse(await f.text());
+    if (!Array.isArray(arr)) throw new Error('File is not a JSON array');
+    for (const rec of arr) { if (rec.id) await dbSave(rec); }
+    alert(`Imported ${arr.length} records.`);
+    refreshHistory();
+  } catch (err) {
+    alert('Import failed: ' + err.message);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Evaluate actions
+   ---------------------------------------------------------------- */
+$('#btnEvaluate').addEventListener('click', async () => {
+  clearError('evaluationMeta');
+  const rubric = lsGet(LS_KEY_RUBRIC) || '';
+  const conversation = $('#conversationInput').value.trim();
+  const model = lsGet(LS_KEY_MODEL_PROC);
+  const key = lsGet(LS_KEY_API);
+  const maxTokens = parseInt(lsGet(LS_KEY_MAX_TOKENS),10) || DEFAULT_MAX_TOKENS;
+  const useJson = $('#internalJsonMode').checked;
+
+  if (!key) { showError('evaluationMeta', 'Missing API key. Add it in the Admin tab.'); return; }
+  if (!rubric) { showError('evaluationMeta', 'Missing rubric. Add it in the Admin tab.'); return; }
+  if (!model) { showError('evaluationMeta', 'Missing processing model. Select one in the Admin tab.'); return; }
+  if (!conversation) { showError('evaluationMeta', 'Paste a conversation to evaluate.'); return; }
+
+  $('#btnEvaluate').disabled = true;
+  $('#evaluationOutput').textContent = 'Evaluating…';
+  $('#evaluationOutput').classList.remove('empty');
+
+  const system = buildPrimarySystemPrompt();
+  const user = buildPrimaryUserPrompt(rubric, conversation);
+
+  // Debug previews
+  $('#debugPrimarySystem').textContent = system;
+  $('#debugPrimaryUser').textContent = user;
+
+  try {
+    let result;
+    try {
+      result = await callOpenRouterChat({ model, messages: [{role:'system',content:system},{role:'user',content:user}], temperature: 0.1, max_tokens: maxTokens, useJsonMode: useJson });
+    } catch (e) {
+      if (useJson && String(e.message).toLowerCase().includes('response_format')) {
+        // Retry once without JSON mode
+        showError('evaluationMeta', 'JSON mode rejected by provider. Retrying without it. See Debug tab.');
+        result = await callOpenRouterChat({ model, messages: [{role:'system',content:system},{role:'user',content:user}], temperature: 0.1, max_tokens: maxTokens, useJsonMode: false });
+      } else {
+        throw e;
+      }
+    }
+
+    const raw = result.content;
+    $('#debugRawPrimary').textContent = raw;
+
+    let parsed = parsePrimaryJson(raw);
+    let rendered;
+    if (parsed) {
+      rendered = renderQ1ToQ8(parsed);
+      $('#debugParsedPrimary').textContent = JSON.stringify(parsed, null, 2);
+    } else {
+      // fallback
+      parsed = fallbackExtractQ1ToQ8(raw);
+      rendered = renderQ1ToQ8(parsed);
+      $('#debugParsedPrimary').textContent = 'JSON parse failed. Fallback extraction used.\n' + JSON.stringify(parsed, null, 2);
+      showError('evaluationMeta', 'Warning: model did not return valid JSON. Fallback text extraction used. Check Debug tab.');
+    }
+
+    $('#evaluationOutput').textContent = rendered;
+    $('#btnCopyOutput').disabled = false;
+    $('#btnVerify').disabled = false;
+    $('#btnSaveHistory').disabled = false;
+
+    // Build in-memory record
+    activeRubricHash = await sha256(rubric);
+    currentRecord = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      conversationText: conversation,
+      rubricHash: activeRubricHash,
+      rubricSizeChars: rubric.length,
+      processingModel: model,
+      reviewModel: lsGet(LS_KEY_MODEL_REV) || '',
+      rawPrimaryOutput: raw,
+      renderedQ1ToQ8Output: rendered,
+      parsedPrimaryJson: parsed,
+      verificationStatus: 'none',
+      rawVerificationOutput: '',
+      parsedVerificationJson: null,
+      proposedQ1ToQ8Output: '',
+      verificationApplied: false,
+      preVerificationOutput: '',
+      userNotes: '',
+      status: 'complete'
+    };
+
+    // Auto-save unless privacy mode
+    if (!$('#privacyMode').checked) {
+      await dbSave(currentRecord);
+    }
+
+  } catch (e) {
+    $('#evaluationOutput').textContent = 'Error during evaluation.';
+    $('#evaluationOutput').classList.add('empty');
+    showError('evaluationMeta', String(e.message));
+    $('#debugLastError').textContent = String(e.message) + '\n' + (e.stack || '');
+    setPill('pill-call', 'Error', 'error');
+  } finally {
+    $('#btnEvaluate').disabled = false;
+  }
+});
+
+$('#btnClearInput').addEventListener('click', () => {
+  $('#conversationInput').value = '';
+  updateConversationMeta();
+});
+$('#conversationInput').addEventListener('input', updateConversationMeta);
+
+function updateConversationMeta() {
+  const len = $('#conversationInput').value.length;
+  $('#conversationMeta').textContent = `${len} chars / ~${Math.ceil(len/4)} tokens`;
+}
+
+$('#btnLoadExample').addEventListener('click', () => {
+  $('#conversationInput').value = `User: How do I reset my password?\nAssistant: You can reset your password by clicking the "Forgot Password" link on the login page and following the instructions sent to your email.\nUser: I didn't get the email.\nAssistant: Please check your spam folder. If it's not there, contact support@example.com.`;
+  updateConversationMeta();
+});
+
+$('#btnClearOutput').addEventListener('click', () => {
+  $('#evaluationOutput').textContent = 'Results will appear here after evaluation.';
+  $('#evaluationOutput').classList.add('empty');
+  $('#btnCopyOutput').disabled = true;
+  $('#btnVerify').disabled = true;
+  $('#btnSaveHistory').disabled = true;
+  $('#verificationPanel').classList.add('hide');
+  currentRecord = null;
+});
+
+$('#btnCopyOutput').addEventListener('click', async () => {
+  const text = $('#evaluationOutput').textContent;
+  if (!text) return;
+  try { await navigator.clipboard.writeText(text); } catch(e){}
+});
+
+$('#btnSaveHistory').addEventListener('click', async () => {
+  if (!currentRecord) return;
+  currentRecord.updatedAt = new Date().toISOString();
+  await dbSave(currentRecord);
+  alert('Saved to history.');
+});
+
+/* ----------------------------------------------------------------
+   Verify / Sniff Test
+   ---------------------------------------------------------------- */
+$('#btnVerify').addEventListener('click', async () => {
+  if (!currentRecord) return;
+  clearError('evaluationMeta');
+  $('#btnVerify').disabled = true;
+
+  const rubric = lsGet(LS_KEY_RUBRIC) || '';
+  const model = lsGet(LS_KEY_MODEL_REV);
+  const key = lsGet(LS_KEY_API);
+  const maxTokens = parseInt(lsGet(LS_KEY_MAX_TOKENS),10) || DEFAULT_MAX_TOKENS;
+  const useJson = $('#internalJsonMode').checked;
+
+  if (!key) { showError('evaluationMeta', 'Missing API key.'); $('#btnVerify').disabled = false; return; }
+  if (!model) { showError('evaluationMeta', 'Missing review model. Select one in Admin.'); $('#btnVerify').disabled = false; return; }
+
+  const system = buildReviewSystemPrompt();
+  const user = buildReviewUserPrompt(rubric, currentRecord.conversationText, currentRecord.renderedQ1ToQ8Output);
+
+  $('#debugReviewSystem').textContent = system;
+  $('#debugReviewUser').textContent = user;
+
+  try {
+    let result;
+    try {
+      result = await callOpenRouterChat({ model, messages: [{role:'system',content:system},{role:'user',content:user}], temperature: 0, max_tokens: maxTokens, useJsonMode: useJson });
+    } catch (e) {
+      if (useJson && String(e.message).toLowerCase().includes('response_format')) {
+        showError('evaluationMeta', 'JSON mode rejected by provider during verification. Retrying without it.');
+        result = await callOpenRouterChat({ model, messages: [{role:'system',content:system},{role:'user',content:user}], temperature: 0, max_tokens: maxTokens, useJsonMode: false });
+      } else { throw e; }
+    }
+
+    const raw = result.content;
+    $('#debugRawReview').textContent = raw;
+
+    const parsed = parseReviewJson(raw);
+    $('#debugParsedReview').textContent = parsed ? JSON.stringify(parsed, null, 2) : 'Parse failed';
+
+    if (!parsed) {
+      showError('evaluationMeta', 'Reviewer did not return valid JSON. See Debug tab.');
+      currentRecord.verificationStatus = 'invalid';
+      currentRecord.rawVerificationOutput = raw;
+      return;
+    }
+
+    currentRecord.rawVerificationOutput = raw;
+    currentRecord.parsedVerificationJson = parsed;
+
+    const verdict = String(parsed.verdict || 'Invalid');
+    const proposed = String(parsed.proposed_q1_to_q8_output || '').trim();
+
+    if (verdict === 'Pass' || !proposed || proposed === currentRecord.renderedQ1ToQ8Output) {
+      currentRecord.verificationStatus = 'pass';
+      $('#verificationSummary').textContent = `Verdict: ${verdict} (confidence: ${parsed.confidence ?? '?'})\n${parsed.summary || 'No issues found.'}`;
+      $('#verificationSummary').className = 'warn-box';
+      $('#verificationDiff').innerHTML = '';
+      $('#verificationPanel').classList.remove('hide');
+      $('#btnApplyFixes').classList.add('hide');
+      $('#btnRejectFixes').textContent = 'Dismiss';
+    } else {
+      currentRecord.verificationStatus = 'needs_fixes';
+      currentRecord.proposedQ1ToQ8Output = proposed;
+      showDiff(currentRecord.renderedQ1ToQ8Output, proposed, parsed);
+      $('#verificationPanel').classList.remove('hide');
+      $('#btnApplyFixes').classList.remove('hide');
+      $('#btnRejectFixes').textContent = 'Reject Proposed Fixes';
+    }
+
+    // Update record in DB if exists
+    if (!$('#privacyMode').checked) await dbSave(currentRecord);
+
+  } catch (e) {
+    showError('evaluationMeta', 'Verification error: ' + e.message);
+    $('#debugLastError').textContent = String(e.message) + '\n' + (e.stack || '');
+  } finally {
+    $('#btnVerify').disabled = false;
+  }
+});
+
+$('#btnApplyFixes').addEventListener('click', async () => {
+  if (!currentRecord || !currentRecord.proposedQ1ToQ8Output) return;
+  currentRecord.preVerificationOutput = currentRecord.renderedQ1ToQ8Output;
+  currentRecord.renderedQ1ToQ8Output = currentRecord.proposedQ1ToQ8Output;
+  currentRecord.verificationApplied = true;
+  currentRecord.updatedAt = new Date().toISOString();
+  $('#evaluationOutput').textContent = currentRecord.renderedQ1ToQ8Output;
+  $('#verificationPanel').classList.add('hide');
+  if (!$('#privacyMode').checked) await dbSave(currentRecord);
+});
+
+$('#btnRejectFixes').addEventListener('click', async () => {
+  if (!currentRecord) return;
+  currentRecord.verificationStatus = 'rejected';
+  currentRecord.updatedAt = new Date().toISOString();
+  $('#verificationPanel').classList.add('hide');
+  if (!$('#privacyMode').checked) await dbSave(currentRecord);
+});
+
+/* ----------------------------------------------------------------
+   Diff engine
+   ---------------------------------------------------------------- */
+function showDiff(current, proposed, parsedReview) {
+  const summaryEl = document.getElementById('verificationSummary');
+  const diffEl = document.getElementById('verificationDiff');
+
+  summaryEl.className = 'warn-box';
+  let summaryText = `Verdict: ${parsedReview.verdict} (confidence: ${parsedReview.confidence ?? '?'})\n${parsedReview.summary || ''}`;
+  if (parsedReview.issues && parsedReview.issues.length) {
+    summaryText += '\n\nIssues:';
+    for (const iss of parsedReview.issues) {
+      summaryText += `\n[${iss.severity}] ${iss.field}: ${iss.issue}`;
+    }
+  }
+  summaryEl.textContent = summaryText;
+
+  const parseFields = (text) => {
+    const map = {};
+    for (let i = 1; i <= 8; i++) {
+      const re = new RegExp(`Q${i}\\.[^\\n]*\\n`);
+      map[`Q${i}`] = extractFieldFromText(text, re);
+    }
+    return map;
+  };
+
+  const curMap = parseFields(current);
+  const propMap = parseFields(proposed);
+
+  diffEl.innerHTML = '';
+  const header = document.createElement('div');
+  header.className = 'diff-row';
+  header.innerHTML = '<div class="field">Field</div><div class="old">Current</div><div class="new">Proposed</div>';
+  diffEl.appendChild(header);
+
+  for (let i = 1; i <= 8; i++) {
+    const key = `Q${i}`;
+    const a = curMap[key] || '';
+    const b = propMap[key] || '';
+    if (a === b) continue;
+    const row = document.createElement('div');
+    row.className = 'diff-row';
+    row.innerHTML = `<div class="field">${key}</div><div class="old">${escapeHtml(a)}</div><div class="new">${escapeHtml(b)}</div>`;
+    diffEl.appendChild(row);
+  }
+}
+
+/* ----------------------------------------------------------------
+   History tab
+   ---------------------------------------------------------------- */
+async function refreshHistory() {
+  const tbody = document.getElementById('historyTable');
+  tbody.innerHTML = '';
+  const all = await dbGetAll();
+  const search = ($('#historySearch').value || '').toLowerCase();
+  const filtered = all.filter(r => {
+    if (!search) return true;
+    const hay = `${r.conversationText||''} ${r.renderedQ1ToQ8Output||''} ${r.processingModel||''} ${r.reviewModel||''} ${r.createdAt||''} ${r.userNotes||''}`.toLowerCase();
+    return hay.includes(search);
+  }).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  $('#historyEmpty').classList.toggle('hide', filtered.length > 0);
+
+  for (const r of filtered) {
+    const tr = document.createElement('tr');
+    const q1 = safeParseRatingQ1(r.renderedQ1ToQ8Output || '');
+    const q3 = safeParseRatingQ3(r.renderedQ1ToQ8Output || '');
+    const q5 = safeParseQ5(r.renderedQ1ToQ8Output || '');
+    const q7 = safeParseQ7(r.renderedQ1ToQ8Output || '');
+    const ver = r.verificationStatus || 'none';
+    const rubricMismatch = activeRubricHash && r.rubricHash && r.rubricHash !== activeRubricHash;
+    tr.innerHTML = `
+      <td>${new Date(r.createdAt).toLocaleString()}</td>
+      <td>${escapeHtml(r.processingModel||'')}</td>
+      <td>${escapeHtml(q1)}</td>
+      <td>${escapeHtml(q3)}</td>
+      <td>${escapeHtml(q5)}</td>
+      <td>${escapeHtml(q7)}</td>
+      <td>${escapeHtml(ver)}${rubricMismatch ? ' <span title="Different rubric" style="color:var(--warn)">⚠</span>' : ''}</td>
+      <td>
+        <button class="btn secondary" style="font-size:.75rem;padding:.25rem .45rem;" data-action="restore-conv" data-id="${r.id}">Conv</button>
+        <button class="btn secondary" style="font-size:.75rem;padding:.25rem .45rem;" data-action="restore-out" data-id="${r.id}">Out</button>
+        <button class="btn secondary" style="font-size:.75rem;padding:.25rem .45rem;" data-action="copy" data-id="${r.id}">Copy</button>
+        <button class="btn secondary" style="font-size:.75rem;padding:.25rem .45rem;" data-action="note" data-id="${r.id}">Note</button>
+        <button class="btn danger" style="font-size:.75rem;padding:.25rem .45rem;" data-action="delete" data-id="${r.id}">Del</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  tbody.querySelectorAll('button[data-action]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      const rec = (await dbGetAll()).find(x => x.id === id);
+      if (!rec) return;
+      if (action === 'restore-conv') {
+        $('#conversationInput').value = rec.conversationText || '';
+        updateConversationMeta();
+        // Switch to evaluate tab
+        $$('.tab-btn')[0].click();
+      } else if (action === 'restore-out') {
+        $('#evaluationOutput').textContent = rec.renderedQ1ToQ8Output || '';
+        $('#evaluationOutput').classList.remove('empty');
+        $('#btnCopyOutput').disabled = false;
+        $('#btnVerify').disabled = false;
+        $('#btnSaveHistory').disabled = false;
+        currentRecord = JSON.parse(JSON.stringify(rec));
+        $$('.tab-btn')[0].click();
+      } else if (action === 'copy') {
+        try { await navigator.clipboard.writeText(rec.renderedQ1ToQ8Output || ''); } catch(e){}
+      } else if (action === 'note') {
+        const note = prompt('Edit note:', rec.userNotes || '');
+        if (note !== null) { rec.userNotes = note; await dbSave(rec); refreshHistory(); }
+      } else if (action === 'delete') {
+        if (confirm('Delete this record?')) { await dbDelete(id); refreshHistory(); }
+      }
+    });
+  });
+}
+
+$('#historySearch').addEventListener('input', refreshHistory);
+
+/* ----------------------------------------------------------------
+   Debug refresh
+   ---------------------------------------------------------------- */
+function refreshDebug() {
+  // previews already set during evaluate/verify
+}
+
+/* ----------------------------------------------------------------
+   Init & pills
+   ---------------------------------------------------------------- */
+async function updatePills() {
+  const rubric = lsGet(LS_KEY_RUBRIC) || '';
+  if (rubric) {
+    const h = await sha256(rubric);
+    activeRubricHash = h;
+    setPill('pill-rubric', `Rubric: Loaded (${rubric.length} chars / ~${Math.ceil(rubric.length/4)} tok)`, 'ok');
+  } else {
+    setPill('pill-rubric', 'Rubric: Missing', 'error');
+  }
+
+  const key = lsGet(LS_KEY_API);
+  setPill('pill-key', key ? 'API Key: Present' : 'API Key: Missing', key ? 'ok' : 'error');
+
+  setPill('pill-models', models.length ? `Models: Loaded ${models.length}` : 'Models: Not checked', models.length ? 'ok' : '');
+}
+
+async function init() {
+  try {
+    db = await openDB();
+    setPill('pill-db', 'IndexedDB: Ready', 'ok');
+  } catch (e) {
+    setPill('pill-db', 'IndexedDB: Failed', 'error');
+    console.error('DB open failed', e);
+  }
+
+  // Load settings
+  $('#maxTokens').value = lsGet(LS_KEY_MAX_TOKENS) || DEFAULT_MAX_TOKENS;
+  $('#internalJsonMode').checked = lsGet(LS_KEY_JSON_MODE) !== 'false';
+  $('#privacyMode').checked = lsGet(LS_KEY_PRIVACY) === 'true';
+
+  // Load rubric
+  const savedRubric = lsGet(LS_KEY_RUBRIC) || '';
+  $('#rubricInput').value = savedRubric;
+  $('#rubricPreview').textContent = savedRubric || '(empty)';
+  if (savedRubric) activeRubricHash = await sha256(savedRubric);
+
+  updatePills();
+  populateModelLists(); // empty until fetch
+  updateConversationMeta();
+
+  // Try to load models if key exists
+  if (lsGet(LS_KEY_API)) {
+    await fetchModels();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
