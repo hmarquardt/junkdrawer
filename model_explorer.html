@@ -1379,6 +1379,31 @@
               <label class="form-label" for="or-title">X-Title (optional)</label>
               <input type="text" id="or-title" placeholder="My App" />
             </div>
+            <div class="form-group">
+              <div class="collapsible-header" id="or-paths-header" onclick="toggleCollapsible('or-paths-body', 'or-paths-header')" aria-expanded="false" role="button" tabindex="0">
+                <span class="form-label" style="margin:0">Endpoint Paths (advanced)</span>
+                <span class="chevron">▼</span>
+              </div>
+              <div class="collapsible-body" id="or-paths-body">
+                <div class="form-group" style="margin-top:0.5rem">
+                  <label class="form-label" for="or-chatpath">Chat / Completions Path</label>
+                  <input type="text" id="or-chatpath" value="/chat/completions" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="or-imagepath">Image Path</label>
+                  <input type="text" id="or-imagepath" value="/chat/completions" />
+                  <div class="form-hint">OpenRouter does not support /images/generations; defaults to chat completions.</div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="or-audiopath">Audio Path</label>
+                  <input type="text" id="or-audiopath" value="/chat/completions" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="or-embeddingspath">Embeddings Path</label>
+                  <input type="text" id="or-embeddingspath" value="/chat/completions" />
+                </div>
+              </div>
+            </div>
             <div class="flex gap-3">
               <button class="btn btn-primary btn-sm" onclick="testProvider('openrouter')">Test Connection</button>
               <button class="btn btn-secondary btn-sm" onclick="fetchModelsForProvider('openrouter')">Fetch Models</button>
@@ -1452,9 +1477,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.13" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.13" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.13
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.14" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.14" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.14
     </footer>
   </div>
 
@@ -1481,6 +1506,10 @@
           apiKey: '',
           referer: '',
           title: 'Single Page Model Explorer',
+          chatPath: '/chat/completions',
+          imagePath: '/chat/completions',
+          audioPath: '/chat/completions',
+          embeddingsPath: '/chat/completions',
           models: [],
           lastModelFetch: null
         },
@@ -1728,7 +1757,7 @@
           }));
         },
         async runText(config, payload) {
-          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/chat/completions';
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + (config.chatPath || '/chat/completions');
           const body = {
             model: payload.model,
             messages: [
@@ -1743,7 +1772,7 @@
           return { url, body, headers: getHeaders(config) };
         },
         async runVision(config, payload) {
-          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/chat/completions';
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + (config.chatPath || '/chat/completions');
           const content = [
             { type: 'text', text: payload.prompt }
           ];
@@ -1761,31 +1790,33 @@
           return { url, body, headers: getHeaders(config) };
         },
         async runImage(config, payload) {
-          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/images/generations';
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + (config.imagePath || '/chat/completions');
           const body = {
             model: payload.model,
-            prompt: payload.prompt,
-            n: payload.n || 1,
-            size: payload.size || '1024x1024'
+            messages: [
+              { role: 'user', content: payload.prompt }
+            ]
           };
           if (payload.negative_prompt) body.negative_prompt = payload.negative_prompt;
           return { url, body, headers: getHeaders(config) };
         },
         async runAudio(config, payload) {
-          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/audio/speech';
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + (config.audioPath || '/chat/completions');
           const body = {
             model: payload.model,
-            input: payload.prompt,
-            voice: payload.voice || 'alloy',
-            response_format: payload.format || 'mp3'
+            messages: [
+              { role: 'user', content: payload.prompt }
+            ]
           };
           return { url, body, headers: getHeaders(config) };
         },
         async runEmbedding(config, payload) {
-          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/embeddings';
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + (config.embeddingsPath || '/chat/completions');
           const body = {
             model: payload.model,
-            input: payload.batch ? payload.prompt.split('\n').filter(Boolean) : payload.prompt
+            messages: [
+              { role: 'user', content: payload.prompt }
+            ]
           };
           return { url, body, headers: getHeaders(config) };
         },
@@ -2133,6 +2164,10 @@
       $('#or-baseurl').value = or.baseUrl || '';
       $('#or-referer').value = or.referer || '';
       $('#or-title').value = or.title || '';
+      $('#or-chatpath').value = or.chatPath || '/chat/completions';
+      $('#or-imagepath').value = or.imagePath || '/chat/completions';
+      $('#or-audiopath').value = or.audioPath || '/chat/completions';
+      $('#or-embeddingspath').value = or.embeddingsPath || '/chat/completions';
       $('#admin-pill-openrouter').className = `status-pill ${or.apiKey ? 'ok' : 'warn'}`;
       $('#admin-pill-openrouter').textContent = or.apiKey ? 'Configured' : 'No key';
     }
@@ -2722,6 +2757,10 @@
       state.providers.openrouter.baseUrl = $('#or-baseurl').value;
       state.providers.openrouter.referer = $('#or-referer').value;
       state.providers.openrouter.title = $('#or-title').value;
+      state.providers.openrouter.chatPath = $('#or-chatpath').value;
+      state.providers.openrouter.imagePath = $('#or-imagepath').value;
+      state.providers.openrouter.audioPath = $('#or-audiopath').value;
+      state.providers.openrouter.embeddingsPath = $('#or-embeddingspath').value;
       saveState();
     }
 
