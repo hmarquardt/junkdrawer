@@ -1669,9 +1669,9 @@
   </div>
 
   <!-- Footer -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.5" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 'Chakra Petch', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Kraken Market Radar · version 2026.05.12.5
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.6" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 'Chakra Petch', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Kraken Market Radar · version 2026.05.12.6
   </footer>
 
   <script>
@@ -2334,19 +2334,23 @@
         if (!t) return {};
 
         const signals = {};
+        const contradictions = [];
+        let bullishPoints = 0;
+        let bearishPoints = 0;
 
-        // 1. Spread status
+        // 1. Spread in bps (basis points)
         const spread = t.ask && t.bid ? t.ask - t.bid : 0;
-        const spreadPct = t.bid ? (spread / t.bid) * 100 : 0;
-        if (spreadPct < 0.02) {
-          signals.spread = { status: 'ok', value: spread.toFixed(t.last > 100 ? 2 : 5), desc: 'Spread is tight' };
-        } else if (spreadPct < 0.1) {
-          signals.spread = { status: 'ok', value: spread.toFixed(t.last > 100 ? 2 : 5), desc: 'Spread is normal' };
-        } else {
-          signals.spread = { status: 'warn', value: spread.toFixed(t.last > 100 ? 2 : 5), desc: 'Spread is widening' };
-        }
+        const spreadBps = t.bid ? (spread / t.bid) * 10000 : 0;
+        const spreadThresholdBps = 10; // 0.1%
+        signals.spread = {
+          bps: +spreadBps.toFixed(2),
+          raw: +spread.toFixed(t.last > 100 ? 2 : 5),
+          thresholdBps: spreadThresholdBps,
+          desc: `${spreadBps.toFixed(2)} bps — ${spreadBps < 2 ? 'tight' : spreadBps < spreadThresholdBps ? 'normal' : 'wide'}`
+        };
+        if (spreadBps >= spreadThresholdBps) bearishPoints += 1;
 
-        // 2. Volume burst (compare recent trade volume to rolling average)
+        // 2. Volume burst ratio
         const now = Date.now();
         const recentWindow = 60000; // 60s
         const recentTrades = tr.filter(x => now - x.time < recentWindow);
@@ -2354,90 +2358,141 @@
         const olderTrades = tr.filter(x => now - x.time >= recentWindow && now - x.time < recentWindow * 2);
         const olderVol = olderTrades.reduce((s, x) => s + x.qty, 0);
         const volRatio = olderVol > 0 ? recentVol / olderVol : 0;
-        if (volRatio > 3) {
-          signals.volume = { status: 'warn', value: recentVol.toFixed(4), desc: 'Volume appears elevated' };
-        } else if (volRatio > 1.5) {
-          signals.volume = { status: 'ok', value: recentVol.toFixed(4), desc: 'Volume is above recent average' };
-        } else {
-          signals.volume = { status: 'ok', value: recentVol.toFixed(4), desc: 'Volume looks normal' };
-        }
-        signals.volRatio = volRatio;
+        signals.volume = {
+          ratio: +volRatio.toFixed(2),
+          recentVol: +recentVol.toFixed(4),
+          olderVol: +olderVol.toFixed(4),
+          tradeCount: recentTrades.length,
+          desc: `${volRatio.toFixed(2)}× recent avg — ${recentTrades.length} trades in 60s`
+        };
+        if (volRatio >= 3) { bullishPoints += 1; bearishPoints += 1; }
 
-        // 3. Price momentum from OHLC
+        // 3. Price momentum in bps
         if (ohlc.length >= 3) {
           const last = ohlc[ohlc.length - 1];
           const prev = ohlc[ohlc.length - 2];
-          const change = last[4] - prev[4]; // close - prev close
-          const momentum = change / prev[4] * 100;
-          if (momentum > 1) {
-            signals.momentum = { status: 'ok', value: '+' + momentum.toFixed(2) + '%', desc: 'Possible upward momentum' };
-          } else if (momentum < -1) {
-            signals.momentum = { status: 'alert', value: momentum.toFixed(2) + '%', desc: 'Possible downward momentum' };
-          } else {
-            signals.momentum = { status: 'ok', value: momentum.toFixed(2) + '%', desc: 'Price momentum is muted' };
-          }
+          const change = last[4] - prev[4];
+          const momentumPct = (change / prev[4]) * 100;
+          const momentumBps = momentumPct * 100;
+          signals.momentum = {
+            pct: +momentumPct.toFixed(2),
+            bps: +momentumBps.toFixed(0),
+            direction: momentumPct > 0 ? 'up' : (momentumPct < 0 ? 'down' : 'flat'),
+            desc: `${momentumPct > 0 ? '+' : ''}${momentumPct.toFixed(2)}% (${momentumBps.toFixed(0)} bps)`
+          };
+          if (momentumPct > 1) bullishPoints += 2;
+          else if (momentumPct < -1) bearishPoints += 2;
         } else {
-          signals.momentum = { status: 'ok', value: '--', desc: 'Not enough data' };
+          signals.momentum = { pct: 0, bps: 0, direction: 'flat', desc: 'Not enough data' };
         }
 
-        // 4. Order book imbalance
+        // 4. Order book imbalance (net bps away from 50/50)
         const visibleBids = b.bids.slice(0, 10);
         const visibleAsks = b.asks.slice(0, 10);
         const bidVol = visibleBids.reduce((s, x) => s + x.qty, 0);
         const askVol = visibleAsks.reduce((s, x) => s + x.qty, 0);
         const totalVol = bidVol + askVol;
         const bidPct = totalVol > 0 ? (bidVol / totalVol) * 100 : 50;
-        if (bidPct > 60) {
-          signals.imbalance = { status: 'ok', value: bidPct.toFixed(1) + '% bid', desc: 'Book is bid-heavy' };
-        } else if (bidPct < 40) {
-          signals.imbalance = { status: 'alert', value: (100 - bidPct).toFixed(1) + '% ask', desc: 'Book is ask-heavy' };
-        } else {
-          signals.imbalance = { status: 'ok', value: 'Balanced', desc: 'Book looks fairly balanced' };
-        }
-        signals.bidPct = bidPct;
+        const askPct = totalVol > 0 ? (askVol / totalVol) * 100 : 50;
+        const imbalanceBps = Math.abs(bidPct - 50) * 100;
+        signals.imbalance = {
+          bidPct: +bidPct.toFixed(1),
+          askPct: +askPct.toFixed(1),
+          netBps: +imbalanceBps.toFixed(0),
+          desc: `${bidPct.toFixed(1)}% bid / ${askPct.toFixed(1)}% ask (${imbalanceBps.toFixed(0)} bps skew)`
+        };
+        if (bidPct > 60) bullishPoints += 1;
+        else if (askPct > 60) bearishPoints += 1;
 
         // 5. Candle range expansion
-        if (ohlc.length >= 3) {
+        if (ohlc.length >= 6) {
           const last = ohlc[ohlc.length - 1];
-          const range = last[2] - last[3]; // high - low
+          const range = last[2] - last[3];
           const prevRanges = ohlc.slice(-6, -1).map(c => c[2] - c[3]);
           const avgRange = prevRanges.reduce((s, r) => s + r, 0) / prevRanges.length;
           const rangeRatio = avgRange > 0 ? range / avgRange : 1;
-          if (rangeRatio > 2) {
-            signals.range = { status: 'warn', value: range.toFixed(2), desc: 'Candle range expanding sharply' };
-          } else if (rangeRatio > 1.3) {
-            signals.range = { status: 'ok', value: range.toFixed(2), desc: 'Range is above recent average' };
-          } else {
-            signals.range = { status: 'ok', value: range.toFixed(2), desc: 'Range is compressed' };
-          }
+          signals.range = {
+            ratio: +rangeRatio.toFixed(2),
+            current: +range.toFixed(2),
+            avg: +avgRange.toFixed(2),
+            desc: `${range.toFixed(2)} vs ${avgRange.toFixed(2)} avg (${rangeRatio.toFixed(2)}×)`
+          };
+          if (rangeRatio > 2) { bullishPoints += 1; bearishPoints += 1; }
         } else {
-          signals.range = { status: 'ok', value: '--', desc: 'Not enough data' };
+          signals.range = { ratio: 1, current: 0, avg: 0, desc: 'Not enough data' };
         }
 
         // 6. Liquidity wall detection
         const allLevels = [...visibleBids, ...visibleAsks];
         const maxQty = Math.max(...allLevels.map(x => x.qty), 0);
+        const totalQty = allLevels.reduce((s, x) => s + x.qty, 0);
         const wall = allLevels.find(x => x.qty > maxQty * 0.6);
         if (wall && maxQty > 0) {
           const side = visibleBids.includes(wall) ? 'bid' : 'ask';
-          signals.wall = { status: 'warn', value: wall.qty.toFixed(4), desc: `Liquidity wall on ${side} at ${wall.price}` };
+          const pctOfBook = totalQty > 0 ? (wall.qty / totalQty) * 100 : 0;
+          signals.wall = {
+            side,
+            size: +wall.qty.toFixed(4),
+            pctOfBook: +pctOfBook.toFixed(1),
+            price: +wall.price.toFixed(t.last > 100 ? 2 : 5),
+            desc: `${side.toUpperCase()} wall ${wall.qty.toFixed(4)} @ ${wall.price.toFixed(t.last > 100 ? 2 : 5)} (${pctOfBook.toFixed(1)}% of visible book)`
+          };
+          if (side === 'bid') bullishPoints += 1;
+          else bearishPoints += 1;
         } else {
-          signals.wall = { status: 'ok', value: 'None', desc: 'No large liquidity walls nearby' };
+          signals.wall = { side: null, size: 0, pctOfBook: 0, price: 0, desc: 'No large walls nearby' };
         }
 
-        // 7. Market classification
-        const hasMomentum = Math.abs(parseFloat(signals.momentum.value) || 0) > 1;
-        const isElevated = volRatio > 2;
-        const isWideSpread = spreadPct > 0.1;
-        if (isElevated && hasMomentum) {
-          signals.classification = { status: 'warn', value: 'Active', desc: 'Market looks active, directional' };
-        } else if (isElevated && !hasMomentum) {
-          signals.classification = { status: 'warn', value: 'Choppy', desc: 'Elevated activity, unclear direction' };
-        } else if (!isElevated && !hasMomentum && !isWideSpread) {
-          signals.classification = { status: 'ok', value: 'Quiet', desc: 'Market looks quiet' };
-        } else {
-          signals.classification = { status: 'ok', value: 'Normal', desc: 'Market appears range-bound' };
+        // 7. Contradiction detection
+        const mom = signals.momentum;
+        const imb = signals.imbalance;
+        const wll = signals.wall;
+
+        if (mom.direction === 'up' && imb.askPct > 60) {
+          contradictions.push('Momentum is up but book is ask-heavy — possible reversal or fakeout');
+          bullishPoints -= 1; bearishPoints += 1;
         }
+        if (mom.direction === 'down' && imb.bidPct > 60) {
+          contradictions.push('Momentum is down but book is bid-heavy — possible reversal or fakeout');
+          bullishPoints += 1; bearishPoints -= 1;
+        }
+        if (mom.direction === 'up' && wll.side === 'ask' && wll.pctOfBook > 15) {
+          contradictions.push('Upward momentum into an ask wall — resistance ahead');
+          bullishPoints -= 1; bearishPoints += 1;
+        }
+        if (mom.direction === 'down' && wll.side === 'bid' && wll.pctOfBook > 15) {
+          contradictions.push('Downward momentum into a bid wall — support ahead');
+          bearishPoints -= 1; bullishPoints += 1;
+        }
+        if (volRatio > 3 && Math.abs(mom.pct) < 0.5) {
+          contradictions.push('Volume surge with flat price — possible accumulation or distribution');
+        }
+
+        signals.contradictions = contradictions;
+
+        // 8. Summary score
+        const netScore = bullishPoints - bearishPoints;
+        signals.summary = {
+          bullishScore: bullishPoints,
+          bearishScore: bearishPoints,
+          net: netScore,
+          desc: netScore >= 3 ? 'Bullish tilt' : netScore <= -3 ? 'Bearish tilt' : 'Mixed / neutral'
+        };
+
+        // 9. Market classification (regime)
+        const hasMomentum = Math.abs(mom.pct) > 1;
+        const isElevated = volRatio > 2;
+        const isWideSpread = spreadBps >= spreadThresholdBps;
+        let regime = 'Quiet';
+        if (isElevated && hasMomentum) regime = 'Active';
+        else if (isElevated && !hasMomentum) regime = 'Choppy';
+        else if (!isElevated && !hasMomentum && !isWideSpread) regime = 'Quiet';
+        else regime = 'Normal';
+        signals.classification = {
+          regime,
+          score: Math.abs(netScore),
+          desc: `${regime} — ${signals.summary.desc.toLowerCase()}`
+        };
 
         return signals;
       }
@@ -2901,6 +2956,30 @@
           grid.innerHTML = '<div class="empty-state">Waiting for data...</div>';
           return;
         }
+
+        const statusFrom = (key) => {
+          if (key === 'spread') return sigs.spread.bps < 2 ? 'ok' : sigs.spread.bps < 10 ? 'ok' : 'warn';
+          if (key === 'volume') return sigs.volume.ratio > 3 ? 'warn' : 'ok';
+          if (key === 'momentum') {
+            if (sigs.momentum.pct > 1) return 'ok';
+            if (sigs.momentum.pct < -1) return 'alert';
+            return 'ok';
+          }
+          if (key === 'imbalance') {
+            if (sigs.imbalance.bidPct > 60) return 'ok';
+            if (sigs.imbalance.askPct > 60) return 'alert';
+            return 'ok';
+          }
+          if (key === 'range') return sigs.range.ratio > 2 ? 'warn' : 'ok';
+          if (key === 'wall') return sigs.wall.side ? 'warn' : 'ok';
+          if (key === 'classification') {
+            if (sigs.classification.regime === 'Active') return 'warn';
+            if (sigs.classification.regime === 'Choppy') return 'warn';
+            return 'ok';
+          }
+          return 'ok';
+        };
+
         const items = [
           { key: 'spread', label: 'Spread' },
           { key: 'volume', label: 'Volume' },
@@ -2908,17 +2987,37 @@
           { key: 'imbalance', label: 'Book Imbalance' },
           { key: 'range', label: 'Candle Range' },
           { key: 'wall', label: 'Liquidity Wall' },
-          { key: 'classification', label: 'Classification' }
+          { key: 'classification', label: 'Regime' }
         ];
-        grid.innerHTML = items.map(item => {
+
+        let html = items.map(item => {
           const s = sigs[item.key];
           if (!s) return '';
-          return `<div class="signal-card ${s.status}">
+          const status = statusFrom(item.key);
+          return `<div class="signal-card ${status}">
             <span class="signal-label">${item.label}</span>
-            <span class="signal-value">${s.value}</span>
-            <span class="signal-desc">${s.desc}</span>
+            <span class="signal-value">${s.desc}</span>
           </div>`;
         }).join('');
+
+        if (sigs.contradictions && sigs.contradictions.length > 0) {
+          html += `<div class="signal-card alert">
+            <span class="signal-label">Contradictions</span>
+            <span class="signal-value">${sigs.contradictions.length}</span>
+            <span class="signal-desc">${sigs.contradictions.join(' · ')}</span>
+          </div>`;
+        }
+
+        if (sigs.summary) {
+          const sumStatus = sigs.summary.net >= 3 ? 'ok' : sigs.summary.net <= -3 ? 'alert' : 'ok';
+          html += `<div class="signal-card ${sumStatus}">
+            <span class="signal-label">Net Tilt</span>
+            <span class="signal-value">${sigs.summary.net > 0 ? '+' : ''}${sigs.summary.net}</span>
+            <span class="signal-desc">${sigs.summary.desc} · Bull ${sigs.summary.bullishScore} / Bear ${sigs.summary.bearishScore}</span>
+          </div>`;
+        }
+
+        grid.innerHTML = html;
       }
     };
 
@@ -2949,14 +3048,24 @@
 
         const observational = sigs.classification ? sigs.classification.desc : 'Market status unclear';
         const thingsToWatch = [];
-        if (sigs.spread && sigs.spread.status === 'warn') thingsToWatch.push('Spread is widening — possible liquidity stress');
-        if (sigs.volume && sigs.volume.status === 'warn') thingsToWatch.push('Volume appears elevated — watch for continuation');
-        if (sigs.momentum && sigs.momentum.status === 'alert') thingsToWatch.push('Downward momentum detected — monitor support levels');
-        if (sigs.momentum && sigs.momentum.value && sigs.momentum.value.startsWith('+')) thingsToWatch.push('Upward momentum detected — monitor resistance levels');
-        if (sigs.imbalance && sigs.imbalance.status === 'alert') thingsToWatch.push('Ask-heavy book — possible selling pressure');
-        if (sigs.imbalance && sigs.imbalance.value && sigs.imbalance.value.includes('bid')) thingsToWatch.push('Bid-heavy book — possible buying interest');
-        if (sigs.wall && sigs.wall.status === 'warn') thingsToWatch.push('Large liquidity wall nearby — may act as support/resistance');
+        if (sigs.spread && sigs.spread.bps >= 10) thingsToWatch.push(`Spread is wide (${sigs.spread.bps.toFixed(2)} bps) — possible liquidity stress`);
+        if (sigs.volume && sigs.volume.ratio >= 3) thingsToWatch.push(`Volume is elevated (${sigs.volume.ratio.toFixed(2)}× recent avg) — watch for continuation`);
+        if (sigs.momentum && sigs.momentum.pct < -1) thingsToWatch.push(`Downward momentum detected (${sigs.momentum.pct.toFixed(2)}%) — monitor support levels`);
+        if (sigs.momentum && sigs.momentum.pct > 1) thingsToWatch.push(`Upward momentum detected (+${sigs.momentum.pct.toFixed(2)}%) — monitor resistance levels`);
+        if (sigs.imbalance && sigs.imbalance.askPct > 60) thingsToWatch.push(`Ask-heavy book (${sigs.imbalance.askPct.toFixed(1)}% ask) — possible selling pressure`);
+        if (sigs.imbalance && sigs.imbalance.bidPct > 60) thingsToWatch.push(`Bid-heavy book (${sigs.imbalance.bidPct.toFixed(1)}% bid) — possible buying interest`);
+        if (sigs.wall && sigs.wall.side) thingsToWatch.push(`Large ${sigs.wall.side} wall at ${sigs.wall.price} — may act as support/resistance`);
         if (thingsToWatch.length === 0) thingsToWatch.push('No unusual signals at this time');
+
+        let contradictionBlock = '';
+        if (sigs.contradictions && sigs.contradictions.length > 0) {
+          contradictionBlock = `\n### Contradictions\n${sigs.contradictions.map(x => '- ' + x).join('\n')}\n`;
+        }
+
+        let summaryBlock = '';
+        if (sigs.summary) {
+          summaryBlock = `\n### Quantitative Tilt\n- **Net score:** ${sigs.summary.net > 0 ? '+' : ''}${sigs.summary.net} (Bull ${sigs.summary.bullishScore} / Bear ${sigs.summary.bearishScore})\n- **Read:** ${sigs.summary.desc}\n`;
+        }
 
         return `## Kraken Market Brief: ${fullName} (${wsName})
 
@@ -2971,7 +3080,7 @@
 - **24h High / Low:** ${t.high ? t.high.toFixed(t.last > 100 ? 2 : 5) : '--'} / ${t.low ? t.low.toFixed(t.last > 100 ? 2 : 5) : '--'}
 
 ### Order Book
-- **Imbalance:** ${sigs.imbalance ? sigs.imbalance.value : '--'}
+- **Imbalance:** ${sigs.imbalance ? sigs.imbalance.desc : '--'}
 - **Liquidity:** ${sigs.wall ? sigs.wall.desc : '--'}
 
 ### Recent Tape (last ${Math.min(recentTrades.length, 10)} trades)
@@ -2981,8 +3090,7 @@ ${recentTape}
 ${observational}
 
 ### Things to Watch
-${thingsToWatch.map(x => '- ' + x).join('\n')}
-
+${thingsToWatch.map(x => '- ' + x).join('\n')}${contradictionBlock}${summaryBlock}
 ---
 *Market observation only. Not financial advice.*
 `;
