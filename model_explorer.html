@@ -1452,9 +1452,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.12" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.12" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.12
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.13" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.13" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.13
     </footer>
   </div>
 
@@ -1942,7 +1942,23 @@
             </div>
           </div>
         `).join('');
-        area.innerHTML = images || '<div class="output-content">Image data received but not displayable</div>';
+        const imgTok = normalized.metadata.usage?.image_tokens;
+        if (!images && imgTok) {
+          area.innerHTML = `
+            <div class="output-content">
+              <p><strong>Image tokens generated:</strong> ${imgTok.toLocaleString()}</p>
+              <p style="color:var(--text-muted);margin-top:0.5rem">The model consumed image tokens but did not return a displayable image in the expected format. This provider may return images through a different endpoint or embed them in the response text.</p>
+              <details style="margin-top:0.5rem">
+                <summary style="cursor:pointer;color:var(--accent)">View raw JSON</summary>
+                <pre style="font-size:0.7rem;max-height:300px;overflow:auto">${escapeHtml(JSON.stringify(normalized.raw, null, 2))}</pre>
+              </details>
+            </div>
+          `;
+        } else if (!images) {
+          area.innerHTML = '<div class="output-content">Image data received but not displayable</div>';
+        } else {
+          area.innerHTML = images;
+        }
         actions.innerHTML = `
           <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.text || '').replace(/"/g, '&quot;')})">📋 Copy Prompt</button>
           <button class="btn btn-ghost btn-sm" onclick="downloadText('output.json', JSON.stringify(normalized.raw, null, 2), 'application/json')">⬇️ Download .json</button>
@@ -2004,7 +2020,8 @@
         <tr><th>Model</th><td>${escapeHtml(normalized.metadata.model || '')}</td></tr>
         <tr><th>Mode</th><td>${escapeHtml(normalized.metadata.mode || '')}</td></tr>
         <tr><th>Latency</th><td>${normalized.metadata.latencyMs || 0}ms</td></tr>
-        ${u ? `<tr><th>Tokens</th><td>${u.total_tokens || 0} total (${u.prompt_tokens || 0} prompt + ${u.completion_tokens || 0} completion)</td></tr>` : ''}
+        ${u ? `<tr><th>Tokens</th><td>${u.total_tokens || 0} total (${u.prompt_tokens || 0} prompt + ${u.completion_tokens || 0} completion${u.image_tokens ? ` · ${u.image_tokens.toLocaleString()} image` : ''})</td></tr>` : ''}
+        ${u?.cost != null ? `<tr><th>Cost</th><td>$${Number(u.cost).toFixed(6)}</td></tr>` : ''}
         <tr><th>Created</th><td>${formatDate(normalized.metadata.createdAt)}</td></tr>
       `;
     }
@@ -2504,15 +2521,50 @@
       }
     }
 
+    function extractImagesFromResponse(data) {
+      const images = [];
+      // Standard OpenAI image generations format
+      if (Array.isArray(data.data)) {
+        data.data.forEach(d => {
+          if (d.url) images.push({ url: d.url, b64: d.b64_json ? `data:image/png;base64,${d.b64_json}` : null, revised_prompt: d.revised_prompt });
+          else if (d.b64_json) images.push({ url: null, b64: `data:image/png;base64,${d.b64_json}`, revised_prompt: d.revised_prompt });
+        });
+      }
+      // Chat completion format with image in content (markdown or base64)
+      const content = data.choices?.[0]?.message?.content;
+      if (content) {
+        // Markdown image syntax: ![alt](url)
+        const mdImgMatch = content.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+        if (mdImgMatch) images.push({ url: mdImgMatch[2], b64: null, revised_prompt: null });
+        // Base64 data URL
+        const b64Match = content.match(/(data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+)/);
+        if (b64Match) images.push({ url: null, b64: b64Match[1], revised_prompt: null });
+      }
+      // Direct fields
+      if (data.url) images.push({ url: data.url, b64: null, revised_prompt: data.revised_prompt });
+      if (data.b64_json) images.push({ url: null, b64: `data:image/png;base64,${data.b64_json}`, revised_prompt: data.revised_prompt });
+      if (data.image_url?.url) images.push({ url: data.image_url.url, b64: null, revised_prompt: null });
+      if (Array.isArray(data.images)) {
+        data.images.forEach(img => {
+          if (typeof img === 'string') images.push({ url: img, b64: null, revised_prompt: null });
+          else if (img.url) images.push({ url: img.url, b64: img.b64_json ? `data:image/png;base64,${img.b64_json}` : null, revised_prompt: img.revised_prompt });
+        });
+      }
+      return images;
+    }
+
     function normalizeOutput(mode, data, provider, model, latency) {
       const usage = data.usage || null;
+      const cost = data.usage?.cost ?? data.cost ?? null;
       const meta = {
         provider, model, mode, latencyMs: latency,
         createdAt: new Date().toISOString(),
         usage: usage ? {
           prompt_tokens: usage.prompt_tokens,
           completion_tokens: usage.completion_tokens,
-          total_tokens: usage.total_tokens
+          total_tokens: usage.total_tokens,
+          image_tokens: usage.completion_tokens_details?.image_tokens || usage.image_tokens || null,
+          cost: cost
         } : null
       };
       if (mode === 'text') {
@@ -2520,12 +2572,9 @@
         return { type: 'text', text, markdown: text, raw: data, metadata: meta };
       }
       if (mode === 'image') {
-        const images = (data.data || []).map(d => ({
-          url: d.url,
-          b64: d.b64_json ? `data:image/png;base64,${d.b64_json}` : null,
-          revised_prompt: d.revised_prompt
-        }));
-        return { type: 'image', text: data.revised_prompt || '', images, raw: data, metadata: meta };
+        const images = extractImagesFromResponse(data);
+        const text = data.revised_prompt || data.choices?.[0]?.message?.content || '';
+        return { type: 'image', text, images, raw: data, metadata: meta };
       }
       if (mode === 'audio') {
         const audio = [{
