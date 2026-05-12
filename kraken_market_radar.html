@@ -1669,9 +1669,9 @@
   </div>
 
   <!-- Footer -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.6" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 'Chakra Petch', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Kraken Market Radar · version 2026.05.12.6
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.7" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 'Chakra Petch', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Kraken Market Radar · version 2026.05.12.7
   </footer>
 
   <script>
@@ -3022,6 +3022,151 @@
     };
 
     // ------------------------------------------------------------------
+    // AIClient — OpenRouter streaming assistant
+    // ------------------------------------------------------------------
+    const AIClient = {
+      cache: new Map(),
+
+      personaSystem() {
+        const map = {
+          cautious: 'You are a cautious market analyst. You weigh risks carefully, avoid overconfidence, and always flag uncertainty.',
+          skeptical: 'You are a skeptical reviewer. You challenge assumptions, look for weaknesses in the data, and question easy narratives.',
+          beginner: 'You are a friendly teacher. Explain everything in simple terms a beginner would understand, using analogies where helpful.',
+          technical: 'You are a quantitative analyst. Focus on numbers, ratios, statistical reasoning, and precise measurement.'
+        };
+        return map[AppState.ai.persona] || map.cautious;
+      },
+
+      buildMarketContext() {
+        const t = AppState.ticker;
+        const info = AppState.pairs[AppState.selectedPair];
+        const sigs = AppState.signals;
+        if (!t || !info) return 'No market data available.';
+        const lines = [
+          `Pair: ${info.wsName} (${info.baseName || info.base} / ${info.quoteName || info.quote})`,
+          `Price: ${t.last.toFixed(t.last > 100 ? 2 : 5)}`,
+          `24h Change: ${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%`,
+          `Bid / Ask: ${t.bid.toFixed(t.last > 100 ? 2 : 5)} / ${t.ask.toFixed(t.last > 100 ? 2 : 5)}`,
+          `Spread: ${sigs.spread ? sigs.spread.desc : '--'}`,
+          `Volume (24h): ${t.volume ? t.volume.toFixed(4) : '--'}`,
+          `High / Low: ${t.high ? t.high.toFixed(t.last > 100 ? 2 : 5) : '--'} / ${t.low ? t.low.toFixed(t.last > 100 ? 2 : 5) : '--'}`,
+          `Trades (24h): ${t.trades ? t.trades.toLocaleString() : '--'}`,
+          `Momentum: ${sigs.momentum ? sigs.momentum.desc : '--'}`,
+          `Book Imbalance: ${sigs.imbalance ? sigs.imbalance.desc : '--'}`,
+          `Liquidity Wall: ${sigs.wall ? sigs.wall.desc : '--'}`,
+          `Range: ${sigs.range ? sigs.range.desc : '--'}`,
+          `Regime: ${sigs.classification ? sigs.classification.desc : '--'}`,
+          `Net Tilt: ${sigs.summary ? sigs.summary.desc : '--'} (score ${sigs.summary ? sigs.summary.net : 0})`
+        ];
+        if (sigs.contradictions && sigs.contradictions.length > 0) {
+          lines.push('Contradictions:', ...sigs.contradictions.map(c => `- ${c}`));
+        }
+        return lines.join('\n');
+      },
+
+      buildScannerContext() {
+        const results = AppState.scanner.results;
+        if (!results || results.length === 0) return 'No scanner results available.';
+        const lines = results.slice(0, 10).map((r, i) => {
+          const sign = r.changePct >= 0 ? '+' : '';
+          return `${i + 1}. ${r.wsName} — score ${r.score.toFixed(1)}, price ${r.last.toFixed(r.last > 100 ? 2 : 5)}, ${sign}${r.changePct.toFixed(2)}%, vol ${r.volume24h.toFixed(2)}, ${r.reason}`;
+        });
+        return `Top ${lines.length} markets by activity score:\n${lines.join('\n')}`;
+      },
+
+      async stream(prompt, outEl) {
+        const apiKey = AppState.ai.apiKey;
+        if (!apiKey) {
+          outEl.textContent = 'No OpenRouter API key set. Add one in Settings → AI (OpenRouter).';
+          outEl.classList.add('visible');
+          return;
+        }
+        AppState.ai.loading = true;
+        outEl.textContent = 'Thinking…';
+        outEl.classList.add('visible');
+        DebugLog.info('AI', 'Streaming request to ' + AppState.ai.model);
+
+        try {
+          const res = await fetch(`${OR_BASE}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+              'HTTP-Referer': location.href,
+              'X-Title': 'Kraken Market Radar'
+            },
+            body: JSON.stringify({
+              model: AppState.ai.model,
+              messages: [
+                { role: 'system', content: this.personaSystem() },
+                { role: 'user', content: prompt }
+              ],
+              stream: true,
+              max_tokens: 1024,
+              temperature: 0.7
+            })
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let fullText = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed === 'data: [DONE]') continue;
+              if (trimmed.startsWith('data: ')) {
+                try {
+                  const chunk = JSON.parse(trimmed.slice(6));
+                  const delta = chunk.choices?.[0]?.delta?.content;
+                  if (delta) {
+                    fullText += delta;
+                    outEl.textContent = fullText;
+                    outEl.scrollTop = outEl.scrollHeight;
+                  }
+                } catch (e) { /* ignore parse errors on partial chunks */ }
+              }
+            }
+          }
+
+          AppState.ai.lastOutput = fullText;
+          AppState.ai.loading = false;
+          DebugLog.success('AI', 'Stream complete (' + fullText.length + ' chars)');
+        } catch (e) {
+          AppState.ai.loading = false;
+          outEl.textContent = 'AI request failed: ' + e.message;
+          DebugLog.error('AI', e.message);
+        }
+      },
+
+      async explainMarket() {
+        const prompt = `Given the following market data, write a concise 3-5 paragraph plain-English analysis. Mention what stands out, any contradictions, and what a cautious observer should watch.\n\n${this.buildMarketContext()}`;
+        await this.stream(prompt, document.getElementById('ai-output'));
+      },
+
+      async sniffTest() {
+        const prompt = `Given the following market data, perform a "sniff test": does the story the data tells hold up? Look for contradictions, weak signals dressed up as strong ones, and any red flags that suggest the market might not be doing what surface-level indicators imply. Be direct and concise (3-4 paragraphs).\n\n${this.buildMarketContext()}`;
+        await this.stream(prompt, document.getElementById('ai-output'));
+      },
+
+      async explainScanner() {
+        const prompt = `Given the following scanner rankings of the most active Kraken markets, provide a brief synthesis (2-3 paragraphs). What themes or patterns do you see? Any notable movers or unusual activity?\n\n${this.buildScannerContext()}`;
+        await this.stream(prompt, document.getElementById('ai-output'));
+      }
+    };
+
+    // ------------------------------------------------------------------
     // BriefGenerator — deterministic plain-English market brief
     // ------------------------------------------------------------------
     const BriefGenerator = {
@@ -3228,10 +3373,17 @@ ${thingsToWatch.map(x => '- ' + x).join('\n')}${contradictionBlock}${summaryBloc
         document.getElementById('btn-scan-toggle').addEventListener('click', () => {
           ScannerEngine.toggle();
         });
+        document.getElementById('btn-ai-explain').addEventListener('click', () => {
+          if (AppState.ai.loading) return;
+          AIClient.explainMarket();
+        });
+        document.getElementById('btn-ai-sniff').addEventListener('click', () => {
+          if (AppState.ai.loading) return;
+          AIClient.sniffTest();
+        });
         document.getElementById('btn-ai-scanner').addEventListener('click', () => {
-          const out = document.getElementById('ai-output');
-          out.textContent = 'AI analysis is not yet available. Phase 4 coming soon.';
-          out.classList.add('visible');
+          if (AppState.ai.loading) return;
+          AIClient.explainScanner();
         });
         // Settings save
         document.getElementById('btn-save-settings').addEventListener('click', () => {
