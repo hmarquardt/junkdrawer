@@ -1330,13 +1330,17 @@
       </div>
       <div class="form-group" style="margin-top:0.5rem">
         <label class="form-label">Model</label>
-        <select class="form-select" id="setting-ai-model">
-          <option value="google/gemini-flash-1.5" selected>Google Gemini Flash 1.5</option>
-          <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
-          <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-          <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
-          <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B</option>
-        </select>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <select class="form-select" id="setting-ai-model" style="flex:1">
+            <option value="google/gemini-flash-1.5" selected>Google Gemini Flash 1.5</option>
+            <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+            <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+            <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
+            <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B</option>
+          </select>
+          <button class="btn btn-sm" id="btn-load-models" title="Fetch available models from OpenRouter">Load Models</button>
+        </div>
+        <div id="ai-model-status" style="font-size:0.65rem;color:var(--text-muted);margin-top:0.25rem"></div>
       </div>
       <div class="form-group" style="margin-top:0.5rem">
         <label class="form-label">Persona</label>
@@ -1346,6 +1350,13 @@
           <option value="beginner">Beginner Explanation</option>
           <option value="technical">Technical Detail</option>
         </select>
+      </div>
+      <div class="form-group" style="margin-top:0.5rem">
+        <label class="form-label">Max Tokens</label>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input type="number" class="form-input" id="setting-ai-max-tokens" value="1024" min="64" max="8192" step="64" style="flex:1">
+          <button class="btn btn-sm" id="btn-test-llm" title="Send a tiny ping to verify the key and model work">Test LLM</button>
+        </div>
       </div>
     </div>
     <div class="admin-section">
@@ -1669,9 +1680,9 @@
   </div>
 
   <!-- Footer -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.7" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 'Chakra Petch', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Kraken Market Radar · version 2026.05.12.7
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.8" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.8" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 'Chakra Petch', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Kraken Market Radar · version 2026.05.12.8
   </footer>
 
   <script>
@@ -1878,6 +1889,7 @@
         aiEnabled: false,
         aiModel: 'google/gemini-flash-1.5',
         aiPersona: 'cautious',
+        aiMaxTokens: 1024,
         debugMode: false,
         soundEnabled: false
       },
@@ -3102,7 +3114,7 @@
                 { role: 'user', content: prompt }
               ],
               stream: true,
-              max_tokens: 1024,
+              max_tokens: Math.max(64, Math.min(8192, AppState.settings.aiMaxTokens || 1024)),
               temperature: 0.7
             })
           });
@@ -3163,6 +3175,91 @@
       async explainScanner() {
         const prompt = `Given the following scanner rankings of the most active Kraken markets, provide a brief synthesis (2-3 paragraphs). What themes or patterns do you see? Any notable movers or unusual activity?\n\n${this.buildScannerContext()}`;
         await this.stream(prompt, document.getElementById('ai-output'));
+      },
+
+      async loadModels() {
+        const apiKey = AppState.ai.apiKey;
+        const statusEl = document.getElementById('ai-model-status');
+        const select = document.getElementById('setting-ai-model');
+        if (!apiKey) {
+          statusEl.textContent = 'Set an API key first.';
+          return;
+        }
+        statusEl.textContent = 'Loading models…';
+        DebugLog.info('AI', 'Fetching model list from OpenRouter');
+        try {
+          const res = await fetch(`${OR_BASE}/models`, {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const models = (data.data || []).sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+          const current = select.value;
+          select.innerHTML = '';
+          let count = 0;
+          for (const m of models) {
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            const label = m.name || m.id;
+            const pricing = m.pricing?.prompt ? ` ~$${(m.pricing.prompt * 1e6).toFixed(2)}/M tok` : '';
+            opt.textContent = `${label}${pricing}`;
+            select.appendChild(opt);
+            count++;
+          }
+          // Restore selection if still present, otherwise keep first
+          const stillThere = Array.from(select.options).some(o => o.value === current);
+          select.value = stillThere ? current : (select.options[0]?.value || '');
+          statusEl.textContent = `${count} models loaded.`;
+          DebugLog.success('AI', `${count} models loaded from OpenRouter`);
+        } catch (e) {
+          statusEl.textContent = 'Failed: ' + e.message;
+          DebugLog.error('AI', 'Model list fetch failed: ' + e.message);
+        }
+      },
+
+      async testLLM() {
+        const apiKey = AppState.ai.apiKey;
+        const out = document.getElementById('ai-output');
+        if (!apiKey) {
+          out.textContent = 'No OpenRouter API key set. Add one in Settings → AI (OpenRouter).';
+          out.classList.add('visible');
+          return;
+        }
+        const model = document.getElementById('setting-ai-model').value;
+        out.textContent = 'Pinging model…';
+        out.classList.add('visible');
+        DebugLog.info('AI', `Testing model: ${model}`);
+        try {
+          const res = await fetch(`${OR_BASE}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+              'HTTP-Referer': location.href,
+              'X-Title': 'Kraken Market Radar'
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: 'system', content: 'Reply with exactly: pong' },
+                { role: 'user', content: 'ping' }
+              ],
+              max_tokens: 10,
+              temperature: 0
+            })
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+          }
+          const data = await res.json();
+          const reply = data.choices?.[0]?.message?.content?.trim() || '(no response)';
+          out.textContent = `Model test OK\nModel: ${model}\nResponse: "${reply}"`;
+          DebugLog.success('AI', `Test OK — ${model} responded: "${reply}"`);
+        } catch (e) {
+          out.textContent = 'Model test failed: ' + e.message;
+          DebugLog.error('AI', 'Test failed: ' + e.message);
+        }
       }
     };
 
@@ -3302,6 +3399,7 @@ ${thingsToWatch.map(x => '- ' + x).join('\n')}${contradictionBlock}${summaryBloc
         document.getElementById('setting-ai-key').value = AppState.ai.apiKey || '';
         document.getElementById('setting-ai-model').value = AppState.settings.aiModel || 'google/gemini-flash-1.5';
         document.getElementById('setting-ai-persona').value = AppState.settings.aiPersona || 'cautious';
+        document.getElementById('setting-ai-max-tokens').value = AppState.settings.aiMaxTokens || 1024;
         document.getElementById('scanner-scope').textContent = AppState.settings.quoteCurrency || 'all';
         document.getElementById('scanner-limit').textContent = AppState.settings.scannerMaxMarkets || 50;
       },
@@ -3385,6 +3483,12 @@ ${thingsToWatch.map(x => '- ' + x).join('\n')}${contradictionBlock}${summaryBloc
           if (AppState.ai.loading) return;
           AIClient.explainScanner();
         });
+        document.getElementById('btn-load-models').addEventListener('click', () => {
+          AIClient.loadModels();
+        });
+        document.getElementById('btn-test-llm').addEventListener('click', () => {
+          AIClient.testLLM();
+        });
         // Settings save
         document.getElementById('btn-save-settings').addEventListener('click', () => {
           AppState.settings.theme = document.getElementById('setting-theme').value;
@@ -3400,6 +3504,7 @@ ${thingsToWatch.map(x => '- ' + x).join('\n')}${contradictionBlock}${summaryBloc
           AppState.ai.apiKey = document.getElementById('setting-ai-key').value;
           AppState.settings.aiModel = document.getElementById('setting-ai-model').value;
           AppState.settings.aiPersona = document.getElementById('setting-ai-persona').value;
+          AppState.settings.aiMaxTokens = parseInt(document.getElementById('setting-ai-max-tokens').value) || 1024;
           AppState.ai.model = AppState.settings.aiModel;
           AppState.ai.persona = AppState.settings.aiPersona;
           AppState.debugMode = AppState.settings.debugMode;
@@ -3418,7 +3523,7 @@ ${thingsToWatch.map(x => '- ' + x).join('\n')}${contradictionBlock}${summaryBloc
         });
         // Reset settings
         document.getElementById('btn-reset-settings').addEventListener('click', () => {
-          AppState.settings = { theme: 'dark', quoteCurrency: 'all', maxPairs: 500, refreshInterval: 30000, chartInterval: 60, scannerEnabled: false, scannerInterval: 60000, scannerMaxMarkets: 50, aiEnabled: false, aiModel: 'google/gemini-flash-1.5', aiPersona: 'cautious', debugMode: false, soundEnabled: false };
+          AppState.settings = { theme: 'dark', quoteCurrency: 'all', maxPairs: 500, refreshInterval: 30000, chartInterval: 60, scannerEnabled: false, scannerInterval: 60000, scannerMaxMarkets: 50, aiEnabled: false, aiModel: 'google/gemini-flash-1.5', aiPersona: 'cautious', aiMaxTokens: 1024, debugMode: false, soundEnabled: false };
           AppState.ai = { apiKey: '', model: 'google/gemini-flash-1.5', persona: 'cautious', lastOutput: '', loading: false };
           AppState.debugMode = false;
           AppState.soundEnabled = false;
