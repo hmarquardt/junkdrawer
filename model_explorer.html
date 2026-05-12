@@ -1023,7 +1023,7 @@
                   </div>
                   <div>
                     <label class="form-label" for="text-maxtokens">Max Tokens</label>
-                    <input type="number" id="text-maxtokens" min="1" max="32000" value="1000" />
+                    <input type="number" id="text-maxtokens" min="1" max="100000" value="50000" />
                   </div>
                   <div>
                     <label class="form-label" for="text-topp">Top P</label>
@@ -1400,9 +1400,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.5" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.5
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.6" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.6
     </footer>
   </div>
 
@@ -1421,6 +1421,7 @@
       activeModel: '',
       activeMode: 'text',
       theme: 'light',
+      maxTokens: 50000,
       providers: {
         openrouter: {
           label: 'OpenRouter',
@@ -1444,6 +1445,8 @@
     let lastResponseInfo = { status: 0, body: '', headers: {} };
     let lastError = null;
     let lastLatency = 0;
+    let heartbeatTimer = null;
+    let requestStartTime = 0;
 
     // ==========================================
     // UTILITIES
@@ -1751,7 +1754,12 @@
       setStatus('#pill-key', cfg && cfg.apiKey ? 'Key set' : 'No key', cfg && cfg.apiKey ? 'ok' : 'warn');
       const hasModels = cfg && cfg.models && cfg.models.length > 0;
       setStatus('#pill-models', hasModels ? `${cfg.models.length} models` : 'No models', hasModels ? 'ok' : 'warn');
-      setStatus('#pill-status', currentAbortController ? 'Running...' : (lastError ? 'Error' : 'Idle'), currentAbortController ? 'active' : (lastError ? 'err' : ''));
+      if (currentAbortController && requestStartTime) {
+        const elapsed = Math.round((performance.now() - requestStartTime) / 1000);
+        setStatus('#pill-status', `Running ${elapsed}s`, 'active');
+      } else {
+        setStatus('#pill-status', lastError ? 'Error' : 'Idle', lastError ? 'err' : '');
+      }
     }
 
     function renderProviderSelects() {
@@ -2138,6 +2146,9 @@
       if (!model) { toast('Select a model first', 'err'); return; }
 
       currentAbortController = new AbortController();
+      requestStartTime = performance.now();
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = setInterval(updateStatusPills, 1000);
       updateStatusPills();
 
       const spinner = $(`#btn-${mode}-spinner`);
@@ -2282,6 +2293,8 @@
         }
       } finally {
         currentAbortController = null;
+        if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+        requestStartTime = 0;
         if (spinner) spinner.classList.add('hidden');
         if (label) label.textContent = mode === 'raw' ? 'Send Request' : (mode === 'text' ? 'Send' : (mode === 'image' ? 'Generate' : (mode === 'audio' ? 'Generate Audio' : (mode === 'vision' ? 'Analyze' : (mode === 'embedding' ? 'Embed' : 'Submit')))));
         updateStatusPills();
@@ -2671,6 +2684,18 @@
             header.click();
           }
         }
+      });
+
+      // Restore persisted max tokens
+      if (state.maxTokens) {
+        const mt = $('#text-maxtokens');
+        if (mt) mt.value = state.maxTokens;
+      }
+
+      // Persist max tokens on change
+      $('#text-maxtokens').addEventListener('change', () => {
+        state.maxTokens = parseInt($('#text-maxtokens').value) || 50000;
+        saveState();
       });
 
       renderTabs();
