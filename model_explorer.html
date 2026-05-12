@@ -1400,9 +1400,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.8" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.8" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.8
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.9" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.9" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.9
     </footer>
   </div>
 
@@ -1590,7 +1590,7 @@
               const delta = chunk.choices?.[0]?.delta?.content;
               if (delta) {
                 text += delta;
-                contentEl.innerHTML = markdownToHtml(escapeHtml(text));
+                contentEl.innerHTML = markdownToHtml(text);
                 contentEl.scrollTop = contentEl.scrollHeight;
               }
               if (chunk.usage) {
@@ -2073,23 +2073,107 @@
 
     function markdownToHtml(md) {
       if (!md) return '';
-      let html = escapeHtml(md);
-      // Code blocks
-      html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-      // Inline code
-      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Block-level processor: split into blocks first, then format each
+      const blocks = [];
+      const lines = md.split('\n');
+      let i = 0;
+
+      while (i < lines.length) {
+        const line = lines[i];
+
+        // Code block ```lang
+        if (/^```/.test(line)) {
+          const lang = line.replace(/^```/, '').trim();
+          i++;
+          const codeLines = [];
+          while (i < lines.length && !/^```/.test(lines[i])) {
+            codeLines.push(lines[i]);
+            i++;
+          }
+          i++; // skip closing ```
+          blocks.push({ type: 'code', lang, text: escapeHtml(codeLines.join('\n')) });
+          continue;
+        }
+
+        // Header
+        const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
+        if (headerMatch) {
+          const level = headerMatch[1].length;
+          blocks.push({ type: 'header', level, text: escapeInline(headerMatch[2]) });
+          i++;
+          continue;
+        }
+
+        // Horizontal rule
+        if (/^(---|===|\*\*\*|___)\s*$/.test(line)) {
+          blocks.push({ type: 'hr' });
+          i++;
+          continue;
+        }
+
+        // List item
+        if (/^\s*[-*+]\s+/.test(line)) {
+          const items = [];
+          while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+            items.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
+            i++;
+          }
+          blocks.push({ type: 'list', items: items.map(escapeInline) });
+          continue;
+        }
+
+        // Empty line
+        if (/^\s*$/.test(line)) {
+          i++;
+          continue;
+        }
+
+        // Paragraph (collect until blank line or other block)
+        const paraLines = [];
+        while (i < lines.length && lines[i] !== '' && !/^```/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i]) && !/^\s*[-*+]\s+/.test(lines[i]) && !/^(---|===|\*\*\*|___)\s*$/.test(lines[i])) {
+          paraLines.push(lines[i]);
+          i++;
+        }
+        blocks.push({ type: 'para', text: escapeInline(paraLines.join(' ')) });
+      }
+
+      // Render blocks
+      return blocks.map(b => {
+        if (b.type === 'code') {
+          return `<pre class="output-content" style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.75rem;overflow-x:auto;font-size:0.78rem"><code style="background:none;padding:0">${b.text}</code></pre>`;
+        }
+        if (b.type === 'header') {
+          const tag = 'h' + Math.min(Math.max(b.level, 1), 6);
+          return `<${tag} style="margin:0.5rem 0;font-family:var(--font-display);font-weight:700">${b.text}</${tag}>`;
+        }
+        if (b.type === 'hr') {
+          return `<hr style="border:0;border-top:1px solid var(--border);margin:1rem 0">`;
+        }
+        if (b.type === 'list') {
+          const lis = b.items.map(item => `<li style="margin:0.25rem 0">${formatInline(item)}</li>`).join('');
+          return `<ul style="margin:0.5rem 0;padding-left:1.25rem">${lis}</ul>`;
+        }
+        if (b.type === 'para') {
+          return `<p style="margin:0.5rem 0">${formatInline(b.text)}</p>`;
+        }
+        return '';
+      }).join('');
+    }
+
+    function escapeInline(text) {
+      return escapeHtml(text);
+    }
+
+    function formatInline(text) {
       // Bold
-      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-      // Italic
-      html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-      // Headers
-      html = html.replace(/^#{1,6}\s+(.+)$/gm, '<h4>$1</h4>');
-      // Lists
-      html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
-      // Paragraphs / line breaks
-      html = html.replace(/\n\n/g, '</p><p>');
-      html = html.replace(/\n/g, '<br>');
-      return '<p>' + html + '</p>';
+      text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Italic (but not bold)
+      text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      // Inline code
+      text = text.replace(/`([^`]+)`/g, '<code style="background:rgba(8,145,178,0.08);padding:0.15rem 0.35rem;border-radius:4px;font-family:var(--font-mono);font-size:0.9em">$1</code>');
+      // Links [text](url)
+      text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">$1</a>');
+      return text;
     }
 
     function buildTextOutput(text, view, availableViews) {
@@ -2107,7 +2191,7 @@
         const url = URL.createObjectURL(blob);
         return `<iframe class="html-preview-frame" src="${url}" sandbox="allow-scripts allow-same-origin" title="HTML Preview" style="min-height:400px"></iframe>`;
       }
-      return `<div class="output-content">${markdownToHtml(escapeHtml(text))}</div>`;
+      return `<div class="output-content">${markdownToHtml(text)}</div>`;
     }
 
     function switchTextView(btn, view, text) {
