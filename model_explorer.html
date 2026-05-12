@@ -420,6 +420,7 @@
       display: flex;
       flex-direction: column;
       gap: 1rem;
+      min-width: 0;
     }
 
     /* Parameters Grid */
@@ -435,9 +436,11 @@
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       min-height: 200px;
+      max-height: 70vh;
       padding: 1rem;
       position: relative;
-      overflow: auto;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .output-area.empty {
       display: flex;
@@ -451,15 +454,20 @@
       font-size: 0.85rem;
       line-height: 1.65;
       word-break: break-word;
+      overflow-wrap: break-word;
+      max-width: 100%;
     }
     .output-content pre {
       background: var(--bg-surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       padding: 0.75rem;
-      overflow: auto;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
       font-size: 0.78rem;
       margin: 0.5rem 0;
+      max-width: 100%;
     }
     .output-content code {
       font-family: var(--font-mono);
@@ -467,8 +475,46 @@
       padding: 0.15rem 0.35rem;
       border-radius: 4px;
       font-size: 0.8em;
+      word-break: break-word;
     }
     .output-content pre code { background: none; padding: 0; }
+
+    /* HTML Preview */
+    .html-preview-frame {
+      width: 100%;
+      min-height: 300px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: white;
+    }
+
+    /* View Toggle */
+    .view-toggle {
+      display: inline-flex;
+      gap: 0;
+      margin-bottom: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .view-toggle button {
+      background: var(--bg-surface);
+      border: none;
+      border-right: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.35rem 0.7rem;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .view-toggle button:last-child { border-right: none; }
+    .view-toggle button:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .view-toggle button.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
 
     /* Action Bar */
     .action-bar {
@@ -1354,9 +1400,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.4" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.4
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.5" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.5
     </footer>
   </div>
 
@@ -1791,12 +1837,22 @@
       metaCard.classList.remove('hidden');
 
       if (normalized.type === 'text') {
-        area.innerHTML = `<div class="output-content">${markdownToHtml(escapeHtml(normalized.text || ''))}</div>`;
+        const text = normalized.text || '';
+        const looksLikeHtml = /^\s*<(!DOCTYPE|html|body|div|span|h[1-6]|p|a|img|table|ul|ol|li|script|style|header|footer|section|article|main|nav)/i.test(text);
+        const views = ['rendered', 'raw'];
+        if (looksLikeHtml) views.push('html');
+        const initialView = looksLikeHtml ? 'rendered' : 'rendered';
+        area.innerHTML = buildTextOutput(text, initialView, views);
         actions.innerHTML = `
-          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.text || '')})">Copy Text</button>
-          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.markdown || normalized.text || '')})">Copy Markdown</button>
-          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.txt', ${JSON.stringify(normalized.text || '')})">Download .txt</button>
-          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.md', ${JSON.stringify(normalized.markdown || normalized.text || '')})">Download .md</button>
+          <div class="view-toggle" style="width:100%;margin-bottom:0.5rem">
+            <button class="${initialView === 'rendered' ? 'active' : ''}" onclick="switchTextView(this, 'rendered', ${JSON.stringify(text).replace(/"/g, '&quot;')})">Rendered</button>
+            <button class="${initialView === 'raw' ? 'active' : ''}" onclick="switchTextView(this, 'raw', ${JSON.stringify(text).replace(/"/g, '&quot;')})">Raw</button>
+            ${looksLikeHtml ? `<button class="${initialView === 'html' ? 'active' : ''}" onclick="switchTextView(this, 'html', ${JSON.stringify(text).replace(/"/g, '&quot;')})">HTML Preview</button>` : ''}
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(text)})">Copy Text</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.markdown || text)})">Copy Markdown</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.txt', ${JSON.stringify(text)})">Download .txt</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.md', ${JSON.stringify(normalized.markdown || text)})">Download .md</button>
           <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(JSON.stringify(normalized.raw, null, 2))">Copy Raw JSON</button>
           <button class="btn btn-ghost btn-sm" onclick="downloadText('output.json', JSON.stringify(normalized.raw, null, 2), 'application/json')">Download .json</button>
         `;
@@ -2017,6 +2073,25 @@
       html = html.replace(/\n\n/g, '</p><p>');
       html = html.replace(/\n/g, '<br>');
       return '<p>' + html + '</p>';
+    }
+
+    function buildTextOutput(text, view, availableViews) {
+      if (view === 'raw') {
+        return `<pre class="output-content" style="white-space:pre-wrap;word-break:break-word">${escapeHtml(text)}</pre>`;
+      }
+      if (view === 'html') {
+        const blob = new Blob([text], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        return `<iframe class="html-preview-frame" src="${url}" sandbox="allow-scripts" title="HTML Preview"></iframe>`;
+      }
+      return `<div class="output-content">${markdownToHtml(escapeHtml(text))}</div>`;
+    }
+
+    function switchTextView(btn, view, text) {
+      const area = $('#output-area');
+      area.innerHTML = buildTextOutput(text, view);
+      btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
     }
 
     // ==========================================
@@ -2640,6 +2715,7 @@
     window.renderModelExplorer = renderModelExplorer;
     window.toggleTheme = toggleTheme;
     window.toggleCollapsible = toggleCollapsible;
+    window.switchTextView = switchTextView;
 
     document.addEventListener('DOMContentLoaded', init);
   </script>
