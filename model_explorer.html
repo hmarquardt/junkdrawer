@@ -40,6 +40,31 @@
       --transition: 0.18s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
+    [data-theme="dark"] {
+      --bg-deep: #050814;
+      --bg-surface: #0a0f1e;
+      --bg-elevated: #111827;
+      --bg-input: #0f172a;
+      --bg-hover: #1e293b;
+      --accent: #00e5ff;
+      --accent-dim: rgba(0, 229, 255, 0.12);
+      --accent-glow: rgba(0, 229, 255, 0.35);
+      --accent-secondary: #ff6b35;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --border: rgba(148, 163, 184, 0.12);
+      --border-active: rgba(0, 229, 255, 0.45);
+      --error: #ff4757;
+      --error-bg: rgba(255, 71, 87, 0.1);
+      --warning: #ffa502;
+      --warning-bg: rgba(255, 165, 2, 0.1);
+      --success: #2ed573;
+      --success-bg: rgba(46, 213, 115, 0.1);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     html { scroll-behavior: smooth; }
@@ -339,6 +364,18 @@
     .btn-group .btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
     .btn-group .btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
     .btn-group .btn:not(:first-child) { border-left: none; }
+
+    .theme-toggle {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.4rem 0.7rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      transition: var(--transition);
+    }
+    .theme-toggle:hover { border-color: var(--border-active); color: var(--accent); }
 
     /* Playground Grid */
     .playground-grid {
@@ -847,6 +884,7 @@
         <span class="status-pill" id="pill-key"><span class="dot"></span><span id="pill-key-text">No key</span></span>
         <span class="status-pill" id="pill-models"><span class="dot"></span><span id="pill-models-text">No models</span></span>
         <span class="status-pill" id="pill-status"><span class="dot"></span><span id="pill-status-text">Idle</span></span>
+        <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme">🌙</button>
       </div>
     </header>
 
@@ -1278,9 +1316,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.2" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.2
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.3" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.3
     </footer>
   </div>
 
@@ -1298,6 +1336,7 @@
       activeProvider: 'openrouter',
       activeModel: '',
       activeMode: 'text',
+      theme: 'light',
       providers: {
         openrouter: {
           label: 'OpenRouter',
@@ -1406,6 +1445,76 @@
 
     function getBrowserInfo() {
       return `${navigator.userAgent} | ${navigator.language} | ${screen.width}x${screen.height}`;
+    }
+
+    function setTheme(theme) {
+      state.theme = theme;
+      document.documentElement.setAttribute('data-theme', theme);
+      const btn = $('#theme-toggle');
+      if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+      saveState();
+    }
+
+    function toggleTheme() {
+      setTheme(state.theme === 'dark' ? 'light' : 'dark');
+    }
+
+    async function readStream(res, provider, model, mode, latency) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let text = '';
+      let usage = null;
+
+      // Pre-render output area for streaming
+      const area = $('#output-area');
+      area.classList.remove('empty');
+      const badge = $('#output-mode-badge');
+      const metaText = $('#output-meta');
+      badge.textContent = mode;
+      metaText.textContent = `${provider} · ${model} · streaming...`;
+      area.innerHTML = `<div class="output-content" id="stream-content"></div>`;
+      const contentEl = $('#stream-content');
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // keep incomplete line in buffer
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data: ')) continue;
+            const jsonStr = trimmed.slice(6);
+            if (jsonStr === '[DONE]') continue;
+            try {
+              const chunk = JSON.parse(jsonStr);
+              // OpenRouter / OpenAI format: choices[0].delta.content
+              const delta = chunk.choices?.[0]?.delta?.content;
+              if (delta) {
+                text += delta;
+                contentEl.innerHTML = markdownToHtml(escapeHtml(text));
+                contentEl.scrollTop = contentEl.scrollHeight;
+              }
+              if (chunk.usage) {
+                usage = chunk.usage;
+              }
+            } catch (e) {
+              // Ignore malformed SSE lines
+            }
+          }
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        logDebug({ msg: 'Stream read error: ' + e.message, level: 'error' });
+      } finally {
+        reader.releaseLock();
+      }
+
+      return { text, usage };
     }
 
     // ==========================================
@@ -1608,7 +1717,7 @@
       list.innerHTML = state.history.map((h, i) => `
         <div class="history-item" onclick="loadHistoryEntry(${i})">
           <div class="history-item-top">
-            <span class="history-item-model">${h.model || 'unknown'} <span style="color:var(--text-muted)">|</span> ${h.mode}</span>
+            <span class="history-item-model">${h.model || 'unknown'} <span style="color:var(--text-muted)">|</span> ${h.mode}${h.usage ? ` <span style="color:var(--text-muted)">|</span> ${h.usage.total_tokens}tk` : ''}</span>
             <span class="history-item-time">${timeAgo(h.timestamp)}</span>
           </div>
           <div class="history-item-prompt">${escapeHtml(h.promptSummary || '')}</div>
@@ -1712,11 +1821,13 @@
         actions.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="copyToClipboard(JSON.stringify(normalized.raw, null, 2))">Copy Raw</button>`;
       }
 
+      const u = normalized.metadata.usage;
       metaTable.innerHTML = `
         <tr><th>Provider</th><td>${escapeHtml(normalized.metadata.provider || '')}</td></tr>
         <tr><th>Model</th><td>${escapeHtml(normalized.metadata.model || '')}</td></tr>
         <tr><th>Mode</th><td>${escapeHtml(normalized.metadata.mode || '')}</td></tr>
         <tr><th>Latency</th><td>${normalized.metadata.latencyMs || 0}ms</td></tr>
+        ${u ? `<tr><th>Tokens</th><td>${u.total_tokens || 0} total (${u.prompt_tokens || 0} prompt + ${u.completion_tokens || 0} completion)</td></tr>` : ''}
         <tr><th>Created</th><td>${formatDate(normalized.metadata.createdAt)}</td></tr>
       `;
     }
@@ -2000,18 +2111,29 @@
         lastResponseInfo.status = res.status;
         lastResponseInfo.headers = Object.fromEntries([...res.headers.entries()]);
 
-        const resText = await res.text();
-        lastResponseInfo.body = resText;
-
-        let resData;
-        try { resData = JSON.parse(resText); } catch { resData = resText; }
-
         if (!res.ok) {
+          const resText = await res.text();
+          lastResponseInfo.body = resText;
+          let resData;
+          try { resData = JSON.parse(resText); } catch { resData = resText; }
           const errMsg = resData?.error?.message || resData?.message || `HTTP ${res.status}`;
           throw new Error(errMsg);
         }
 
-        const normalized = normalizeOutput(mode, resData, provider, model, lastLatency);
+        let normalized;
+        if (payload.stream && (mode === 'text' || mode === 'vision')) {
+          // Streaming mode: read SSE chunks live
+          const { text, usage } = await readStream(res, provider, model, mode, lastLatency);
+          lastResponseInfo.body = text; // Store final text as body for debug
+          normalized = normalizeOutput(mode, { choices: [{ message: { content: text } }], usage }, provider, model, lastLatency);
+        } else {
+          const resText = await res.text();
+          lastResponseInfo.body = resText;
+          let resData;
+          try { resData = JSON.parse(resText); } catch { resData = resText; }
+          normalized = normalizeOutput(mode, resData, provider, model, lastLatency);
+        }
+
         renderOutput(normalized);
         addToHistory(normalized, payload);
         logDebug({ msg: `Success: ${mode} from ${provider}`, level: 'info' });
@@ -2048,7 +2170,16 @@
     }
 
     function normalizeOutput(mode, data, provider, model, latency) {
-      const meta = { provider, model, mode, latencyMs: latency, createdAt: new Date().toISOString() };
+      const usage = data.usage || null;
+      const meta = {
+        provider, model, mode, latencyMs: latency,
+        createdAt: new Date().toISOString(),
+        usage: usage ? {
+          prompt_tokens: usage.prompt_tokens,
+          completion_tokens: usage.completion_tokens,
+          total_tokens: usage.total_tokens
+        } : null
+      };
       if (mode === 'text') {
         const text = data.choices?.[0]?.message?.content || data.text || data.content || JSON.stringify(data);
         return { type: 'text', text, markdown: text, raw: data, metadata: meta };
@@ -2090,6 +2221,7 @@
         promptSummary: payload.prompt || payload.system || payload.path || 'Raw request',
         outputSummary: normalized.text || normalized.type,
         latency: normalized.metadata.latencyMs,
+        usage: normalized.metadata.usage,
         error: normalized.type === 'error',
         raw: normalized.raw
       };
@@ -2366,6 +2498,7 @@
     // ==========================================
     function init() {
       loadState();
+      setTheme(state.theme || 'light');
 
       // Tabs
       $$('.tab-btn').forEach(btn => {
@@ -2453,6 +2586,7 @@
     window.rerunHistoryEntry = rerunHistoryEntry;
     window.deleteHistoryEntry = deleteHistoryEntry;
     window.renderModelExplorer = renderModelExplorer;
+    window.toggleTheme = toggleTheme;
 
     document.addEventListener('DOMContentLoaded', init);
   </script>
