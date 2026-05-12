@@ -1,0 +1,2667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Model Explorer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-deep: #050814;
+      --bg-surface: #0a0f1e;
+      --bg-elevated: #111827;
+      --bg-input: #0f172a;
+      --bg-hover: #1e293b;
+      --accent: #00e5ff;
+      --accent-dim: rgba(0, 229, 255, 0.12);
+      --accent-glow: rgba(0, 229, 255, 0.35);
+      --accent-secondary: #ff6b35;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --border: rgba(148, 163, 184, 0.12);
+      --border-active: rgba(0, 229, 255, 0.45);
+      --error: #ff4757;
+      --error-bg: rgba(255, 71, 87, 0.1);
+      --warning: #ffa502;
+      --warning-bg: rgba(255, 165, 2, 0.1);
+      --success: #2ed573;
+      --success-bg: rgba(46, 213, 115, 0.1);
+      --radius: 10px;
+      --radius-sm: 6px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+      --shadow-glow: 0 0 20px var(--accent-glow);
+      --font-display: 'Sora', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+      --transition: 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      line-height: 1.55;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-surface); }
+    ::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    /* App Shell */
+    .app-shell {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 1.25rem;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* Topbar */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 0.5rem;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .topbar-brand h1 {
+      font-family: var(--font-display);
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .topbar-brand p {
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      margin-top: 0.2rem;
+      font-weight: 400;
+    }
+
+    .status-cluster {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+
+    .status-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.7;
+    }
+
+    .status-pill.ok { border-color: rgba(46,213,115,0.3); color: var(--success); background: var(--success-bg); }
+    .status-pill.warn { border-color: rgba(255,165,2,0.3); color: var(--warning); background: var(--warning-bg); }
+    .status-pill.err { border-color: rgba(255,71,87,0.3); color: var(--error); background: var(--error-bg); }
+    .status-pill.active { border-color: var(--border-active); color: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      padding-bottom: 1px;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.75rem 1.25rem;
+      cursor: pointer;
+      position: relative;
+      transition: var(--transition);
+      white-space: nowrap;
+      letter-spacing: 0.01em;
+    }
+
+    .tab-btn:hover { color: var(--text-secondary); }
+    .tab-btn[aria-selected="true"] {
+      color: var(--accent);
+    }
+    .tab-btn[aria-selected="true"]::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0.5rem;
+      right: 0.5rem;
+      height: 2px;
+      background: var(--accent);
+      border-radius: 2px;
+      box-shadow: 0 -2px 8px var(--accent-glow);
+    }
+
+    /* Tab Panels */
+    .tab-panel {
+      display: none;
+      animation: fadeIn 0.25s ease;
+    }
+    .tab-panel.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Main Layout */
+    main { flex: 1; padding-bottom: 2rem; }
+
+    /* Cards */
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      transition: var(--transition);
+    }
+    .card:hover { border-color: var(--border-active); }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+    .card-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+
+    /* Forms */
+    .form-group { margin-bottom: 1rem; }
+    .form-label {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+      margin-bottom: 0.4rem;
+    }
+    .form-hint {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    input[type="url"],
+    select,
+    textarea {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.6rem 0.85rem;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      outline: none;
+      transition: var(--transition);
+      resize: vertical;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+
+    input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 0.7; }
+
+    select {
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.75rem center;
+      padding-right: 2rem;
+    }
+
+    textarea { min-height: 100px; line-height: 1.6; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1.1rem;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: var(--transition);
+      white-space: nowrap;
+      letter-spacing: 0.02em;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg-deep);
+      border-color: var(--accent);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #33ebff;
+      box-shadow: var(--shadow-glow);
+    }
+
+    .btn-secondary {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-active); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-active); background: var(--bg-elevated); }
+
+    .btn-danger {
+      background: var(--error-bg);
+      color: var(--error);
+      border-color: rgba(255,71,87,0.3);
+    }
+    .btn-danger:hover:not(:disabled) { background: rgba(255,71,87,0.2); }
+
+    .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.75rem; }
+    .btn-xs { padding: 0.25rem 0.5rem; font-size: 0.7rem; }
+
+    .btn-group {
+      display: inline-flex;
+      gap: 0;
+    }
+    .btn-group .btn {
+      border-radius: 0;
+    }
+    .btn-group .btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+    .btn-group .btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .btn-group .btn:not(:first-child) { border-left: none; }
+
+    /* Playground Grid */
+    .playground-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .playground-grid { grid-template-columns: 1fr; }
+    }
+
+    .playground-col {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    /* Parameters Grid */
+    .params-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem;
+    }
+
+    /* Output Area */
+    .output-area {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      min-height: 200px;
+      padding: 1rem;
+      position: relative;
+      overflow: auto;
+    }
+    .output-area.empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .output-content {
+      font-size: 0.85rem;
+      line-height: 1.65;
+      word-break: break-word;
+    }
+    .output-content pre {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.75rem;
+      overflow: auto;
+      font-size: 0.78rem;
+      margin: 0.5rem 0;
+    }
+    .output-content code {
+      font-family: var(--font-mono);
+      background: rgba(0,229,255,0.08);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.8em;
+    }
+    .output-content pre code { background: none; padding: 0; }
+
+    /* Action Bar */
+    .action-bar {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Mode badge */
+    .mode-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid var(--border-active);
+    }
+
+    /* Model Cards */
+    .model-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1rem;
+    }
+
+    .model-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      transition: var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+    .model-card:hover {
+      border-color: var(--border-active);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+    .model-card.favorite { border-color: rgba(255, 193, 7, 0.3); }
+    .model-card.favorite::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #ffc107, #ff9800);
+    }
+
+    .model-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.5rem;
+      gap: 0.5rem;
+    }
+    .model-card-id {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      word-break: break-all;
+    }
+    .model-card-provider {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .model-card-desc {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 0.75rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .model-card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-bottom: 0.75rem;
+    }
+    .meta-chip {
+      font-size: 0.68rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .meta-chip.accent { background: var(--accent-dim); color: var(--accent); border-color: var(--border-active); }
+
+    .model-card-actions {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    /* Filters toolbar */
+    .toolbar {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .toolbar-search {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    /* Toggle Switch */
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+    .toggle input { display: none; }
+    .toggle-track {
+      width: 36px;
+      height: 20px;
+      background: var(--bg-hover);
+      border-radius: 999px;
+      position: relative;
+      transition: var(--transition);
+      border: 1px solid var(--border);
+    }
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      top: 2px; left: 2px;
+      width: 14px; height: 14px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      transition: var(--transition);
+    }
+    .toggle input:checked + .toggle-track { background: var(--accent-dim); border-color: var(--accent); }
+    .toggle input:checked + .toggle-track::after { left: 18px; background: var(--accent); }
+
+    /* Spinner */
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-muted);
+    }
+    .empty-state-icon {
+      font-size: 2.5rem;
+      margin-bottom: 0.75rem;
+      opacity: 0.5;
+    }
+    .empty-state h3 {
+      font-family: var(--font-display);
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+      margin-bottom: 0.3rem;
+    }
+    .empty-state p {
+      font-size: 0.8rem;
+      max-width: 400px;
+      margin: 0 auto;
+    }
+
+    /* Alert / Notice */
+    .notice {
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .notice.info { background: rgba(0,229,255,0.06); border-color: rgba(0,229,255,0.2); color: var(--accent); }
+    .notice.warn { background: var(--warning-bg); border-color: rgba(255,165,2,0.3); color: var(--warning); }
+    .notice.error { background: var(--error-bg); border-color: rgba(255,71,87,0.3); color: var(--error); }
+    .notice.success { background: var(--success-bg); border-color: rgba(46,213,115,0.3); color: var(--success); }
+
+    /* History List */
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .history-item {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.75rem;
+      cursor: pointer;
+      transition: var(--transition);
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .history-item:hover { border-color: var(--border-active); }
+    .history-item-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .history-item-model {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .history-item-time {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .history-item-prompt {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-item-actions {
+      display: flex;
+      gap: 0.3rem;
+      margin-top: 0.25rem;
+    }
+
+    /* Debug Table */
+    .debug-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+    .debug-table th, .debug-table td {
+      text-align: left;
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .debug-table th {
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--bg-elevated);
+    }
+    .debug-table td {
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      word-break: break-all;
+    }
+    .debug-table tr:hover td { background: var(--bg-elevated); }
+
+    .debug-raw {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.75rem;
+      font-size: 0.75rem;
+      overflow: auto;
+      max-height: 300px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-secondary);
+    }
+
+    /* Admin provider cards */
+    .provider-admin-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 1rem;
+    }
+
+    /* Modal / overlay */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(5,8,20,0.85);
+      backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      max-width: 640px;
+      width: 100%;
+      max-height: 85vh;
+      overflow: auto;
+      box-shadow: var(--shadow-md);
+    }
+    .modal-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-title {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .modal-body { padding: 1.25rem; }
+    .modal-footer {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+
+    /* Toast */
+    .toast-container {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.75rem 1rem;
+      font-size: 0.8rem;
+      color: var(--text-primary);
+      box-shadow: var(--shadow-md);
+      animation: toastIn 0.25s ease, toastOut 0.25s ease 2.75s forwards;
+      pointer-events: auto;
+      max-width: 320px;
+    }
+    .toast.ok { border-color: rgba(46,213,115,0.3); }
+    .toast.err { border-color: rgba(255,71,87,0.3); }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes toastOut { to { opacity: 0; transform: translateY(10px); } }
+
+    /* Image preview in vision mode */
+    .image-preview {
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      margin-top: 0.5rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .topbar { flex-direction: column; align-items: flex-start; }
+      .status-cluster { width: 100%; }
+      .card { padding: 1rem; }
+      .model-grid { grid-template-columns: 1fr; }
+      .provider-admin-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Utility */
+    .flex { display: flex; }
+    .flex-col { display: flex; flex-direction: column; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-1 { gap: 0.25rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-3 { gap: 0.75rem; }
+    .gap-4 { gap: 1rem; }
+    .mt-1 { margin-top: 0.25rem; }
+    .mt-2 { margin-top: 0.5rem; }
+    .mt-3 { margin-top: 0.75rem; }
+    .mt-4 { margin-top: 1rem; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-3 { margin-bottom: 0.75rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .w-full { width: 100%; }
+    .text-xs { font-size: 0.7rem; }
+    .text-sm { font-size: 0.8rem; }
+    .text-muted { color: var(--text-muted); }
+    .text-secondary { color: var(--text-secondary); }
+    .text-accent { color: var(--accent); }
+    .font-display { font-family: var(--font-display); }
+    .font-mono { font-family: var(--font-mono); }
+    .hidden { display: none !important; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-brand">
+        <h1>Model Explorer</h1>
+        <p>Probe models, compare capabilities, and test inference providers.</p>
+      </div>
+      <div class="status-cluster" id="status-cluster" aria-live="polite">
+        <span class="status-pill" id="pill-provider"><span class="dot"></span><span id="pill-provider-text">No provider</span></span>
+        <span class="status-pill" id="pill-key"><span class="dot"></span><span id="pill-key-text">No key</span></span>
+        <span class="status-pill" id="pill-models"><span class="dot"></span><span id="pill-models-text">No models</span></span>
+        <span class="status-pill" id="pill-status"><span class="dot"></span><span id="pill-status-text">Idle</span></span>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Main tabs">
+      <button class="tab-btn" role="tab" aria-selected="true" aria-controls="tab-playground" data-tab="playground">Playground</button>
+      <button class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-models" data-tab="models">Model Explorer</button>
+      <button class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-admin" data-tab="admin">Admin</button>
+      <button class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-debug" data-tab="debug">Debug</button>
+    </nav>
+
+    <main>
+      <!-- PLAYGROUND -->
+      <section id="tab-playground" class="tab-panel active" role="tabpanel" aria-labelledby="tab-playground">
+        <div class="playground-grid">
+          <div class="playground-col" id="playground-left">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Configuration</div>
+                  <div class="card-subtitle">Select provider, model, and mode</div>
+                </div>
+                <span class="mode-badge" id="playground-mode-badge">text</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="pg-provider">Provider</label>
+                <select id="pg-provider"></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="pg-model">Model</label>
+                <select id="pg-model"></select>
+                <div class="form-hint" id="pg-model-hint">Select a provider first</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="pg-mode">Mode</label>
+                <select id="pg-mode"></select>
+              </div>
+            </div>
+
+            <!-- Text Mode Inputs -->
+            <div class="card" id="panel-text">
+              <div class="card-header">
+                <div class="card-title">Text Prompt</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="text-system">System Prompt (optional)</label>
+                <textarea id="text-system" rows="2" placeholder="You are a helpful assistant..."></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="text-prompt">User Prompt</label>
+                <textarea id="text-prompt" rows="6" placeholder="Enter your prompt here..."></textarea>
+              </div>
+              <div class="form-group">
+                <div class="params-grid">
+                  <div>
+                    <label class="form-label" for="text-temp">Temperature</label>
+                    <input type="number" id="text-temp" step="0.1" min="0" max="2" value="0.7" />
+                  </div>
+                  <div>
+                    <label class="form-label" for="text-maxtokens">Max Tokens</label>
+                    <input type="number" id="text-maxtokens" min="1" max="32000" value="1000" />
+                  </div>
+                  <div>
+                    <label class="form-label" for="text-topp">Top P</label>
+                    <input type="number" id="text-topp" step="0.05" min="0" max="1" value="1" />
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="toggle">
+                  <input type="checkbox" id="text-stream" />
+                  <span class="toggle-track"></span>
+                  Stream response
+                </label>
+              </div>
+              <div class="flex gap-3">
+                <button class="btn btn-primary w-full" id="btn-text-submit" onclick="handleSubmit()">
+                  <span id="btn-text-spinner" class="spinner hidden"></span>
+                  <span id="btn-text-label">Send</span>
+                </button>
+                <button class="btn btn-secondary" onclick="clearInputs()">Clear</button>
+              </div>
+            </div>
+
+            <!-- Image Mode Inputs -->
+            <div class="card hidden" id="panel-image">
+              <div class="card-header">
+                <div class="card-title">Image Generation</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="image-prompt">Prompt</label>
+                <textarea id="image-prompt" rows="3" placeholder="A futuristic cityscape at sunset..."></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="image-negative">Negative Prompt (optional)</label>
+                <input type="text" id="image-negative" placeholder=" blurry, low quality..." />
+              </div>
+              <div class="params-grid">
+                <div>
+                  <label class="form-label" for="image-size">Size</label>
+                  <select id="image-size">
+                    <option value="1024x1024">1024x1024</option>
+                    <option value="512x512">512x512</option>
+                    <option value="256x256">256x256</option>
+                    <option value="1792x1024">1792x1024</option>
+                    <option value="1024x1792">1024x1792</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label" for="image-n">Number of Images</label>
+                  <input type="number" id="image-n" min="1" max="4" value="1" />
+                </div>
+              </div>
+              <div class="flex gap-3">
+                <button class="btn btn-primary w-full" id="btn-image-submit" onclick="handleSubmit()">
+                  <span id="btn-image-spinner" class="spinner hidden"></span>
+                  <span id="btn-image-label">Generate</span>
+                </button>
+                <button class="btn btn-secondary" onclick="clearInputs()">Clear</button>
+              </div>
+            </div>
+
+            <!-- Audio Mode Inputs -->
+            <div class="card hidden" id="panel-audio">
+              <div class="card-header">
+                <div class="card-title">Audio Generation</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="audio-prompt">Text / Script</label>
+                <textarea id="audio-prompt" rows="4" placeholder="Enter text to convert to speech..."></textarea>
+              </div>
+              <div class="params-grid">
+                <div>
+                  <label class="form-label" for="audio-voice">Voice (optional)</label>
+                  <input type="text" id="audio-voice" placeholder="alloy, echo, fable..." />
+                </div>
+                <div>
+                  <label class="form-label" for="audio-format">Format</label>
+                  <select id="audio-format">
+                    <option value="mp3">MP3</option>
+                    <option value="wav">WAV</option>
+                    <option value="ogg">OGG</option>
+                    <option value="aac">AAC</option>
+                  </select>
+                </div>
+              </div>
+              <div class="flex gap-3">
+                <button class="btn btn-primary w-full" id="btn-audio-submit" onclick="handleSubmit()">
+                  <span id="btn-audio-spinner" class="spinner hidden"></span>
+                  <span id="btn-audio-label">Generate Audio</span>
+                </button>
+                <button class="btn btn-secondary" onclick="clearInputs()">Clear</button>
+              </div>
+            </div>
+
+            <!-- Vision Mode Inputs -->
+            <div class="card hidden" id="panel-vision">
+              <div class="card-header">
+                <div class="card-title">Vision Analysis</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="vision-system">System Prompt (optional)</label>
+                <textarea id="vision-system" rows="2" placeholder="You are a visual analysis assistant..."></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="vision-prompt">User Prompt</label>
+                <textarea id="vision-prompt" rows="4" placeholder="Describe what you see in this image..."></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="vision-image-url">Image URL (optional)</label>
+                <input type="url" id="vision-image-url" placeholder="https://..." />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="vision-image-file">Or upload an image</label>
+                <input type="file" id="vision-image-file" accept="image/*" />
+                <img id="vision-preview" class="image-preview hidden" alt="Preview" />
+              </div>
+              <div class="flex gap-3">
+                <button class="btn btn-primary w-full" id="btn-vision-submit" onclick="handleSubmit()">
+                  <span id="btn-vision-spinner" class="spinner hidden"></span>
+                  <span id="btn-vision-label">Analyze</span>
+                </button>
+                <button class="btn btn-secondary" onclick="clearInputs()">Clear</button>
+              </div>
+            </div>
+
+            <!-- Embedding Mode Inputs -->
+            <div class="card hidden" id="panel-embedding">
+              <div class="card-header">
+                <div class="card-title">Embedding</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="embedding-input">Text Input</label>
+                <textarea id="embedding-input" rows="4" placeholder="Enter text to embed..."></textarea>
+              </div>
+              <div class="form-group">
+                <label class="toggle">
+                  <input type="checkbox" id="embedding-batch" />
+                  <span class="toggle-track"></span>
+                  Batch mode (one embedding per line)
+                </label>
+              </div>
+              <div class="flex gap-3">
+                <button class="btn btn-primary w-full" id="btn-embedding-submit" onclick="handleSubmit()">
+                  <span id="btn-embedding-spinner" class="spinner hidden"></span>
+                  <span id="btn-embedding-label">Embed</span>
+                </button>
+                <button class="btn btn-secondary" onclick="clearInputs()">Clear</button>
+              </div>
+            </div>
+
+            <!-- Raw Mode Inputs -->
+            <div class="card hidden" id="panel-raw">
+              <div class="card-header">
+                <div class="card-title">Raw Request</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="raw-method">HTTP Method</label>
+                <select id="raw-method">
+                  <option value="GET">GET</option>
+                  <option value="POST" selected>POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="raw-path">Endpoint Path</label>
+                <input type="text" id="raw-path" value="/chat/completions" placeholder="/chat/completions" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="raw-body">Request Body (JSON)</label>
+                <textarea id="raw-body" rows="8" placeholder='{"model": "...", "messages": [...]}'></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Headers Preview</label>
+                <div class="debug-raw" id="raw-headers-preview">Authorization: Bearer ***</div>
+              </div>
+              <div class="flex gap-3">
+                <button class="btn btn-primary w-full" id="btn-raw-submit" onclick="handleSubmit()">
+                  <span id="btn-raw-spinner" class="spinner hidden"></span>
+                  <span id="btn-raw-label">Send Request</span>
+                </button>
+                <button class="btn btn-secondary" onclick="clearInputs()">Clear</button>
+              </div>
+            </div>
+
+            <!-- History -->
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">History</div>
+                <button class="btn btn-ghost btn-xs" onclick="clearHistory()">Clear All</button>
+              </div>
+              <div class="history-list" id="history-list">
+                <div class="empty-state" style="padding:1.5rem">
+                  <p>No runs yet</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="playground-col" id="playground-right">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Output</div>
+                <div class="flex gap-2 items-center">
+                  <span class="mode-badge" id="output-mode-badge">text</span>
+                  <span class="text-xs text-muted" id="output-meta"></span>
+                </div>
+              </div>
+              <div class="output-area empty" id="output-area">
+                <div class="empty-state">
+                  <div class="empty-state-icon">🧬</div>
+                  <h3>Ready to explore</h3>
+                  <p>Configure your provider and model, then send a prompt to see the response.</p>
+                </div>
+              </div>
+              <div class="action-bar hidden" id="output-actions"></div>
+            </div>
+
+            <!-- Output metadata card -->
+            <div class="card hidden" id="output-metadata-card">
+              <div class="card-header">
+                <div class="card-title">Metadata</div>
+              </div>
+              <div class="debug-table-wrapper">
+                <table class="debug-table" id="output-metadata-table"></table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MODEL EXPLORER -->
+      <section id="tab-models" class="tab-panel" role="tabpanel" aria-labelledby="tab-models">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Model Explorer</div>
+              <div class="card-subtitle">Browse, search, and compare available models</div>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary btn-sm" onclick="refreshModels()">Refresh Models</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="toolbar-search">
+              <input type="text" id="model-search" placeholder="Search models by name or description..." oninput="renderModelExplorer()" />
+            </div>
+            <select id="model-filter-provider" onchange="renderModelExplorer()">
+              <option value="">All Providers</option>
+            </select>
+            <select id="model-sort" onchange="renderModelExplorer()">
+              <option value="name">Sort: Name</option>
+              <option value="provider">Sort: Provider</option>
+              <option value="context">Sort: Context Length</option>
+            </select>
+          </div>
+          <div class="flex gap-2 mb-3" id="model-capability-filters">
+            <!-- capability toggles injected here -->
+          </div>
+          <div class="model-grid" id="model-grid">
+            <div class="empty-state">
+              <div class="empty-state-icon">🔭</div>
+              <h3>No models loaded</h3>
+              <p>Go to Admin to configure providers and fetch model lists.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ADMIN -->
+      <section id="tab-admin" class="tab-panel" role="tabpanel" aria-labelledby="tab-admin">
+        <div class="provider-admin-grid">
+          <!-- OpenRouter Admin -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">OpenRouter</div>
+                <div class="card-subtitle">Configure OpenRouter provider settings</div>
+              </div>
+              <span class="status-pill" id="admin-pill-openrouter">Not configured</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="or-key">API Key</label>
+              <input type="password" id="or-key" placeholder="sk-or-v1-..." />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="or-baseurl">Base URL</label>
+              <input type="url" id="or-baseurl" value="https://openrouter.ai/api/v1" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="or-referer">HTTP Referer (optional)</label>
+              <input type="text" id="or-referer" placeholder="https://yourdomain.com" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="or-title">X-Title (optional)</label>
+              <input type="text" id="or-title" placeholder="My App" />
+            </div>
+            <div class="flex gap-3">
+              <button class="btn btn-primary btn-sm" onclick="testProvider('openrouter')">Test Connection</button>
+              <button class="btn btn-secondary btn-sm" onclick="fetchModelsForProvider('openrouter')">Fetch Models</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearProviderKey('openrouter')">Clear Key</button>
+            </div>
+          </div>
+
+          <!-- OpenCode / Zen Admin -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">OpenCode / Zen</div>
+                <div class="card-subtitle">Configure custom endpoint</div>
+              </div>
+              <span class="status-pill" id="admin-pill-opencode_zen">Not configured</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-key">API Key</label>
+              <input type="password" id="oz-key" placeholder="Enter API key..." />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-baseurl">Base URL</label>
+              <input type="url" id="oz-baseurl" placeholder="https://api.example.com" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-modellist">Model List Endpoint Path</label>
+              <input type="text" id="oz-modellist" value="/models" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-chat">Chat/Completions Endpoint Path</label>
+              <input type="text" id="oz-chat" value="/chat/completions" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-image">Image Endpoint Path</label>
+              <input type="text" id="oz-image" value="/images/generations" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-audio">Audio Endpoint Path</label>
+              <input type="text" id="oz-audio" value="/audio/speech" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-embeddings">Embeddings Endpoint Path</label>
+              <input type="text" id="oz-embeddings" value="/embeddings" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="oz-manual">Manual Model List (one per line)</label>
+              <textarea id="oz-manual" rows="4" placeholder="kimi-k2&#10;minimax-2.7&#10;qwen3.6-plus"></textarea>
+            </div>
+            <div class="flex gap-3">
+              <button class="btn btn-primary btn-sm" onclick="testProvider('opencode_zen')">Test Connection</button>
+              <button class="btn btn-secondary btn-sm" onclick="saveZenConfig()">Save Config</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearProviderKey('opencode_zen')">Clear Key</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-4">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Local Storage Management</div>
+              <div class="card-subtitle">Export, import, or clear your data</div>
+            </div>
+          </div>
+          <div class="flex gap-3 flex-wrap">
+            <button class="btn btn-secondary btn-sm" onclick="exportSettings()">Export Settings JSON</button>
+            <button class="btn btn-secondary btn-sm" onclick="importSettings()">Import Settings JSON</button>
+            <button class="btn btn-danger btn-sm" onclick="clearAllSettings()">Clear All Settings</button>
+            <button class="btn btn-danger btn-sm" onclick="clearHistory()">Clear History</button>
+            <button class="btn btn-danger btn-sm" onclick="clearDebugLog()">Clear Debug Log</button>
+          </div>
+        </div>
+
+        <div class="notice info mt-4">
+          <span>🔒</span>
+          <div>
+            <strong>Privacy Notice:</strong> API keys are stored only in this browser's localStorage. Do not use this artifact on a shared or untrusted computer.
+          </div>
+        </div>
+      </section>
+
+      <!-- DEBUG -->
+      <section id="tab-debug" class="tab-panel" role="tabpanel" aria-labelledby="tab-debug">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Debug Information</div>
+              <div class="card-subtitle">Diagnostic data for troubleshooting</div>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary btn-sm" onclick="copyDebugBundle()">Copy Bundle</button>
+              <button class="btn btn-secondary btn-sm" onclick="downloadDebugBundle()">Download JSON</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearDebugLog()">Clear Log</button>
+            </div>
+          </div>
+          <div class="debug-table-wrapper mb-3">
+            <table class="debug-table">
+              <tbody id="debug-info-table">
+                <tr><th>Active Provider</th><td id="dbg-provider">-</td></tr>
+                <tr><th>Active Model</th><td id="dbg-model">-</td></tr>
+                <tr><th>Active Mode</th><td id="dbg-mode">-</td></tr>
+                <tr><th>API Key Present</th><td id="dbg-key">-</td></tr>
+                <tr><th>Last Request URL</th><td id="dbg-req-url">-</td></tr>
+                <tr><th>Last Response Status</th><td id="dbg-res-status">-</td></tr>
+                <tr><th>Last Latency</th><td id="dbg-latency">-</td></tr>
+                <tr><th>Last Error</th><td id="dbg-error">-</td></tr>
+                <tr><th>Browser</th><td id="dbg-browser">-</td></tr>
+                <tr><th>Timestamp</th><td id="dbg-timestamp">-</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-title mb-2">Last Request Body</div>
+          <div class="debug-raw" id="debug-req-body">No request yet</div>
+          <div class="card-title mb-2 mt-3">Last Response Body</div>
+          <div class="debug-raw" id="debug-res-body">No response yet</div>
+          <div class="card-title mb-2 mt-3">Debug Log</div>
+          <div class="debug-raw" id="debug-log">No log entries</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.1
+    </footer>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    // ==========================================
+    // STATE
+    // ==========================================
+    const STORAGE_KEY = 'model_explorer_state_v1';
+    const HISTORY_LIMIT = 50;
+
+    const defaultState = {
+      activeProvider: 'openrouter',
+      activeModel: '',
+      activeMode: 'text',
+      providers: {
+        openrouter: {
+          label: 'OpenRouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: '',
+          referer: '',
+          title: 'Single Page Model Explorer',
+          models: [],
+          lastModelFetch: null
+        },
+        opencode_zen: {
+          label: 'OpenCode / Zen',
+          baseUrl: '',
+          apiKey: '',
+          modelListPath: '/models',
+          chatPath: '/chat/completions',
+          imagePath: '/images/generations',
+          audioPath: '/audio/speech',
+          embeddingsPath: '/embeddings',
+          manualModels: [],
+          models: [],
+          lastModelFetch: null
+        }
+      },
+      favorites: [],
+      history: [],
+      debugLog: []
+    };
+
+    let state = deepClone(defaultState);
+    let currentAbortController = null;
+    let lastRequestInfo = { url: '', body: '', headers: {} };
+    let lastResponseInfo = { status: 0, body: '', headers: {} };
+    let lastError = null;
+    let lastLatency = 0;
+
+    // ==========================================
+    // UTILITIES
+    // ==========================================
+    function $(s, r = document) { return r.querySelector(s); }
+    function $$(s, r = document) { return Array.from(r.querySelectorAll(s)); }
+
+    function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+    function maskSecret(value) {
+      if (!value || value.length < 8) return value ? '***' : '';
+      return value.slice(0, 6) + '...' + value.slice(-4);
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => toast('Copied to clipboard', 'ok')).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast('Copied to clipboard', 'ok');
+      });
+    }
+
+    function downloadBlob(filename, blob) {
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadText(filename, text, type = 'text/plain') {
+      downloadBlob(filename, new Blob([text], { type }));
+    }
+
+    function toast(message, type = 'info') {
+      const container = $('#toast-container');
+      const el = document.createElement('div');
+      el.className = `toast ${type}`;
+      el.textContent = message;
+      container.appendChild(el);
+      setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 3000);
+    }
+
+    function setStatus(id, message, type) {
+      const pill = $(id);
+      if (!pill) return;
+      pill.className = `status-pill ${type || ''}`;
+      const span = pill.querySelector('span:last-child');
+      if (span) span.textContent = message;
+    }
+
+    function logDebug(entry) {
+      state.debugLog.unshift({
+        t: new Date().toISOString(),
+        ...entry
+      });
+      if (state.debugLog.length > 100) state.debugLog.pop();
+      saveState();
+      renderDebug();
+    }
+
+    function formatDate(d) {
+      if (!d) return '-';
+      const dt = new Date(d);
+      return dt.toLocaleString();
+    }
+
+    function timeAgo(d) {
+      if (!d) return 'never';
+      const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+      if (s < 60) return `${s}s ago`;
+      if (s < 3600) return `${Math.floor(s/60)}m ago`;
+      if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+      return `${Math.floor(s/86400)}d ago`;
+    }
+
+    function getBrowserInfo() {
+      return `${navigator.userAgent} | ${navigator.language} | ${screen.width}x${screen.height}`;
+    }
+
+    // ==========================================
+    // STORAGE
+    // ==========================================
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {
+        logDebug({ msg: 'Failed to save state: ' + e.message, level: 'error' });
+      }
+      updateStatusPills();
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          state = deepClone({ ...defaultState, ...parsed, providers: { ...defaultState.providers, ...(parsed.providers || {}) } });
+        }
+      } catch (e) {
+        logDebug({ msg: 'Failed to load state: ' + e.message, level: 'error' });
+      }
+    }
+
+    // ==========================================
+    // PROVIDER ADAPTERS
+    // ==========================================
+    function getHeaders(config) {
+      const h = { 'Content-Type': 'application/json' };
+      if (config.apiKey) h['Authorization'] = `Bearer ${config.apiKey}`;
+      if (config.referer) h['HTTP-Referer'] = config.referer;
+      if (config.title) h['X-Title'] = config.title;
+      return h;
+    }
+
+    const adapters = {
+      openrouter: {
+        async fetchModels(config) {
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/models';
+          const headers = getHeaders(config);
+          const res = await fetch(url, { headers });
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+          const data = await res.json();
+          return (data.data || []).map(m => ({
+            id: m.id,
+            name: m.name || m.id,
+            provider: 'openrouter',
+            description: m.description || '',
+            context_length: m.context_length || null,
+            input_modalities: m.architecture?.input_modalities || (m.id.includes('vision') ? ['text','image'] : ['text']),
+            output_modalities: m.architecture?.output_modalities || ['text'],
+            pricing: m.pricing || {},
+            raw: m
+          }));
+        },
+        async runText(config, payload) {
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/chat/completions';
+          const body = {
+            model: payload.model,
+            messages: [
+              ...(payload.system ? [{ role: 'system', content: payload.system }] : []),
+              { role: 'user', content: payload.prompt }
+            ],
+            temperature: payload.temperature,
+            max_tokens: payload.max_tokens,
+            top_p: payload.top_p
+          };
+          if (payload.stream) body.stream = true;
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runVision(config, payload) {
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/chat/completions';
+          const content = [
+            { type: 'text', text: payload.prompt }
+          ];
+          if (payload.imageUrl) {
+            content.push({ type: 'image_url', image_url: { url: payload.imageUrl } });
+          }
+          const body = {
+            model: payload.model,
+            messages: [
+              ...(payload.system ? [{ role: 'system', content: payload.system }] : []),
+              { role: 'user', content }
+            ],
+            max_tokens: payload.max_tokens || 1000
+          };
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runImage(config, payload) {
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/images/generations';
+          const body = {
+            model: payload.model,
+            prompt: payload.prompt,
+            n: payload.n || 1,
+            size: payload.size || '1024x1024'
+          };
+          if (payload.negative_prompt) body.negative_prompt = payload.negative_prompt;
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runAudio(config, payload) {
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/audio/speech';
+          const body = {
+            model: payload.model,
+            input: payload.prompt,
+            voice: payload.voice || 'alloy',
+            response_format: payload.format || 'mp3'
+          };
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runEmbedding(config, payload) {
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/embeddings';
+          const body = {
+            model: payload.model,
+            input: payload.batch ? payload.prompt.split('\n').filter(Boolean) : payload.prompt
+          };
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runRaw(config, payload) {
+          const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + payload.path;
+          return { url, body: payload.body, headers: getHeaders(config) };
+        }
+      },
+      opencode_zen: {
+        async fetchModels(config) {
+          if (!config.baseUrl) throw new Error('Base URL not configured');
+          const url = config.baseUrl.replace(/\/$/, '') + (config.modelListPath || '/models');
+          const headers = getHeaders(config);
+          try {
+            const res = await fetch(url, { headers });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const arr = Array.isArray(data) ? data : (data.data || data.models || []);
+            return arr.map(m => ({
+              id: m.id || m.name || m.model || String(m),
+              name: m.name || m.id || m.model || String(m),
+              provider: 'opencode_zen',
+              description: m.description || '',
+              context_length: m.context_length || null,
+              input_modalities: m.input_modalities || ['text'],
+              output_modalities: m.output_modalities || ['text'],
+              pricing: m.pricing || {},
+              raw: m
+            }));
+          } catch (e) {
+            if (config.manualModels && config.manualModels.length) {
+              return config.manualModels.map(id => ({
+                id,
+                name: id,
+                provider: 'opencode_zen',
+                description: 'Manual model entry',
+                context_length: null,
+                input_modalities: ['text'],
+                output_modalities: ['text'],
+                pricing: {},
+                raw: { id }
+              }));
+            }
+            throw e;
+          }
+        },
+        async runText(config, payload) {
+          const url = config.baseUrl.replace(/\/$/, '') + (config.chatPath || '/chat/completions');
+          const body = {
+            model: payload.model,
+            messages: [
+              ...(payload.system ? [{ role: 'system', content: payload.system }] : []),
+              { role: 'user', content: payload.prompt }
+            ],
+            temperature: payload.temperature,
+            max_tokens: payload.max_tokens,
+            top_p: payload.top_p
+          };
+          if (payload.stream) body.stream = true;
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runVision(config, payload) {
+          const url = config.baseUrl.replace(/\/$/, '') + (config.chatPath || '/chat/completions');
+          const content = [{ type: 'text', text: payload.prompt }];
+          if (payload.imageUrl) content.push({ type: 'image_url', image_url: { url: payload.imageUrl } });
+          const body = {
+            model: payload.model,
+            messages: [
+              ...(payload.system ? [{ role: 'system', content: payload.system }] : []),
+              { role: 'user', content }
+            ],
+            max_tokens: payload.max_tokens || 1000
+          };
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runImage(config, payload) {
+          const url = config.baseUrl.replace(/\/$/, '') + (config.imagePath || '/images/generations');
+          const body = {
+            model: payload.model,
+            prompt: payload.prompt,
+            n: payload.n || 1,
+            size: payload.size || '1024x1024'
+          };
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runAudio(config, payload) {
+          const url = config.baseUrl.replace(/\/$/, '') + (config.audioPath || '/audio/speech');
+          const body = {
+            model: payload.model,
+            input: payload.prompt,
+            voice: payload.voice || 'alloy',
+            response_format: payload.format || 'mp3'
+          };
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runEmbedding(config, payload) {
+          const url = config.baseUrl.replace(/\/$/, '') + (config.embeddingsPath || '/embeddings');
+          const body = {
+            model: payload.model,
+            input: payload.batch ? payload.prompt.split('\n').filter(Boolean) : payload.prompt
+          };
+          return { url, body, headers: getHeaders(config) };
+        },
+        async runRaw(config, payload) {
+          const url = config.baseUrl.replace(/\/$/, '') + payload.path;
+          return { url, body: payload.body, headers: getHeaders(config) };
+        }
+      }
+    };
+
+    // ==========================================
+    // UI RENDERERS
+    // ==========================================
+    function renderTabs() {
+      $$('.tab-btn').forEach(btn => {
+        const selected = btn.dataset.tab === state.activeTab;
+        btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+      });
+      $$('.tab-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.id === 'tab-' + (state.activeTab || 'playground'));
+      });
+    }
+
+    function updateStatusPills() {
+      const cfg = state.providers[state.activeProvider];
+      setStatus('#pill-provider', cfg ? cfg.label : 'No provider', cfg ? 'ok' : 'warn');
+      setStatus('#pill-key', cfg && cfg.apiKey ? 'Key set' : 'No key', cfg && cfg.apiKey ? 'ok' : 'warn');
+      const hasModels = cfg && cfg.models && cfg.models.length > 0;
+      setStatus('#pill-models', hasModels ? `${cfg.models.length} models` : 'No models', hasModels ? 'ok' : 'warn');
+      setStatus('#pill-status', currentAbortController ? 'Running...' : (lastError ? 'Error' : 'Idle'), currentAbortController ? 'active' : (lastError ? 'err' : ''));
+    }
+
+    function renderProviderSelects() {
+      const pgProv = $('#pg-provider');
+      const filterProv = $('#model-filter-provider');
+      const options = Object.entries(state.providers).map(([key, p]) => `<option value="${key}">${p.label}</option>`).join('');
+      pgProv.innerHTML = options;
+      pgProv.value = state.activeProvider;
+      if (filterProv) {
+        filterProv.innerHTML = '<option value="">All Providers</option>' + options;
+      }
+    }
+
+    function renderModeSelect() {
+      const sel = $('#pg-mode');
+      const modes = ['text', 'image', 'audio', 'vision', 'embedding', 'raw'];
+      sel.innerHTML = modes.map(m => `<option value="${m}">${m.charAt(0).toUpperCase() + m.slice(1)}</option>`).join('');
+      sel.value = state.activeMode;
+    }
+
+    function renderModelSelect() {
+      const sel = $('#pg-model');
+      const cfg = state.providers[state.activeProvider];
+      const hint = $('#pg-model-hint');
+      if (!cfg || !cfg.models || !cfg.models.length) {
+        sel.innerHTML = '<option value="">No models available</option>';
+        if (hint) hint.textContent = 'Fetch models in Admin or add manual models';
+        return;
+      }
+      sel.innerHTML = cfg.models.map(m => `<option value="${m.id}">${m.name || m.id}</option>`).join('');
+      if (state.activeModel && cfg.models.find(m => m.id === state.activeModel)) {
+        sel.value = state.activeModel;
+      } else if (cfg.models.length) {
+        state.activeModel = cfg.models[0].id;
+        sel.value = state.activeModel;
+        saveState();
+      }
+      if (hint) hint.textContent = `${cfg.models.length} models loaded`;
+    }
+
+    function showModePanel(mode) {
+      $$('[id^="panel-"]').forEach(el => el.classList.add('hidden'));
+      const panel = $(`#panel-${mode}`);
+      if (panel) panel.classList.remove('hidden');
+      $('#playground-mode-badge').textContent = mode;
+    }
+
+    function renderHistory() {
+      const list = $('#history-list');
+      if (!state.history.length) {
+        list.innerHTML = '<div class="empty-state" style="padding:1.5rem"><p>No runs yet</p></div>';
+        return;
+      }
+      list.innerHTML = state.history.map((h, i) => `
+        <div class="history-item" onclick="loadHistoryEntry(${i})">
+          <div class="history-item-top">
+            <span class="history-item-model">${h.model || 'unknown'} <span style="color:var(--text-muted)">|</span> ${h.mode}</span>
+            <span class="history-item-time">${timeAgo(h.timestamp)}</span>
+          </div>
+          <div class="history-item-prompt">${escapeHtml(h.promptSummary || '')}</div>
+          <div class="history-item-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-ghost btn-xs" onclick="rerunHistoryEntry(${i})">Re-run</button>
+            <button class="btn btn-ghost btn-xs" onclick="copyToClipboard(JSON.stringify(h, null, 2))">Copy</button>
+            <button class="btn btn-ghost btn-xs" onclick="deleteHistoryEntry(${i})">Delete</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderOutput(normalized) {
+      const area = $('#output-area');
+      const actions = $('#output-actions');
+      const metaCard = $('#output-metadata-card');
+      const metaTable = $('#output-metadata-table');
+      const badge = $('#output-mode-badge');
+      const metaText = $('#output-meta');
+
+      badge.textContent = normalized.metadata.mode || state.activeMode;
+      metaText.textContent = `${normalized.metadata.provider || state.activeProvider} · ${normalized.metadata.model || state.activeModel} · ${normalized.metadata.latencyMs || 0}ms`;
+
+      area.classList.remove('empty');
+      actions.classList.remove('hidden');
+      metaCard.classList.remove('hidden');
+
+      if (normalized.type === 'text') {
+        area.innerHTML = `<div class="output-content">${markdownToHtml(escapeHtml(normalized.text || ''))}</div>`;
+        actions.innerHTML = `
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.text || '')})">Copy Text</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.markdown || normalized.text || '')})">Copy Markdown</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.txt', ${JSON.stringify(normalized.text || '')})">Download .txt</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.md', ${JSON.stringify(normalized.markdown || normalized.text || '')})">Download .md</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(JSON.stringify(normalized.raw, null, 2))">Copy Raw JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.json', JSON.stringify(normalized.raw, null, 2), 'application/json')">Download .json</button>
+        `;
+      } else if (normalized.type === 'image') {
+        const images = (normalized.images || []).map(img => `
+          <div style="margin-bottom:1rem">
+            <img src="${img.url || img.b64 || ''}" style="max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);" alt="Generated" />
+            <div class="action-bar" style="border-top:none;padding-top:0.5rem">
+              <a class="btn btn-ghost btn-sm" href="${img.url || img.b64 || ''}" target="_blank" download="generated.png">Download</a>
+              <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(img.url || '')})">Copy URL</button>
+            </div>
+          </div>
+        `).join('');
+        area.innerHTML = images || '<div class="output-content">Image data received but not displayable</div>';
+        actions.innerHTML = `
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.text || '')})">Copy Prompt</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.json', JSON.stringify(normalized.raw, null, 2), 'application/json')">Download .json</button>
+        `;
+      } else if (normalized.type === 'audio') {
+        const audio = (normalized.audio || []);
+        area.innerHTML = audio.map(a => `
+          <div style="margin-bottom:1rem">
+            <audio controls src="${a.url || a.b64 || ''}" style="width:100%"></audio>
+            <div class="action-bar" style="border-top:none;padding-top:0.5rem">
+              <a class="btn btn-ghost btn-sm" href="${a.url || a.b64 || ''}" target="_blank" download="generated.mp3">Download</a>
+              <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(a.url || '')})">Copy URL</button>
+            </div>
+          </div>
+        `).join('') || '<div class="output-content">Audio data received</div>';
+        actions.innerHTML = `
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.text || '')})">Copy Script</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('output.json', JSON.stringify(normalized.raw, null, 2), 'application/json')">Download .json</button>
+        `;
+      } else if (normalized.type === 'embedding') {
+        const vec = normalized.json?.data?.[0]?.embedding || normalized.json?.embedding || [];
+        const preview = vec.slice(0, 8).map(v => Number(v).toFixed(4)).join(', ') + (vec.length > 8 ? ', ...' : '');
+        area.innerHTML = `
+          <div class="output-content">
+            <p><strong>Vector length:</strong> ${vec.length}</p>
+            <p><strong>Preview:</strong> [${preview}]</p>
+            <details style="margin-top:0.5rem">
+              <summary style="cursor:pointer;color:var(--accent)">View full vector</summary>
+              <pre style="font-size:0.7rem;max-height:300px;overflow:auto">${JSON.stringify(vec, null, 2)}</pre>
+            </details>
+          </div>
+        `;
+        actions.innerHTML = `
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(JSON.stringify(normalized.json, null, 2))">Copy JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('embedding.json', JSON.stringify(normalized.json, null, 2), 'application/json')">Download .json</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${vec.length}')">Copy Length</button>
+        `;
+      } else if (normalized.type === 'json') {
+        area.innerHTML = `<pre class="output-content">${escapeHtml(JSON.stringify(normalized.json, null, 2))}</pre>`;
+        actions.innerHTML = `
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(JSON.stringify(normalized.json, null, 2))">Copy JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadText('response.json', JSON.stringify(normalized.json, null, 2), 'application/json')">Download .json</button>
+        `;
+      } else if (normalized.type === 'error') {
+        area.innerHTML = `<div class="output-content" style="color:var(--error)">${escapeHtml(normalized.text || 'Error')}</div>`;
+        actions.innerHTML = `
+          <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(normalized.text || '')})">Copy Error</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyDebugBundle()">Copy Debug Bundle</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadDebugBundle()">Download Debug</button>
+        `;
+      } else {
+        area.innerHTML = `<div class="output-content">${escapeHtml(JSON.stringify(normalized.raw, null, 2))}</div>`;
+        actions.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="copyToClipboard(JSON.stringify(normalized.raw, null, 2))">Copy Raw</button>`;
+      }
+
+      metaTable.innerHTML = `
+        <tr><th>Provider</th><td>${escapeHtml(normalized.metadata.provider || '')}</td></tr>
+        <tr><th>Model</th><td>${escapeHtml(normalized.metadata.model || '')}</td></tr>
+        <tr><th>Mode</th><td>${escapeHtml(normalized.metadata.mode || '')}</td></tr>
+        <tr><th>Latency</th><td>${normalized.metadata.latencyMs || 0}ms</td></tr>
+        <tr><th>Created</th><td>${formatDate(normalized.metadata.createdAt)}</td></tr>
+      `;
+    }
+
+    function renderModelExplorer() {
+      const grid = $('#model-grid');
+      const search = ($('#model-search')?.value || '').toLowerCase();
+      const providerFilter = $('#model-filter-provider')?.value || '';
+      const sortBy = $('#model-sort')?.value || 'name';
+      const activeCaps = $$('.cap-filter:checked').map(cb => cb.value);
+
+      let allModels = [];
+      Object.entries(state.providers).forEach(([pKey, p]) => {
+        if (p.models) allModels = allModels.concat(p.models.map(m => ({ ...m, _providerKey: pKey })));
+      });
+
+      if (providerFilter) {
+        allModels = allModels.filter(m => m._providerKey === providerFilter || m.provider === providerFilter);
+      }
+      if (search) {
+        allModels = allModels.filter(m =>
+          (m.id || '').toLowerCase().includes(search) ||
+          (m.name || '').toLowerCase().includes(search) ||
+          (m.description || '').toLowerCase().includes(search)
+        );
+      }
+      if (activeCaps.length) {
+        allModels = allModels.filter(m => {
+          const caps = [...(m.input_modalities || []), ...(m.output_modalities || [])];
+          return activeCaps.every(c => caps.includes(c));
+        });
+      }
+
+      allModels.sort((a, b) => {
+        if (sortBy === 'name') return (a.name || a.id).localeCompare(b.name || b.id);
+        if (sortBy === 'provider') return (a.provider || '').localeCompare(b.provider || '');
+        if (sortBy === 'context') return (b.context_length || 0) - (a.context_length || 0);
+        return 0;
+      });
+
+      if (!allModels.length) {
+        grid.innerHTML = `
+          <div class="empty-state" style="grid-column:1/-1">
+            <div class="empty-state-icon">🔭</div>
+            <h3>No models found</h3>
+            <p>Adjust filters or fetch models from Admin.</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = allModels.map(m => {
+        const isFav = state.favorites.includes(m.id);
+        const caps = [...new Set([...(m.input_modalities || []), ...(m.output_modalities || [])])];
+        return `
+          <div class="model-card ${isFav ? 'favorite' : ''}" data-model="${m.id}">
+            <div class="model-card-header">
+              <div class="model-card-id">${escapeHtml(m.name || m.id)}</div>
+              <span class="model-card-provider">${escapeHtml(m.provider || m._providerKey || '')}</span>
+            </div>
+            <div class="model-card-desc">${escapeHtml(m.description || 'No description available.')}</div>
+            <div class="model-card-meta">
+              ${m.context_length ? `<span class="meta-chip accent">${m.context_length.toLocaleString()} ctx</span>` : ''}
+              ${caps.map(c => `<span class="meta-chip">${c}</span>`).join('')}
+            </div>
+            <div class="model-card-actions">
+              <button class="btn btn-primary btn-sm" onclick="useModelInPlayground('${m.id}', '${m._providerKey || m.provider}')">Use in Playground</button>
+              <button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${m.id}')">Copy ID</button>
+              <button class="btn btn-ghost btn-sm" onclick="toggleFavorite('${m.id}')">${isFav ? '★ Unfavorite' : '☆ Favorite'}</button>
+              <button class="btn btn-ghost btn-sm" onclick="showRawModelMeta('${m.id}')">Raw Meta</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderCapabilityFilters() {
+      const container = $('#model-capability-filters');
+      const caps = ['text', 'image', 'audio', 'vision', 'embedding', 'tool use', 'streaming', 'json mode'];
+      container.innerHTML = caps.map(c => `
+        <label class="toggle" title="Filter by ${c}">
+          <input type="checkbox" class="cap-filter" value="${c}" onchange="renderModelExplorer()">
+          <span class="toggle-track"></span>
+          <span style="font-size:0.7rem;text-transform:capitalize">${c}</span>
+        </label>
+      `).join('');
+    }
+
+    function renderDebug() {
+      $('#dbg-provider').textContent = state.activeProvider;
+      $('#dbg-model').textContent = state.activeModel || '-';
+      $('#dbg-mode').textContent = state.activeMode;
+      const cfg = state.providers[state.activeProvider];
+      $('#dbg-key').textContent = cfg && cfg.apiKey ? maskSecret(cfg.apiKey) : 'No';
+      $('#dbg-req-url').textContent = lastRequestInfo.url || '-';
+      $('#dbg-res-status').textContent = lastResponseInfo.status || '-';
+      $('#dbg-latency').textContent = lastLatency ? `${lastLatency}ms` : '-';
+      $('#dbg-error').textContent = lastError ? lastError.message : '-';
+      $('#dbg-browser').textContent = getBrowserInfo();
+      $('#dbg-timestamp').textContent = new Date().toLocaleString();
+      $('#debug-req-body').textContent = lastRequestInfo.body || 'No request yet';
+      $('#debug-res-body').textContent = lastResponseInfo.body || 'No response yet';
+      $('#debug-log').textContent = state.debugLog.map(l => `[${l.t}] ${l.level || 'info'}: ${l.msg}`).join('\n') || 'No log entries';
+    }
+
+    function renderAdmin() {
+      const or = state.providers.openrouter;
+      $('#or-key').value = or.apiKey || '';
+      $('#or-baseurl').value = or.baseUrl || '';
+      $('#or-referer').value = or.referer || '';
+      $('#or-title').value = or.title || '';
+      $('#admin-pill-openrouter').className = `status-pill ${or.apiKey ? 'ok' : 'warn'}`;
+      $('#admin-pill-openrouter').textContent = or.apiKey ? 'Configured' : 'No key';
+
+      const oz = state.providers.opencode_zen;
+      $('#oz-key').value = oz.apiKey || '';
+      $('#oz-baseurl').value = oz.baseUrl || '';
+      $('#oz-modellist').value = oz.modelListPath || '';
+      $('#oz-chat').value = oz.chatPath || '';
+      $('#oz-image').value = oz.imagePath || '';
+      $('#oz-audio').value = oz.audioPath || '';
+      $('#oz-embeddings').value = oz.embeddingsPath || '';
+      $('#oz-manual').value = (oz.manualModels || []).join('\n');
+      $('#admin-pill-opencode_zen').className = `status-pill ${oz.apiKey && oz.baseUrl ? 'ok' : 'warn'}`;
+      $('#admin-pill-opencode_zen').textContent = oz.apiKey && oz.baseUrl ? 'Configured' : 'Incomplete';
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function markdownToHtml(md) {
+      if (!md) return '';
+      let html = escapeHtml(md);
+      // Code blocks
+      html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+      // Inline code
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Bold
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Italic
+      html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      // Headers
+      html = html.replace(/^#{1,6}\s+(.+)$/gm, '<h4>$1</h4>');
+      // Lists
+      html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+      // Paragraphs / line breaks
+      html = html.replace(/\n\n/g, '</p><p>');
+      html = html.replace(/\n/g, '<br>');
+      return '<p>' + html + '</p>';
+    }
+
+    // ==========================================
+    // ACTIONS
+    // ==========================================
+    function setActiveTab(tab) {
+      state.activeTab = tab;
+      renderTabs();
+      if (tab === 'models') renderModelExplorer();
+      if (tab === 'admin') renderAdmin();
+      if (tab === 'debug') renderDebug();
+      saveState();
+    }
+
+    function setActiveProvider(key) {
+      state.activeProvider = key;
+      renderProviderSelects();
+      renderModelSelect();
+      saveState();
+    }
+
+    function setActiveMode(mode) {
+      state.activeMode = mode;
+      renderModeSelect();
+      showModePanel(mode);
+      saveState();
+    }
+
+    async function handleSubmit() {
+      if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+        updateStatusPills();
+        return;
+      }
+
+      const provider = state.activeProvider;
+      const model = state.activeModel;
+      const mode = state.activeMode;
+      const cfg = state.providers[provider];
+
+      if (!cfg) { toast('Provider not configured', 'err'); return; }
+      if (!cfg.apiKey && provider === 'openrouter') { toast('API key required. Go to Admin.', 'err'); return; }
+      if (!model) { toast('Select a model first', 'err'); return; }
+
+      currentAbortController = new AbortController();
+      updateStatusPills();
+
+      const spinner = $(`#btn-${mode}-spinner`);
+      const label = $(`#btn-${mode}-label`);
+      if (spinner) spinner.classList.remove('hidden');
+      if (label) label.textContent = 'Cancel';
+
+      const startTime = performance.now();
+      lastError = null;
+
+      try {
+        let payload = {};
+        if (mode === 'text') {
+          payload = {
+            model,
+            system: $('#text-system').value,
+            prompt: $('#text-prompt').value,
+            temperature: parseFloat($('#text-temp').value),
+            max_tokens: parseInt($('#text-maxtokens').value),
+            top_p: parseFloat($('#text-topp').value),
+            stream: $('#text-stream').checked
+          };
+        } else if (mode === 'image') {
+          payload = {
+            model,
+            prompt: $('#image-prompt').value,
+            negative_prompt: $('#image-negative').value,
+            size: $('#image-size').value,
+            n: parseInt($('#image-n').value)
+          };
+        } else if (mode === 'audio') {
+          payload = {
+            model,
+            prompt: $('#audio-prompt').value,
+            voice: $('#audio-voice').value,
+            format: $('#audio-format').value
+          };
+        } else if (mode === 'vision') {
+          const fileInput = $('#vision-image-file');
+          let imageUrl = $('#vision-image-url').value;
+          if (fileInput.files && fileInput.files[0]) {
+            imageUrl = await fileToDataUrl(fileInput.files[0]);
+          }
+          payload = {
+            model,
+            system: $('#vision-system').value,
+            prompt: $('#vision-prompt').value,
+            imageUrl,
+            max_tokens: 1000
+          };
+        } else if (mode === 'embedding') {
+          payload = {
+            model,
+            prompt: $('#embedding-input').value,
+            batch: $('#embedding-batch').checked
+          };
+        } else if (mode === 'raw') {
+          let body;
+          try { body = JSON.parse($('#raw-body').value); } catch (e) { toast('Invalid JSON in request body', 'err'); throw e; }
+          payload = {
+            model,
+            path: $('#raw-path').value,
+            method: $('#raw-method').value,
+            body
+          };
+        }
+
+        const adapter = adapters[provider];
+        if (!adapter) throw new Error('No adapter for provider ' + provider);
+        const adapterFn = adapter['run' + mode.charAt(0).toUpperCase() + mode.slice(1)];
+        if (!adapterFn) throw new Error(`Mode ${mode} not supported for ${provider}`);
+
+        const reqInfo = await adapterFn(cfg, payload);
+        lastRequestInfo = {
+          url: reqInfo.url,
+          body: JSON.stringify(reqInfo.body, null, 2),
+          headers: { ...reqInfo.headers, Authorization: reqInfo.headers.Authorization ? maskSecret(reqInfo.headers.Authorization) : undefined }
+        };
+
+        logDebug({ msg: `Request to ${reqInfo.url}`, level: 'info' });
+
+        const fetchOpts = {
+          method: payload.method || 'POST',
+          headers: reqInfo.headers,
+          signal: currentAbortController.signal
+        };
+        if (fetchOpts.method !== 'GET') fetchOpts.body = JSON.stringify(reqInfo.body);
+
+        const res = await fetch(reqInfo.url, fetchOpts);
+        lastLatency = Math.round(performance.now() - startTime);
+        lastResponseInfo.status = res.status;
+        lastResponseInfo.headers = Object.fromEntries([...res.headers.entries()]);
+
+        const resText = await res.text();
+        lastResponseInfo.body = resText;
+
+        let resData;
+        try { resData = JSON.parse(resText); } catch { resData = resText; }
+
+        if (!res.ok) {
+          const errMsg = resData?.error?.message || resData?.message || `HTTP ${res.status}`;
+          throw new Error(errMsg);
+        }
+
+        const normalized = normalizeOutput(mode, resData, provider, model, lastLatency);
+        renderOutput(normalized);
+        addToHistory(normalized, payload);
+        logDebug({ msg: `Success: ${mode} from ${provider}`, level: 'info' });
+        toast('Response received', 'ok');
+      } catch (err) {
+        lastLatency = Math.round(performance.now() - startTime);
+        if (err.name === 'AbortError') {
+          toast('Request cancelled', 'warn');
+          logDebug({ msg: 'Request aborted by user', level: 'warn' });
+        } else {
+          lastError = err;
+          const isCors = err.message.includes('CORS') || err.message.includes('Failed to fetch');
+          const friendly = isCors
+            ? 'This may be a browser CORS limitation. The provider endpoint may require a proxy or local server for browser use.'
+            : err.message;
+          const normalized = {
+            type: 'error',
+            text: friendly,
+            raw: { error: err.message, stack: err.stack },
+            metadata: { provider, model, mode, latencyMs: lastLatency, createdAt: new Date().toISOString() }
+          };
+          renderOutput(normalized);
+          addToHistory(normalized, {});
+          logDebug({ msg: `Error: ${err.message}`, level: 'error' });
+          toast(friendly, 'err');
+        }
+      } finally {
+        currentAbortController = null;
+        if (spinner) spinner.classList.add('hidden');
+        if (label) label.textContent = mode === 'raw' ? 'Send Request' : (mode === 'text' ? 'Send' : (mode === 'image' ? 'Generate' : (mode === 'audio' ? 'Generate Audio' : (mode === 'vision' ? 'Analyze' : (mode === 'embedding' ? 'Embed' : 'Submit')))));
+        updateStatusPills();
+        renderDebug();
+      }
+    }
+
+    function normalizeOutput(mode, data, provider, model, latency) {
+      const meta = { provider, model, mode, latencyMs: latency, createdAt: new Date().toISOString() };
+      if (mode === 'text') {
+        const text = data.choices?.[0]?.message?.content || data.text || data.content || JSON.stringify(data);
+        return { type: 'text', text, markdown: text, raw: data, metadata: meta };
+      }
+      if (mode === 'image') {
+        const images = (data.data || []).map(d => ({
+          url: d.url,
+          b64: d.b64_json ? `data:image/png;base64,${d.b64_json}` : null,
+          revised_prompt: d.revised_prompt
+        }));
+        return { type: 'image', text: data.revised_prompt || '', images, raw: data, metadata: meta };
+      }
+      if (mode === 'audio') {
+        const audio = [{
+          url: data.url || (data.audio ? `data:audio/mp3;base64,${data.audio}` : null),
+          b64: data.audio ? `data:audio/mp3;base64,${data.audio}` : null
+        }];
+        return { type: 'audio', text: '', audio, raw: data, metadata: meta };
+      }
+      if (mode === 'vision') {
+        const text = data.choices?.[0]?.message?.content || JSON.stringify(data);
+        return { type: 'text', text, markdown: text, raw: data, metadata: meta };
+      }
+      if (mode === 'embedding') {
+        return { type: 'embedding', text: '', json: data, raw: data, metadata: meta };
+      }
+      if (mode === 'raw') {
+        return { type: 'json', text: '', json: data, raw: data, metadata: meta };
+      }
+      return { type: 'json', text: JSON.stringify(data, null, 2), json: data, raw: data, metadata: meta };
+    }
+
+    function addToHistory(normalized, payload) {
+      const entry = {
+        timestamp: new Date().toISOString(),
+        provider: normalized.metadata.provider,
+        model: normalized.metadata.model,
+        mode: normalized.metadata.mode,
+        promptSummary: payload.prompt || payload.system || payload.path || 'Raw request',
+        outputSummary: normalized.text || normalized.type,
+        latency: normalized.metadata.latencyMs,
+        error: normalized.type === 'error',
+        raw: normalized.raw
+      };
+      state.history.unshift(entry);
+      if (state.history.length > HISTORY_LIMIT) state.history.pop();
+      saveState();
+      renderHistory();
+    }
+
+    function loadHistoryEntry(index) {
+      const h = state.history[index];
+      if (!h) return;
+      setActiveProvider(h.provider);
+      state.activeModel = h.model;
+      setActiveMode(h.mode);
+      renderProviderSelects();
+      renderModelSelect();
+      renderModeSelect();
+      showModePanel(h.mode);
+      // Restore inputs if available (simplified)
+      toast('Loaded history entry into playground', 'ok');
+    }
+
+    function rerunHistoryEntry(index) {
+      loadHistoryEntry(index);
+      setTimeout(() => handleSubmit(), 100);
+    }
+
+    function deleteHistoryEntry(index) {
+      state.history.splice(index, 1);
+      saveState();
+      renderHistory();
+    }
+
+    function clearHistory() {
+      if (!confirm('Clear all history?')) return;
+      state.history = [];
+      saveState();
+      renderHistory();
+      toast('History cleared', 'ok');
+    }
+
+    function clearInputs() {
+      $$('textarea, input[type="text"], input[type="url"], input[type="number"], input[type="password"]').forEach(el => {
+        if (el.id.startsWith('text-') || el.id.startsWith('image-') || el.id.startsWith('audio-') ||
+            el.id.startsWith('vision-') || el.id.startsWith('embedding-') || el.id.startsWith('raw-')) {
+          if (el.tagName === 'TEXTAREA') el.value = '';
+          else if (el.type === 'number') el.value = el.defaultValue || '';
+          else el.value = '';
+        }
+      });
+      $('#vision-preview')?.classList.add('hidden');
+      $('#output-area').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">🧬</div>
+          <h3>Ready to explore</h3>
+          <p>Configure your provider and model, then send a prompt to see the response.</p>
+        </div>
+      `;
+      $('#output-area').classList.add('empty');
+      $('#output-actions').classList.add('hidden');
+      $('#output-metadata-card').classList.add('hidden');
+    }
+
+    // ==========================================
+    // ADMIN ACTIONS
+    // ==========================================
+    function saveAdminValues() {
+      state.providers.openrouter.apiKey = $('#or-key').value;
+      state.providers.openrouter.baseUrl = $('#or-baseurl').value;
+      state.providers.openrouter.referer = $('#or-referer').value;
+      state.providers.openrouter.title = $('#or-title').value;
+
+      state.providers.opencode_zen.apiKey = $('#oz-key').value;
+      state.providers.opencode_zen.baseUrl = $('#oz-baseurl').value;
+      state.providers.opencode_zen.modelListPath = $('#oz-modellist').value;
+      state.providers.opencode_zen.chatPath = $('#oz-chat').value;
+      state.providers.opencode_zen.imagePath = $('#oz-image').value;
+      state.providers.opencode_zen.audioPath = $('#oz-audio').value;
+      state.providers.opencode_zen.embeddingsPath = $('#oz-embeddings').value;
+      state.providers.opencode_zen.manualModels = $('#oz-manual').value.split('\n').map(s => s.trim()).filter(Boolean);
+      saveState();
+    }
+
+    async function testProvider(key) {
+      saveAdminValues();
+      const cfg = state.providers[key];
+      if (!cfg.baseUrl) { toast('Base URL required', 'err'); return; }
+      try {
+        const adapter = adapters[key];
+        const url = cfg.baseUrl.replace(/\/$/, '') + (key === 'openrouter' ? '/models' : (cfg.modelListPath || '/models'));
+        const headers = getHeaders(cfg);
+        const res = await fetch(url, { headers });
+        if (res.ok) {
+          toast('Connection successful', 'ok');
+          logDebug({ msg: `Test connection to ${key} succeeded`, level: 'info' });
+        } else {
+          toast(`Connection failed: HTTP ${res.status}`, 'err');
+        }
+      } catch (err) {
+        toast(`Connection failed: ${err.message}`, 'err');
+        logDebug({ msg: `Test connection to ${key} failed: ${err.message}`, level: 'error' });
+      }
+    }
+
+    async function fetchModelsForProvider(key) {
+      saveAdminValues();
+      const cfg = state.providers[key];
+      try {
+        const adapter = adapters[key];
+        if (!adapter || !adapter.fetchModels) {
+          toast('Model fetching not supported for this provider', 'warn');
+          return;
+        }
+        const models = await adapter.fetchModels(cfg);
+        state.providers[key].models = models;
+        state.providers[key].lastModelFetch = new Date().toISOString();
+        saveState();
+        renderModelSelect();
+        renderModelExplorer();
+        toast(`Loaded ${models.length} models from ${cfg.label}`, 'ok');
+        logDebug({ msg: `Fetched ${models.length} models from ${key}`, level: 'info' });
+      } catch (err) {
+        toast(`Failed to fetch models: ${err.message}`, 'err');
+        logDebug({ msg: `Fetch models from ${key} failed: ${err.message}`, level: 'error' });
+      }
+    }
+
+    function refreshModels() {
+      Object.keys(state.providers).forEach(key => {
+        if (state.providers[key].apiKey || state.providers[key].baseUrl) {
+          fetchModelsForProvider(key);
+        }
+      });
+    }
+
+    function saveZenConfig() {
+      saveAdminValues();
+      toast('OpenCode / Zen configuration saved', 'ok');
+      // Rebuild manual models into the model list
+      const oz = state.providers.opencode_zen;
+      if (oz.manualModels.length) {
+        oz.models = oz.manualModels.map(id => ({
+          id,
+          name: id,
+          provider: 'opencode_zen',
+          description: 'Manual model entry',
+          context_length: null,
+          input_modalities: ['text'],
+          output_modalities: ['text'],
+          pricing: {},
+          raw: { id }
+        }));
+        saveState();
+        renderModelSelect();
+        renderModelExplorer();
+      }
+    }
+
+    function clearProviderKey(key) {
+      state.providers[key].apiKey = '';
+      saveState();
+      renderAdmin();
+      toast(`Cleared ${state.providers[key].label} key`, 'ok');
+    }
+
+    function exportSettings() {
+      const exportData = deepClone(state);
+      Object.values(exportData.providers).forEach(p => { if (p.apiKey) p.apiKey = maskSecret(p.apiKey); });
+      downloadText('model-explorer-settings.json', JSON.stringify(exportData, null, 2), 'application/json');
+    }
+
+    function importSettings() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json';
+      input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const data = JSON.parse(text);
+          state = deepClone({ ...defaultState, ...data, providers: { ...defaultState.providers, ...(data.providers || {}) } });
+          saveState();
+          renderAdmin();
+          renderProviderSelects();
+          renderModelSelect();
+          renderHistory();
+          toast('Settings imported', 'ok');
+        } catch (e) {
+          toast('Failed to import settings: ' + e.message, 'err');
+        }
+      };
+      input.click();
+    }
+
+    function clearAllSettings() {
+      if (!confirm('Clear ALL settings including API keys, history, and favorites?')) return;
+      state = deepClone(defaultState);
+      localStorage.removeItem(STORAGE_KEY);
+      renderAdmin();
+      renderProviderSelects();
+      renderModelSelect();
+      renderHistory();
+      toast('All settings cleared', 'ok');
+    }
+
+    function clearDebugLog() {
+      state.debugLog = [];
+      lastRequestInfo = { url: '', body: '', headers: {} };
+      lastResponseInfo = { status: 0, body: '', headers: {} };
+      lastError = null;
+      saveState();
+      renderDebug();
+      toast('Debug log cleared', 'ok');
+    }
+
+    // ==========================================
+    // MODEL EXPLORER ACTIONS
+    // ==========================================
+    function useModelInPlayground(modelId, providerKey) {
+      setActiveProvider(providerKey);
+      state.activeModel = modelId;
+      setActiveTab('playground');
+      renderProviderSelects();
+      renderModelSelect();
+      toast(`Selected ${modelId}`, 'ok');
+    }
+
+    function toggleFavorite(modelId) {
+      const idx = state.favorites.indexOf(modelId);
+      if (idx >= 0) state.favorites.splice(idx, 1);
+      else state.favorites.push(modelId);
+      saveState();
+      renderModelExplorer();
+    }
+
+    function showRawModelMeta(modelId) {
+      let model = null;
+      Object.values(state.providers).forEach(p => {
+        const found = p.models?.find(m => m.id === modelId);
+        if (found) model = found;
+      });
+      if (!model) { toast('Model not found', 'err'); return; }
+      const raw = JSON.stringify(model.raw, null, 2);
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay active';
+      modal.innerHTML = `
+        <div class="modal-card">
+          <div class="modal-header">
+            <div class="modal-title">Raw Metadata: ${escapeHtml(modelId)}</div>
+            <button class="btn btn-ghost btn-sm" onclick="this.closest('.modal-overlay').remove()">Close</button>
+          </div>
+          <div class="modal-body">
+            <pre class="debug-raw" style="max-height:60vh">${escapeHtml(raw)}</pre>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost btn-sm" onclick="copyToClipboard(${JSON.stringify(raw)})">Copy JSON</button>
+          </div>
+        </div>
+      `;
+      modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+      document.body.appendChild(modal);
+    }
+
+    // ==========================================
+    // DEBUG ACTIONS
+    // ==========================================
+    function getDebugBundle() {
+      const bundle = {
+        timestamp: new Date().toISOString(),
+        browser: getBrowserInfo(),
+        state: deepClone(state),
+        lastRequest: lastRequestInfo,
+        lastResponse: lastResponseInfo,
+        lastError: lastError ? { message: lastError.message, stack: lastError.stack } : null,
+        lastLatency
+      };
+      // Mask keys
+      Object.values(bundle.state.providers).forEach(p => { if (p.apiKey) p.apiKey = maskSecret(p.apiKey); });
+      return bundle;
+    }
+
+    function copyDebugBundle() {
+      copyToClipboard(JSON.stringify(getDebugBundle(), null, 2));
+    }
+
+    function downloadDebugBundle() {
+      downloadText('debug-bundle.json', JSON.stringify(getDebugBundle(), null, 2), 'application/json');
+    }
+
+    // ==========================================
+    // HELPERS
+    // ==========================================
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // ==========================================
+    // EVENT LISTENERS
+    // ==========================================
+    function init() {
+      loadState();
+
+      // Tabs
+      $$('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
+      });
+
+      // Provider select
+      $('#pg-provider').addEventListener('change', e => {
+        setActiveProvider(e.target.value);
+        renderModelSelect();
+      });
+
+      // Model select
+      $('#pg-model').addEventListener('change', e => {
+        state.activeModel = e.target.value;
+        saveState();
+      });
+
+      // Mode select
+      $('#pg-mode').addEventListener('change', e => {
+        setActiveMode(e.target.value);
+      });
+
+      // Vision image preview
+      $('#vision-image-file').addEventListener('change', async e => {
+        const file = e.target.files[0];
+        const preview = $('#vision-preview');
+        if (file) {
+          preview.src = await fileToDataUrl(file);
+          preview.classList.remove('hidden');
+        } else {
+          preview.classList.add('hidden');
+        }
+      });
+
+      // Admin inputs auto-save
+      $$('#tab-admin input, #tab-admin textarea, #tab-admin select').forEach(el => {
+        el.addEventListener('change', saveAdminValues);
+      });
+
+      // Keyboard shortcuts
+      document.addEventListener('keydown', e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          handleSubmit();
+        }
+      });
+
+      renderTabs();
+      renderProviderSelects();
+      renderModeSelect();
+      renderModelSelect();
+      showModePanel(state.activeMode);
+      renderHistory();
+      renderCapabilityFilters();
+      renderModelExplorer();
+      renderAdmin();
+      renderDebug();
+      updateStatusPills();
+
+      // Set active tab from state or default
+      setActiveTab(state.activeTab || 'playground');
+    }
+
+    // Expose some helpers globally for inline onclick handlers
+    window.handleSubmit = handleSubmit;
+    window.clearInputs = clearInputs;
+    window.copyToClipboard = copyToClipboard;
+    window.downloadText = downloadText;
+    window.downloadBlob = downloadBlob;
+    window.testProvider = testProvider;
+    window.fetchModelsForProvider = fetchModelsForProvider;
+    window.saveZenConfig = saveZenConfig;
+    window.clearProviderKey = clearProviderKey;
+    window.exportSettings = exportSettings;
+    window.importSettings = importSettings;
+    window.clearAllSettings = clearAllSettings;
+    window.clearHistory = clearHistory;
+    window.clearDebugLog = clearDebugLog;
+    window.refreshModels = refreshModels;
+    window.useModelInPlayground = useModelInPlayground;
+    window.toggleFavorite = toggleFavorite;
+    window.showRawModelMeta = showRawModelMeta;
+    window.copyDebugBundle = copyDebugBundle;
+    window.downloadDebugBundle = downloadDebugBundle;
+    window.loadHistoryEntry = loadHistoryEntry;
+    window.rerunHistoryEntry = rerunHistoryEntry;
+    window.deleteHistoryEntry = deleteHistoryEntry;
+    window.renderModelExplorer = renderModelExplorer;
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
