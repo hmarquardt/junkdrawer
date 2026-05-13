@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quack Drawer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦆</text></svg>" />
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #f59e0b;
+      --accent-dark: #b45309;
+      --border: #1f2937;
+      --error: #ef4444;
+      --success: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #status-bar {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      padding: 0.5rem 1rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      flex-wrap: wrap;
+    }
+    .badge {
+      padding: 0.15rem 0.5rem;
+      border-radius: 0.25rem;
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-ready { background: rgba(34,197,94,0.15); color: var(--success); }
+    .badge-loading { background: rgba(245,158,11,0.15); color: var(--accent); }
+    .badge-failed { background: rgba(239,68,68,0.15); color: var(--error); }
+    #app { display: flex; flex: 1; overflow: hidden; }
+    #sidebar {
+      width: 280px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #sidebar h2 {
+      margin: 0;
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .sidebar-section { flex: 1; overflow-y: auto; }
+    .sidebar-section + .sidebar-section { border-top: 1px solid var(--border); }
+    .sidebar-list { list-style: none; margin: 0; padding: 0; }
+    .sidebar-list li {
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .sidebar-list li:hover { background: rgba(245,158,11,0.08); }
+    .sidebar-list li.active { background: rgba(245,158,11,0.15); color: var(--accent); }
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #tabs {
+      display: flex;
+      gap: 0.25rem;
+      padding: 0.5rem 1rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      border-radius: 0.25rem;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { background: rgba(245,158,11,0.15); color: var(--accent); font-weight: 600; }
+    #tab-content { flex: 1; overflow-y: auto; padding: 1rem; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1rem;
+    }
+    .card h3 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--accent); }
+    .muted { color: var(--muted); }
+    .error { color: var(--error); }
+    .success { color: var(--success); }
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 0.5rem;
+      padding: 3rem 1rem;
+      text-align: center;
+      color: var(--muted);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(245,158,11,0.05);
+      color: var(--text);
+    }
+    button {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.45rem 0.8rem;
+      border-radius: 0.25rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
+    button.primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
+    button.small { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+    textarea, input[type="text"], select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem;
+      width: 100%;
+    }
+    textarea { resize: vertical; min-height: 120px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { padding: 0.4rem 0.6rem; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: rgba(17,24,39,0.9); position: sticky; top: 0; }
+    tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .results-wrap { overflow-x: auto; max-height: 500px; border: 1px solid var(--border); border-radius: 0.25rem; margin-top: 0.5rem; }
+    .status-msg { margin-top: 0.5rem; font-size: 0.85rem; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .debug-list { list-style: none; padding: 0; margin: 0; }
+    .debug-list li {
+      padding: 0.35rem 0;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+    }
+    .debug-list li span:first-child { color: var(--muted); }
+    .query-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .query-row pre {
+      margin: 0;
+      font-size: 0.8rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: var(--muted);
+      max-height: 6rem;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #chart-container { position: relative; height: 400px; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div id="status-bar" role="status" aria-live="polite">
+    <strong>Quack Drawer</strong>
+    <span class="badge badge-loading" id="db-status">Loading</span>
+    <span id="table-count">Tables: 0</span>
+    <span id="query-runtime" class="muted"></span>
+    <span id="status-msg" class="muted"></span>
+  </div>
+  <div id="app">
+    <aside id="sidebar" aria-label="Sidebar">
+      <div class="sidebar-section">
+        <h2>Tables</h2>
+        <ul id="table-list" class="sidebar-list" role="listbox" aria-label="Tables"></ul>
+      </div>
+      <div class="sidebar-section">
+        <h2>Saved Queries</h2>
+        <ul id="saved-query-list" class="sidebar-list" role="listbox" aria-label="Saved Queries"></ul>
+      </div>
+    </aside>
+    <main id="main">
+      <nav id="tabs" role="tablist" aria-label="Main tabs">
+        <button class="tab-btn active" data-tab="import" role="tab" aria-selected="true">Import</button>
+        <button class="tab-btn" data-tab="tables" role="tab">Tables</button>
+        <button class="tab-btn" data-tab="query" role="tab">Query</button>
+        <button class="tab-btn" data-tab="charts" role="tab">Charts</button>
+        <button class="tab-btn" data-tab="saved" role="tab">Saved Queries</button>
+        <button class="tab-btn" data-tab="export" role="tab">Export</button>
+        <button class="tab-btn" data-tab="debug" role="tab">Debug</button>
+      </nav>
+      <div id="tab-content">
+        <section id="panel-import" class="panel active" role="tabpanel">
+          <div class="card">
+            <h3>Import Data</h3>
+            <p class="muted">Drag and drop CSV, JSON, NDJSON, or Parquet files here.</p>
+            <div id="drop-zone" role="region" aria-label="Drop zone">Drop files here</div>
+            <div id="import-log" style="margin-top:1rem;"></div>
+            <div style="margin-top:1rem; display:flex; gap:0.5rem;">
+              <button class="primary" id="btn-load-samples">Load Sample Data</button>
+            </div>
+          </div>
+        </section>
+        <section id="panel-tables" class="panel" role="tabpanel">
+          <div id="tables-container" class="card"><p class="muted">No tables loaded yet.</p></div>
+        </section>
+        <section id="panel-query" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>SQL Editor</h3>
+            <textarea id="sql-editor" placeholder="SELECT * FROM ..." spellcheck="false" aria-label="SQL Editor"></textarea>
+            <div style="margin-top:0.5rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <button class="primary" id="btn-run">Run</button>
+              <button id="btn-clear">Clear</button>
+              <button id="btn-copy-sql">Copy SQL</button>
+              <button id="btn-save-query">Save Query</button>
+            </div>
+            <div id="query-status" class="status-msg muted"></div>
+            <div id="query-results" style="margin-top:1rem;"></div>
+          </div>
+        </section>
+        <section id="panel-charts" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Chart</h3>
+            <p class="muted">Run a query first, then choose chart options.</p>
+            <div class="grid-3" style="margin-top:0.5rem;">
+              <div>
+                <label class="muted">Type</label>
+                <select id="chart-type" aria-label="Chart type">
+                  <option value="bar">Bar</option>
+                  <option value="line">Line</option>
+                  <option value="scatter">Scatter</option>
+                </select>
+              </div>
+              <div>
+                <label class="muted">X Column</label>
+                <select id="chart-x" aria-label="X column"></select>
+              </div>
+              <div>
+                <label class="muted">Y Column</label>
+                <select id="chart-y" aria-label="Y column"></select>
+              </div>
+            </div>
+            <div style="margin-top:0.5rem;">
+              <button class="primary" id="btn-draw-chart">Draw</button>
+            </div>
+            <div id="chart-container"><canvas id="chart-canvas"></canvas></div>
+          </div>
+        </section>
+        <section id="panel-saved" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Saved Queries</h3>
+            <div id="saved-queries-container"></div>
+          </div>
+        </section>
+        <section id="panel-export" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Export</h3>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem;">
+              <button id="btn-export-csv">Export Results CSV</button>
+              <button id="btn-export-json">Export Results JSON</button>
+              <button id="btn-export-queries">Export Saved Queries JSON</button>
+              <button id="btn-export-manifest">Export Session Manifest</button>
+            </div>
+            <div style="margin-top:1rem;">
+              <label class="muted">Import Saved Queries JSON</label>
+              <input type="file" id="import-queries-input" accept=".json" style="margin-top:0.25rem; display:block;" aria-label="Import saved queries" />
+            </div>
+          </div>
+        </section>
+        <section id="panel-debug" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Debug</h3>
+            <ul id="debug-list" class="debug-list"></ul>
+            <div style="margin-top:1rem;">
+              <button id="btn-copy-debug">Copy Debug Report</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Quack Drawer · version 2026.05.13.1
+  </footer>
+  <script type="module">
+    let duckdb = null;
+    let Chart = null;
+
+    const state = {
+      db: null,
+      conn: null,
+      tables: [],
+      savedQueries: [],
+      currentResults: null,
+      currentTab: 'import',
+      status: { dbState: 'loading', dbError: null, lastQueryRuntime: null, lastError: null },
+      capabilities: {},
+      initTime: null,
+    };
+
+    function escapeHTML(str) {
+      if (str == null) return '';
+      return String(str).replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]));
+    }
+
+    function el(tag, opts = {}) {
+      const e = document.createElement(tag);
+      if (opts.className) e.className = opts.className;
+      if (opts.text != null) e.textContent = opts.text;
+      if (opts.attrs) Object.entries(opts.attrs).forEach(([k, v]) => e.setAttribute(k, v));
+      if (opts.style) Object.assign(e.style, opts.style);
+      return e;
+    }
+
+    function setStatus(msg, type = 'info') {
+      const s = document.getElementById('status-msg');
+      s.textContent = msg;
+      s.className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'muted';
+    }
+
+    function formatBytes(b) {
+      if (b === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B','KB','MB','GB'];
+      const i = Math.floor(Math.log(b) / Math.log(k));
+      return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    async function checkCapabilities() {
+      const caps = {
+        wasm: typeof WebAssembly === 'object' && WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0])),
+        worker: typeof Worker !== 'undefined',
+        crossOriginIsolated: globalThis.crossOriginIsolated || false,
+        localStorage: (() => { try { localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; } catch { return false; } })(),
+        filePicker: typeof window.showOpenFilePicker === 'function',
+        opfs: false,
+      };
+      try {
+        if (navigator.storage && navigator.storage.getDirectory) {
+          await navigator.storage.getDirectory();
+          caps.opfs = true;
+        }
+      } catch { caps.opfs = false; }
+      state.capabilities = caps;
+    }
+
+    async function loadDuckDBModule() {
+      try {
+        duckdb = await import('https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev45.0/+esm');
+        return true;
+      } catch (err) {
+        console.error('DuckDB module load failed', err);
+        state.status.dbState = 'failed';
+        state.status.dbError = 'Module load failed: ' + (err.message || String(err));
+        renderStatus();
+        return false;
+      }
+    }
+
+    async function loadChartModule() {
+      if (Chart) return;
+      try {
+        const mod = await import('https://cdn.jsdelivr.net/npm/chart.js@4.4.3/auto/+esm');
+        Chart = mod.default || mod.Chart;
+      } catch (err) {
+        console.error('Chart.js load failed', err);
+      }
+    }
+
+    async function initDuckDB() {
+      if (!duckdb) return;
+      const t0 = performance.now();
+      try {
+        const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+        const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+        const worker_url = URL.createObjectURL(
+          new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
+        );
+        const worker = new Worker(worker_url);
+        const logger = new duckdb.ConsoleLogger();
+        const db = new duckdb.AsyncDuckDB(logger, worker);
+        await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+        URL.revokeObjectURL(worker_url);
+        state.db = db;
+        state.conn = await db.connect();
+        state.status.dbState = 'ready';
+        state.initTime = performance.now() - t0;
+      } catch (err) {
+        state.status.dbState = 'failed';
+        state.status.dbError = err.message || String(err);
+        console.error('DuckDB init failed', err);
+      }
+      renderStatus();
+    }
+
+    async function initApp() {
+      await checkCapabilities();
+      loadSavedQueries();
+      setupEventListeners();
+      render();
+      const loaded = await loadDuckDBModule();
+      if (loaded) {
+        await initDuckDB();
+        await refreshTableMetadata();
+        render();
+      }
+    }
+
+    function setupEventListeners() {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+      });
+
+      const dz = document.getElementById('drop-zone');
+      dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+      dz.addEventListener('drop', e => {
+        e.preventDefault();
+        dz.classList.remove('drag-over');
+        handleFiles(e.dataTransfer.files);
+      });
+
+      document.getElementById('btn-load-samples').addEventListener('click', loadSampleData);
+      document.getElementById('btn-run').addEventListener('click', () => {
+        const sql = document.getElementById('sql-editor').value;
+        runSQL(sql);
+      });
+      document.getElementById('btn-clear').addEventListener('click', () => {
+        document.getElementById('sql-editor').value = '';
+        document.getElementById('query-results').innerHTML = '';
+        document.getElementById('query-status').textContent = '';
+        state.currentResults = null;
+        state.status.lastError = null;
+        renderChartControls();
+      });
+      document.getElementById('btn-copy-sql').addEventListener('click', async () => {
+        const sql = document.getElementById('sql-editor').value;
+        try { await navigator.clipboard.writeText(sql); setStatus('SQL copied', 'success'); } catch { setStatus('Copy failed', 'error'); }
+      });
+      document.getElementById('btn-save-query').addEventListener('click', () => {
+        const sql = document.getElementById('sql-editor').value.trim();
+        if (!sql) { setStatus('Nothing to save', 'error'); return; }
+        const name = prompt('Name this query:');
+        if (!name) return;
+        saveQuery(name, sql);
+      });
+      document.getElementById('btn-draw-chart').addEventListener('click', drawChart);
+      document.getElementById('btn-export-csv').addEventListener('click', exportResultsCSV);
+      document.getElementById('btn-export-json').addEventListener('click', exportResultsJSON);
+      document.getElementById('btn-export-queries').addEventListener('click', exportSavedQueries);
+      document.getElementById('btn-export-manifest').addEventListener('click', exportSessionManifest);
+      document.getElementById('btn-copy-debug').addEventListener('click', copyDebugReport);
+      document.getElementById('import-queries-input').addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          try { importSavedQueries(JSON.parse(ev.target.result)); } catch { setStatus('Invalid JSON file', 'error'); }
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    function switchTab(tabName) {
+      state.currentTab = tabName;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const active = btn.dataset.tab === tabName;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.panel').forEach(p => {
+        p.classList.toggle('active', p.id === 'panel-' + tabName);
+      });
+      if (tabName === 'debug') renderDebug();
+      if (tabName === 'saved') renderSavedQueries();
+      if (tabName === 'tables') renderTables();
+      if (tabName === 'charts') renderChartControls();
+    }
+
+    function renderStatus() {
+      const st = document.getElementById('db-status');
+      st.textContent = state.status.dbState;
+      st.className = 'badge badge-' + (state.status.dbState === 'ready' ? 'ready' : state.status.dbState === 'failed' ? 'failed' : 'loading');
+      document.getElementById('table-count').textContent = 'Tables: ' + state.tables.length;
+      document.getElementById('query-runtime').textContent = state.status.lastQueryRuntime ? `Last query: ${state.status.lastQueryRuntime.toFixed(1)}ms` : '';
+    }
+
+    function render() {
+      renderStatus();
+      renderTables();
+      renderSavedQueries();
+      renderChartControls();
+    }
+
+    async function handleFiles(files) {
+      for (const file of files) {
+        await importFile(file);
+      }
+      await refreshTableMetadata();
+      render();
+      setStatus(`Processed ${files.length} file(s)`, 'success');
+    }
+
+    function sanitizeTableName(name) {
+      let base = name.includes('.') ? name.split('.').slice(0, -1).join('.') : name;
+      base = base.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+      if (!base) base = 'table';
+      if (!/^[a-zA-Z]/.test(base)) base = 't_' + base;
+      let final = base;
+      let i = 2;
+      while (state.tables.some(t => t.name === final)) {
+        final = base + '_' + i;
+        i++;
+      }
+      return final;
+    }
+
+    async function importFile(file) {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const tableName = sanitizeTableName(file.name);
+      const logDiv = document.getElementById('import-log');
+      const entry = el('div', { style: { marginBottom: '0.5rem', fontSize: '0.85rem' } });
+      entry.textContent = `Importing ${escapeHTML(file.name)} (${formatBytes(file.size)}) → ${tableName} ...`;
+      logDiv.appendChild(entry);
+
+      try {
+        if (!state.conn) throw new Error('DuckDB not ready');
+        const safeFileName = 'file_' + tableName + '_' + Date.now();
+
+        if (ext === 'csv') {
+          const text = await file.text();
+          await state.db.registerFileText(safeFileName, text);
+          await state.conn.query(`CREATE TABLE "${tableName}" AS SELECT * FROM read_csv_auto('${safeFileName}')`);
+        } else if (ext === 'json') {
+          const text = await file.text();
+          await state.db.registerFileText(safeFileName, text);
+          await state.conn.query(`CREATE TABLE "${tableName}" AS SELECT * FROM read_json_auto('${safeFileName}')`);
+        } else if (ext === 'ndjson' || ext === 'jsonl') {
+          const text = await file.text();
+          await state.db.registerFileText(safeFileName, text);
+          await state.conn.query(`CREATE TABLE "${tableName}" AS SELECT * FROM read_ndjson_auto('${safeFileName}')`);
+        } else if (ext === 'parquet') {
+          const buf = await file.arrayBuffer();
+          await state.db.registerFileBuffer(safeFileName, new Uint8Array(buf));
+          await state.conn.query(`CREATE TABLE "${tableName}" AS SELECT * FROM read_parquet('${safeFileName}')`);
+        } else {
+          throw new Error('Unsupported file type: ' + ext);
+        }
+
+        // Store metadata
+        const existing = state.tables.find(t => t.name === tableName);
+        const meta = { fileName: file.name, size: file.size, type: ext, importTime: new Date().toISOString() };
+        if (existing) {
+          Object.assign(existing, meta);
+        } else {
+          state.tables.push({ name: tableName, rowCount: 0, columns: [], sampleValues: {}, ...meta });
+        }
+
+        entry.textContent = `✅ ${escapeHTML(file.name)} → ${tableName}`;
+        entry.className = 'success';
+      } catch (err) {
+        entry.textContent = `❌ ${escapeHTML(file.name)}: ${escapeHTML(err.message)}`;
+        entry.className = 'error';
+        state.status.lastError = err.message;
+      }
+    }
+
+    async function loadSampleData() {
+      if (!state.conn) { setStatus('DuckDB not ready', 'error'); return; }
+      const animals = [
+        { id: 1, species: 'Terrapene carolina', common_name: 'Eastern Box Turtle', habitat: 'Forest', observed_count: 3, county: 'Gibson', observed_at: '2024-05-12' },
+        { id: 2, species: 'Nerodia sipedon', common_name: 'Northern Watersnake', habitat: 'Wetland', observed_count: 1, county: 'Posey', observed_at: '2024-06-03' },
+        { id: 3, species: 'Lithobates clamitans', common_name: 'Green Frog', habitat: 'Pond', observed_count: 12, county: 'Gibson', observed_at: '2024-07-15' },
+        { id: 4, species: 'Buteo jamaicensis', common_name: 'Red-tailed Hawk', habitat: 'Field', observed_count: 2, county: 'Vanderburgh', observed_at: '2024-08-01' },
+        { id: 5, species: 'Odocoileus virginianus', common_name: 'White-tailed Deer', habitat: 'Forest', observed_count: 7, county: 'Gibson', observed_at: '2024-09-20' },
+        { id: 6, species: 'Chelydra serpentina', common_name: 'Snapping Turtle', habitat: 'Pond', observed_count: 1, county: 'Posey', observed_at: '2024-05-22' },
+        { id: 7, species: 'Anaxyrus americanus', common_name: 'American Toad', habitat: 'Garden', observed_count: 5, county: 'Gibson', observed_at: '2024-06-10' },
+        { id: 8, species: 'Marmota monax', common_name: 'Groundhog', habitat: 'Field', observed_count: 2, county: 'Vanderburgh', observed_at: '2024-07-08' },
+      ];
+      await loadJSONArray(animals, 'sample_animals');
+      const sales = [
+        { id: 1, date: '2024-01-05', category: 'Electronics', item: 'Headphones', quantity: 2, unit_price: 49.99, region: 'North' },
+        { id: 2, date: '2024-01-07', category: 'Electronics', item: 'USB Cable', quantity: 5, unit_price: 9.99, region: 'South' },
+        { id: 3, date: '2024-01-12', category: 'Office', item: 'Stapler', quantity: 1, unit_price: 12.50, region: 'North' },
+        { id: 4, date: '2024-01-15', category: 'Electronics', item: 'Mouse', quantity: 3, unit_price: 25.00, region: 'East' },
+        { id: 5, date: '2024-01-20', category: 'Furniture', item: 'Chair', quantity: 2, unit_price: 89.00, region: 'West' },
+        { id: 6, date: '2024-01-22', category: 'Office', item: 'Paper (500)', quantity: 10, unit_price: 6.99, region: 'North' },
+        { id: 7, date: '2024-01-25', category: 'Electronics', item: 'Keyboard', quantity: 2, unit_price: 45.00, region: 'South' },
+        { id: 8, date: '2024-01-28', category: 'Furniture', item: 'Desk Lamp', quantity: 1, unit_price: 34.50, region: 'East' },
+      ];
+      await loadJSONArray(sales, 'sample_sales');
+      await refreshTableMetadata();
+      render();
+      setStatus('Sample data loaded', 'success');
+    }
+
+    async function loadJSONArray(arr, tableName) {
+      const text = JSON.stringify(arr);
+      const safeFileName = 'file_' + tableName + '_' + Date.now();
+      await state.db.registerFileText(safeFileName, text);
+      await state.conn.query(`CREATE TABLE "${tableName}" AS SELECT * FROM read_json_auto('${safeFileName}')`);
+    }
+
+    async function refreshTableMetadata() {
+      if (!state.conn) { state.tables = []; return; }
+      try {
+        const res = await state.conn.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name`);
+        const rows = res.toArray ? res.toArray() : [];
+        const names = rows.map(r => r.table_name || r['table_name']);
+        const tables = [];
+        for (const name of names) {
+          let rowCount = 0;
+          try {
+            const countRes = await state.conn.query(`SELECT COUNT(*) AS c FROM "${name}"`);
+            const cRows = countRes.toArray();
+            rowCount = Number(cRows[0].c || cRows[0]['c']);
+          } catch {}
+          let columns = [];
+          try {
+            const descRes = await state.conn.query(`DESCRIBE "${name}"`);
+            const dRows = descRes.toArray();
+            columns = dRows.map(r => ({ name: String(r.column_name || r['column_name']), type: String(r.column_type || r['column_type']) }));
+          } catch {}
+          let sampleValues = {};
+          try {
+            const sampleRes = await state.conn.query(`SELECT * FROM "${name}" LIMIT 1`);
+            const sRows = sampleRes.toArray();
+            if (sRows.length > 0) {
+              const row = sRows[0];
+              for (const col of columns) sampleValues[col.name] = row[col.name];
+            }
+          } catch {}
+          // Preserve existing meta if present
+          const existing = state.tables.find(t => t.name === name);
+          tables.push({
+            name,
+            rowCount,
+            columns,
+            sampleValues,
+            fileName: existing?.fileName || name,
+            size: existing?.size || 0,
+            type: existing?.type || 'unknown',
+            importTime: existing?.importTime || new Date().toISOString(),
+          });
+        }
+        state.tables = tables;
+      } catch (err) {
+        console.error('refresh metadata', err);
+        state.status.lastError = err.message;
+      }
+      renderStatus();
+    }
+
+    function renderTables() {
+      const sidebar = document.getElementById('table-list');
+      sidebar.innerHTML = '';
+      state.tables.forEach(t => {
+        const li = el('li', { text: `${t.name} (${t.rowCount.toLocaleString()})` });
+        li.addEventListener('click', () => {
+          document.getElementById('sql-editor').value = `SELECT * FROM "${t.name}" LIMIT 100;`;
+          switchTab('query');
+        });
+        sidebar.appendChild(li);
+      });
+
+      const container = document.getElementById('tables-container');
+      if (state.tables.length === 0) {
+        container.innerHTML = '';
+        container.appendChild(el('p', { className: 'muted', text: 'No tables loaded yet.' }));
+        return;
+      }
+      container.innerHTML = '';
+      state.tables.forEach(t => {
+        const card = el('div', { className: 'card', style: { marginBottom: '1rem' } });
+        const title = el('h3', { text: t.name });
+        const meta = el('div', { className: 'muted', style: { marginBottom: '0.5rem', fontSize: '0.85rem' } });
+        meta.textContent = `${t.rowCount.toLocaleString()} rows · ${t.columns.length} columns`;
+        const cols = el('div', { style: { marginBottom: '0.5rem', fontSize: '0.8rem' } });
+        cols.textContent = t.columns.map(c => `${c.name} (${c.type})`).join(', ');
+        const actions = el('div', { style: { display: 'flex', gap: '0.5rem', flexWrap: 'wrap' } });
+        const btnPreview = el('button', { text: 'Preview', className: 'small' });
+        btnPreview.addEventListener('click', async () => {
+          document.getElementById('sql-editor').value = `SELECT * FROM "${t.name}" LIMIT 100;`;
+          await runSQL(document.getElementById('sql-editor').value);
+          switchTab('query');
+        });
+        const btnDescribe = el('button', { text: 'Describe', className: 'small' });
+        btnDescribe.addEventListener('click', async () => {
+          document.getElementById('sql-editor').value = `DESCRIBE "${t.name}";`;
+          await runSQL(document.getElementById('sql-editor').value);
+          switchTab('query');
+        });
+        const btnCopy = el('button', { text: 'Copy SELECT *', className: 'small' });
+        btnCopy.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(`SELECT * FROM "${t.name}";`); setStatus('Copied', 'success'); } catch { setStatus('Copy failed', 'error'); }
+        });
+        const btnDrop = el('button', { text: 'Drop', className: 'small' });
+        btnDrop.addEventListener('click', async () => {
+          if (!confirm(`Drop table ${t.name}?`)) return;
+          try {
+            await state.conn.query(`DROP TABLE IF EXISTS "${t.name}"`);
+            await refreshTableMetadata();
+            render();
+            setStatus(`Dropped ${t.name}`, 'success');
+          } catch (err) { setStatus(err.message, 'error'); }
+        });
+        actions.append(btnPreview, btnDescribe, btnCopy, btnDrop);
+        card.append(title, meta, cols, actions);
+        container.appendChild(card);
+      });
+    }
+
+    async function runSQL(sql) {
+      if (!state.conn) { setStatus('DuckDB not ready', 'error'); return; }
+      const t0 = performance.now();
+      state.status.lastError = null;
+      try {
+        const result = await state.conn.query(sql);
+        const rows = result.toArray ? result.toArray() : [];
+        const columns = result.schema.fields.map(f => f.name);
+        const plainRows = rows.map(r => {
+          const obj = {};
+          for (const col of columns) {
+            const v = r[col];
+            obj[col] = v === undefined ? null : v;
+          }
+          return obj;
+        });
+        state.currentResults = { columns, rows: plainRows, sql, runtime: performance.now() - t0 };
+        state.status.lastQueryRuntime = state.currentResults.runtime;
+        renderResults();
+        setStatus(`Returned ${plainRows.length.toLocaleString()} rows in ${state.currentResults.runtime.toFixed(1)}ms`, 'success');
+      } catch (err) {
+        state.status.lastError = err.message || String(err);
+        state.currentResults = null;
+        const resDiv = document.getElementById('query-results');
+        resDiv.innerHTML = '';
+        resDiv.appendChild(el('div', { className: 'error', text: state.status.lastError }));
+        document.getElementById('query-status').textContent = 'Error';
+        setStatus(state.status.lastError, 'error');
+      }
+      renderChartControls();
+      renderStatus();
+    }
+
+    function renderResults() {
+      const container = document.getElementById('query-results');
+      container.innerHTML = '';
+      if (!state.currentResults) return;
+      const { columns, rows } = state.currentResults;
+      if (columns.length === 0) {
+        container.appendChild(el('p', { className: 'muted', text: 'Query executed (no columns returned).' }));
+        return;
+      }
+      const wrap = el('div', { className: 'results-wrap' });
+      const tbl = el('table');
+      const thead = el('thead');
+      const trHead = el('tr');
+      columns.forEach(c => trHead.appendChild(el('th', { text: c })));
+      thead.appendChild(trHead);
+      tbl.appendChild(thead);
+      const tbody = el('tbody');
+      const displayRows = rows.slice(0, 500);
+      displayRows.forEach(row => {
+        const tr = el('tr');
+        columns.forEach(c => {
+          const v = row[c];
+          tr.appendChild(el('td', { text: (v === null || v === undefined) ? 'NULL' : String(v) }));
+        });
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+      wrap.appendChild(tbl);
+      container.appendChild(wrap);
+      const info = el('div', { className: 'muted', style: { marginTop: '0.5rem', fontSize: '0.8rem' } });
+      info.textContent = `Showing ${displayRows.length.toLocaleString()} of ${rows.length.toLocaleString()} rows · ${columns.length} columns`;
+      container.appendChild(info);
+    }
+
+    function loadSavedQueries() {
+      try {
+        const raw = localStorage.getItem('quack_drawer_saved_queries');
+        if (raw) state.savedQueries = JSON.parse(raw);
+      } catch { state.savedQueries = []; }
+      if (!state.savedQueries.length) {
+        const now = new Date().toISOString();
+        state.savedQueries = [
+          { id: 'q1', name: 'Preview table', sql: 'SELECT * FROM {{table}} LIMIT 100;', created_at: now, updated_at: now },
+          { id: 'q2', name: 'Count rows', sql: 'SELECT COUNT(*) AS rows FROM {{table}};', created_at: now, updated_at: now },
+          { id: 'q3', name: 'Count by category', sql: 'SELECT {{column}}, COUNT(*) AS count FROM {{table}} GROUP BY {{column}} ORDER BY count DESC;', created_at: now, updated_at: now },
+          { id: 'q4', name: 'Find duplicates', sql: 'SELECT {{column}}, COUNT(*) AS count FROM {{table}} GROUP BY {{column}} HAVING COUNT(*) > 1 ORDER BY count DESC;', created_at: now, updated_at: now },
+          { id: 'q5', name: 'Numeric summary', sql: 'SELECT MIN({{column}}) AS min_value, MAX({{column}}) AS max_value, AVG({{column}}) AS avg_value FROM {{table}};', created_at: now, updated_at: now },
+        ];
+        persistSavedQueries();
+      }
+    }
+
+    function persistSavedQueries() {
+      try { localStorage.setItem('quack_drawer_saved_queries', JSON.stringify(state.savedQueries)); } catch (err) { console.error('persist failed', err); }
+    }
+
+    function saveQuery(name, sql) {
+      const id = 'q_' + Date.now();
+      const now = new Date().toISOString();
+      state.savedQueries.push({ id, name, sql, created_at: now, updated_at: now });
+      persistSavedQueries();
+      renderSavedQueries();
+      setStatus('Query saved', 'success');
+    }
+
+    function renderSavedQueries() {
+      const sidebar = document.getElementById('saved-query-list');
+      sidebar.innerHTML = '';
+      state.savedQueries.forEach(q => {
+        const li = el('li', { text: q.name });
+        li.addEventListener('click', () => {
+          document.getElementById('sql-editor').value = q.sql;
+          switchTab('query');
+        });
+        sidebar.appendChild(li);
+      });
+
+      const container = document.getElementById('saved-queries-container');
+      container.innerHTML = '';
+      if (state.savedQueries.length === 0) {
+        container.appendChild(el('p', { className: 'muted', text: 'No saved queries.' }));
+        return;
+      }
+      state.savedQueries.forEach(q => {
+        const row = el('div', { className: 'query-row' });
+        const left = el('div');
+        left.appendChild(el('strong', { text: q.name }));
+        const pre = el('pre');
+        pre.textContent = q.sql;
+        left.appendChild(pre);
+        const actions = el('div', { style: { display: 'flex', gap: '0.5rem' } });
+        const btnLoad = el('button', { text: 'Load', className: 'small' });
+        btnLoad.addEventListener('click', () => { document.getElementById('sql-editor').value = q.sql; switchTab('query'); });
+        const btnDup = el('button', { text: 'Duplicate', className: 'small' });
+        btnDup.addEventListener('click', () => {
+          const copy = { ...q, id: 'q_' + Date.now(), name: q.name + ' Copy', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          state.savedQueries.push(copy);
+          persistSavedQueries();
+          renderSavedQueries();
+        });
+        const btnRen = el('button', { text: 'Rename', className: 'small' });
+        btnRen.addEventListener('click', () => {
+          const newName = prompt('Rename query:', q.name);
+          if (!newName) return;
+          q.name = newName;
+          q.updated_at = new Date().toISOString();
+          persistSavedQueries();
+          renderSavedQueries();
+        });
+        const btnDel = el('button', { text: 'Delete', className: 'small' });
+        btnDel.addEventListener('click', () => {
+          if (!confirm('Delete query?')) return;
+          state.savedQueries = state.savedQueries.filter(x => x.id !== q.id);
+          persistSavedQueries();
+          renderSavedQueries();
+        });
+        actions.append(btnLoad, btnDup, btnRen, btnDel);
+        row.append(left, actions);
+        container.appendChild(row);
+      });
+    }
+
+    function importSavedQueries(data) {
+      if (!Array.isArray(data)) { setStatus('Invalid queries format', 'error'); return; }
+      let added = 0;
+      for (const item of data) {
+        if (!item || !item.sql) continue;
+        const id = 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        state.savedQueries.push({
+          id,
+          name: item.name || 'Imported Query',
+          sql: item.sql,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+        added++;
+      }
+      persistSavedQueries();
+      renderSavedQueries();
+      setStatus(`Imported ${added} queries`, 'success');
+    }
+
+    function renderChartControls() {
+      const xSel = document.getElementById('chart-x');
+      const ySel = document.getElementById('chart-y');
+      xSel.innerHTML = '';
+      ySel.innerHTML = '';
+      if (!state.currentResults || !state.currentResults.columns.length) {
+        xSel.disabled = true; ySel.disabled = true; return;
+      }
+      xSel.disabled = false; ySel.disabled = false;
+      state.currentResults.columns.forEach(c => {
+        xSel.appendChild(el('option', { text: c, attrs: { value: c } }));
+        ySel.appendChild(el('option', { text: c, attrs: { value: c } }));
+      });
+      if (state.currentResults.columns.length > 1) ySel.selectedIndex = 1;
+    }
+
+    let currentChart = null;
+    async function drawChart() {
+      await loadChartModule();
+      if (!Chart) { setStatus('Chart.js not available', 'error'); return; }
+      const type = document.getElementById('chart-type').value;
+      const xCol = document.getElementById('chart-x').value;
+      const yCol = document.getElementById('chart-y').value;
+      if (!state.currentResults) { setStatus('No results to chart', 'error'); return; }
+      const { rows } = state.currentResults;
+      const canvas = document.getElementById('chart-canvas');
+      const ctx = canvas.getContext('2d');
+      if (currentChart) { currentChart.destroy(); currentChart = null; }
+      const labels = rows.map(r => (r[xCol] === null || r[xCol] === undefined) ? '' : String(r[xCol]));
+      const data = rows.map(r => {
+        const v = r[yCol];
+        return (v === null || v === undefined) ? 0 : Number(v);
+      });
+      currentChart = new Chart(ctx, {
+        type,
+        data: {
+          labels,
+          datasets: [{
+            label: yCol,
+            data,
+            backgroundColor: 'rgba(245,158,11,0.5)',
+            borderColor: 'rgba(245,158,11,1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { beginAtZero: true } },
+          plugins: { legend: { display: true } }
+        }
+      });
+    }
+
+    function exportResultsCSV() {
+      if (!state.currentResults) { setStatus('No results', 'error'); return; }
+      const { columns, rows } = state.currentResults;
+      const escape = v => {
+        const s = v === null || v === undefined ? '' : String(v);
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      };
+      const lines = [columns.join(','), ...rows.map(r => columns.map(c => escape(r[c])).join(','))];
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+      downloadBlob(blob, 'results.csv');
+      setStatus('CSV exported', 'success');
+    }
+
+    function exportResultsJSON() {
+      if (!state.currentResults) { setStatus('No results', 'error'); return; }
+      const blob = new Blob([JSON.stringify(state.currentResults.rows, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, 'results.json');
+      setStatus('JSON exported', 'success');
+    }
+
+    function exportSavedQueries() {
+      const blob = new Blob([JSON.stringify(state.savedQueries, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, 'saved_queries.json');
+      setStatus('Saved queries exported', 'success');
+    }
+
+    function exportSessionManifest() {
+      const manifest = {
+        generated_at: new Date().toISOString(),
+        tables: state.tables.map(t => ({
+          name: t.name,
+          row_count: t.rowCount,
+          columns: t.columns,
+          file_name: t.fileName,
+          size: t.size,
+          type: t.type,
+          import_time: t.importTime,
+        })),
+        saved_queries: state.savedQueries.map(q => ({ id: q.id, name: q.name, created_at: q.created_at })),
+      };
+      const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, 'session_manifest.json');
+      setStatus('Manifest exported', 'success');
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = el('a', { attrs: { href: url, download: filename } });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function renderDebug() {
+      const list = document.getElementById('debug-list');
+      const rows = [
+        ['User Agent', navigator.userAgent],
+        ['WASM Supported', state.capabilities.wasm],
+        ['Worker Supported', state.capabilities.worker],
+        ['DuckDB Loaded', state.status.dbState === 'ready'],
+        ['DuckDB Init Time (ms)', state.initTime != null ? state.initTime.toFixed(1) : 'N/A'],
+        ['OPFS Available', state.capabilities.opfs],
+        ['File Picker Available', state.capabilities.filePicker],
+        ['crossOriginIsolated', state.capabilities.crossOriginIsolated],
+        ['localStorage Available', state.capabilities.localStorage],
+        ['Loaded Table Count', state.tables.length],
+        ['Saved Query Count', state.savedQueries.length],
+        ['Last SQL', state.currentResults ? state.currentResults.sql : 'N/A'],
+        ['Last Query Runtime (ms)', state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) : 'N/A'],
+        ['Last Error', state.status.lastError || 'None'],
+      ];
+      list.innerHTML = '';
+      rows.forEach(([k, v]) => {
+        const li = el('li');
+        li.appendChild(el('span', { text: k }));
+        li.appendChild(el('span', { text: String(v) }));
+        list.appendChild(li);
+      });
+    }
+
+    function copyDebugReport() {
+      const lines = [
+        'Quack Drawer Debug Report',
+        'Generated: ' + new Date().toISOString(),
+        'User Agent: ' + navigator.userAgent,
+        'WASM: ' + state.capabilities.wasm,
+        'Worker: ' + state.capabilities.worker,
+        'DuckDB State: ' + state.status.dbState,
+        'DuckDB Init Time: ' + (state.initTime != null ? state.initTime.toFixed(1) + 'ms' : 'N/A'),
+        'OPFS: ' + state.capabilities.opfs,
+        'File Picker: ' + state.capabilities.filePicker,
+        'crossOriginIsolated: ' + state.capabilities.crossOriginIsolated,
+        'localStorage: ' + state.capabilities.localStorage,
+        'Tables: ' + state.tables.length,
+        'Saved Queries: ' + state.savedQueries.length,
+        'Last SQL: ' + (state.currentResults ? state.currentResults.sql : 'N/A'),
+        'Last Runtime: ' + (state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) + 'ms' : 'N/A'),
+        'Last Error: ' + (state.status.lastError || 'None'),
+      ];
+      navigator.clipboard.writeText(lines.join('\n')).then(() => setStatus('Debug report copied', 'success')).catch(() => setStatus('Copy failed', 'error'));
+    }
+
+    initApp();
+  </script>
+</body>
+</html>
