@@ -572,9 +572,9 @@
       </div>
     </main>
   </div>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.6" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
-    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.05.13.6
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.7" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
+    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.05.13.7
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -613,6 +613,32 @@
     // === Settings & Theme ===
     function loadSettings() { try { const raw = localStorage.getItem('qd2_settings'); if (raw) Object.assign(state.settings, JSON.parse(raw)); } catch {} }
     function saveSettings() { try { localStorage.setItem('qd2_settings', JSON.stringify(state.settings)); } catch {} }
+    function getLatestSettings(syncForm = false) {
+      const latest = { ...defaultSettings };
+      try { const raw = localStorage.getItem('qd2_settings'); if (raw) Object.assign(latest, JSON.parse(raw)); } catch {}
+      if (syncForm) {
+        const formIds = {
+          'setting-ai-enabled': ['aiEnabled', 'checked'],
+          'setting-ai-provider': ['aiProvider', 'value'],
+          'setting-ai-key': ['aiApiKey', 'value'],
+          'setting-ai-model': ['aiModel', 'value'],
+          'setting-ai-sample': ['aiMaxSampleRows', 'number'],
+          'setting-ai-result': ['aiMaxResultRows', 'number'],
+          'setting-ai-prompt': ['aiSystemPrompt', 'value'],
+        };
+        Object.entries(formIds).forEach(([id, [key, mode]]) => {
+          const field = document.getElementById(id);
+          if (!field) return;
+          if (mode === 'checked') latest[key] = field.checked;
+          else if (mode === 'number') latest[key] = parseInt(field.value, 10) || defaultSettings[key];
+          else if (key === 'aiModel' && !field.value && field.options && field.options.length === 0) return;
+          else latest[key] = field.value;
+        });
+        Object.assign(state.settings, latest);
+        saveSettings();
+      }
+      return latest;
+    }
     function applyTheme() { let theme = state.settings.theme; if (theme === 'system') theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.dataset.theme = theme; document.body.style.fontSize = state.settings.largeText ? '1.05rem' : ''; }
     function bindSettings() {
       document.getElementById('theme-selector').value = state.settings.theme;
@@ -636,11 +662,13 @@
     }
     function setupSettingsListeners() {
       const ids = { 'theme-selector': 'theme', 'setting-theme': 'theme', 'setting-compact': 'compactMode', 'setting-large-text': 'largeText', 'setting-reduced-motion': 'reducedMotion', 'setting-auto-profile': 'autoProfile', 'setting-auto-preview': 'autoPreview', 'setting-confirm-drop': 'confirmDrop', 'setting-enable-history': 'enableHistory', 'setting-ai-enabled': 'aiEnabled' };
-      Object.entries(ids).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('change', () => { state.settings[key] = el.type === 'checkbox' ? el.checked : el.value; saveSettings(); applyTheme(); bindSettings(); }); });
+      Object.entries(ids).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('change', () => { state.settings[key] = el.type === 'checkbox' ? el.checked : el.value; saveSettings(); applyTheme(); bindSettings(); if (key === 'aiEnabled') renderAI(); }); });
       const numIds = { 'setting-max-rows': 'maxDisplayRows', 'setting-max-history': 'maxHistoryItems', 'setting-ai-sample': 'aiMaxSampleRows', 'setting-ai-result': 'aiMaxResultRows' };
       Object.entries(numIds).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('change', () => { state.settings[key] = parseInt(el.value) || 0; saveSettings(); }); });
-      const textIds = { 'setting-ai-key': 'aiApiKey', 'setting-ai-model': 'aiModel', 'setting-ai-prompt': 'aiSystemPrompt' };
-      Object.entries(textIds).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('input', () => { state.settings[key] = el.value; saveSettings(); }); });
+      const textIds = { 'setting-ai-key': 'aiApiKey', 'setting-ai-prompt': 'aiSystemPrompt' };
+      Object.entries(textIds).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('input', () => { state.settings[key] = el.value; saveSettings(); if (key === 'aiApiKey') renderAI(); }); });
+      const modelEl = document.getElementById('setting-ai-model');
+      if (modelEl) modelEl.addEventListener('change', () => { state.settings.aiModel = modelEl.value; saveSettings(); renderAI(); });
       document.getElementById('btn-reset-queries').addEventListener('click', () => { if (confirm('Clear all saved queries?')) { state.savedQueries = []; persistSavedQueries(); renderSavedQueries(); setStatus('Saved queries cleared', 'success'); } });
       document.getElementById('btn-reset-history').addEventListener('click', () => { if (confirm('Clear query history?')) { state.queryHistory = []; persistHistory(); renderHistory(); setStatus('History cleared', 'success'); } });
       document.getElementById('btn-reset-settings').addEventListener('click', () => { if (confirm('Reset settings to defaults?')) { state.settings = { ...defaultSettings }; saveSettings(); bindSettings(); applyTheme(); setStatus('Settings reset', 'success'); } });
@@ -1458,20 +1486,30 @@
         if (exists) sel.value = current;
       }
       if (!sel.value && models.length) sel.selectedIndex = 0;
+      if (sel.value && state.settings.aiModel !== sel.value) {
+        state.settings.aiModel = sel.value;
+        saveSettings();
+      }
     }
     function renderAI() {
-      let latestSettings = { ...defaultSettings };
-      try { const raw = localStorage.getItem('qd2_settings'); if (raw) Object.assign(latestSettings, JSON.parse(raw)); } catch {}
-      const enabled = latestSettings.aiEnabled && latestSettings.aiApiKey;
+      const latestSettings = getLatestSettings(true);
+      const hasKey = Boolean(String(latestSettings.aiApiKey || '').trim());
+      const enabled = latestSettings.aiEnabled && hasKey;
       const msg = document.getElementById('ai-config-msg');
       const btn = document.getElementById('btn-ai-run');
-      if (!enabled) { msg.classList.remove('hidden'); btn.disabled = true; }
+      if (!enabled) {
+        msg.textContent = latestSettings.aiEnabled ? 'AI needs an API key. Add one in Settings.' : 'AI is disabled. Enable it in Settings and configure your API key.';
+        msg.classList.remove('hidden');
+        btn.disabled = true;
+      }
       else { msg.classList.add('hidden'); btn.disabled = false; }
     }
     async function runAIAction() {
-      let latestSettings = { ...defaultSettings };
-      try { const raw = localStorage.getItem('qd2_settings'); if (raw) Object.assign(latestSettings, JSON.parse(raw)); } catch {}
-      if (!latestSettings.aiEnabled || !latestSettings.aiApiKey) return;
+      const latestSettings = getLatestSettings(true);
+      if (!latestSettings.aiEnabled || !String(latestSettings.aiApiKey || '').trim()) {
+        renderAI();
+        return;
+      }
       const action = document.getElementById('ai-action').value;
       const chat = document.getElementById('ai-chat');
       const prompt = buildAIPrompt(action);
@@ -1482,7 +1520,7 @@
       try {
         const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + latestSettings.aiApiKey, 'HTTP-Referer': location.href },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + latestSettings.aiApiKey.trim(), 'HTTP-Referer': location.href },
           body: JSON.stringify({
             model: latestSettings.aiModel || 'openai/gpt-4o-mini',
             messages: [
