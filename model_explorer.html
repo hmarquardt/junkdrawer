@@ -1503,9 +1503,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.2" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.13.2
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.3" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.13.3
     </footer>
   </div>
 
@@ -1764,6 +1764,8 @@
       let buffer = '';
       let text = '';
       let usage = null;
+      let lastRender = 0;
+      const RENDER_INTERVAL = 150; // ms — throttle DOM updates to avoid O(n²) hang
 
       // Pre-render output area for streaming
       const area = $('#output-area');
@@ -1784,6 +1786,7 @@
           const lines = buffer.split('\n');
           buffer = lines.pop(); // keep incomplete line in buffer
 
+          let hasDelta = false;
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed.startsWith('data: ')) continue;
@@ -1795,8 +1798,7 @@
               const delta = chunk.choices?.[0]?.delta?.content;
               if (delta) {
                 text += delta;
-                contentEl.innerHTML = markdownToHtml(text);
-                contentEl.scrollTop = contentEl.scrollHeight;
+                hasDelta = true;
               }
               if (chunk.usage) {
                 usage = chunk.usage;
@@ -1805,12 +1807,23 @@
               // Ignore malformed SSE lines
             }
           }
+
+          if (hasDelta) {
+            const now = performance.now();
+            if (now - lastRender >= RENDER_INTERVAL) {
+              contentEl.innerHTML = markdownToHtml(text);
+              lastRender = now;
+            }
+          }
         }
       } catch (e) {
         if (e.name === 'AbortError') throw e;
         logDebug({ msg: 'Stream read error: ' + e.message, level: 'error' });
       } finally {
         reader.releaseLock();
+        // Final render to ensure everything is displayed
+        const contentElFinal = $('#stream-content');
+        if (contentElFinal) contentElFinal.innerHTML = markdownToHtml(text);
       }
 
       return { text, usage };
