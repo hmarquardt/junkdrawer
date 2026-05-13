@@ -530,7 +530,15 @@
             <div class="setting-row"><label>Enable AI</label><input type="checkbox" id="setting-ai-enabled" /></div>
             <div class="setting-row"><label>Provider</label><select id="setting-ai-provider"><option value="openrouter">OpenRouter</option></select></div>
             <div class="setting-row"><label>API Key</label><input type="text" id="setting-ai-key" placeholder="sk-..." style="width:200px;" /></div>
-            <div class="setting-row"><label>Model</label><input type="text" id="setting-ai-model" placeholder="openai/gpt-4o" style="width:200px;" /></div>
+            <div class="setting-row" style="align-items:flex-start;"><label>Model</label>
+              <div style="display:flex; gap:0.4rem; flex-direction:column;">
+                <div style="display:flex; gap:0.4rem; align-items:center;">
+                  <select id="setting-ai-model" style="width:260px;"></select>
+                  <button class="small" id="btn-refresh-models">Refresh</button>
+                </div>
+                <span id="model-refresh-status" class="muted" style="font-size:0.75rem;"></span>
+              </div>
+            </div>
             <div class="setting-row"><label>Max Sample Rows</label><input type="number" id="setting-ai-sample" value="10" style="width:80px;" /></div>
             <div class="setting-row"><label>Max Result Rows</label><input type="number" id="setting-ai-result" value="100" style="width:80px;" /></div>
             <div class="setting-row"><label>System Prompt</label><textarea id="setting-ai-prompt" placeholder="System prompt..." style="min-height:50px; width:300px;"></textarea></div>
@@ -563,9 +571,9 @@
       </div>
     </main>
   </div>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
-    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.05.13.2
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
+    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.05.13.3
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -670,6 +678,7 @@
     async function initApp() {
       loadSettings(); applyTheme(); loadSavedQueries(); loadHistory(); bindSettings();
       setupEventListeners(); setupSettingsListeners(); await checkCapabilities(); render();
+      fetchOpenRouterModels();
       const loaded = await loadDuckDBModule();
       if (loaded) { await initDuckDB(); await refreshTableMetadata(); render(); if (state.settings.autoProfile && state.tables.length) { state.selectedTable = state.tables[0].name; } }
     }
@@ -705,6 +714,7 @@
       document.getElementById('btn-add-map-report').addEventListener('click', () => { addToReport({ type: 'map', title: 'Map' }); setStatus('Map added to report', 'success'); });
       document.getElementById('btn-add-note-report').addEventListener('click', () => { const note = document.getElementById('report-notes').value.trim(); if (note) addToReport({ type: 'note', title: 'Note', content: note }); setStatus('Note added to report', 'success'); });
       document.getElementById('btn-ai-run').addEventListener('click', runAIAction);
+      document.getElementById('btn-refresh-models').addEventListener('click', fetchOpenRouterModels);
       document.getElementById('btn-export-csv').addEventListener('click', exportResultsCSV);
       document.getElementById('btn-export-json').addEventListener('click', exportResultsJSON);
       document.getElementById('btn-export-table-csv').addEventListener('click', exportTableCSV);
@@ -1403,6 +1413,51 @@
     function downloadReport() { const blob = new Blob([buildReportMarkdown()], { type: 'text/markdown' }); downloadBlob(blob, 'report.md'); setStatus('Report downloaded', 'success'); }
 
     // === AI Analyst ===
+    const FALLBACK_MODELS = [
+      { id: 'openai/gpt-4o-mini', name: 'openai/gpt-4o-mini' },
+      { id: 'openai/gpt-4o', name: 'openai/gpt-4o' },
+      { id: 'anthropic/claude-3.5-sonnet', name: 'anthropic/claude-3.5-sonnet' },
+      { id: 'anthropic/claude-3-opus', name: 'anthropic/claude-3-opus' },
+      { id: 'google/gemini-1.5-pro', name: 'google/gemini-1.5-pro' },
+      { id: 'google/gemini-1.5-flash', name: 'google/gemini-1.5-flash' },
+      { id: 'meta-llama/llama-3.1-70b-instruct', name: 'meta-llama/llama-3.1-70b-instruct' },
+      { id: 'meta-llama/llama-3.1-405b-instruct', name: 'meta-llama/llama-3.1-405b-instruct' },
+      { id: 'mistralai/mistral-large', name: 'mistralai/mistral-large' },
+      { id: 'deepseek/deepseek-chat', name: 'deepseek/deepseek-chat' },
+      { id: 'qwen/qwen-2.5-72b-instruct', name: 'qwen/qwen-2.5-72b-instruct' },
+    ];
+    async function fetchOpenRouterModels() {
+      const status = document.getElementById('model-refresh-status');
+      try {
+        status.textContent = 'Fetching models...';
+        const resp = await fetch('https://openrouter.ai/api/v1/models');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        const models = (data.data || []).map(m => ({ id: m.id, name: m.name || m.id })).sort((a, b) => a.id.localeCompare(b.id));
+        if (!models.length) throw new Error('No models returned');
+        populateAIModels(models);
+        status.textContent = 'Loaded ' + models.length + ' models from OpenRouter';
+        status.className = 'success';
+      } catch (err) {
+        status.textContent = 'Could not fetch models (' + err.message + '). Using fallback list.';
+        status.className = 'warning';
+        populateAIModels(FALLBACK_MODELS);
+      }
+    }
+    function populateAIModels(models) {
+      const sel = document.getElementById('setting-ai-model');
+      const current = sel.value || state.settings.aiModel;
+      sel.innerHTML = '';
+      models.forEach(m => {
+        const opt = el('option', { text: m.name, attrs: { value: m.id } });
+        sel.appendChild(opt);
+      });
+      if (current) {
+        const exists = Array.from(sel.options).some(o => o.value === current);
+        if (exists) sel.value = current;
+      }
+      if (!sel.value && models.length) sel.selectedIndex = 0;
+    }
     function renderAI() {
       const enabled = state.settings.aiEnabled && state.settings.aiApiKey;
       const msg = document.getElementById('ai-config-msg');
