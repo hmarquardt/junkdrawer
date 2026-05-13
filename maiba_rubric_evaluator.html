@@ -331,6 +331,21 @@
     </div>
 
     <div class="card mt-2">
+      <h2>Admin Context</h2>
+      <label for="adminContextInput">Directives sent to the model alongside every prompt. Use this to add your own specific instructions that are not part of the uploaded rubric.</label>
+      <textarea id="adminContextInput" rows="6" class="mt-1" placeholder="e.g. Be extra strict on Accuracy; do not penalize for missing emojis…"></textarea>
+      <div class="toolbar">
+        <button id="btnSaveAdminContext" class="btn">Save Admin Context</button>
+        <button id="btnClearAdminContext" class="btn secondary">Clear</button>
+      </div>
+      <div id="adminContextMeta" class="status-line"></div>
+      <details class="mt-1">
+        <summary style="color:var(--text-dim);cursor:pointer;font-size:.85rem;">Preview</summary>
+        <div id="adminContextPreview" class="output-box mt-1" style="min-height:2rem;font-size:.8rem;max-height:8rem;overflow:auto;"></div>
+      </details>
+    </div>
+
+    <div class="card mt-2">
       <h2>History Pruning</h2>
       <div class="toolbar">
         <button id="btnDeleteAllHistory" class="btn danger">Delete All History</button>
@@ -376,9 +391,9 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.3" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.13.3
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.4" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.13.4
   </footer>
 </div>
 
@@ -399,6 +414,7 @@ const LS_KEY_JSON_MODE = 'maiba.settings.internalJsonMode';
 const LS_KEY_PRIVACY = 'maiba.settings.privacyMode';
 const LS_KEY_THEME = 'maiba.settings.theme';
 const LS_KEY_AUDIO_CUE = 'maiba.settings.audioCue';
+const LS_KEY_ADMIN_CONTEXT = 'maiba.settings.adminContext';
 
 const DB_NAME = 'maibaRubricEvaluatorDB';
 const STORE = 'evaluations';
@@ -626,8 +642,8 @@ async function callOpenRouterChat({ model, messages, temperature, max_tokens, us
 /* ----------------------------------------------------------------
    Prompt builders
    ---------------------------------------------------------------- */
-function buildPrimarySystemPrompt(rubric) {
-  return `You are a meticulous MAIBA conversation quality evaluator. Apply the following rubric exactly when evaluating the conversation provided in the user message.
+function buildPrimarySystemPrompt(rubric, adminContext) {
+  let prompt = `You are a meticulous MAIBA conversation quality evaluator. Apply the following rubric exactly when evaluating the conversation provided in the user message.
 
 ## Rubric
 ${rubric}
@@ -639,20 +655,14 @@ Evaluation rules:
 - Address all metrics defined in the rubric in your Q2 and Q4 analysis (when appropriate).
 - Apply the conservative tie-break rule.
 - Ensure Q5 mirrors every failed dimension mentioned in Q2 and Q4.
-- If the conversation has one turn, Q3/Q4 may match Q1/Q2.
+- If the conversation has one turn, Q3/Q4 may match Q1/Q2.`;
 
-You must respond with a single JSON object and no other text. Do not use markdown code fences. Use this exact schema:
+  if (adminContext && adminContext.trim()) {
+    prompt += `\n\n## Admin Directives\n${adminContext.trim()}`;
+  }
 
-{
-  "q1": "Very Good|Good|Just Okay|Bad|Very Bad",
-  "q2": "string (bullet points: dimension, success/failure/mixed, impact, short evidence quote)",
-  "q3": "Very Good|Good|Just Okay|Bad|Very Bad",
-  "q4": "string (bullet points)",
-  "q5": "Comma-separated list from: Understands User Intent, Accuracy, Personalization, Actionability, Clarity, Style/Tone, Safety. If none: None",
-  "q6": "string (one bullet per Q5 dimension, with explanation, evidence quote, and recommendation. If Q5 is None: N/A)",
-  "q7": "Yes - the AI appears to have met all of the user's goals|Yes - the AI appears to have met some (but not all) of the user's goals|No - the AI did not seem to have met any of the user's goals|Not sure - I could not infer whether the AI did or did-not meet any of the user's goals.",
-  "q8": "A single conversation|Multiple conversations|I'm not sure"
-}`;
+  prompt += `\n\nYou must respond with a single JSON object and no other text. Do not use markdown code fences. Use this exact schema:\n\n{\n  "q1": "Very Good|Good|Just Okay|Bad|Very Bad",\n  "q2": "string (bullet points: dimension, success/failure/mixed, impact, short evidence quote)",\n  "q3": "Very Good|Good|Just Okay|Bad|Very Bad",\n  "q4": "string (bullet points)",\n  "q5": "Comma-separated list from: Understands User Intent, Accuracy, Personalization, Actionability, Clarity, Style/Tone, Safety. If none: None",\n  "q6": "string (one bullet per Q5 dimension, with explanation, evidence quote, and recommendation. If Q5 is None: N/A)",\n  "q7": "Yes - the AI appears to have met all of the user's goals|Yes - the AI appears to have met some (but not all) of the user's goals|No - the AI did not seem to have met any of the user's goals|Not sure - I could not infer whether the AI did or did-not meet any of the user's goals.",\n  "q8": "A single conversation|Multiple conversations|I'm not sure"\n}`;
+  return prompt;
 }
 
 function buildPrimaryUserPrompt(conversation) {
@@ -662,16 +672,16 @@ ${conversation}
 Respond with ONLY the JSON object described in your system instructions. Do not add commentary before or after the JSON.`;
 }
 
-function buildReviewSystemPrompt(rubric) {
-  return `You are a rigorous MAIBA evaluation reviewer. Review the existing Q1–Q8 evaluation against the following rubric and the original conversation provided in the user message.
+function buildReviewSystemPrompt(rubric, adminContext) {
+  let prompt = `You are a rigorous MAIBA evaluation reviewer. Review the existing Q1–Q8 evaluation against the following rubric and the original conversation provided in the user message.\n\n## Rubric\n${rubric}`;
 
-## Rubric
-${rubric}
+  if (adminContext && adminContext.trim()) {
+    prompt += `\n\n## Admin Directives\n${adminContext.trim()}`;
+  }
 
-Your response must be a single JSON object with exactly two fields:
-
-1. "comparison" — A brief (2-4 sentences) natural-language comparison. Explain what changed and why. Be concise.
-2. "corrected_q1_to_q8" — The complete corrected Q1–Q8 evaluation in the EXACT SAME format as the original. If no changes are needed, return the original text unchanged.
+  prompt += `\n\nYour response must be a single JSON object with exactly two fields:\n\n1. "comparison" — A brief (2-4 sentences) natural-language comparison. Explain what changed and why. Be concise.\n2. "corrected_q1_to_q8" — The complete corrected Q1–Q8 evaluation in the EXACT SAME format as the original. If no changes are needed, return the original text unchanged.`;
+  return prompt;
+}
 
 The Q1–Q8 format must use these exact question labels:
 
@@ -1000,6 +1010,22 @@ $('#rubricFile').addEventListener('change', async (e) => {
   updatePills();
 });
 
+/* ----------------------------------------------------------------
+   Admin Context actions
+   ---------------------------------------------------------------- */
+$('#btnSaveAdminContext').addEventListener('click', () => {
+  const v = $('#adminContextInput').value;
+  lsSet(LS_KEY_ADMIN_CONTEXT, v);
+  $('#adminContextMeta').textContent = `Saved. ${v.length} chars / ~${Math.ceil(v.length/4)} tokens.`;
+  $('#adminContextPreview').textContent = v || '(empty)';
+});
+$('#btnClearAdminContext').addEventListener('click', () => {
+  $('#adminContextInput').value = '';
+  lsDel(LS_KEY_ADMIN_CONTEXT);
+  $('#adminContextMeta').textContent = 'Cleared.';
+  $('#adminContextPreview').textContent = '(empty)';
+});
+
 $('#btnSaveSettings').addEventListener('click', () => {
   lsSet(LS_KEY_MAX_TOKENS, String(parseInt($('#maxTokens').value,10) || DEFAULT_MAX_TOKENS));
   lsSet(LS_KEY_JSON_MODE, String($('#internalJsonMode').checked));
@@ -1074,7 +1100,8 @@ $('#btnEvaluate').addEventListener('click', async () => {
   $('#evaluationOutput').textContent = 'Evaluating…';
   $('#evaluationOutput').classList.remove('empty');
 
-  const system = buildPrimarySystemPrompt(rubric);
+  const adminContext = lsGet(LS_KEY_ADMIN_CONTEXT) || '';
+  const system = buildPrimarySystemPrompt(rubric, adminContext);
   const user = buildPrimaryUserPrompt(conversation);
 
   // Debug previews
@@ -1263,7 +1290,8 @@ $('#btnVerify').addEventListener('click', async () => {
   if (!key) { showError('evaluationMeta', 'Missing API key.'); $('#btnVerify').disabled = false; return; }
   if (!model) { showError('evaluationMeta', 'Missing review model. Select one in Admin.'); $('#btnVerify').disabled = false; return; }
 
-  const system = buildReviewSystemPrompt(rubric);
+  const adminContext = lsGet(LS_KEY_ADMIN_CONTEXT) || '';
+  const system = buildReviewSystemPrompt(rubric, adminContext);
   const user = buildReviewUserPrompt(currentRecord.conversationText, currentRecord.renderedQ1ToQ8Output);
 
   $('#debugReviewSystem').textContent = system;
@@ -1616,6 +1644,11 @@ async function init() {
   const savedTheme = lsGet(LS_KEY_THEME) || 'dark';
   $('#themeToggle').checked = savedTheme === 'light';
   applyTheme(savedTheme);
+
+  // Load admin context
+  const savedAdminContext = lsGet(LS_KEY_ADMIN_CONTEXT) || '';
+  $('#adminContextInput').value = savedAdminContext;
+  $('#adminContextPreview').textContent = savedAdminContext || '(empty)';
 
   // Load rubric
   const savedRubric = lsGet(LS_KEY_RUBRIC) || '';
