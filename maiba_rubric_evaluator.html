@@ -376,9 +376,9 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.8
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.13.3
   </footer>
 </div>
 
@@ -626,8 +626,20 @@ async function callOpenRouterChat({ model, messages, temperature, max_tokens, us
 /* ----------------------------------------------------------------
    Prompt builders
    ---------------------------------------------------------------- */
-function buildPrimarySystemPrompt() {
-  return `You are a meticulous MAIBA conversation quality evaluator. Apply the provided rubric exactly. Do not invent facts. Evaluate only the provided conversation. Use direct quotes from the assistant response when supporting Q2, Q4, and Q6. Address all metrics defined in the rubric in your Q2 and Q4 analysis (when appropriate). Apply the conservative tie-break rule. Ensure Q5 mirrors every failed dimension mentioned in Q2 and Q4. If the conversation has one turn, Q3/Q4 may match Q1/Q2.
+function buildPrimarySystemPrompt(rubric) {
+  return `You are a meticulous MAIBA conversation quality evaluator. Apply the following rubric exactly when evaluating the conversation provided in the user message.
+
+## Rubric
+${rubric}
+
+Evaluation rules:
+- Do not invent facts.
+- Evaluate only the provided conversation.
+- Use direct quotes from the assistant response when supporting Q2, Q4, and Q6.
+- Address all metrics defined in the rubric in your Q2 and Q4 analysis (when appropriate).
+- Apply the conservative tie-break rule.
+- Ensure Q5 mirrors every failed dimension mentioned in Q2 and Q4.
+- If the conversation has one turn, Q3/Q4 may match Q1/Q2.
 
 You must respond with a single JSON object and no other text. Do not use markdown code fences. Use this exact schema:
 
@@ -643,12 +655,18 @@ You must respond with a single JSON object and no other text. Do not use markdow
 }`;
 }
 
-function buildPrimaryUserPrompt(rubric, conversation) {
-  return `## Rubric\n${rubric}\n\n---\n\n## Conversation to Evaluate\n${conversation}\n\n---\n\n## Instructions\nRespond with ONLY the JSON object described in your system instructions. Do not add commentary before or after the JSON.`;
+function buildPrimaryUserPrompt(conversation) {
+  return `## Conversation to Evaluate
+${conversation}
+
+Respond with ONLY the JSON object described in your system instructions. Do not add commentary before or after the JSON.`;
 }
 
-function buildReviewSystemPrompt() {
-  return `You are a rigorous MAIBA evaluation reviewer. You review an existing Q1–Q8 evaluation against the rubric and the original conversation.
+function buildReviewSystemPrompt(rubric) {
+  return `You are a rigorous MAIBA evaluation reviewer. Review the existing Q1–Q8 evaluation against the following rubric and the original conversation provided in the user message.
+
+## Rubric
+${rubric}
 
 Your response must be a single JSON object with exactly two fields:
 
@@ -696,8 +714,19 @@ Checklist:
 CRITICAL: Output ONLY the JSON object. No markdown fences. No text before or after.`;
 }
 
-function buildReviewUserPrompt(rubric, conversation, currentOutput) {
-  return `## Rubric\n${rubric}\n\n---\n\n## Original Conversation\n${conversation}\n\n---\n\n## Current Q1–Q8 Evaluation\n${currentOutput}\n\n---\n\n## Instructions\nReview the evaluation. Output ONLY the JSON object described in your system instructions. Provide a brief comparison and the full corrected Q1–Q8 in the exact same format.`;
+function buildReviewUserPrompt(conversation, currentOutput) {
+  return `## Original Conversation
+${conversation}
+
+---
+
+## Current Q1–Q8 Evaluation
+${currentOutput}
+
+---
+
+## Instructions
+Review the evaluation. Output ONLY the JSON object described in your system instructions. Provide a brief comparison and the full corrected Q1–Q8 in the exact same format.`;
 }
 
 /* ----------------------------------------------------------------
@@ -1045,8 +1074,8 @@ $('#btnEvaluate').addEventListener('click', async () => {
   $('#evaluationOutput').textContent = 'Evaluating…';
   $('#evaluationOutput').classList.remove('empty');
 
-  const system = buildPrimarySystemPrompt();
-  const user = buildPrimaryUserPrompt(rubric, conversation);
+  const system = buildPrimarySystemPrompt(rubric);
+  const user = buildPrimaryUserPrompt(conversation);
 
   // Debug previews
   $('#debugPrimarySystem').textContent = system;
@@ -1234,8 +1263,8 @@ $('#btnVerify').addEventListener('click', async () => {
   if (!key) { showError('evaluationMeta', 'Missing API key.'); $('#btnVerify').disabled = false; return; }
   if (!model) { showError('evaluationMeta', 'Missing review model. Select one in Admin.'); $('#btnVerify').disabled = false; return; }
 
-  const system = buildReviewSystemPrompt();
-  const user = buildReviewUserPrompt(rubric, currentRecord.conversationText, currentRecord.renderedQ1ToQ8Output);
+  const system = buildReviewSystemPrompt(rubric);
+  const user = buildReviewUserPrompt(currentRecord.conversationText, currentRecord.renderedQ1ToQ8Output);
 
   $('#debugReviewSystem').textContent = system;
   $('#debugReviewUser').textContent = user;
