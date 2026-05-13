@@ -256,6 +256,7 @@
         <section id="panel-import" class="panel active" role="tabpanel">
           <div class="card">
             <h3>Import Data</h3>
+            <p class="muted" style="font-size:0.82rem; margin-bottom:0.5rem;">Imported tables live in memory for this session. Reloading the page will clear them unless OPFS persistence is active.</p>
             <div class="drop-zone" id="drop-zone" role="region" aria-label="Drop zone">Drag &amp; drop files here (CSV, JSON, NDJSON, Parquet)</div>
             <div class="grid-2 mt">
               <div class="card" style="margin-bottom:0;">
@@ -571,9 +572,9 @@
       </div>
     </main>
   </div>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.4" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
-    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.05.13.4
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.5" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
+    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.05.13.5
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1459,14 +1460,18 @@
       if (!sel.value && models.length) sel.selectedIndex = 0;
     }
     function renderAI() {
-      const enabled = state.settings.aiEnabled && state.settings.aiApiKey;
+      let latestSettings = { ...defaultSettings };
+      try { const raw = localStorage.getItem('qd2_settings'); if (raw) Object.assign(latestSettings, JSON.parse(raw)); } catch {}
+      const enabled = latestSettings.aiEnabled && latestSettings.aiApiKey;
       const msg = document.getElementById('ai-config-msg');
       const btn = document.getElementById('btn-ai-run');
       if (!enabled) { msg.classList.remove('hidden'); btn.disabled = true; }
       else { msg.classList.add('hidden'); btn.disabled = false; }
     }
     async function runAIAction() {
-      if (!state.settings.aiEnabled || !state.settings.aiApiKey) return;
+      let latestSettings = { ...defaultSettings };
+      try { const raw = localStorage.getItem('qd2_settings'); if (raw) Object.assign(latestSettings, JSON.parse(raw)); } catch {}
+      if (!latestSettings.aiEnabled || !latestSettings.aiApiKey) return;
       const action = document.getElementById('ai-action').value;
       const chat = document.getElementById('ai-chat');
       const prompt = buildAIPrompt(action);
@@ -1477,11 +1482,11 @@
       try {
         const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.settings.aiApiKey, 'HTTP-Referer': location.href },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + latestSettings.aiApiKey, 'HTTP-Referer': location.href },
           body: JSON.stringify({
-            model: state.settings.aiModel || 'openai/gpt-4o-mini',
+            model: latestSettings.aiModel || 'openai/gpt-4o-mini',
             messages: [
-              { role: 'system', content: state.settings.aiSystemPrompt || 'You are a helpful data analyst.' },
+              { role: 'system', content: latestSettings.aiSystemPrompt || 'You are a helpful data analyst.' },
               { role: 'user', content: prompt }
             ],
             temperature: 0.3, max_tokens: 1500
@@ -1609,6 +1614,8 @@
       st.className = 'badge badge-' + (state.status.dbState === 'ready' ? 'ready' : state.status.dbState === 'failed' ? 'failed' : 'loading');
       document.getElementById('table-count').textContent = 'Tables: ' + state.tables.length;
       document.getElementById('query-runtime').textContent = state.status.lastQueryRuntime ? 'Last query: ' + state.status.lastQueryRuntime.toFixed(1) + 'ms' : '';
+      const persistMode = state.capabilities.opfs ? 'OPFS' : 'Memory';
+      document.getElementById('persist-mode').textContent = persistMode;
     }
     function render() { renderStatus(); renderTables(); renderSavedQueries(); renderChartControls(); renderMapControls(); renderAI(); }
     function filterSidebar(term) {
