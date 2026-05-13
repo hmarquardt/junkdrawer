@@ -597,6 +597,7 @@
       db: null, conn: null, tables: [], savedQueries: [], queryHistory: [],
       importQueue: [], currentResults: null, currentTab: 'import',
       selectedTable: null, profileData: null, reportSections: [],
+      aiHistory: [],
       status: { dbState: 'loading', dbError: null, lastQueryRuntime: null, lastError: null, dbVersion: null, bundleName: null },
       capabilities: {}, initTime: null, settings: { ...defaultSettings },
     };
@@ -1504,6 +1505,24 @@
       }
       else { msg.classList.add('hidden'); btn.disabled = false; }
     }
+    function formatAIOutput(raw) {
+      let t = escapeHTML(raw);
+      // Code blocks
+      t = t.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => '<pre style="background:var(--code-bg);border:1px solid var(--border);border-radius:0.3rem;padding:0.5rem;overflow:auto;font-size:0.82rem;margin:0.5rem 0;"><code>' + code + '</code></pre>');
+      // Inline code
+      t = t.replace(/`([^`]+)`/g, '<code style="background:var(--code-bg);padding:0.1rem 0.3rem;border-radius:0.2rem;font-size:0.82rem;">$1</code>');
+      // Headings
+      t = t.replace(/^###\s+(.*$)/gim, '<h4 style="margin:0.75rem 0 0.25rem;color:var(--accent);font-size:0.95rem;">$1</h4>');
+      t = t.replace(/^##\s+(.*$)/gim, '<h3 style="margin:0.75rem 0 0.25rem;color:var(--accent);font-size:1.05rem;">$1</h3>');
+      t = t.replace(/^#\s+(.*$)/gim, '<h2 style="margin:1rem 0 0.5rem;color:var(--accent);font-size:1.15rem;">$1</h2>');
+      // Bold
+      t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Italic
+      t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      // Line breaks
+      t = t.replace(/\n/g, '<br>');
+      return t;
+    }
     async function runAIAction() {
       const latestSettings = getLatestSettings(true);
       if (!latestSettings.aiEnabled || !String(latestSettings.aiApiKey || '').trim()) {
@@ -1513,10 +1532,12 @@
       const action = document.getElementById('ai-action').value;
       const chat = document.getElementById('ai-chat');
       const prompt = buildAIPrompt(action);
-      const userMsg = el('div', { className: 'ai-msg user', html: '<strong>' + escapeHTML(action) + '</strong>' });
+      const userMsg = el('div', { className: 'ai-msg user', html: '<strong>' + escapeHTML(action) + '</strong><div class="muted" style="font-size:0.75rem;margin-top:0.25rem;">' + escapeHTML(prompt.slice(0, 300)) + (prompt.length > 300 ? '...' : '') + '</div>' });
       chat.appendChild(userMsg);
-      const assistantMsg = el('div', { className: 'ai-msg assistant', text: 'Thinking...' });
+      const assistantMsg = el('div', { className: 'ai-msg assistant' });
+      assistantMsg.innerHTML = '<em class="muted">Thinking...</em>';
       chat.appendChild(assistantMsg);
+      let responseText = '';
       try {
         const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -1532,10 +1553,12 @@
         });
         const data = await resp.json();
         if (data.error) throw new Error(data.error.message || 'API error');
-        const text = data.choices?.[0]?.message?.content || 'No response';
-        assistantMsg.textContent = text;
-      } catch (err) { assistantMsg.innerHTML = '<span class="error">Error: ' + escapeHTML(err.message) + '</span>'; }
+        responseText = data.choices?.[0]?.message?.content || 'No response';
+        assistantMsg.innerHTML = formatAIOutput(responseText);
+      } catch (err) { assistantMsg.innerHTML = '<span class="error">Error: ' + escapeHTML(err.message) + '</span>'; responseText = 'Error: ' + err.message; }
       chat.scrollTop = chat.scrollHeight;
+      state.aiHistory.push({ action, prompt: prompt.slice(0, 500), response: responseText.slice(0, 2000), timestamp: nowISO() });
+      if (state.aiHistory.length > 50) state.aiHistory.shift();
     }
     function buildAIPrompt(action) {
       let prompt = '';
@@ -1607,8 +1630,19 @@
         ['Theme', state.settings.theme], ['Tables', state.tables.length], ['Saved Queries', state.savedQueries.length],
         ['Query History', state.queryHistory.length], ['Last SQL', state.currentResults ? state.currentResults.sql.slice(0, 200) : 'N/A'],
         ['Last Runtime (ms)', state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) : 'N/A'], ['Last Error', state.status.lastError || 'None'],
+        ['AI Interactions', state.aiHistory.length],
       ];
       rows.forEach(([k, v]) => { const li = el('li'); li.appendChild(el('span', { text: k })); li.appendChild(el('span', { text: String(v) })); list.appendChild(li); });
+      if (state.aiHistory.length) {
+        const aiDiv = el('div', { className: 'mt', style: { fontSize: '0.82rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' } });
+        aiDiv.innerHTML = '<strong class="muted">AI History</strong>';
+        state.aiHistory.slice(-10).forEach(h => {
+          const entry = el('div', { style: { marginTop: '0.4rem', padding: '0.4rem', background: 'var(--panel-2)', borderRadius: '0.3rem', fontSize: '0.78rem' } });
+          entry.innerHTML = '<div class="muted">' + escapeHTML(h.timestamp) + ' &middot; ' + escapeHTML(h.action) + '</div><pre style="margin:0.25rem 0;white-space:pre-wrap;word-break:break-word;">' + escapeHTML(h.prompt) + '</pre><div style="color:var(--muted);margin-top:0.25rem;">Response: ' + escapeHTML(h.response.slice(0, 300)) + (h.response.length > 300 ? '...' : '') + '</div>';
+          aiDiv.appendChild(entry);
+        });
+        list.appendChild(aiDiv);
+      }
     }
     function buildDebugText() {
       return [
@@ -1621,7 +1655,8 @@
         'Theme: ' + state.settings.theme, 'Tables: ' + state.tables.length, 'Saved Queries: ' + state.savedQueries.length,
         'History: ' + state.queryHistory.length, 'Last SQL: ' + (state.currentResults ? state.currentResults.sql : 'N/A'),
         'Last Runtime: ' + (state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) + 'ms' : 'N/A'), 'Last Error: ' + (state.status.lastError || 'None'),
-      ].join('\n');
+        'AI Interactions: ' + state.aiHistory.length,
+      ].join('\n') + (state.aiHistory.length ? '\n\n--- AI History ---\n' + state.aiHistory.slice(-5).map(h => h.timestamp + ' | ' + h.action + ' | ' + h.response.slice(0, 200)).join('\n') : '');
     }
     function copyDebugReport() { navigator.clipboard.writeText(buildDebugText()).then(() => setStatus('Debug report copied', 'success')).catch(() => setStatus('Copy failed', 'error')); }
     async function runSelfTest() {
