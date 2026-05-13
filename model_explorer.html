@@ -594,6 +594,22 @@
       border: 1px solid var(--border-active);
     }
 
+    /* Personality badge */
+    .personality-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: rgba(234, 88, 12, 0.12);
+      color: var(--accent-secondary);
+      border: 1px solid rgba(234, 88, 12, 0.35);
+    }
+
     /* Model Cards */
     .model-grid {
       display: grid;
@@ -1047,6 +1063,14 @@
                 <label class="form-label" for="pg-mode">Mode</label>
                 <select id="pg-mode"></select>
               </div>
+              <div class="form-group">
+                <label class="form-label" for="pg-personality">Personality</label>
+                <select id="pg-personality"></select>
+                <div class="form-hint" id="pg-personality-hint">No personality modifier applied.</div>
+                <div class="form-group hidden" id="personality-custom-group" style="margin-top:0.5rem; margin-bottom:0">
+                  <textarea id="personality-custom-text" rows="2" placeholder="Enter your custom personality instruction..."></textarea>
+                </div>
+              </div>
             </div>
 
             <!-- Text Mode Inputs -->
@@ -1287,6 +1311,7 @@
                 <div class="card-title">Output</div>
                 <div class="flex gap-2 items-center">
                   <span class="mode-badge" id="output-mode-badge">text</span>
+                  <span class="personality-badge hidden" id="output-personality-badge"></span>
                   <span class="text-xs text-muted" id="output-meta"></span>
                 </div>
               </div>
@@ -1457,6 +1482,7 @@
                 <tr><th>Active Provider</th><td id="dbg-provider">-</td></tr>
                 <tr><th>Active Model</th><td id="dbg-model">-</td></tr>
                 <tr><th>Active Mode</th><td id="dbg-mode">-</td></tr>
+                <tr><th>Active Personality</th><td id="dbg-personality">-</td></tr>
                 <tr><th>API Key Present</th><td id="dbg-key">-</td></tr>
                 <tr><th>Last Request URL</th><td id="dbg-req-url">-</td></tr>
                 <tr><th>Last Response Status</th><td id="dbg-res-status">-</td></tr>
@@ -1477,9 +1503,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.12.14" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.12.14" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.12.14
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.05.13.1
     </footer>
   </div>
 
@@ -1497,6 +1523,8 @@
       activeProvider: 'openrouter',
       activeModel: '',
       activeMode: 'text',
+      selectedPersonality: 'default',
+      customPersonalityText: '',
       theme: 'light',
       maxTokens: 50000,
       providers: {
@@ -1528,6 +1556,98 @@
     let lastLatency = 0;
     let heartbeatTimer = null;
     let requestStartTime = 0;
+
+    // ==========================================
+    // PERSONALITIES
+    // ==========================================
+    const PERSONALITIES = {
+      default: {
+        label: "Default",
+        description: "No personality modifier applied.",
+        instruction: ""
+      },
+      snarky: {
+        label: "Snarky 😏",
+        description: "Witty, sarcastic, sharp, but still useful. Never cruel or abusive.",
+        instruction: "Respond with dry wit and light sarcasm while remaining accurate, useful, and not cruel."
+      },
+      shakespeare: {
+        label: "Shakespeare 🎭",
+        description: "Elizabethan-flavored English. Theatrical phrasing but understandable.",
+        instruction: "Respond in Elizabethan-flavored English with theatrical phrasing, yet remain clearly understandable and accurate."
+      },
+      pirate: {
+        label: "Pirate ☠️",
+        description: "Nautical pirate voice. Fun, informal, but still answers the question.",
+        instruction: "Respond in the voice of a nautical pirate. Be playful and informal, but still answer the question accurately and completely."
+      },
+      paranoidLawyer: {
+        label: "Paranoid Lawyer ⚖️",
+        description: "Cautious, risk-aware, caveat-heavy. Not a real lawyer.",
+        instruction: "Respond with extreme caution. Spot liability, ambiguity, and edge cases. Heavy on caveats and risk awareness. You are not a real lawyer; do not claim to provide legal advice."
+      },
+      brutalCto: {
+        label: "Brutally Honest CTO 🧱",
+        description: "Direct technical critique. Calls out bad architecture and wasted effort.",
+        instruction: "Respond as a brutally honest CTO. Directly critique technical approaches, call out complexity, bad architecture, wasted effort, and weak assumptions. Be constructively harsh."
+      },
+      zenPm: {
+        label: "Zen Product Manager 🪷",
+        description: "Calm, structured, prioritization-focused. Pushes toward MVP and tradeoffs.",
+        instruction: "Respond as a calm, structured product manager. Focus on prioritization, tradeoffs, user value, MVP, and scope control. Keep responses grounded and actionable."
+      },
+      madScientist: {
+        label: "Mad Scientist 🧪",
+        description: "Energetic, experimental, slightly chaotic. Great for ideation and weird prototypes.",
+        instruction: "Respond as an energetic, experimental mad scientist. Be enthusiastic, slightly chaotic, and great for ideation and weird prototypes. Still keep answers accurate and actionable."
+      },
+      startupBro: {
+        label: "Startup Bro 🚀",
+        description: "High-energy, buzzword-aware, growth-hacking vibe. Slightly ridiculous but practical.",
+        instruction: "Respond as an over-caffeinated startup bro. High energy, buzzword-aware, growth-hacking vibe. Slightly ridiculous but still practical and accurate."
+      },
+      gothicOracle: {
+        label: "Southern Gothic Oracle 🕯️",
+        description: "Dark, poetic, atmospheric. Vivid phrasing and ominous metaphors, but answers clearly.",
+        instruction: "Respond as a Southern Gothic oracle. Use dark, poetic, atmospheric phrasing and vivid, ominous metaphors. Still answer the question clearly and accurately."
+      },
+      fiveYearOld: {
+        label: "Explain Like I'm Five 🧸",
+        description: "Simple, friendly explanations using tiny words, analogies, and everyday examples.",
+        instruction: [
+          "Explain the answer as if speaking to a curious five-year-old.",
+          "Use simple words, short sentences, and familiar examples.",
+          "Avoid jargon unless you explain it immediately.",
+          "Use gentle analogies involving everyday things like toys, snacks, animals, weather, or playgrounds.",
+          "Do not talk down to the user.",
+          "Keep the answer accurate, just easier to understand."
+        ].join("\n")
+      },
+      custom: {
+        label: "Custom ✏️",
+        description: "Use your own custom behavior instruction.",
+        instruction: null
+      }
+    };
+
+    function buildPersonalityInstruction(personalityKey, customText) {
+      const personality = PERSONALITIES[personalityKey];
+      if (!personality) return "";
+      let instruction = "";
+      if (personalityKey === 'custom') {
+        instruction = (customText || "").trim();
+      } else {
+        instruction = personality.instruction || "";
+      }
+      if (!instruction) return "";
+      return [
+        "Personality mode is enabled.",
+        instruction,
+        "Preserve factual accuracy.",
+        "Preserve any required output format exactly.",
+        "Do not mention that a personality mode was applied unless asked."
+      ].join("\n");
+    }
 
     // ==========================================
     // UTILITIES
@@ -1758,10 +1878,15 @@
         },
         async runText(config, payload) {
           const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + (config.chatPath || '/chat/completions');
+          const personalityInstruction = buildPersonalityInstruction(payload.personality, payload.customPersonality);
+          const finalSystemPrompt = [
+            payload.system,
+            personalityInstruction
+          ].filter(Boolean).join("\n\n");
           const body = {
             model: payload.model,
             messages: [
-              ...(payload.system ? [{ role: 'system', content: payload.system }] : []),
+              ...(finalSystemPrompt ? [{ role: 'system', content: finalSystemPrompt }] : []),
               { role: 'user', content: payload.prompt }
             ],
             temperature: payload.temperature,
@@ -1773,6 +1898,11 @@
         },
         async runVision(config, payload) {
           const url = (config.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + (config.chatPath || '/chat/completions');
+          const personalityInstruction = buildPersonalityInstruction(payload.personality, payload.customPersonality);
+          const finalSystemPrompt = [
+            payload.system,
+            personalityInstruction
+          ].filter(Boolean).join("\n\n");
           const content = [
             { type: 'text', text: payload.prompt }
           ];
@@ -1782,7 +1912,7 @@
           const body = {
             model: payload.model,
             messages: [
-              ...(payload.system ? [{ role: 'system', content: payload.system }] : []),
+              ...(finalSystemPrompt ? [{ role: 'system', content: finalSystemPrompt }] : []),
               { role: 'user', content }
             ],
             max_tokens: payload.max_tokens || 1000
@@ -1872,6 +2002,30 @@
       sel.value = state.activeMode;
     }
 
+    function renderPersonalitySelect() {
+      const sel = $('#pg-personality');
+      const hint = $('#pg-personality-hint');
+      const customGroup = $('#personality-custom-group');
+      const customText = $('#personality-custom-text');
+      if (!sel) return;
+
+      sel.innerHTML = Object.entries(PERSONALITIES).map(([key, p]) => `<option value="${key}">${p.label}</option>`).join('');
+      const currentKey = state.selectedPersonality || 'default';
+      sel.value = currentKey;
+
+      const personality = PERSONALITIES[currentKey];
+      if (hint && personality) hint.textContent = personality.description;
+
+      if (customGroup) {
+        if (currentKey === 'custom') {
+          customGroup.classList.remove('hidden');
+          if (customText) customText.value = state.customPersonalityText || '';
+        } else {
+          customGroup.classList.add('hidden');
+        }
+      }
+    }
+
     function renderModelSelect() {
       const sel = $('#pg-model');
       const cfg = state.providers[state.activeProvider];
@@ -1931,6 +2085,18 @@
 
       badge.textContent = normalized.metadata.mode || state.activeMode;
       metaText.textContent = `${normalized.metadata.provider || state.activeProvider} · ${normalized.metadata.model || state.activeModel} · ${normalized.metadata.latencyMs || 0}ms`;
+
+      const personalityBadge = $('#output-personality-badge');
+      const personalityKey = normalized.metadata.personality || 'default';
+      if (personalityBadge) {
+        if (personalityKey !== 'default') {
+          const p = PERSONALITIES[personalityKey];
+          personalityBadge.textContent = p ? p.label : personalityKey;
+          personalityBadge.classList.remove('hidden');
+        } else {
+          personalityBadge.classList.add('hidden');
+        }
+      }
 
       area.classList.remove('empty');
       actions.classList.remove('hidden');
@@ -2046,10 +2212,13 @@
       }
 
       const u = normalized.metadata.usage;
+      const pKey = normalized.metadata.personality || 'default';
+      const pLabel = pKey !== 'default' ? (PERSONALITIES[pKey]?.label || pKey) : '-';
       metaTable.innerHTML = `
         <tr><th>Provider</th><td>${escapeHtml(normalized.metadata.provider || '')}</td></tr>
         <tr><th>Model</th><td>${escapeHtml(normalized.metadata.model || '')}</td></tr>
         <tr><th>Mode</th><td>${escapeHtml(normalized.metadata.mode || '')}</td></tr>
+        <tr><th>Personality</th><td>${escapeHtml(pLabel)}</td></tr>
         <tr><th>Latency</th><td>${normalized.metadata.latencyMs || 0}ms</td></tr>
         ${u ? `<tr><th>Tokens</th><td>${u.total_tokens || 0} total (${u.prompt_tokens || 0} prompt + ${u.completion_tokens || 0} completion${u.image_tokens ? ` · ${u.image_tokens.toLocaleString()} image` : ''})</td></tr>` : ''}
         ${u?.cost != null ? `<tr><th>Cost</th><td>$${Number(u.cost).toFixed(6)}</td></tr>` : ''}
@@ -2145,6 +2314,9 @@
       $('#dbg-provider').textContent = state.activeProvider;
       $('#dbg-model').textContent = state.activeModel || '-';
       $('#dbg-mode').textContent = state.activeMode;
+      const pKey = state.selectedPersonality || 'default';
+      const pLabel = pKey !== 'default' ? (PERSONALITIES[pKey]?.label || pKey) : 'Default';
+      $('#dbg-personality').textContent = pLabel;
       const cfg = state.providers[state.activeProvider];
       $('#dbg-key').textContent = cfg && cfg.apiKey ? maskSecret(cfg.apiKey) : 'No';
       $('#dbg-req-url').textContent = lastRequestInfo.url || '-';
@@ -2415,6 +2587,8 @@
 
       try {
         let payload = {};
+        const personality = state.selectedPersonality || 'default';
+        const customPersonality = state.customPersonalityText || '';
         if (mode === 'text') {
           payload = {
             model,
@@ -2423,7 +2597,9 @@
             temperature: parseFloat($('#text-temp').value),
             max_tokens: parseInt($('#text-maxtokens').value),
             top_p: parseFloat($('#text-topp').value),
-            stream: $('#text-stream').checked
+            stream: $('#text-stream').checked,
+            personality,
+            customPersonality
           };
         } else if (mode === 'image') {
           payload = {
@@ -2451,7 +2627,9 @@
             system: $('#vision-system').value,
             prompt: $('#vision-prompt').value,
             imageUrl,
-            max_tokens: 1000
+            max_tokens: 1000,
+            personality,
+            customPersonality
           };
         } else if (mode === 'embedding') {
           payload = {
@@ -2510,13 +2688,13 @@
           // Streaming mode: read SSE chunks live
           const { text, usage } = await readStream(res, provider, model, mode, lastLatency);
           lastResponseInfo.body = text; // Store final text as body for debug
-          normalized = normalizeOutput(mode, { choices: [{ message: { content: text } }], usage }, provider, model, lastLatency);
+          normalized = normalizeOutput(mode, { choices: [{ message: { content: text } }], usage }, provider, model, lastLatency, personality, customPersonality);
         } else {
           const resText = await res.text();
           lastResponseInfo.body = resText;
           let resData;
           try { resData = JSON.parse(resText); } catch { resData = resText; }
-          normalized = normalizeOutput(mode, resData, provider, model, lastLatency);
+          normalized = normalizeOutput(mode, resData, provider, model, lastLatency, personality, customPersonality);
         }
 
         renderOutput(normalized);
@@ -2588,12 +2766,14 @@
       return images;
     }
 
-    function normalizeOutput(mode, data, provider, model, latency) {
+    function normalizeOutput(mode, data, provider, model, latency, personality = 'default', customPersonality = '') {
       const usage = data.usage || null;
       const cost = data.usage?.cost ?? data.cost ?? null;
       const meta = {
         provider, model, mode, latencyMs: latency,
         createdAt: new Date().toISOString(),
+        personality,
+        customPersonality,
         usage: usage ? {
           prompt_tokens: usage.prompt_tokens,
           completion_tokens: usage.completion_tokens,
@@ -2637,6 +2817,8 @@
         provider: normalized.metadata.provider,
         model: normalized.metadata.model,
         mode: normalized.metadata.mode,
+        personality: normalized.metadata.personality || 'default',
+        customPersonality: normalized.metadata.customPersonality || '',
         promptSummary: payload.prompt || payload.system || payload.path || 'Raw request',
         outputSummary: normalized.text || normalized.type,
         latency: normalized.metadata.latencyMs,
@@ -2661,6 +2843,13 @@
       renderModelSelect();
       renderModeSelect();
       showModePanel(h.mode);
+
+      // Restore personality if present
+      if (h.personality) {
+        state.selectedPersonality = h.personality;
+        state.customPersonalityText = h.customPersonality || '';
+        renderPersonalitySelect();
+      }
 
       // Restore inputs from saved payload
       const p = h.payload || {};
@@ -2989,6 +3178,19 @@
         setActiveMode(e.target.value);
       });
 
+      // Personality select
+      $('#pg-personality').addEventListener('change', e => {
+        state.selectedPersonality = e.target.value;
+        renderPersonalitySelect();
+        saveState();
+      });
+
+      // Personality custom text
+      $('#personality-custom-text').addEventListener('input', e => {
+        state.customPersonalityText = e.target.value;
+        saveState();
+      });
+
       // Vision image preview
       $('#vision-image-file').addEventListener('change', async e => {
         const file = e.target.files[0];
@@ -3036,6 +3238,7 @@
       renderProviderSelects();
       renderModeSelect();
       renderModelSelect();
+      renderPersonalitySelect();
       showModePanel(state.activeMode);
       renderHistory();
       renderCapabilityFilters();
