@@ -319,6 +319,10 @@
             <input id="privacyMode" type="checkbox" />
             Privacy mode (do not auto-save to history)
           </label>
+          <label style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem;">
+            <input id="audioCue" type="checkbox" checked />
+            Play audio cue when evaluation completes
+          </label>
         </div>
       </div>
       <div class="toolbar mt-1">
@@ -372,8 +376,8 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.2" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
     &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator · version 2026.05.11.8
   </footer>
 </div>
@@ -394,6 +398,7 @@ const LS_KEY_MAX_TOKENS = 'maiba.settings.maxTokens';
 const LS_KEY_JSON_MODE = 'maiba.settings.internalJsonMode';
 const LS_KEY_PRIVACY = 'maiba.settings.privacyMode';
 const LS_KEY_THEME = 'maiba.settings.theme';
+const LS_KEY_AUDIO_CUE = 'maiba.settings.audioCue';
 
 const DB_NAME = 'maibaRubricEvaluatorDB';
 const STORE = 'evaluations';
@@ -421,6 +426,37 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 function lsGet(k) { try { return localStorage.getItem(k); } catch(e){ return null; } }
 function lsSet(k,v) { try { localStorage.setItem(k,v); } catch(e){} }
 function lsDel(k) { try { localStorage.removeItem(k); } catch(e){} }
+
+/* ----------------------------------------------------------------
+   Audio cue
+   ---------------------------------------------------------------- */
+function playAudioCue() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+
+    // Two soft chimes: C5 then E5
+    const notes = [523.25, 659.25];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + i * 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + i * 0.18 + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.18 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.18);
+      osc.stop(now + i * 0.18 + 0.35);
+    });
+
+    // Close context after sound finishes
+    setTimeout(() => { if (ctx.state !== 'closed') ctx.close(); }, 1000);
+  } catch (e) { /* ignore audio errors */ }
+}
 
 /* ----------------------------------------------------------------
    IndexedDB
@@ -939,6 +975,7 @@ $('#btnSaveSettings').addEventListener('click', () => {
   lsSet(LS_KEY_MAX_TOKENS, String(parseInt($('#maxTokens').value,10) || DEFAULT_MAX_TOKENS));
   lsSet(LS_KEY_JSON_MODE, String($('#internalJsonMode').checked));
   lsSet(LS_KEY_PRIVACY, String($('#privacyMode').checked));
+  lsSet(LS_KEY_AUDIO_CUE, String($('#audioCue').checked));
   alert('Settings saved.');
 });
 
@@ -1087,6 +1124,7 @@ $('#btnEvaluate').addEventListener('click', async () => {
     const ct = result.usage?.completion_tokens ?? '?';
     const tt = result.usage?.total_tokens ?? '?';
     $('#evaluationMeta').textContent = `Tokens: ${pt} prompt + ${ct} completion = ${tt} total`;
+    if ($('#audioCue').checked) playAudioCue();
     $('#debugLastError').textContent = '';
 
     // Auto-save unless privacy mode
@@ -1260,6 +1298,8 @@ $('#btnVerify').addEventListener('click', async () => {
       const existing = $('#evaluationMeta').textContent || '';
       $('#evaluationMeta').textContent = existing + (existing ? ' | ' : '') + `Review tokens: ${vpt}+${vct}=${vtt}`;
     }
+
+    if ($('#audioCue').checked) playAudioCue();
 
     // Update record in DB if exists
     if (!$('#privacyMode').checked) await dbSave(currentRecord);
@@ -1543,6 +1583,7 @@ async function init() {
   $('#maxTokens').value = lsGet(LS_KEY_MAX_TOKENS) || DEFAULT_MAX_TOKENS;
   $('#internalJsonMode').checked = lsGet(LS_KEY_JSON_MODE) !== 'false';
   $('#privacyMode').checked = lsGet(LS_KEY_PRIVACY) === 'true';
+  $('#audioCue').checked = lsGet(LS_KEY_AUDIO_CUE) !== 'false';
   const savedTheme = lsGet(LS_KEY_THEME) || 'dark';
   $('#themeToggle').checked = savedTheme === 'light';
   applyTheme(savedTheme);
