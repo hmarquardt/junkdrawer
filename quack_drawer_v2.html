@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quack Drawer v2</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦆</text></svg>" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #101014;
+      --panel: #181820;
+      --panel-2: #20202a;
+      --text: #f5f5f7;
+      --muted: #a8a8b3;
+      --border: #343440;
+      --accent: #f5b942;
+      --accent-2: #ffe08a;
+      --danger: #ff5f6d;
+      --success: #60d394;
+      --warning: #ffd166;
+      --code-bg: #0c0c10;
+      --table-stripe: rgba(255,255,255,0.035);
+      --focus-ring: #ffd166;
+      --button-bg: #20202a;
+      --button-text: #f5f5f7;
+      --input-bg: #0c0c10;
+      --input-text: #f5f5f7;
+      --font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    [data-theme="light"] {
+      --bg: #f5f5f7;
+      --panel: #ffffff;
+      --panel-2: #eaeaec;
+      --text: #1a1a20;
+      --muted: #666670;
+      --border: #d0d0d8;
+      --accent: #c48a0f;
+      --accent-2: #8a6308;
+      --danger: #c4182a;
+      --success: #1a8c4a;
+      --warning: #c48a0f;
+      --code-bg: #eaeaec;
+      --table-stripe: rgba(0,0,0,0.03);
+      --focus-ring: #c48a0f;
+      --button-bg: #eaeaec;
+      --button-text: #1a1a20;
+      --input-bg: #ffffff;
+      --input-text: #1a1a20;
+    }
+    [data-theme="high-contrast-dark"] {
+      --bg: #000000;
+      --panel: #000000;
+      --panel-2: #111111;
+      --text: #ffffff;
+      --muted: #cccccc;
+      --border: #ffffff;
+      --accent: #ffff00;
+      --accent-2: #ffff00;
+      --danger: #ff0000;
+      --success: #00ff00;
+      --warning: #ffff00;
+      --code-bg: #000000;
+      --table-stripe: rgba(255,255,255,0.1);
+      --focus-ring: #00ffff;
+      --button-bg: #000000;
+      --button-text: #ffffff;
+      --input-bg: #000000;
+      --input-text: #ffffff;
+    }
+    [data-theme="high-contrast-light"] {
+      --bg: #ffffff;
+      --panel: #ffffff;
+      --panel-2: #eeeeee;
+      --text: #000000;
+      --muted: #333333;
+      --border: #000000;
+      --accent: #0000ff;
+      --accent-2: #0000ff;
+      --danger: #cc0000;
+      --success: #006600;
+      --warning: #cc6600;
+      --code-bg: #ffffff;
+      --table-stripe: rgba(0,0,0,0.08);
+      --focus-ring: #0000ff;
+      --button-bg: #ffffff;
+      --button-text: #000000;
+      --input-bg: #ffffff;
+      --input-text: #000000;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; font-family: var(--font); background: var(--bg); color: var(--text); }
+    body { display: flex; flex-direction: column; overflow: hidden; }
+    #status-bar {
+      display: flex; gap: 0.75rem; align-items: center;
+      padding: 0.5rem 1rem; background: var(--panel); border-bottom: 1px solid var(--border);
+      font-size: 0.85rem; flex-wrap: wrap;
+    }
+    .badge {
+      padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-weight: 700; font-size: 0.7rem;
+      text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid transparent;
+    }
+    .badge-ready { background: rgba(96,211,148,0.12); color: var(--success); border-color: var(--success); }
+    .badge-loading { background: rgba(255,209,102,0.12); color: var(--warning); border-color: var(--warning); }
+    .badge-failed { background: rgba(255,95,109,0.12); color: var(--danger); border-color: var(--danger); }
+    #app { display: flex; flex: 1; overflow: hidden; }
+    #sidebar { width: 260px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+    #sidebar h2 { margin: 0; padding: 0.6rem 1rem; font-size: 0.8rem; color: var(--muted); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.08em; }
+    .sidebar-section { flex: 1; overflow-y: auto; min-height: 80px; }
+    .sidebar-section + .sidebar-section { border-top: 1px solid var(--border); }
+    .sidebar-list { list-style: none; margin: 0; padding: 0; }
+    .sidebar-list li { padding: 0.45rem 1rem; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 0.82rem; display: flex; justify-content: space-between; align-items: center; }
+    .sidebar-list li:hover { background: rgba(245,185,66,0.06); }
+    .sidebar-list li.active { background: rgba(245,185,66,0.14); color: var(--accent); }
+    .sidebar-list li .pin { font-size: 0.7rem; opacity: 0.6; }
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #tabs { display: flex; gap: 0.15rem; padding: 0.4rem 0.8rem; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; }
+    .tab-btn {
+      background: transparent; border: none; color: var(--muted); padding: 0.45rem 0.65rem;
+      cursor: pointer; border-radius: 0.25rem; font-size: 0.82rem; white-space: nowrap;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { background: rgba(245,185,66,0.12); color: var(--accent); font-weight: 700; }
+    #tab-content { flex: 1; overflow-y: auto; padding: 0.8rem; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; }
+    .card h3 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--accent); }
+    .muted { color: var(--muted); }
+    .error { color: var(--danger); }
+    .success { color: var(--success); }
+    .warning { color: var(--warning); }
+    .drop-zone {
+      border: 2px dashed var(--border); border-radius: 0.5rem; padding: 2.5rem 1rem;
+      text-align: center; color: var(--muted); transition: border-color 0.2s, background 0.2s; cursor: pointer;
+    }
+    .drop-zone.drag-over { border-color: var(--accent); background: rgba(245,185,66,0.04); color: var(--text); }
+    button, select, input[type="text"], input[type="number"], textarea {
+      background: var(--button-bg); border: 1px solid var(--border); color: var(--button-text);
+      padding: 0.45rem 0.75rem; border-radius: 0.3rem; cursor: pointer; font-size: 0.85rem; font-family: var(--font);
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { background: var(--accent); color: #0b0b0f; border-color: var(--accent); font-weight: 700; }
+    button.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: #0b0b0f; }
+    button.small { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input[type="text"], input[type="number"], textarea, select {
+      background: var(--input-bg); color: var(--input-text); font-family: var(--font-mono); width: 100%;
+    }
+    textarea { resize: vertical; min-height: 100px; }
+    select { appearance: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td { padding: 0.35rem 0.55rem; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: var(--panel-2); position: sticky; top: 0; }
+    tr:nth-child(even) { background: var(--table-stripe); }
+    .results-wrap { overflow-x: auto; max-height: 520px; border: 1px solid var(--border); border-radius: 0.3rem; margin-top: 0.5rem; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+    .debug-list { list-style: none; padding: 0; margin: 0; }
+    .debug-list li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; font-size: 0.82rem; }
+    .debug-list li span:first-child { color: var(--muted); }
+    .query-row {
+      display: flex; justify-content: space-between; align-items: flex-start; padding: 0.5rem 0; border-bottom: 1px solid var(--border); gap: 1rem;
+    }
+    .query-row pre { margin: 0.25rem 0 0; font-size: 0.78rem; font-family: var(--font-mono); color: var(--muted); max-height: 5rem; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+    .query-row .actions { display: flex; gap: 0.4rem; flex-shrink: 0; flex-wrap: wrap; }
+    .status-msg { margin-top: 0.4rem; font-size: 0.85rem; }
+    .import-item { padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.3rem; margin-bottom: 0.5rem; font-size: 0.82rem; }
+    .import-item .title { font-weight: 600; }
+    .import-item .meta { color: var(--muted); font-size: 0.75rem; }
+    .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .profile-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 0.4rem; padding: 0.75rem; }
+    .profile-card h4 { margin: 0 0 0.4rem; font-size: 0.88rem; color: var(--accent); }
+    .profile-card .stat { font-size: 0.78rem; color: var(--muted); margin: 0.15rem 0; }
+    #chart-container, #map-container { position: relative; height: 380px; margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 0.3rem; overflow: hidden; }
+    .report-preview { background: var(--code-bg); border: 1px solid var(--border); border-radius: 0.3rem; padding: 1rem; font-family: var(--font-mono); font-size: 0.82rem; white-space: pre-wrap; max-height: 400px; overflow: auto; }
+    .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .setting-row label { color: var(--muted); }
+    .ai-msg { padding: 0.75rem; border-radius: 0.3rem; margin-bottom: 0.5rem; font-size: 0.85rem; }
+    .ai-msg.user { background: var(--panel-2); border-left: 3px solid var(--accent); }
+    .ai-msg.assistant { background: var(--panel); border-left: 3px solid var(--success); }
+    .ai-warning { background: rgba(255,95,109,0.08); border: 1px solid var(--danger); color: var(--danger); padding: 0.75rem; border-radius: 0.3rem; font-size: 0.82rem; margin-bottom: 1rem; }
+    .placeholder-inputs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .placeholder-inputs label { font-size: 0.78rem; color: var(--muted); }
+    .placeholder-inputs input { width: 140px; }
+    [data-theme="high-contrast-dark"] .tab-btn.active,
+    [data-theme="high-contrast-light"] .tab-btn.active { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+    [data-theme="high-contrast-dark"] button:focus,
+    [data-theme="high-contrast-light"] button:focus,
+    [data-theme="high-contrast-dark"] select:focus,
+    [data-theme="high-contrast-light"] select:focus,
+    [data-theme="high-contrast-dark"] input:focus,
+    [data-theme="high-contrast-light"] input:focus,
+    [data-theme="high-contrast-dark"] textarea:focus,
+    [data-theme="high-contrast-light"] textarea:focus { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+    .hidden { display: none !important; }
+    .flex { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .mt { margin-top: 0.5rem; }
+    .mb { margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div id="status-bar" role="status" aria-live="polite">
+    <strong>Quack Drawer v2</strong>
+    <span class="badge badge-loading" id="db-status">Loading</span>
+    <span id="table-count">Tables: 0</span>
+    <span id="persist-mode" class="muted">Memory</span>
+    <span id="query-runtime" class="muted"></span>
+    <span id="status-msg" class="muted"></span>
+    <div style="margin-left:auto; display:flex; gap:0.5rem; align-items:center;">
+      <input type="text" id="global-search" placeholder="Search tables / queries..." style="width:180px; padding:0.25rem 0.5rem; font-size:0.8rem;" aria-label="Global search" />
+      <select id="theme-selector" aria-label="Theme">
+        <option value="system">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+        <option value="high-contrast-dark">HC Dark</option>
+        <option value="high-contrast-light">HC Light</option>
+      </select>
+    </div>
+  </div>
+  <div id="app">
+    <aside id="sidebar" aria-label="Sidebar">
+      <div class="sidebar-section">
+        <h2>Tables</h2>
+        <ul id="table-list" class="sidebar-list" role="listbox" aria-label="Tables"></ul>
+      </div>
+      <div class="sidebar-section">
+        <h2>Saved Queries</h2>
+        <ul id="saved-query-list" class="sidebar-list" role="listbox" aria-label="Saved Queries"></ul>
+      </div>
+      <div class="sidebar-section">
+        <h2>Recent Queries</h2>
+        <ul id="recent-query-list" class="sidebar-list" role="listbox" aria-label="Recent Queries"></ul>
+      </div>
+    </aside>
+    <main id="main">
+      <nav id="tabs" role="tablist" aria-label="Main tabs">
+        <button class="tab-btn active" data-tab="import" role="tab" aria-selected="true">Import</button>
+        <button class="tab-btn" data-tab="tables" role="tab">Tables</button>
+        <button class="tab-btn" data-tab="profile" role="tab">Profile</button>
+        <button class="tab-btn" data-tab="query" role="tab">Query</button>
+        <button class="tab-btn" data-tab="charts" role="tab">Charts</button>
+        <button class="tab-btn" data-tab="map" role="tab">Map</button>
+        <button class="tab-btn" data-tab="reports" role="tab">Reports</button>
+        <button class="tab-btn" data-tab="ai" role="tab">AI Analyst</button>
+        <button class="tab-btn" data-tab="saved" role="tab">Saved</button>
+        <button class="tab-btn" data-tab="history" role="tab">History</button>
+        <button class="tab-btn" data-tab="export" role="tab">Export</button>
+        <button class="tab-btn" data-tab="settings" role="tab">Settings</button>
+        <button class="tab-btn" data-tab="debug" role="tab">Debug</button>
+      </nav>
+      <div id="tab-content">
+        <!-- Import -->
+        <section id="panel-import" class="panel active" role="tabpanel">
+          <div class="card">
+            <h3>Import Data</h3>
+            <div class="drop-zone" id="drop-zone" role="region" aria-label="Drop zone">Drag &amp; drop files here (CSV, JSON, NDJSON, Parquet)</div>
+            <div class="grid-2 mt">
+              <div class="card" style="margin-bottom:0;">
+                <h3>Paste Data</h3>
+                <input type="text" id="paste-table-name" placeholder="Table name" style="margin-bottom:0.4rem;" />
+                <select id="paste-format" style="margin-bottom:0.4rem;">
+                  <option value="auto">Auto</option>
+                  <option value="csv">CSV</option>
+                  <option value="json">JSON</option>
+                  <option value="ndjson">NDJSON</option>
+                </select>
+                <textarea id="paste-data" placeholder="Paste CSV, JSON array, or NDJSON here..." style="min-height:80px; margin-bottom:0.4rem;"></textarea>
+                <button class="primary small" id="btn-import-paste">Import</button>
+              </div>
+              <div class="card" style="margin-bottom:0;">
+                <h3>URL Import</h3>
+                <input type="text" id="url-input" placeholder="https://example.com/data.csv" style="margin-bottom:0.4rem;" />
+                <select id="url-format" style="margin-bottom:0.4rem;">
+                  <option value="auto">Auto</option>
+                  <option value="csv">CSV</option>
+                  <option value="json">JSON</option>
+                  <option value="ndjson">NDJSON</option>
+                  <option value="parquet">Parquet</option>
+                </select>
+                <input type="text" id="url-table-name" placeholder="Table name" style="margin-bottom:0.4rem;" />
+                <button class="primary small" id="btn-import-url">Fetch &amp; Import</button>
+              </div>
+            </div>
+            <div class="mt">
+              <button class="primary small" id="btn-load-samples">Load Sample Datasets</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Import Queue</h3>
+            <div id="import-queue"></div>
+          </div>
+        </section>
+        <!-- Tables -->
+        <section id="panel-tables" class="panel" role="tabpanel">
+          <div id="tables-container"><p class="muted">No tables loaded yet.</p></div>
+        </section>
+        <!-- Profile -->
+        <section id="panel-profile" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Profile</h3>
+            <select id="profile-table-select" style="width:auto; margin-bottom:0.5rem;" aria-label="Table to profile">
+              <option value="">Select a table...</option>
+            </select>
+            <div id="profile-results"></div>
+          </div>
+        </section>
+        <!-- Query -->
+        <section id="panel-query" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>SQL Editor</h3>
+            <input type="text" id="query-name" placeholder="Query name (optional)" style="margin-bottom:0.4rem;" />
+            <div id="query-placeholders" class="placeholder-inputs hidden"></div>
+            <textarea id="sql-editor" placeholder="SELECT * FROM ..." spellcheck="false" aria-label="SQL Editor"></textarea>
+            <div class="flex mt">
+              <button class="primary" id="btn-run">Run (Ctrl+Enter)</button>
+              <button id="btn-clear">Clear</button>
+              <button id="btn-copy-sql">Copy SQL</button>
+              <button id="btn-save-query">Save Query</button>
+              <button id="btn-pin-query">Pin</button>
+            </div>
+            <div id="query-status" class="status-msg muted"></div>
+            <div id="query-results"></div>
+          </div>
+        </section>
+        <!-- Charts -->
+        <section id="panel-charts" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Charts</h3>
+            <div class="grid-4">
+              <div>
+                <label class="muted">Type</label>
+                <select id="chart-type" aria-label="Chart type">
+                  <option value="bar">Bar</option>
+                  <option value="barh">Horizontal Bar</option>
+                  <option value="line">Line</option>
+                  <option value="scatter">Scatter</option>
+                  <option value="area">Area</option>
+                  <option value="pie">Pie/Donut</option>
+                </select>
+              </div>
+              <div>
+                <label class="muted">X Column</label>
+                <select id="chart-x" aria-label="X column"></select>
+              </div>
+              <div>
+                <label class="muted">Y Column</label>
+                <select id="chart-y" aria-label="Y column"></select>
+              </div>
+              <div>
+                <label class="muted">Group/Color</label>
+                <select id="chart-group" aria-label="Group column"><option value="">(none)</option></select>
+              </div>
+            </div>
+            <div class="grid-3 mt">
+              <div>
+                <label class="muted">Aggregation</label>
+                <select id="chart-agg">
+                  <option value="none">None</option>
+                  <option value="count">Count</option>
+                  <option value="sum">Sum</option>
+                  <option value="avg">Average</option>
+                  <option value="min">Min</option>
+                  <option value="max">Max</option>
+                </select>
+              </div>
+              <div>
+                <label class="muted">Row Limit</label>
+                <input type="text" id="chart-limit" value="500" />
+              </div>
+              <div>
+                <label class="muted">Chart Title</label>
+                <input type="text" id="chart-title" placeholder="Title" />
+              </div>
+            </div>
+            <div class="flex mt">
+              <button class="primary" id="btn-draw-chart">Draw</button>
+              <button id="btn-chart-png">Download PNG</button>
+              <button id="btn-chart-report">Add to Report</button>
+            </div>
+            <div id="chart-container"><canvas id="chart-canvas"></canvas></div>
+          </div>
+        </section>
+        <!-- Map -->
+        <section id="panel-map" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Map</h3>
+            <div class="grid-4">
+              <div>
+                <label class="muted">Source</label>
+                <select id="map-source"><option value="results">Latest Query Result</option><option value="table">Selected Table</option></select>
+              </div>
+              <div>
+                <label class="muted">Latitude</label>
+                <select id="map-lat"></select>
+              </div>
+              <div>
+                <label class="muted">Longitude</label>
+                <select id="map-lon"></select>
+              </div>
+              <div>
+                <label class="muted">Label</label>
+                <select id="map-label"><option value="">(none)</option></select>
+              </div>
+            </div>
+            <div class="flex mt">
+              <button class="primary" id="btn-render-map">Render Map</button>
+              <button id="btn-map-geojson">Export GeoJSON</button>
+              <button id="btn-map-report">Add to Report</button>
+            </div>
+            <div id="map-container"></div>
+          </div>
+        </section>
+        <!-- Reports -->
+        <section id="panel-reports" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Report Builder</h3>
+            <input type="text" id="report-title" placeholder="Report title" style="margin-bottom:0.4rem;" />
+            <textarea id="report-notes" placeholder="Notes..." style="min-height:60px; margin-bottom:0.4rem;"></textarea>
+            <div class="flex mt">
+              <button id="btn-add-query-report">Add Latest Query</button>
+              <button id="btn-add-profile-report">Add Profile</button>
+              <button id="btn-add-chart-report">Add Chart Summary</button>
+              <button id="btn-add-map-report">Add Map Summary</button>
+              <button id="btn-add-note-report">Add Note</button>
+            </div>
+            <div class="mt">
+              <button class="primary" id="btn-preview-report">Preview Markdown</button>
+              <button id="btn-copy-report">Copy Markdown</button>
+              <button id="btn-download-report">Download Markdown</button>
+            </div>
+            <div id="report-preview" class="report-preview mt hidden"></div>
+          </div>
+        </section>
+        <!-- AI Analyst -->
+        <section id="panel-ai" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>AI Analyst</h3>
+            <div id="ai-config-msg" class="ai-warning">AI is disabled. Enable it in Settings and configure your API key.</div>
+            <div id="ai-chat"></div>
+            <div class="flex mt">
+              <select id="ai-action" style="width:auto;">
+                <option value="explain_dataset">Explain this dataset</option>
+                <option value="suggest_queries">Suggest useful SQL queries</option>
+                <option value="explain_sql">Explain this SQL query</option>
+                <option value="explain_result">Explain this query result</option>
+                <option value="data_quality">Find data quality issues</option>
+                <option value="suggest_charts">Suggest charts</option>
+                <option value="suggest_maps">Suggest map ideas</option>
+                <option value="report_narrative">Generate report narrative</option>
+              </select>
+              <button class="primary" id="btn-ai-run" disabled>Run</button>
+            </div>
+          </div>
+        </section>
+        <!-- Saved Queries -->
+        <section id="panel-saved" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Saved Queries</h3>
+            <div class="flex mb">
+              <input type="text" id="saved-search" placeholder="Search queries..." style="width:200px;" />
+              <select id="saved-filter-pack" style="width:auto;">
+                <option value="">All Packs</option>
+                <option value="Basics">Basics</option>
+                <option value="Data Quality">Data Quality</option>
+                <option value="Categorical">Categorical Analysis</option>
+                <option value="Numeric">Numeric Analysis</option>
+                <option value="Time Series">Time Series</option>
+                <option value="Mapping">Mapping</option>
+                <option value="Utilities">DuckDB Utilities</option>
+              </select>
+            </div>
+            <div id="saved-queries-container"></div>
+          </div>
+        </section>
+        <!-- History -->
+        <section id="panel-history" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Query History</h3>
+            <div class="flex mb">
+              <button id="btn-clear-history">Clear History</button>
+              <button id="btn-export-history">Export History</button>
+            </div>
+            <div id="history-container"></div>
+          </div>
+        </section>
+        <!-- Export -->
+        <section id="panel-export" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Export</h3>
+            <div class="flex mt">
+              <button id="btn-export-csv">Results CSV</button>
+              <button id="btn-export-json">Results JSON</button>
+              <button id="btn-export-table-csv">Table CSV</button>
+              <button id="btn-export-table-json">Table JSON</button>
+              <button id="btn-export-queries">Saved Queries</button>
+              <button id="btn-export-history2">Query History</button>
+              <button id="btn-export-manifest">Session Manifest</button>
+              <button id="btn-export-report">Markdown Report</button>
+              <button id="btn-export-debug">Debug Report</button>
+            </div>
+            <div class="mt">
+              <label class="muted">Import Saved Queries JSON</label>
+              <input type="file" id="import-queries-input" accept=".json" style="display:block; margin-top:0.25rem;" aria-label="Import saved queries" />
+            </div>
+          </div>
+        </section>
+        <!-- Settings -->
+        <section id="panel-settings" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Appearance</h3>
+            <div class="setting-row"><label>Theme</label><select id="setting-theme"><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option><option value="high-contrast-dark">HC Dark</option><option value="high-contrast-light">HC Light</option></select></div>
+            <div class="setting-row"><label>Compact Mode</label><input type="checkbox" id="setting-compact" /></div>
+            <div class="setting-row"><label>Large Text</label><input type="checkbox" id="setting-large-text" /></div>
+            <div class="setting-row"><label>Reduced Motion</label><input type="checkbox" id="setting-reduced-motion" /></div>
+            <div class="setting-row"><label>Max Displayed Rows</label><input type="number" id="setting-max-rows" value="500" style="width:100px;" /></div>
+          </div>
+          <div class="card">
+            <h3>Data</h3>
+            <div class="setting-row"><label>Max Query History</label><input type="number" id="setting-max-history" value="100" style="width:100px;" /></div>
+            <div class="setting-row"><label>Auto-Profile After Import</label><input type="checkbox" id="setting-auto-profile" checked /></div>
+            <div class="setting-row"><label>Auto-Preview After Import</label><input type="checkbox" id="setting-auto-preview" checked /></div>
+            <div class="setting-row"><label>Confirm Before Drop</label><input type="checkbox" id="setting-confirm-drop" checked /></div>
+            <div class="setting-row"><label>Enable Query History</label><input type="checkbox" id="setting-enable-history" checked /></div>
+          </div>
+          <div class="card">
+            <h3>AI</h3>
+            <div class="setting-row"><label>Enable AI</label><input type="checkbox" id="setting-ai-enabled" /></div>
+            <div class="setting-row"><label>Provider</label><select id="setting-ai-provider"><option value="openrouter">OpenRouter</option></select></div>
+            <div class="setting-row"><label>API Key</label><input type="text" id="setting-ai-key" placeholder="sk-..." style="width:200px;" /></div>
+            <div class="setting-row"><label>Model</label><input type="text" id="setting-ai-model" placeholder="openai/gpt-4o" style="width:200px;" /></div>
+            <div class="setting-row"><label>Max Sample Rows</label><input type="number" id="setting-ai-sample" value="10" style="width:80px;" /></div>
+            <div class="setting-row"><label>Max Result Rows</label><input type="number" id="setting-ai-result" value="100" style="width:80px;" /></div>
+            <div class="setting-row"><label>System Prompt</label><textarea id="setting-ai-prompt" placeholder="System prompt..." style="min-height:50px; width:300px;"></textarea></div>
+          </div>
+          <div class="card">
+            <h3>Reset</h3>
+            <div class="flex">
+              <button id="btn-reset-queries">Clear Saved Queries</button>
+              <button id="btn-reset-history">Clear History</button>
+              <button id="btn-reset-settings">Reset Settings</button>
+              <button id="btn-factory-reset">Factory Reset</button>
+            </div>
+          </div>
+        </section>
+        <!-- Debug -->
+        <section id="panel-debug" class="panel" role="tabpanel">
+          <div class="card">
+            <h3>Debug</h3>
+            <ul id="debug-list" class="debug-list"></ul>
+            <div class="flex mt">
+              <button id="btn-copy-debug">Copy Debug Report</button>
+              <button id="btn-download-debug">Download Debug Report</button>
+              <button id="btn-self-test">Run Self Test</button>
+              <button id="btn-load-samples-debug">Load Sample Data</button>
+              <button id="btn-clear-error">Clear Last Error</button>
+            </div>
+            <div id="self-test-results" class="mt"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.2" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
+    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.05.13.2
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module">
+    let duckdb = null;
+    let Chart = null;
+    let mapInstance = null;
+    let mapMarkers = [];
+    let currentChart = null;
+
+    const defaultSettings = {
+      theme: 'system', compactMode: false, largeText: false, reducedMotion: false,
+      maxDisplayRows: 500, maxHistoryItems: 100, autoProfile: true, autoPreview: true,
+      confirmDrop: true, enableHistory: true,
+      aiEnabled: false, aiProvider: 'openrouter', aiApiKey: '', aiModel: '',
+      aiMaxSampleRows: 10, aiMaxResultRows: 100, aiSystemPrompt: '',
+    };
+
+    const state = {
+      db: null, conn: null, tables: [], savedQueries: [], queryHistory: [],
+      importQueue: [], currentResults: null, currentTab: 'import',
+      selectedTable: null, profileData: null, reportSections: [],
+      status: { dbState: 'loading', dbError: null, lastQueryRuntime: null, lastError: null, dbVersion: null, bundleName: null },
+      capabilities: {}, initTime: null, settings: { ...defaultSettings },
+    };
+
+    function escapeHTML(str) { if (str == null) return ''; return String(str).replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m])); }
+    function el(tag, opts = {}) { const e = document.createElement(tag); if (opts.className) e.className = opts.className; if (opts.text != null) e.textContent = opts.text; if (opts.html != null) e.innerHTML = opts.html; if (opts.attrs) Object.entries(opts.attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (opts.style) Object.assign(e.style, opts.style); return e; }
+    function setStatus(msg, type = 'info') { const s = document.getElementById('status-msg'); s.textContent = msg; s.className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'muted'; }
+    function formatBytes(b) { if (!b) return '0 B'; const k = 1024, sizes = ['B','KB','MB','GB']; const i = Math.floor(Math.log(b) / Math.log(k)); return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]; }
+    function formatDuration(ms) { if (ms < 1000) return ms.toFixed(0) + 'ms'; return (ms / 1000).toFixed(2) + 's'; }
+    function nowISO() { return new Date().toISOString(); }
+    function generateId(prefix = 'id') { return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
+    function deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+    // === Settings & Theme ===
+    function loadSettings() { try { const raw = localStorage.getItem('qd2_settings'); if (raw) Object.assign(state.settings, JSON.parse(raw)); } catch {} }
+    function saveSettings() { try { localStorage.setItem('qd2_settings', JSON.stringify(state.settings)); } catch {} }
+    function applyTheme() { let theme = state.settings.theme; if (theme === 'system') theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.dataset.theme = theme; document.body.style.fontSize = state.settings.largeText ? '1.05rem' : ''; }
+    function bindSettings() {
+      document.getElementById('theme-selector').value = state.settings.theme;
+      document.getElementById('setting-theme').value = state.settings.theme;
+      document.getElementById('setting-compact').checked = state.settings.compactMode;
+      document.getElementById('setting-large-text').checked = state.settings.largeText;
+      document.getElementById('setting-reduced-motion').checked = state.settings.reducedMotion;
+      document.getElementById('setting-max-rows').value = state.settings.maxDisplayRows;
+      document.getElementById('setting-max-history').value = state.settings.maxHistoryItems;
+      document.getElementById('setting-auto-profile').checked = state.settings.autoProfile;
+      document.getElementById('setting-auto-preview').checked = state.settings.autoPreview;
+      document.getElementById('setting-confirm-drop').checked = state.settings.confirmDrop;
+      document.getElementById('setting-enable-history').checked = state.settings.enableHistory;
+      document.getElementById('setting-ai-enabled').checked = state.settings.aiEnabled;
+      document.getElementById('setting-ai-provider').value = state.settings.aiProvider;
+      document.getElementById('setting-ai-key').value = state.settings.aiApiKey;
+      document.getElementById('setting-ai-model').value = state.settings.aiModel;
+      document.getElementById('setting-ai-sample').value = state.settings.aiMaxSampleRows;
+      document.getElementById('setting-ai-result').value = state.settings.aiMaxResultRows;
+      document.getElementById('setting-ai-prompt').value = state.settings.aiSystemPrompt;
+    }
+    function setupSettingsListeners() {
+      const ids = { 'theme-selector': 'theme', 'setting-theme': 'theme', 'setting-compact': 'compactMode', 'setting-large-text': 'largeText', 'setting-reduced-motion': 'reducedMotion', 'setting-auto-profile': 'autoProfile', 'setting-auto-preview': 'autoPreview', 'setting-confirm-drop': 'confirmDrop', 'setting-enable-history': 'enableHistory', 'setting-ai-enabled': 'aiEnabled' };
+      Object.entries(ids).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('change', () => { state.settings[key] = el.type === 'checkbox' ? el.checked : el.value; saveSettings(); applyTheme(); bindSettings(); }); });
+      const numIds = { 'setting-max-rows': 'maxDisplayRows', 'setting-max-history': 'maxHistoryItems', 'setting-ai-sample': 'aiMaxSampleRows', 'setting-ai-result': 'aiMaxResultRows' };
+      Object.entries(numIds).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('change', () => { state.settings[key] = parseInt(el.value) || 0; saveSettings(); }); });
+      const textIds = { 'setting-ai-key': 'aiApiKey', 'setting-ai-model': 'aiModel', 'setting-ai-prompt': 'aiSystemPrompt' };
+      Object.entries(textIds).forEach(([id, key]) => { const el = document.getElementById(id); if (!el) return; el.addEventListener('change', () => { state.settings[key] = el.value; saveSettings(); }); });
+      document.getElementById('btn-reset-queries').addEventListener('click', () => { if (confirm('Clear all saved queries?')) { state.savedQueries = []; persistSavedQueries(); renderSavedQueries(); setStatus('Saved queries cleared', 'success'); } });
+      document.getElementById('btn-reset-history').addEventListener('click', () => { if (confirm('Clear query history?')) { state.queryHistory = []; persistHistory(); renderHistory(); setStatus('History cleared', 'success'); } });
+      document.getElementById('btn-reset-settings').addEventListener('click', () => { if (confirm('Reset settings to defaults?')) { state.settings = { ...defaultSettings }; saveSettings(); bindSettings(); applyTheme(); setStatus('Settings reset', 'success'); } });
+      document.getElementById('btn-factory-reset').addEventListener('click', () => { if (confirm('Factory reset? This clears all local data.')) { localStorage.clear(); state.savedQueries = []; state.queryHistory = []; state.settings = { ...defaultSettings }; saveSettings(); bindSettings(); applyTheme(); render(); setStatus('Factory reset complete', 'success'); } });
+    }
+
+    // === Capabilities & DuckDB ===
+    async function checkCapabilities() {
+      const caps = { wasm: typeof WebAssembly === 'object' && WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0])), worker: typeof Worker !== 'undefined', crossOriginIsolated: globalThis.crossOriginIsolated || false, localStorage: (() => { try { localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; } catch { return false; } })(), indexedDB: (() => { try { return !!window.indexedDB; } catch { return false; } })(), filePicker: typeof window.showOpenFilePicker === 'function', opfs: false };
+      try { if (navigator.storage && navigator.storage.getDirectory) { await navigator.storage.getDirectory(); caps.opfs = true; } } catch {}
+      state.capabilities = caps;
+    }
+    async function loadDuckDBModule() { try { duckdb = await import('https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev45.0/+esm'); return true; } catch (err) { state.status.dbState = 'failed'; state.status.dbError = 'Module load failed: ' + (err.message || String(err)); renderStatus(); return false; } }
+    async function loadChartModule() { if (Chart) return; try { const mod = await import('https://cdn.jsdelivr.net/npm/chart.js@4.4.3/auto/+esm'); Chart = mod.default || mod.Chart; } catch (err) { console.error('Chart.js load failed', err); } }
+    async function initDuckDB() {
+      if (!duckdb) return;
+      const t0 = performance.now();
+      try {
+        const bundles = duckdb.getJsDelivrBundles();
+        const bundle = await duckdb.selectBundle(bundles);
+        state.status.bundleName = bundle.mainModule.includes('eh') ? 'eh' : bundle.mainModule.includes('coi') ? 'coi' : 'mvp';
+        const worker_url = URL.createObjectURL(new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' }));
+        const worker = new Worker(worker_url);
+        const logger = new duckdb.ConsoleLogger();
+        const db = new duckdb.AsyncDuckDB(logger, worker);
+        await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+        URL.revokeObjectURL(worker_url);
+        state.db = db; state.conn = await db.connect();
+        try { const ver = await db.getVersion(); state.status.dbVersion = ver; } catch {}
+        state.status.dbState = 'ready'; state.initTime = performance.now() - t0;
+      } catch (err) { state.status.dbState = 'failed'; state.status.dbError = err.message || String(err); console.error('DuckDB init failed', err); }
+      renderStatus();
+    }
+
+    // === App Init ===
+    async function initApp() {
+      loadSettings(); applyTheme(); loadSavedQueries(); loadHistory(); bindSettings();
+      setupEventListeners(); setupSettingsListeners(); await checkCapabilities(); render();
+      const loaded = await loadDuckDBModule();
+      if (loaded) { await initDuckDB(); await refreshTableMetadata(); render(); if (state.settings.autoProfile && state.tables.length) { state.selectedTable = state.tables[0].name; } }
+    }
+
+    // === Event Listeners ===
+    function setupEventListeners() {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+      const dz = document.getElementById('drop-zone');
+      dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+      dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+      document.getElementById('btn-load-samples').addEventListener('click', loadSampleData);
+      document.getElementById('btn-import-paste').addEventListener('click', importPastedData);
+      document.getElementById('btn-import-url').addEventListener('click', importFromURL);
+      document.getElementById('btn-run').addEventListener('click', () => runSQL(document.getElementById('sql-editor').value));
+      document.getElementById('sql-editor').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runSQL(document.getElementById('sql-editor').value); } });
+      document.getElementById('btn-clear').addEventListener('click', clearQuery);
+      document.getElementById('btn-copy-sql').addEventListener('click', async () => { try { await navigator.clipboard.writeText(document.getElementById('sql-editor').value); setStatus('SQL copied', 'success'); } catch { setStatus('Copy failed', 'error'); } });
+      document.getElementById('btn-save-query').addEventListener('click', () => { const sql = document.getElementById('sql-editor').value.trim(); if (!sql) return setStatus('Nothing to save', 'error'); const name = document.getElementById('query-name').value.trim() || 'Untitled'; saveQuery({ name, sql }); });
+      document.getElementById('btn-pin-query').addEventListener('click', () => { const sql = document.getElementById('sql-editor').value.trim(); if (!sql) return; const name = document.getElementById('query-name').value.trim() || 'Untitled'; saveQuery({ name, sql, favorite: true }); });
+      document.getElementById('btn-draw-chart').addEventListener('click', drawChart);
+      document.getElementById('btn-chart-png').addEventListener('click', downloadChartPNG);
+      document.getElementById('btn-chart-report').addEventListener('click', () => { addToReport({ type: 'chart', title: document.getElementById('chart-title').value || 'Chart' }); setStatus('Chart added to report', 'success'); });
+      document.getElementById('btn-render-map').addEventListener('click', renderMap);
+      document.getElementById('btn-map-geojson').addEventListener('click', exportMapGeoJSON);
+      document.getElementById('btn-map-report').addEventListener('click', () => { addToReport({ type: 'map', title: 'Map' }); setStatus('Map added to report', 'success'); });
+      document.getElementById('btn-preview-report').addEventListener('click', previewReport);
+      document.getElementById('btn-copy-report').addEventListener('click', copyReport);
+      document.getElementById('btn-download-report').addEventListener('click', downloadReport);
+      document.getElementById('btn-add-query-report').addEventListener('click', () => { addToReport({ type: 'query', title: 'Query Result' }); setStatus('Query added to report', 'success'); });
+      document.getElementById('btn-add-profile-report').addEventListener('click', () => { addToReport({ type: 'profile', title: 'Profile' }); setStatus('Profile added to report', 'success'); });
+      document.getElementById('btn-add-chart-report').addEventListener('click', () => { addToReport({ type: 'chart', title: document.getElementById('chart-title').value || 'Chart' }); setStatus('Chart added to report', 'success'); });
+      document.getElementById('btn-add-map-report').addEventListener('click', () => { addToReport({ type: 'map', title: 'Map' }); setStatus('Map added to report', 'success'); });
+      document.getElementById('btn-add-note-report').addEventListener('click', () => { const note = document.getElementById('report-notes').value.trim(); if (note) addToReport({ type: 'note', title: 'Note', content: note }); setStatus('Note added to report', 'success'); });
+      document.getElementById('btn-ai-run').addEventListener('click', runAIAction);
+      document.getElementById('btn-export-csv').addEventListener('click', exportResultsCSV);
+      document.getElementById('btn-export-json').addEventListener('click', exportResultsJSON);
+      document.getElementById('btn-export-table-csv').addEventListener('click', exportTableCSV);
+      document.getElementById('btn-export-table-json').addEventListener('click', exportTableJSON);
+      document.getElementById('btn-export-queries').addEventListener('click', exportSavedQueries);
+      document.getElementById('btn-export-history2').addEventListener('click', exportHistory);
+      document.getElementById('btn-export-manifest').addEventListener('click', exportSessionManifest);
+      document.getElementById('btn-export-report').addEventListener('click', downloadReport);
+      document.getElementById('btn-export-debug').addEventListener('click', downloadDebugReport);
+      document.getElementById('btn-copy-debug').addEventListener('click', copyDebugReport);
+      document.getElementById('btn-download-debug').addEventListener('click', downloadDebugReport);
+      document.getElementById('btn-self-test').addEventListener('click', runSelfTest);
+      document.getElementById('btn-load-samples-debug').addEventListener('click', loadSampleData);
+      document.getElementById('btn-clear-error').addEventListener('click', () => { state.status.lastError = null; setStatus(''); renderDebug(); });
+      document.getElementById('import-queries-input').addEventListener('change', e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { try { importSavedQueries(JSON.parse(ev.target.result)); } catch { setStatus('Invalid JSON', 'error'); } }; r.readAsText(f); });
+      document.getElementById('btn-clear-history').addEventListener('click', () => { if (confirm('Clear history?')) { state.queryHistory = []; persistHistory(); renderHistory(); } });
+      document.getElementById('btn-export-history').addEventListener('click', exportHistory);
+      document.getElementById('global-search').addEventListener('input', e => filterSidebar(e.target.value));
+      document.getElementById('saved-search').addEventListener('input', renderSavedQueries);
+      document.getElementById('saved-filter-pack').addEventListener('change', renderSavedQueries);
+      document.getElementById('profile-table-select').addEventListener('change', e => { state.selectedTable = e.target.value; if (state.selectedTable) profileTable(state.selectedTable); });
+    }
+
+    // === Navigation ===
+    function switchTab(tabName) {
+      state.currentTab = tabName;
+      document.querySelectorAll('.tab-btn').forEach(btn => { const a = btn.dataset.tab === tabName; btn.classList.toggle('active', a); btn.setAttribute('aria-selected', String(a)); });
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tabName));
+      if (tabName === 'debug') renderDebug();
+      if (tabName === 'saved') renderSavedQueries();
+      if (tabName === 'history') renderHistory();
+      if (tabName === 'tables') renderTables();
+      if (tabName === 'charts') renderChartControls();
+      if (tabName === 'map') renderMapControls();
+      if (tabName === 'reports') previewReport();
+      if (tabName === 'ai') renderAI();
+      if (tabName === 'profile') renderProfileSelect();
+    }
+
+    // === Import ===
+    function sanitizeTableName(name) {
+      let base = name.includes('.') ? name.split('.').slice(0, -1).join('.') : name;
+      base = base.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+      if (!base) base = 'table';
+      if (!/^[a-zA-Z]/.test(base)) base = 't_' + base;
+      let final = base; let i = 2;
+      while (state.tables.some(t => t.name === final) || state.importQueue.some(q => q.tableName === final)) { final = base + '_' + i; i++; }
+      return final;
+    }
+    function addImportQueueItem(item) { state.importQueue.unshift(item); if (state.importQueue.length > 50) state.importQueue.pop(); renderImportQueue(); }
+    function renderImportQueue() {
+      const container = document.getElementById('import-queue');
+      container.innerHTML = '';
+      if (!state.importQueue.length) { container.appendChild(el('p', { className: 'muted', text: 'No imports yet.' })); return; }
+      state.importQueue.forEach(item => {
+        const div = el('div', { className: 'import-item' });
+        const statusColor = item.status === 'imported' ? 'success' : item.status === 'failed' ? 'error' : item.status === 'warning' ? 'warning' : 'muted';
+        div.innerHTML = '<div class="title">' + escapeHTML(item.name) + ' &rarr; ' + escapeHTML(item.tableName) + ' <span class="' + statusColor + '">[' + item.status + ']</span></div><div class="meta">' + escapeHTML(item.source) + ' &middot; ' + formatBytes(item.size || 0) + ' &middot; ' + (item.rowCount != null ? item.rowCount.toLocaleString() + ' rows' : '') + ' &middot; ' + formatDuration(item.duration || 0) + ' &middot; ' + (item.message ? escapeHTML(item.message) : '') + '</div>';
+        container.appendChild(div);
+      });
+    }
+    async function handleFiles(files) { for (const file of files) await importFile(file); await refreshTableMetadata(); render(); }
+    async function importFile(file) {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const tableName = sanitizeTableName(file.name);
+      const qItem = { id: generateId('imp'), source: 'file', name: file.name, format: ext, tableName, size: file.size, status: 'loading', timestamp: nowISO() };
+      addImportQueueItem(qItem);
+      const t0 = performance.now();
+      try {
+        if (!state.conn) throw new Error('DuckDB not ready');
+        const safeFileName = 'file_' + tableName + '_' + Date.now();
+        if (ext === 'csv') { const text = await file.text(); await state.db.registerFileText(safeFileName, text); await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_csv_auto(\'' + safeFileName + '\')'); }
+        else if (ext === 'json') { const text = await file.text(); await state.db.registerFileText(safeFileName, text); await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_json_auto(\'' + safeFileName + '\')'); }
+        else if (ext === 'ndjson' || ext === 'jsonl') { const text = await file.text(); await state.db.registerFileText(safeFileName, text); await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_ndjson_auto(\'' + safeFileName + '\')'); }
+        else if (ext === 'parquet') { const buf = await file.arrayBuffer(); await state.db.registerFileBuffer(safeFileName, new Uint8Array(buf)); await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_parquet(\'' + safeFileName + '\')'); }
+        else { throw new Error('Unsupported: ' + ext); }
+        const countRes = await state.conn.query('SELECT COUNT(*) AS c FROM "' + tableName + '"');
+        qItem.rowCount = Number(countRes.toArray()[0].c || 0);
+        qItem.status = 'imported'; qItem.duration = performance.now() - t0;
+        setStatus('Imported ' + file.name, 'success');
+      } catch (err) {
+        qItem.status = 'failed'; qItem.message = err.message; qItem.duration = performance.now() - t0;
+        state.status.lastError = err.message; setStatus(err.message, 'error');
+      }
+      addImportQueueItem(qItem); renderImportQueue();
+    }
+    async function importPastedData() {
+      const raw = document.getElementById('paste-data').value.trim();
+      if (!raw) return setStatus('Paste some data first', 'error');
+      let format = document.getElementById('paste-format').value;
+      let tableName = document.getElementById('paste-table-name').value.trim() || sanitizeTableName('pasted_data');
+      if (format === 'auto') { if (raw.trim().startsWith('[')) format = 'json'; else if (raw.includes('\n') && raw.includes(',')) format = 'csv'; else format = 'ndjson'; }
+      const qItem = { id: generateId('imp'), source: 'paste', name: 'pasted', format, tableName, size: new Blob([raw]).size, status: 'loading', timestamp: nowISO() };
+      addImportQueueItem(qItem); const t0 = performance.now();
+      try {
+        if (!state.conn) throw new Error('DuckDB not ready');
+        const safeFileName = 'file_' + tableName + '_' + Date.now();
+        await state.db.registerFileText(safeFileName, raw);
+        if (format === 'csv') await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_csv_auto(\'' + safeFileName + '\')');
+        else if (format === 'json') await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_json_auto(\'' + safeFileName + '\')');
+        else await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_ndjson_auto(\'' + safeFileName + '\')');
+        const countRes = await state.conn.query('SELECT COUNT(*) AS c FROM "' + tableName + '"');
+        qItem.rowCount = Number(countRes.toArray()[0].c || 0);
+        qItem.status = 'imported'; qItem.duration = performance.now() - t0;
+        setStatus('Pasted data imported', 'success');
+        await refreshTableMetadata(); render(); if (state.settings.autoProfile) { state.selectedTable = tableName; profileTable(tableName); }
+      } catch (err) { qItem.status = 'failed'; qItem.message = err.message; qItem.duration = performance.now() - t0; state.status.lastError = err.message; setStatus(err.message, 'error'); }
+      addImportQueueItem(qItem); renderImportQueue();
+    }
+    async function importFromURL() {
+      const url = document.getElementById('url-input').value.trim();
+      if (!url) return setStatus('Enter a URL', 'error');
+      let format = document.getElementById('url-format').value;
+      let tableName = document.getElementById('url-table-name').value.trim() || sanitizeTableName('url_data');
+      if (format === 'auto') { const ext = (url.split('.').pop() || '').toLowerCase().split('?')[0]; if (['csv','json','ndjson','jsonl','parquet'].includes(ext)) format = ext; else format = 'csv'; }
+      const qItem = { id: generateId('imp'), source: 'url', name: url, format, tableName, status: 'loading', timestamp: nowISO() };
+      addImportQueueItem(qItem); const t0 = performance.now();
+      try {
+        if (!state.conn) throw new Error('DuckDB not ready');
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const blob = await resp.blob();
+        qItem.size = blob.size;
+        const safeFileName = 'file_' + tableName + '_' + Date.now();
+        const buf = await blob.arrayBuffer();
+        if (format === 'parquet') await state.db.registerFileBuffer(safeFileName, new Uint8Array(buf));
+        else await state.db.registerFileText(safeFileName, new TextDecoder().decode(buf));
+        if (format === 'csv') await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_csv_auto(\'' + safeFileName + '\')');
+        else if (format === 'json') await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_json_auto(\'' + safeFileName + '\')');
+        else if (format === 'ndjson' || format === 'jsonl') await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_ndjson_auto(\'' + safeFileName + '\')');
+        else if (format === 'parquet') await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_parquet(\'' + safeFileName + '\')');
+        else await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_csv_auto(\'' + safeFileName + '\')');
+        const countRes = await state.conn.query('SELECT COUNT(*) AS c FROM "' + tableName + '"');
+        qItem.rowCount = Number(countRes.toArray()[0].c || 0);
+        qItem.status = 'imported'; qItem.duration = performance.now() - t0;
+        setStatus('URL imported', 'success');
+        await refreshTableMetadata(); render(); if (state.settings.autoProfile) { state.selectedTable = tableName; profileTable(tableName); }
+      } catch (err) {
+        let msg = err.message || String(err);
+        if (msg.includes('CORS') || msg.includes('Failed to fetch')) msg += ' (CORS may block this URL. Try downloading and dragging the file instead.)';
+        qItem.status = 'failed'; qItem.message = msg; qItem.duration = performance.now() - t0; state.status.lastError = msg; setStatus(msg, 'error');
+      }
+      addImportQueueItem(qItem); renderImportQueue();
+    }
+    async function loadSampleData() {
+      if (!state.conn) { setStatus('DuckDB not ready', 'error'); return; }
+      const animals = [
+        { id: 1, species: 'Terrapene carolina', common_name: 'Eastern Box Turtle', habitat: 'Forest', observed_count: 3, county: 'Gibson', latitude: 38.35, longitude: -87.77, observed_at: '2024-05-12' },
+        { id: 2, species: 'Nerodia sipedon', common_name: 'Northern Watersnake', habitat: 'Wetland', observed_count: 1, county: 'Posey', latitude: 37.95, longitude: -87.85, observed_at: '2024-06-03' },
+        { id: 3, species: 'Lithobates clamitans', common_name: 'Green Frog', habitat: 'Pond', observed_count: 12, county: 'Gibson', latitude: 38.30, longitude: -87.75, observed_at: '2024-07-15' },
+        { id: 4, species: 'Buteo jamaicensis', common_name: 'Red-tailed Hawk', habitat: 'Field', observed_count: 2, county: 'Vanderburgh', latitude: 37.95, longitude: -87.55, observed_at: '2024-08-01' },
+        { id: 5, species: 'Odocoileus virginianus', common_name: 'White-tailed Deer', habitat: 'Forest', observed_count: 7, county: 'Gibson', latitude: 38.40, longitude: -87.80, observed_at: '2024-09-20' },
+        { id: 6, species: 'Chelydra serpentina', common_name: 'Snapping Turtle', habitat: 'Pond', observed_count: 1, county: 'Posey', latitude: 37.90, longitude: -87.90, observed_at: '2024-05-22' },
+        { id: 7, species: 'Anaxyrus americanus', common_name: 'American Toad', habitat: 'Garden', observed_count: 5, county: 'Gibson', latitude: 38.33, longitude: -87.76, observed_at: '2024-06-10' },
+        { id: 8, species: 'Marmota monax', common_name: 'Groundhog', habitat: 'Field', observed_count: 2, county: 'Vanderburgh', latitude: 37.97, longitude: -87.57, observed_at: '2024-07-08' },
+      ];
+      const sales = [
+        { id: 1, date: '2024-01-05', category: 'Electronics', item: 'Headphones', quantity: 2, unit_price: 49.99, region: 'North' },
+        { id: 2, date: '2024-01-07', category: 'Electronics', item: 'USB Cable', quantity: 5, unit_price: 9.99, region: 'South' },
+        { id: 3, date: '2024-01-12', category: 'Office', item: 'Stapler', quantity: 1, unit_price: 12.50, region: 'North' },
+        { id: 4, date: '2024-01-15', category: 'Electronics', item: 'Mouse', quantity: 3, unit_price: 25.00, region: 'East' },
+        { id: 5, date: '2024-01-20', category: 'Furniture', item: 'Chair', quantity: 2, unit_price: 89.00, region: 'West' },
+        { id: 6, date: '2024-01-22', category: 'Office', item: 'Paper (500)', quantity: 10, unit_price: 6.99, region: 'North' },
+        { id: 7, date: '2024-01-25', category: 'Electronics', item: 'Keyboard', quantity: 2, unit_price: 45.00, region: 'South' },
+        { id: 8, date: '2024-01-28', category: 'Furniture', item: 'Desk Lamp', quantity: 1, unit_price: 34.50, region: 'East' },
+      ];
+      const weather = [
+        { id: 1, date: '2024-01-01', location: 'Evansville', temperature_f: 32, humidity: 78, wind_mph: 8, precipitation_inches: 0.1 },
+        { id: 2, date: '2024-01-02', location: 'Evansville', temperature_f: 35, humidity: 75, wind_mph: 12, precipitation_inches: 0.0 },
+        { id: 3, date: '2024-01-03', location: 'Princeton', temperature_f: 28, humidity: 82, wind_mph: 15, precipitation_inches: 0.3 },
+        { id: 4, date: '2024-01-04', location: 'Owensboro', temperature_f: 30, humidity: 80, wind_mph: 10, precipitation_inches: 0.0 },
+        { id: 5, date: '2024-01-05', location: 'Evansville', temperature_f: 38, humidity: 70, wind_mph: 6, precipitation_inches: 0.0 },
+        { id: 6, date: '2024-01-06', location: 'Princeton', temperature_f: 25, humidity: 85, wind_mph: 18, precipitation_inches: 0.5 },
+        { id: 7, date: '2024-01-07', location: 'Owensboro', temperature_f: 33, humidity: 77, wind_mph: 9, precipitation_inches: 0.1 },
+        { id: 8, date: '2024-01-08', location: 'Evansville', temperature_f: 40, humidity: 65, wind_mph: 5, precipitation_inches: 0.0 },
+      ];
+      const locations = [
+        { id: 1, name: 'Gibson County Wetlands', type: 'Wetland', county: 'Gibson', latitude: 38.35, longitude: -87.77, notes: 'Known for waterfowl.' },
+        { id: 2, name: 'Harmonie State Park', type: 'Forest', county: 'Posey', latitude: 37.95, longitude: -87.85, notes: 'Hiking and wildlife.' },
+        { id: 3, name: 'Wesselman Woods', type: 'Forest', county: 'Vanderburgh', latitude: 37.97, longitude: -87.55, notes: 'Urban old-growth forest.' },
+        { id: 4, name: 'Ohio Riverfront', type: 'River', county: 'Vanderburgh', latitude: 37.97, longitude: -87.57, notes: 'River observation deck.' },
+      ];
+      for (const [data, name] of [[animals, 'sample_animals'], [sales, 'sample_sales'], [weather, 'sample_weather'], [locations, 'sample_locations']]) {
+        try { await loadJSONArray(data, name); } catch (err) { console.error('sample load', name, err); }
+      }
+      await refreshTableMetadata(); render(); setStatus('Sample data loaded', 'success');
+    }
+    async function loadJSONArray(arr, tableName) {
+      const text = JSON.stringify(arr);
+      const safeFileName = 'file_' + tableName + '_' + Date.now();
+      await state.db.registerFileText(safeFileName, text);
+      await state.conn.query('CREATE TABLE "' + tableName + '" AS SELECT * FROM read_json_auto(\'' + safeFileName + '\')');
+    }
+
+    // === Tables ===
+    async function refreshTableMetadata() {
+      if (!state.conn) { state.tables = []; return; }
+      try {
+        const res = await state.conn.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name");
+        const names = res.toArray().map(r => r.table_name || r['table_name']);
+        const tables = [];
+        for (const name of names) {
+          let rowCount = 0; try { const c = await state.conn.query('SELECT COUNT(*) AS c FROM "' + name + '"'); rowCount = Number(c.toArray()[0].c || 0); } catch {}
+          let columns = []; try { const d = await state.conn.query('DESCRIBE "' + name + '"'); columns = d.toArray().map(r => ({ name: String(r.column_name || r['column_name']), type: String(r.column_type || r['column_type']) })); } catch {}
+          let sampleValues = {}; try { const s = await state.conn.query('SELECT * FROM "' + name + '" LIMIT 1'); const rows = s.toArray(); if (rows.length) { const row = rows[0]; for (const col of columns) sampleValues[col.name] = row[col.name]; } } catch {}
+          const existing = state.tables.find(t => t.name === name);
+          tables.push({ name, rowCount, columns, sampleValues, fileName: existing?.fileName || name, size: existing?.size || 0, type: existing?.type || 'unknown', importTime: existing?.importTime || nowISO() });
+        }
+        state.tables = tables;
+      } catch (err) { console.error('refresh metadata', err); state.status.lastError = err.message; }
+      renderStatus();
+    }
+    function renderTables() {
+      const sidebar = document.getElementById('table-list'); sidebar.innerHTML = '';
+      state.tables.forEach(t => {
+        const li = el('li', { text: t.name + ' (' + t.rowCount.toLocaleString() + ')' });
+        li.addEventListener('click', () => { document.getElementById('sql-editor').value = 'SELECT * FROM "' + t.name + '" LIMIT 100;'; switchTab('query'); });
+        sidebar.appendChild(li);
+      });
+      const container = document.getElementById('tables-container');
+      if (!state.tables.length) { container.innerHTML = '<p class="muted">No tables loaded yet.</p>'; return; }
+      container.innerHTML = '';
+      state.tables.forEach(t => {
+        const card = el('div', { className: 'card', style: { marginBottom: '0.75rem' } });
+        card.innerHTML = '<h3>' + escapeHTML(t.name) + '</h3><div class="muted mb" style="font-size:0.82rem">' + t.rowCount.toLocaleString() + ' rows &middot; ' + t.columns.length + ' cols &middot; ' + escapeHTML(t.importTime) + '</div><div style="font-size:0.78rem; margin-bottom:0.5rem">' + t.columns.map(c => escapeHTML(c.name) + ' <span class="muted">(' + escapeHTML(c.type) + ')</span>').join(', ') + '</div>';
+        const actions = el('div', { className: 'flex' });
+        const mkBtn = (text, fn) => { const b = el('button', { text, className: 'small' }); b.addEventListener('click', fn); return b; };
+        actions.append(
+          mkBtn('Preview', async () => { document.getElementById('sql-editor').value = 'SELECT * FROM "' + t.name + '" LIMIT 100;'; await runSQL(document.getElementById('sql-editor').value); switchTab('query'); }),
+          mkBtn('Describe', async () => { document.getElementById('sql-editor').value = 'DESCRIBE "' + t.name + '";'; await runSQL(document.getElementById('sql-editor').value); switchTab('query'); }),
+          mkBtn('Profile', () => { state.selectedTable = t.name; profileTable(t.name); switchTab('profile'); }),
+          mkBtn('Chart', () => { document.getElementById('sql-editor').value = 'SELECT * FROM "' + t.name + '" LIMIT 100;'; runSQL(document.getElementById('sql-editor').value); switchTab('charts'); }),
+          mkBtn('Map', () => { state.selectedTable = t.name; switchTab('map'); }),
+          mkBtn('Rename', async () => { const n = prompt('New name:', t.name); if (!n || n === t.name) return; const safe = sanitizeTableName(n); if (safe !== n) { setStatus('Name sanitized to ' + safe, 'warning'); } try { await state.conn.query('ALTER TABLE "' + t.name + '" RENAME TO "' + safe + '"'); await refreshTableMetadata(); render(); setStatus('Renamed', 'success'); } catch (err) { setStatus(err.message, 'error'); } }),
+          mkBtn('Drop', async () => { if (state.settings.confirmDrop && !confirm('Drop ' + t.name + '?')) return; try { await state.conn.query('DROP TABLE IF EXISTS "' + t.name + '"'); await refreshTableMetadata(); render(); setStatus('Dropped', 'success'); } catch (err) { setStatus(err.message, 'error'); } }),
+          mkBtn('CSV', () => exportTableCSV(t.name)),
+          mkBtn('JSON', () => exportTableJSON(t.name))
+        );
+        card.appendChild(actions);
+        const previewWrap = el('div', { className: 'results-wrap', style: { marginTop: '0.5rem', maxHeight: '200px' } });
+        const tbl = el('table');
+        const thead = el('thead'); const trh = el('tr'); t.columns.forEach(c => trh.appendChild(el('th', { text: c.name }))); thead.appendChild(trh); tbl.appendChild(thead);
+        const tbody = el('tbody');
+        (async () => {
+          try { const pres = await state.conn.query('SELECT * FROM "' + t.name + '" LIMIT 20'); const rows = pres.toArray(); rows.forEach(r => { const tr = el('tr'); t.columns.forEach(c => { const v = r[c.name]; tr.appendChild(el('td', { text: (v === null || v === undefined) ? 'NULL' : String(v) })); }); tbody.appendChild(tr); }); } catch {}
+          tbl.appendChild(tbody); previewWrap.appendChild(tbl);
+        })();
+        card.appendChild(previewWrap);
+        container.appendChild(card);
+      });
+    }
+
+    // === Profile ===
+    function renderProfileSelect() {
+      const sel = document.getElementById('profile-table-select'); sel.innerHTML = '<option value="">Select a table...</option>';
+      state.tables.forEach(t => { sel.appendChild(el('option', { text: t.name, attrs: { value: t.name } })); });
+      if (state.selectedTable) { sel.value = state.selectedTable; profileTable(state.selectedTable); }
+    }
+    async function profileTable(tableName) {
+      if (!state.conn || !tableName) return;
+      const container = document.getElementById('profile-results');
+      container.innerHTML = ''; container.appendChild(el('p', { className: 'muted', text: 'Profiling...' }));
+      const t0 = performance.now();
+      try {
+        const descRes = await state.conn.query('DESCRIBE "' + tableName + '"');
+        const columns = descRes.toArray().map(r => ({ name: String(r.column_name || r['column_name']), type: String(r.column_type || r['column_type']) }));
+        const totalRows = (await state.conn.query('SELECT COUNT(*) AS c FROM "' + tableName + '"')).toArray()[0].c;
+        const profiles = [];
+        for (const col of columns) {
+          const prof = { name: col.name, duckType: col.type, nullCount: 0, distinctCount: 0, min: null, max: null, avg: null, topValues: [], sampleValues: [], semanticType: 'unknown' };
+          try { const nullRes = await state.conn.query('SELECT COUNT(*) AS c FROM "' + tableName + '" WHERE "' + col.name + '" IS NULL'); prof.nullCount = Number(nullRes.toArray()[0].c || 0); } catch {}
+          try { const distRes = await state.conn.query('SELECT COUNT(DISTINCT "' + col.name + '") AS c FROM "' + tableName + '"'); prof.distinctCount = Number(distRes.toArray()[0].c || 0); } catch {}
+          if (['INTEGER','BIGINT','DOUBLE','FLOAT','DECIMAL','REAL','SMALLINT','TINYINT','UBIGINT','UINTEGER','USMALLINT','UTINYINT'].some(t => col.type.toUpperCase().includes(t))) {
+            try { const numRes = await state.conn.query('SELECT MIN("' + col.name + '") AS mn, MAX("' + col.name + '") AS mx, AVG("' + col.name + '")::DOUBLE AS av FROM "' + tableName + '"'); const row = numRes.toArray()[0]; prof.min = row.mn; prof.max = row.mx; prof.avg = row.av; } catch {}
+          }
+          if (prof.distinctCount <= 20 && prof.distinctCount > 0) {
+            try { const topRes = await state.conn.query('SELECT "' + col.name + '" AS val, COUNT(*) AS cnt FROM "' + tableName + '" GROUP BY "' + col.name + '" ORDER BY cnt DESC LIMIT 5'); prof.topValues = topRes.toArray().map(r => ({ value: r.val, count: r.cnt })); } catch {}
+          }
+          try { const sampleRes = await state.conn.query('SELECT "' + col.name + '" FROM "' + tableName + '" WHERE "' + col.name + '" IS NOT NULL LIMIT 5'); prof.sampleValues = sampleRes.toArray().map(r => r[col.name]); } catch {}
+          prof.semanticType = detectSemanticType(col.name, col.type, prof, totalRows);
+          profiles.push(prof);
+        }
+        state.profileData = { tableName, totalRows: Number(totalRows), columns: profiles };
+        const dur = performance.now() - t0;
+        container.innerHTML = '<div class="success mb">Profiled ' + profiles.length + ' columns in ' + dur.toFixed(0) + 'ms</div>';
+        const grid = el('div', { className: 'profile-grid' });
+        profiles.forEach(p => {
+          const card = el('div', { className: 'profile-card' });
+          card.innerHTML = '<h4>' + escapeHTML(p.name) + ' <span class="muted">' + escapeHTML(p.duckType) + '</span> <span class="success">' + escapeHTML(p.semanticType) + '</span></h4>';
+          const stats = el('div');
+          stats.innerHTML = '<div class="stat">Null: ' + p.nullCount.toLocaleString() + ' (' + ((p.nullCount / Math.max(state.profileData.totalRows, 1)) * 100).toFixed(1) + '%)</div><div class="stat">Distinct: ' + p.distinctCount.toLocaleString() + '</div>';
+          if (p.min !== null) stats.innerHTML += '<div class="stat">Min: ' + p.min + ' &middot; Max: ' + p.max + ' &middot; Avg: ' + (typeof p.avg === 'number' ? p.avg.toFixed(2) : p.avg) + '</div>';
+          if (p.topValues.length) stats.innerHTML += '<div class="stat">Top: ' + p.topValues.map(v => escapeHTML(String(v.value)) + ' (' + v.count + ')').join(', ') + '</div>';
+          stats.innerHTML += '<div class="stat">Samples: ' + p.sampleValues.map(v => escapeHTML(String(v))).join(', ') + '</div>';
+          const actions = el('div', { className: 'flex mt' });
+          const mkBtn = (text, sql) => { const b = el('button', { text, className: 'small' }); b.addEventListener('click', () => { document.getElementById('sql-editor').value = sql; runSQL(sql); switchTab('query'); }); return b; };
+          actions.append(
+            mkBtn('Preview', 'SELECT "' + p.name + '" FROM "' + tableName + '" LIMIT 100;'),
+            mkBtn('Count', 'SELECT "' + p.name + '", COUNT(*) AS count FROM "' + tableName + '" GROUP BY "' + p.name + '" ORDER BY count DESC LIMIT 25;'),
+            mkBtn('Nulls', 'SELECT COUNT(*) AS null_count FROM "' + tableName + '" WHERE "' + p.name + '" IS NULL;'),
+            mkBtn('Chart', 'SELECT "' + p.name + '", COUNT(*) AS count FROM "' + tableName + '" GROUP BY "' + p.name + '" ORDER BY count DESC LIMIT 25;')
+          );
+          card.appendChild(stats); card.appendChild(actions); grid.appendChild(card);
+        });
+        container.appendChild(grid);
+      } catch (err) { container.innerHTML = '<div class="error">Profile failed: ' + escapeHTML(err.message) + '</div>'; }
+    }
+    function detectSemanticType(name, duckType, prof, totalRows) {
+      const n = name.toLowerCase();
+      const d = duckType.toLowerCase();
+      if (n.includes('id') && prof.distinctCount / Math.max(totalRows, 1) > 0.9) return 'ID';
+      if (d.includes('date') || d.includes('timestamp')) return d.includes('timestamp') ? 'datetime' : 'date';
+      if (['lat','latitude','y'].some(s => n.includes(s)) && prof.min >= -90 && prof.max <= 90) return 'latitude';
+      if (['lon','lng','longitude','x'].some(s => n.includes(s)) && prof.min >= -180 && prof.max <= 180) return 'longitude';
+      if (['url','link','href'].some(s => n.includes(s))) return 'URL';
+      if (['email','e-mail'].some(s => n.includes(s))) return 'email';
+      if (['price','cost','revenue','amount','salary','fee'].some(s => n.includes(s)) && ['integer','bigint','double','decimal','float','real','numeric'].some(t => d.includes(t))) return 'currency';
+      if (['percent','pct','rate','ratio'].some(s => n.includes(s))) return 'percentage';
+      if (['integer','bigint','double','decimal','float','real','numeric','smallint','tinyint'].some(t => d.includes(t))) return 'numeric';
+      if (prof.distinctCount <= 20 && totalRows > 0) return 'category';
+      if (['boolean','bool'].some(t => d.includes(t))) return 'boolean';
+      if (['varchar','text','string','utf8'].some(t => d.includes(t)) && prof.sampleValues.some(v => String(v).length > 50)) return 'free text';
+      return 'unknown';
+    }
+
+    // === Query ===
+    async function runSQL(sql) {
+      if (!state.conn) { setStatus('DuckDB not ready', 'error'); return; }
+      const t0 = performance.now();
+      state.status.lastError = null;
+      try {
+        const substituted = substitutePlaceholders(sql);
+        const result = await state.conn.query(substituted);
+        const rows = result.toArray ? result.toArray() : [];
+        const columns = result.schema.fields.map(f => f.name);
+        const plainRows = rows.map(r => { const o = {}; columns.forEach(c => { const v = r[c]; o[c] = v === undefined ? null : v; }); return o; });
+        state.currentResults = { columns, rows: plainRows, sql: substituted, runtime: performance.now() - t0 };
+        state.status.lastQueryRuntime = state.currentResults.runtime;
+        renderResults();
+        setStatus('Returned ' + plainRows.length.toLocaleString() + ' rows in ' + state.currentResults.runtime.toFixed(1) + 'ms', 'success');
+        recordQueryHistory({ sql: substituted, runtime: state.currentResults.runtime, rowCount: plainRows.length, success: true, timestamp: nowISO() });
+      } catch (err) {
+        state.status.lastError = err.message || String(err);
+        state.currentResults = null;
+        document.getElementById('query-results').innerHTML = '<div class="error">' + escapeHTML(state.status.lastError) + '</div>';
+        document.getElementById('query-status').textContent = 'Error';
+        setStatus(state.status.lastError, 'error');
+        recordQueryHistory({ sql, runtime: performance.now() - t0, rowCount: 0, success: false, error: state.status.lastError, timestamp: nowISO() });
+      }
+      renderChartControls(); renderMapControls(); renderStatus();
+    }
+    function substitutePlaceholders(sql) {
+      const container = document.getElementById('query-placeholders');
+      if (!container) return sql;
+      const inputs = container.querySelectorAll('input');
+      let result = sql;
+      inputs.forEach(inp => { const ph = '{{' + inp.dataset.placeholder + '}}'; result = result.split(ph).join(inp.value); });
+      return result;
+    }
+    function clearQuery() { document.getElementById('sql-editor').value = ''; document.getElementById('query-results').innerHTML = ''; document.getElementById('query-status').textContent = ''; document.getElementById('query-placeholders').classList.add('hidden'); document.getElementById('query-placeholders').innerHTML = ''; state.currentResults = null; state.status.lastError = null; renderChartControls(); }
+    function renderResults() {
+      const container = document.getElementById('query-results'); container.innerHTML = '';
+      if (!state.currentResults) return;
+      const { columns, rows } = state.currentResults;
+      if (!columns.length) { container.appendChild(el('p', { className: 'muted', text: 'Query executed (no columns).' })); return; }
+      const placeholders = [];
+      const phRegex = /\{\{(\w+)\}\}/g; let m;
+      while ((m = phRegex.exec(state.currentResults.sql)) !== null) placeholders.push(m[1]);
+      const phContainer = document.getElementById('query-placeholders');
+      if (placeholders.length) {
+        phContainer.classList.remove('hidden'); phContainer.innerHTML = '';
+        placeholders.forEach(p => {
+          const lbl = el('label', { text: p + ': ', style: { fontSize: '0.78rem' } });
+          const inp = el('input', { attrs: { type: 'text', 'data-placeholder': p, value: p === 'table' && state.tables.length ? state.tables[0].name : p === 'limit' ? '100' : '' } });
+          const wrap = el('div'); wrap.appendChild(lbl); wrap.appendChild(inp); phContainer.appendChild(wrap);
+        });
+      } else { phContainer.classList.add('hidden'); }
+      const filterWrap = el('div', { className: 'flex mb' });
+      const filterInp = el('input', { attrs: { type: 'text', placeholder: 'Filter results...' }, style: { width: '200px' } });
+      filterInp.addEventListener('input', () => renderResultTable(columns, rows, filterInp.value));
+      filterWrap.appendChild(filterInp);
+      container.appendChild(filterWrap);
+      renderResultTable(columns, rows, '');
+      const info = el('div', { className: 'muted', style: { marginTop: '0.5rem', fontSize: '0.78rem' } });
+      info.textContent = Math.min(rows.length, state.settings.maxDisplayRows).toLocaleString() + ' of ' + rows.length.toLocaleString() + ' rows &middot; ' + columns.length + ' columns';
+      container.appendChild(info);
+    }
+    function renderResultTable(columns, rows, filterText) {
+      let displayRows = rows;
+      if (filterText) { const low = filterText.toLowerCase(); displayRows = rows.filter(r => columns.some(c => String(r[c] || '').toLowerCase().includes(low))); }
+      displayRows = displayRows.slice(0, state.settings.maxDisplayRows);
+      let wrap = document.querySelector('.results-wrap[data-results]');
+      if (!wrap) { wrap = el('div', { className: 'results-wrap', attrs: { 'data-results': 'true' } }); }
+      wrap.innerHTML = '';
+      const tbl = el('table');
+      const thead = el('thead'); const trh = el('tr');
+      columns.forEach(c => {
+        const th = el('th', { text: c, style: { cursor: 'pointer' } });
+        th.addEventListener('click', () => {
+          const sorted = [...rows].sort((a, b) => {
+            const av = a[c], bv = b[c];
+            if (av === null && bv !== null) return 1; if (bv === null && av !== null) return -1;
+            if (typeof av === 'number' && typeof bv === 'number') return av - bv;
+            return String(av).localeCompare(String(bv));
+          });
+          state.currentResults.rows = sorted;
+          renderResults();
+        });
+        trh.appendChild(th);
+      });
+      thead.appendChild(trh); tbl.appendChild(thead);
+      const tbody = el('tbody');
+      displayRows.forEach(r => { const tr = el('tr'); columns.forEach(c => { const v = r[c]; tr.appendChild(el('td', { text: (v === null || v === undefined) ? 'NULL' : String(v) })); }); tbody.appendChild(tr); });
+      tbl.appendChild(tbody); wrap.appendChild(tbl);
+      const container = document.getElementById('query-results');
+      if (!container.contains(wrap)) container.appendChild(wrap);
+    }
+    function recordQueryHistory(entry) {
+      if (!state.settings.enableHistory) return;
+      entry.tables = extractTableNames(entry.sql);
+      state.queryHistory.unshift(entry);
+      if (state.queryHistory.length > state.settings.maxHistoryItems) state.queryHistory.pop();
+      persistHistory();
+      renderRecentQueries();
+    }
+    function extractTableNames(sql) {
+      const tables = [];
+      const regex = /FROM\s+("?\w+"?)/gi; let m;
+      while ((m = regex.exec(sql)) !== null) { const t = m[1].replace(/"/g, ''); if (!tables.includes(t)) tables.push(t); }
+      const joinRegex = /JOIN\s+("?\w+"?)/gi;
+      while ((m = joinRegex.exec(sql)) !== null) { const t = m[1].replace(/"/g, ''); if (!tables.includes(t)) tables.push(t); }
+      return tables;
+    }
+    function persistHistory() { try { localStorage.setItem('qd2_history', JSON.stringify(state.queryHistory)); } catch {} }
+    function loadHistory() { try { const raw = localStorage.getItem('qd2_history'); if (raw) state.queryHistory = JSON.parse(raw); } catch {} }
+    function renderHistory() {
+      const container = document.getElementById('history-container'); container.innerHTML = '';
+      if (!state.queryHistory.length) { container.appendChild(el('p', { className: 'muted', text: 'No history.' })); return; }
+      state.queryHistory.forEach(h => {
+        const row = el('div', { className: 'query-row' });
+        const left = el('div');
+        left.innerHTML = '<strong>' + (h.success ? '<span class="success">&#10003;</span>' : '<span class="error">&#10007;</span>') + ' ' + formatDuration(h.runtime) + ' &middot; ' + h.rowCount.toLocaleString() + ' rows</strong><pre>' + escapeHTML(h.sql) + '</pre><div class="muted" style="font-size:0.75rem">' + escapeHTML(h.timestamp) + (h.tables.length ? ' &middot; ' + h.tables.join(', ') : '') + '</div>';
+        const actions = el('div', { className: 'actions' });
+        const mkBtn = (text, fn) => { const b = el('button', { text, className: 'small' }); b.addEventListener('click', fn); return b; };
+        actions.append(
+          mkBtn('Load', () => { document.getElementById('sql-editor').value = h.sql; switchTab('query'); }),
+          mkBtn('Rerun', () => { document.getElementById('sql-editor').value = h.sql; runSQL(h.sql); switchTab('query'); }),
+          mkBtn('Save', () => saveQuery({ name: 'From History', sql: h.sql })),
+          mkBtn('Delete', () => { state.queryHistory = state.queryHistory.filter(x => x !== h); persistHistory(); renderHistory(); renderRecentQueries(); })
+        );
+        row.append(left, actions); container.appendChild(row);
+      });
+    }
+    function renderRecentQueries() {
+      const list = document.getElementById('recent-query-list'); list.innerHTML = '';
+      state.queryHistory.slice(0, 10).forEach(h => {
+        const li = el('li', { text: (h.sql.length > 40 ? h.sql.slice(0, 40) + '...' : h.sql) });
+        li.addEventListener('click', () => { document.getElementById('sql-editor').value = h.sql; switchTab('query'); });
+        list.appendChild(li);
+      });
+    }
+
+    // === Saved Queries ===
+    function loadSavedQueries() {
+      try { const raw = localStorage.getItem('qd2_saved_queries'); if (raw) state.savedQueries = JSON.parse(raw); } catch {}
+      if (!state.savedQueries.length) seedSavedQueries();
+    }
+    function persistSavedQueries() { try { localStorage.setItem('qd2_saved_queries', JSON.stringify(state.savedQueries)); } catch {} }
+    function seedSavedQueries() {
+      const now = nowISO();
+      const packs = [
+        { pack: 'Basics', queries: [
+          { name: 'Preview table', sql: 'SELECT * FROM {{table}} LIMIT {{limit}};', description: 'Preview rows from a table.' },
+          { name: 'Count rows', sql: 'SELECT COUNT(*) AS rows FROM {{table}};', description: 'Count total rows.' },
+          { name: 'Describe', sql: 'DESCRIBE {{table}};', description: 'Show column types.' },
+        ]},
+        { pack: 'Data Quality', queries: [
+          { name: 'Null audit', sql: "SELECT '{{column}}' AS column_name, COUNT(*) AS total_rows, COUNT(\"{{column}}\") AS non_null_rows, COUNT(*) - COUNT(\"{{column}}\") AS null_rows FROM {{table}};", description: 'Count nulls in a column.' },
+          { name: 'Duplicate values', sql: 'SELECT "{{column}}", COUNT(*) AS count FROM {{table}} GROUP BY "{{column}}" HAVING COUNT(*) > 1 ORDER BY count DESC;', description: 'Find duplicate values.' },
+          { name: 'Top categories', sql: 'SELECT "{{column}}", COUNT(*) AS count FROM {{table}} GROUP BY "{{column}}" ORDER BY count DESC LIMIT 25;', description: 'Top values by frequency.' },
+        ]},
+        { pack: 'Numeric Analysis', queries: [
+          { name: 'Numeric summary', sql: 'SELECT MIN("{{column}}") AS min_value, MAX("{{column}}") AS max_value, AVG("{{column}}")::DOUBLE AS avg_value FROM {{table}};', description: 'Basic numeric summary.' },
+        ]},
+        { pack: 'Time Series', queries: [
+          { name: 'Date trend', sql: 'SELECT {{date_column}}, COUNT(*) AS count FROM {{table}} GROUP BY {{date_column}} ORDER BY {{date_column}};', description: 'Count by date.' },
+        ]},
+        { pack: 'Mapping', queries: [
+          { name: 'Map points', sql: 'SELECT {{label_column}}, {{lat_column}}, {{lon_column}} FROM {{table}} LIMIT 1000;', description: 'Select map columns.' },
+        ]},
+      ];
+      packs.forEach(p => p.queries.forEach(q => state.savedQueries.push({ id: generateId('q'), name: q.name, sql: q.sql, description: q.description, tags: [p.pack], favorite: false, created_at: now, updated_at: now, last_run_at: null, run_count: 0 })));
+      persistSavedQueries();
+    }
+    function saveQuery(opts) {
+      const id = generateId('q');
+      const now = nowISO();
+      state.savedQueries.push({ id, name: opts.name, sql: opts.sql, description: opts.description || '', tags: opts.tags || [], favorite: !!opts.favorite, created_at: now, updated_at: now, last_run_at: null, run_count: 0 });
+      persistSavedQueries(); renderSavedQueries(); setStatus('Query saved', 'success');
+    }
+    function renderSavedQueries() {
+      const sidebar = document.getElementById('saved-query-list'); sidebar.innerHTML = '';
+      const pinned = state.savedQueries.filter(q => q.favorite);
+      const rest = state.savedQueries.filter(q => !q.favorite);
+      [...pinned, ...rest].forEach(q => {
+        const li = el('li');
+        li.innerHTML = escapeHTML(q.name) + (q.favorite ? ' <span class="pin">&#9733;</span>' : '');
+        li.addEventListener('click', () => { document.getElementById('sql-editor').value = q.sql; document.getElementById('query-name').value = q.name; switchTab('query'); });
+        sidebar.appendChild(li);
+      });
+      const container = document.getElementById('saved-queries-container'); container.innerHTML = '';
+      const search = (document.getElementById('saved-search')?.value || '').toLowerCase();
+      const packFilter = document.getElementById('saved-filter-pack')?.value || '';
+      const filtered = state.savedQueries.filter(q => {
+        if (search && !q.name.toLowerCase().includes(search) && !q.sql.toLowerCase().includes(search)) return false;
+        if (packFilter && !q.tags.includes(packFilter)) return false;
+        return true;
+      });
+      if (!filtered.length) { container.appendChild(el('p', { className: 'muted', text: 'No queries match.' })); return; }
+      filtered.forEach(q => {
+        const row = el('div', { className: 'query-row' });
+        const left = el('div');
+        left.innerHTML = '<strong>' + escapeHTML(q.name) + '</strong> ' + (q.favorite ? '&#9733;' : '') + '<div class="muted" style="font-size:0.75rem">' + q.tags.map(t => escapeHTML(t)).join(', ') + ' &middot; ' + q.run_count + ' runs</div><pre>' + escapeHTML(q.sql) + '</pre>';
+        const actions = el('div', { className: 'actions' });
+        const mkBtn = (text, fn) => { const b = el('button', { text, className: 'small' }); b.addEventListener('click', fn); return b; };
+        actions.append(
+          mkBtn('Load', () => { document.getElementById('sql-editor').value = q.sql; document.getElementById('query-name').value = q.name; switchTab('query'); }),
+          mkBtn('Run', () => { document.getElementById('sql-editor').value = q.sql; runSQL(q.sql); switchTab('query'); q.run_count++; q.last_run_at = nowISO(); persistSavedQueries(); renderSavedQueries(); }),
+          mkBtn(q.favorite ? 'Unpin' : 'Pin', () => { q.favorite = !q.favorite; persistSavedQueries(); renderSavedQueries(); }),
+          mkBtn('Dup', () => { state.savedQueries.push({ ...deepCopy(q), id: generateId('q'), name: q.name + ' Copy', created_at: nowISO(), updated_at: nowISO(), run_count: 0 }); persistSavedQueries(); renderSavedQueries(); }),
+          mkBtn('Del', () => { if (confirm('Delete?')) { state.savedQueries = state.savedQueries.filter(x => x.id !== q.id); persistSavedQueries(); renderSavedQueries(); } })
+        );
+        row.append(left, actions); container.appendChild(row);
+      });
+    }
+    function importSavedQueries(data) {
+      if (!Array.isArray(data)) { setStatus('Invalid format', 'error'); return; }
+      let added = 0;
+      for (const item of data) {
+        if (!item || !item.sql) continue;
+        state.savedQueries.push({ id: generateId('q'), name: item.name || 'Imported', sql: item.sql, description: item.description || '', tags: item.tags || [], favorite: false, created_at: nowISO(), updated_at: nowISO(), last_run_at: null, run_count: 0 });
+        added++;
+      }
+      persistSavedQueries(); renderSavedQueries(); setStatus('Imported ' + added + ' queries', 'success');
+    }
+
+    // === Charts ===
+    function renderChartControls() {
+      const xSel = document.getElementById('chart-x'); const ySel = document.getElementById('chart-y'); const gSel = document.getElementById('chart-group');
+      xSel.innerHTML = ''; ySel.innerHTML = ''; gSel.innerHTML = '<option value="">(none)</option>';
+      if (!state.currentResults || !state.currentResults.columns.length) return;
+      state.currentResults.columns.forEach(c => { xSel.appendChild(el('option', { text: c, attrs: { value: c } })); ySel.appendChild(el('option', { text: c, attrs: { value: c } })); gSel.appendChild(el('option', { text: c, attrs: { value: c } })); });
+      if (state.currentResults.columns.length > 1) ySel.selectedIndex = 1;
+    }
+    async function drawChart() {
+      await loadChartModule(); if (!Chart) return setStatus('Chart.js unavailable', 'error');
+      const type = document.getElementById('chart-type').value;
+      const xCol = document.getElementById('chart-x').value;
+      const yCol = document.getElementById('chart-y').value;
+      const groupCol = document.getElementById('chart-group').value;
+      const agg = document.getElementById('chart-agg').value;
+      const limit = parseInt(document.getElementById('chart-limit').value) || 500;
+      if (!state.currentResults) return;
+      let rows = state.currentResults.rows.slice(0, limit);
+      const canvas = document.getElementById('chart-canvas');
+      if (currentChart) { currentChart.destroy(); currentChart = null; }
+      const ctx = canvas.getContext('2d');
+      const theme = document.documentElement.dataset.theme || 'dark';
+      const isDark = theme === 'dark' || theme === 'high-contrast-dark';
+      const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+      const textColor = isDark ? '#e5e7eb' : '#1a1a20';
+      let datasets = []; let labels = [];
+      if (groupCol) {
+        const groups = {};
+        rows.forEach(r => { const g = r[groupCol] ?? 'null'; if (!groups[g]) groups[g] = []; groups[g].push(r); });
+        const allX = [...new Set(rows.map(r => r[xCol] === null ? '' : String(r[xCol])))].sort();
+        labels = allX;
+        datasets = Object.entries(groups).map(([gName, gRows], idx) => {
+          const dataMap = {};
+          gRows.forEach(r => { const x = r[xCol] === null ? '' : String(r[xCol]); const y = Number(r[yCol]) || 0; dataMap[x] = (dataMap[x] || 0) + y; });
+          const data = allX.map(x => dataMap[x] || 0);
+          const colors = ['#f5b942','#60d394','#ff5f6d','#ffd166','#5fa8d3','#d35fa8','#8a63d2','#63d2a8'];
+          const c = colors[idx % colors.length];
+          return { label: String(gName), data, backgroundColor: type === 'pie' ? undefined : c + '80', borderColor: c, borderWidth: 2, fill: type === 'area' };
+        });
+      } else {
+        if (agg !== 'none') {
+          const groups = {};
+          rows.forEach(r => { const x = r[xCol] === null ? '' : String(r[xCol]); const y = Number(r[yCol]) || 0; if (!groups[x]) groups[x] = []; groups[x].push(y); });
+          labels = Object.keys(groups);
+          const data = labels.map(x => {
+            const vals = groups[x];
+            if (agg === 'count') return vals.length;
+            if (agg === 'sum') return vals.reduce((a, b) => a + b, 0);
+            if (agg === 'avg') return vals.reduce((a, b) => a + b, 0) / vals.length;
+            if (agg === 'min') return Math.min(...vals);
+            if (agg === 'max') return Math.max(...vals);
+            return vals[0];
+          });
+          datasets = [{ label: agg + '(' + yCol + ')', data, backgroundColor: 'rgba(245,185,66,0.5)', borderColor: '#f5b942', borderWidth: 2, fill: type === 'area' }];
+        } else {
+          labels = rows.map(r => r[xCol] === null ? '' : String(r[xCol]));
+          datasets = [{ label: yCol, data: rows.map(r => Number(r[yCol]) || 0), backgroundColor: 'rgba(245,185,66,0.5)', borderColor: '#f5b942', borderWidth: 2, fill: type === 'area' }];
+        }
+      }
+      const chartType = type === 'area' ? 'line' : type === 'barh' ? 'bar' : type === 'pie' ? 'pie' : type;
+      const config = {
+        type: chartType,
+        data: { labels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          indexAxis: type === 'barh' ? 'y' : 'x',
+          scales: chartType === 'pie' || chartType === 'doughnut' ? {} : { x: { ticks: { color: textColor }, grid: { color: gridColor } }, y: { ticks: { color: textColor }, grid: { color: gridColor }, beginAtZero: true } },
+          plugins: { legend: { labels: { color: textColor } }, title: { display: !!document.getElementById('chart-title').value, text: document.getElementById('chart-title').value, color: textColor } }
+        }
+      };
+      currentChart = new Chart(ctx, config);
+    }
+    function downloadChartPNG() { if (!currentChart) return; const url = currentChart.toBase64Image(); const a = el('a', { attrs: { href: url, download: 'chart.png' } }); document.body.appendChild(a); a.click(); a.remove(); }
+
+    // === Map ===
+    function renderMapControls() {
+      const latSel = document.getElementById('map-lat'); const lonSel = document.getElementById('map-lon'); const lblSel = document.getElementById('map-label');
+      latSel.innerHTML = ''; lonSel.innerHTML = ''; lblSel.innerHTML = '<option value="">(none)</option>';
+      const cols = state.currentResults ? state.currentResults.columns : (state.selectedTable ? state.tables.find(t => t.name === state.selectedTable)?.columns.map(c => c.name) : []);
+      if (!cols) return;
+      cols.forEach(c => { latSel.appendChild(el('option', { text: c, attrs: { value: c } })); lonSel.appendChild(el('option', { text: c, attrs: { value: c } })); lblSel.appendChild(el('option', { text: c, attrs: { value: c } })); });
+      const latCol = cols.find(c => ['lat','latitude','y'].some(s => c.toLowerCase().includes(s)));
+      const lonCol = cols.find(c => ['lon','lng','long','longitude','x'].some(s => c.toLowerCase().includes(s)));
+      if (latCol) latSel.value = latCol;
+      if (lonCol) lonSel.value = lonCol;
+    }
+    function renderMap() {
+      const source = document.getElementById('map-source').value;
+      const latCol = document.getElementById('map-lat').value;
+      const lonCol = document.getElementById('map-lon').value;
+      const lblCol = document.getElementById('map-label').value;
+      if (!latCol || !lonCol) return setStatus('Select latitude and longitude columns', 'error');
+      let rows = [];
+      if (source === 'results' && state.currentResults) rows = state.currentResults.rows;
+      else if (source === 'table' && state.selectedTable) {
+        setStatus('Query table for map data...', 'info');
+        (async () => {
+          try { const res = await state.conn.query('SELECT * FROM "' + state.selectedTable + '" LIMIT 5000'); const arr = res.toArray(); rows = arr.map(r => { const o = {}; Object.keys(r).forEach(k => o[k] = r[k]); return o; }); doRenderMap(rows, latCol, lonCol, lblCol); } catch (err) { setStatus(err.message, 'error'); }
+        })();
+        return;
+      }
+      doRenderMap(rows, latCol, lonCol, lblCol);
+    }
+    function doRenderMap(rows, latCol, lonCol, lblCol) {
+      if (!rows.length) return setStatus('No data to map', 'error');
+      if (rows.length > 5000) { if (!confirm('This has ' + rows.length.toLocaleString() + ' points. Render first 5,000?')) return; rows = rows.slice(0, 5000); }
+      if (!mapInstance) { mapInstance = L.map('map-container').setView([0, 0], 2); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(mapInstance); }
+      mapMarkers.forEach(m => mapInstance.removeLayer(m)); mapMarkers = [];
+      const validRows = rows.filter(r => r[latCol] != null && r[lonCol] != null && !isNaN(+r[latCol]) && !isNaN(+r[lonCol]));
+      if (!validRows.length) return setStatus('No valid coordinates', 'error');
+      validRows.forEach(r => {
+        const lat = +r[latCol]; const lon = +r[lonCol];
+        const marker = L.circleMarker([lat, lon], { radius: 5, color: '#f5b942', fillColor: '#f5b942', fillOpacity: 0.7 });
+        const popup = lblCol ? escapeHTML(String(r[lblCol])) + '<br>' + lat.toFixed(4) + ', ' + lon.toFixed(4) : lat.toFixed(4) + ', ' + lon.toFixed(4);
+        marker.bindPopup(popup);
+        marker.addTo(mapInstance); mapMarkers.push(marker);
+      });
+      const group = new L.featureGroup(mapMarkers); mapInstance.fitBounds(group.getBounds().pad(0.1));
+      setStatus('Mapped ' + validRows.length.toLocaleString() + ' points', 'success');
+    }
+    function exportMapGeoJSON() {
+      if (!mapMarkers.length) return setStatus('No map data', 'error');
+      const features = mapMarkers.map(m => { const ll = m.getLatLng(); return { type: 'Feature', geometry: { type: 'Point', coordinates: [ll.lng, ll.lat] }, properties: {} }; });
+      const blob = new Blob([JSON.stringify({ type: 'FeatureCollection', features }, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, 'map.geojson'); setStatus('GeoJSON exported', 'success');
+    }
+
+    // === Reports ===
+    function addToReport(section) { state.reportSections.push({ ...section, timestamp: nowISO() }); }
+    function previewReport() {
+      const container = document.getElementById('report-preview');
+      container.classList.remove('hidden');
+      container.textContent = buildReportMarkdown();
+    }
+    function buildReportMarkdown() {
+      const title = document.getElementById('report-title').value || 'Quack Drawer Report';
+      let md = '# ' + title + '\n\n';
+      md += 'Generated: ' + nowISO() + '\n\n';
+      if (state.tables.length) { md += '## Tables\n\n'; state.tables.forEach(t => { md += '- **' + t.name + '**: ' + t.rowCount.toLocaleString() + ' rows, ' + t.columns.length + ' columns\n'; }); md += '\n'; }
+      state.reportSections.forEach(s => {
+        if (s.type === 'query') { md += '## Query Result\n\n'; if (state.currentResults) { md += '```sql\n' + state.currentResults.sql + '\n```\n\nRows: ' + state.currentResults.rows.length.toLocaleString() + '\n\n'; } }
+        else if (s.type === 'profile') { md += '## Profile\n\n'; if (state.profileData) { md += 'Table: ' + state.profileData.tableName + '\nRows: ' + state.profileData.totalRows.toLocaleString() + '\nColumns: ' + state.profileData.columns.length + '\n\n'; } }
+        else if (s.type === 'chart') { md += '## Chart: ' + s.title + '\n\n'; }
+        else if (s.type === 'map') { md += '## Map\n\n'; }
+        else if (s.type === 'note') { md += '## Note\n\n' + s.content + '\n\n'; }
+      });
+      return md;
+    }
+    function copyReport() { const md = buildReportMarkdown(); navigator.clipboard.writeText(md).then(() => setStatus('Report copied', 'success')).catch(() => setStatus('Copy failed', 'error')); }
+    function downloadReport() { const blob = new Blob([buildReportMarkdown()], { type: 'text/markdown' }); downloadBlob(blob, 'report.md'); setStatus('Report downloaded', 'success'); }
+
+    // === AI Analyst ===
+    function renderAI() {
+      const enabled = state.settings.aiEnabled && state.settings.aiApiKey;
+      const msg = document.getElementById('ai-config-msg');
+      const btn = document.getElementById('btn-ai-run');
+      if (!enabled) { msg.classList.remove('hidden'); btn.disabled = true; }
+      else { msg.classList.add('hidden'); btn.disabled = false; }
+    }
+    async function runAIAction() {
+      if (!state.settings.aiEnabled || !state.settings.aiApiKey) return;
+      const action = document.getElementById('ai-action').value;
+      const chat = document.getElementById('ai-chat');
+      const prompt = buildAIPrompt(action);
+      const userMsg = el('div', { className: 'ai-msg user', html: '<strong>' + escapeHTML(action) + '</strong>' });
+      chat.appendChild(userMsg);
+      const assistantMsg = el('div', { className: 'ai-msg assistant', text: 'Thinking...' });
+      chat.appendChild(assistantMsg);
+      try {
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.settings.aiApiKey, 'HTTP-Referer': location.href },
+          body: JSON.stringify({
+            model: state.settings.aiModel || 'openai/gpt-4o-mini',
+            messages: [
+              { role: 'system', content: state.settings.aiSystemPrompt || 'You are a helpful data analyst.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.3, max_tokens: 1500
+          })
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error.message || 'API error');
+        const text = data.choices?.[0]?.message?.content || 'No response';
+        assistantMsg.textContent = text;
+      } catch (err) { assistantMsg.innerHTML = '<span class="error">Error: ' + escapeHTML(err.message) + '</span>'; }
+      chat.scrollTop = chat.scrollHeight;
+    }
+    function buildAIPrompt(action) {
+      let prompt = '';
+      const tables = state.tables.map(t => t.name + ': ' + t.rowCount + ' rows, columns: ' + t.columns.map(c => c.name + ' (' + c.type + ')').join(', ')).join('\n');
+      if (action === 'explain_dataset') prompt = 'Explain this dataset:\n' + tables;
+      else if (action === 'suggest_queries') prompt = 'Suggest useful SQL queries for these tables:\n' + tables;
+      else if (action === 'explain_sql') prompt = 'Explain this SQL:\n' + (state.currentResults?.sql || 'No SQL');
+      else if (action === 'explain_result') prompt = 'Explain these query results:\nSQL: ' + (state.currentResults?.sql || '') + '\nColumns: ' + (state.currentResults?.columns || []).join(', ') + '\nRows: ' + (state.currentResults?.rows || []).length;
+      else if (action === 'data_quality') prompt = 'Find possible data quality issues:\n' + tables;
+      else if (action === 'suggest_charts') prompt = 'Suggest useful charts for:\n' + tables;
+      else if (action === 'suggest_maps') prompt = 'Suggest map visualizations for:\n' + tables;
+      else if (action === 'report_narrative') prompt = 'Generate a narrative report for:\n' + tables;
+      return prompt;
+    }
+
+    // === Export ===
+    function exportResultsCSV() {
+      if (!state.currentResults) return setStatus('No results', 'error');
+      const { columns, rows } = state.currentResults;
+      const escape = v => { const s = v === null ? '' : String(v); if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"'; return s; };
+      const lines = [columns.join(','), ...rows.map(r => columns.map(c => escape(r[c])).join(','))];
+      downloadBlob(new Blob([lines.join('\n')], { type: 'text/csv' }), 'results.csv');
+      setStatus('CSV exported', 'success');
+    }
+    function exportResultsJSON() {
+      if (!state.currentResults) return setStatus('No results', 'error');
+      downloadBlob(new Blob([JSON.stringify(state.currentResults.rows, null, 2)], { type: 'application/json' }), 'results.json');
+      setStatus('JSON exported', 'success');
+    }
+    async function exportTableCSV(tableName) {
+      if (!state.conn) return;
+      try {
+        const res = await state.conn.query('SELECT * FROM "' + tableName + '"');
+        const rows = res.toArray();
+        const columns = res.schema.fields.map(f => f.name);
+        const escape = v => { const s = v === null ? '' : String(v); if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"'; return s; };
+        const lines = [columns.join(','), ...rows.map(r => columns.map(c => escape(r[c])).join(','))];
+        downloadBlob(new Blob([lines.join('\n')], { type: 'text/csv' }), tableName + '.csv');
+        setStatus('Table CSV exported', 'success');
+      } catch (err) { setStatus(err.message, 'error'); }
+    }
+    async function exportTableJSON(tableName) {
+      if (!state.conn) return;
+      try {
+        const res = await state.conn.query('SELECT * FROM "' + tableName + '"');
+        const rows = res.toArray();
+        const plain = rows.map(r => { const o = {}; Object.keys(r).forEach(k => o[k] = r[k]); return o; });
+        downloadBlob(new Blob([JSON.stringify(plain, null, 2)], { type: 'application/json' }), tableName + '.json');
+        setStatus('Table JSON exported', 'success');
+      } catch (err) { setStatus(err.message, 'error'); }
+    }
+    function exportSavedQueries() { downloadBlob(new Blob([JSON.stringify(state.savedQueries, null, 2)], { type: 'application/json' }), 'saved_queries.json'); setStatus('Saved queries exported', 'success'); }
+    function exportHistory() { downloadBlob(new Blob([JSON.stringify(state.queryHistory, null, 2)], { type: 'application/json' }), 'query_history.json'); setStatus('History exported', 'success'); }
+    function exportSessionManifest() {
+      const manifest = { app: 'Quack Drawer', version: '2.0', exported_at: nowISO(), theme: state.settings.theme, tables: state.tables.map(t => ({ name: t.name, row_count: t.rowCount, columns: t.columns, file_name: t.fileName, size: t.size, type: t.type, import_time: t.importTime })), saved_queries: state.savedQueries.map(q => ({ id: q.id, name: q.name, tags: q.tags, favorite: q.favorite, created_at: q.created_at })), query_history_summary: state.queryHistory.slice(0, 20).map(h => ({ sql: h.sql.slice(0, 200), runtime: h.runtime, row_count: h.rowCount, success: h.success, timestamp: h.timestamp })), capabilities: state.capabilities, notes: 'Manifest only; does not include full imported table data unless explicitly exported.' };
+      downloadBlob(new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' }), 'session_manifest.json');
+      setStatus('Manifest exported', 'success');
+    }
+    function downloadDebugReport() { const blob = new Blob([buildDebugText()], { type: 'text/plain' }); downloadBlob(blob, 'debug_report.txt'); }
+
+    // === Debug ===
+    function renderDebug() {
+      const list = document.getElementById('debug-list'); list.innerHTML = '';
+      const rows = [
+        ['App Version', '2.0'], ['User Agent', navigator.userAgent], ['WASM', state.capabilities.wasm], ['Worker', state.capabilities.worker],
+        ['DuckDB Loaded', state.status.dbState === 'ready'], ['DuckDB Version', state.status.dbVersion || 'N/A'], ['Bundle', state.status.bundleName || 'N/A'],
+        ['Init Time (ms)', state.initTime != null ? state.initTime.toFixed(1) : 'N/A'], ['OPFS', state.capabilities.opfs], ['File Picker', state.capabilities.filePicker],
+        ['crossOriginIsolated', state.capabilities.crossOriginIsolated], ['localStorage', state.capabilities.localStorage], ['IndexedDB', state.capabilities.indexedDB],
+        ['Theme', state.settings.theme], ['Tables', state.tables.length], ['Saved Queries', state.savedQueries.length],
+        ['Query History', state.queryHistory.length], ['Last SQL', state.currentResults ? state.currentResults.sql.slice(0, 200) : 'N/A'],
+        ['Last Runtime (ms)', state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) : 'N/A'], ['Last Error', state.status.lastError || 'None'],
+      ];
+      rows.forEach(([k, v]) => { const li = el('li'); li.appendChild(el('span', { text: k })); li.appendChild(el('span', { text: String(v) })); list.appendChild(li); });
+    }
+    function buildDebugText() {
+      return [
+        'Quack Drawer v2 Debug Report', 'Generated: ' + nowISO(), 'User Agent: ' + navigator.userAgent,
+        'WASM: ' + state.capabilities.wasm, 'Worker: ' + state.capabilities.worker, 'DuckDB State: ' + state.status.dbState,
+        'DuckDB Version: ' + (state.status.dbVersion || 'N/A'), 'Bundle: ' + (state.status.bundleName || 'N/A'),
+        'Init Time: ' + (state.initTime != null ? state.initTime.toFixed(1) + 'ms' : 'N/A'), 'OPFS: ' + state.capabilities.opfs,
+        'File Picker: ' + state.capabilities.filePicker, 'crossOriginIsolated: ' + state.capabilities.crossOriginIsolated,
+        'localStorage: ' + state.capabilities.localStorage, 'IndexedDB: ' + state.capabilities.indexedDB,
+        'Theme: ' + state.settings.theme, 'Tables: ' + state.tables.length, 'Saved Queries: ' + state.savedQueries.length,
+        'History: ' + state.queryHistory.length, 'Last SQL: ' + (state.currentResults ? state.currentResults.sql : 'N/A'),
+        'Last Runtime: ' + (state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) + 'ms' : 'N/A'), 'Last Error: ' + (state.status.lastError || 'None'),
+      ].join('\n');
+    }
+    function copyDebugReport() { navigator.clipboard.writeText(buildDebugText()).then(() => setStatus('Debug report copied', 'success')).catch(() => setStatus('Copy failed', 'error')); }
+    async function runSelfTest() {
+      const container = document.getElementById('self-test-results'); container.innerHTML = '';
+      const steps = [];
+      try {
+        if (!state.conn) throw new Error('DuckDB not connected');
+        steps.push('Connection OK');
+        await state.conn.query('CREATE TABLE __self_test (id INTEGER, name VARCHAR)');
+        steps.push('Create table OK');
+        await state.conn.query("INSERT INTO __self_test VALUES (1, 'test'), (2, 'hello')");
+        steps.push('Insert OK');
+        const res = await state.conn.query('SELECT * FROM __self_test ORDER BY id');
+        const rows = res.toArray();
+        if (rows.length !== 2) throw new Error('Expected 2 rows, got ' + rows.length);
+        if (rows[0].id !== 1 || rows[1].id !== 2) throw new Error('Unexpected row data');
+        steps.push('Query OK');
+        await state.conn.query('DROP TABLE __self_test');
+        steps.push('Drop table OK');
+        container.innerHTML = '<div class="success">Self test passed: ' + steps.join(' &rarr; ') + '</div>';
+      } catch (err) {
+        container.innerHTML = '<div class="error">Self test failed at: ' + (steps.length ? steps[steps.length - 1] : 'start') + '<br>' + escapeHTML(err.message) + '</div>';
+      }
+    }
+    function renderStatus() {
+      const st = document.getElementById('db-status');
+      st.textContent = state.status.dbState;
+      st.className = 'badge badge-' + (state.status.dbState === 'ready' ? 'ready' : state.status.dbState === 'failed' ? 'failed' : 'loading');
+      document.getElementById('table-count').textContent = 'Tables: ' + state.tables.length;
+      document.getElementById('query-runtime').textContent = state.status.lastQueryRuntime ? 'Last query: ' + state.status.lastQueryRuntime.toFixed(1) + 'ms' : '';
+    }
+    function render() { renderStatus(); renderTables(); renderSavedQueries(); renderChartControls(); renderMapControls(); renderAI(); }
+    function filterSidebar(term) {
+      const low = term.toLowerCase();
+      document.querySelectorAll('#table-list li').forEach(li => { li.style.display = li.textContent.toLowerCase().includes(low) ? '' : 'none'; });
+      document.querySelectorAll('#saved-query-list li').forEach(li => { li.style.display = li.textContent.toLowerCase().includes(low) ? '' : 'none'; });
+    }
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = el('a', { attrs: { href: url, download: filename } });
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    initApp();
+  </script>
+</body>
+</html>
