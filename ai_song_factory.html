@@ -817,6 +817,10 @@ pre.debug {
             <pre class="debug" id="debug-last-image"></pre>
           </div>
           <div class="debug-section">
+            <h4>Prompt History (last 10)</h4>
+            <pre class="debug" id="debug-prompt-history"></pre>
+          </div>
+          <div class="debug-section">
             <h4>Project Stats</h4>
             <pre class="debug" id="debug-project-stats"></pre>
           </div>
@@ -844,9 +848,9 @@ pre.debug {
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.6" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.6" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.6
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.7" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.7" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.7
 </footer>
 
 <script>
@@ -881,7 +885,8 @@ function getDefaultState() {
     youtube_packages: [],
     reviews: [],
     ai_jobs: [],
-    model_cache: { text: [], image: [] }
+    model_cache: { text: [], image: [] },
+    prompt_history: []
   };
 }
 
@@ -933,6 +938,27 @@ function getDefaultPromptTemplates() {
 Concept:
 {{concept}}
 
+Return ONLY a JSON object with this exact structure (no markdown, no extra text):
+{
+  "directions": [
+    {
+      "title": "title idea",
+      "genre": "genre name",
+      "tone": "tone description",
+      "lyrical_angle": "what the lyrics focus on",
+      "hook": "one-line hook",
+      "visual_style": "visual style idea",
+      "rationale": "why it works"
+    }
+  ]
+}
+
+Make the ideas distinct. Favor witty, vivid, usable concepts. Return ONLY valid JSON.`,
+    directions_fallback: `Given this song concept, generate 5 distinct creative directions.
+
+Concept:
+{{concept}}
+
 For each direction return:
 - title idea
 - genre
@@ -943,6 +969,7 @@ For each direction return:
 - why it works
 
 Make the ideas distinct. Favor witty, vivid, usable concepts.`,
+    plan: `Create a full production plan for this song direction.
     plan: `Create a full production plan for this song direction.
 
 Direction:
@@ -2104,7 +2131,18 @@ Written and produced with AI assistance. All vocals and instrumentation generate
   switchTab('concept');
 }
 
-/* ── Directions (Stub) ── */
+function recordPromptHistory(type, promptText) {
+  state.prompt_history.push({
+    id: 'ph_' + Date.now().toString(36),
+    type,
+    prompt: promptText.slice(0, 4000),
+    sent_at: new Date().toISOString()
+  });
+  if (state.prompt_history.length > 50) state.prompt_history = state.prompt_history.slice(-50);
+  saveState();
+}
+
+/* ── Directions ── */
 function generateDirections() {
   saveConceptFields();
   const proj = getCurrentProject();
@@ -2113,9 +2151,9 @@ function generateDirections() {
   if (!proj.concept.trim()) { showError('Enter a core concept first.'); return; }
   setLoading(true);
   updateStatus('Generating 5 creative directions…');
-  // Use template
   const tmpl = state.settings.prompt_templates.directions;
   const prompt = tmpl.replace(/{{concept}}/g, proj.concept);
+  recordPromptHistory('directions', prompt);
   callTextModel('directions', [{ role: 'user', content: prompt }])
     .then(res => { parseAndShowDirections(res.content); updateStatus('Directions generated'); })
     .catch(err => { showError(err.message); updateStatus('Error generating directions'); })
@@ -2131,42 +2169,40 @@ function parseAndShowDirections(text) {
   const proj = getCurrentProject();
   if (!proj) return;
 
-  // Try to extract direction blocks using multiple separators
-  const blocks = text.split(/(?:^|\n)(?:#{1,3}\s*)?(?:Direction|Option)\s*\d*[.:\-\s]*/im).filter(b => b.trim().length > 20);
-  const useBlocks = blocks.length >= 2 ? blocks : [text];
+  // Try JSON first
+  let directions = tryParseDirectionsJSON(text);
 
-  let parsedCount = 0;
-  useBlocks.forEach((block, idx) => {
-    if (!block.trim()) return;
-    const parsed = parseDirectionBlock(block.trim(), idx);
-    if (!parsed.title && !parsed.genre && !parsed.hook && block.trim().length < 40) return; // skip empty stubs
+  // Fallback to markdown parser
+  if (!directions || directions.length < 2) {
+    directions = parseDirectionsMarkdown(text);
+  }
 
-    const dirId = 'dir_' + Date.now().toString(36) + '_' + idx;
-    const dir = { id: dirId, song_id: proj.id, ...parsed };
-    state.directions.push(dir);
-    parsedCount++;
+  if (directions && directions.length >= 2) {
+    directions.forEach((dir, idx) => {
+      const dirId = 'dir_' + Date.now().toString(36) + '_' + idx;
+      const record = { id: dirId, song_id: proj.id, ...dir };
+      state.directions.push(record);
 
-    const card = document.createElement('div');
-    card.className = 'direction-card';
-    card.innerHTML = `
-      <h4>${escapeHTML(dir.title || `Direction ${idx + 1}`)}</h4>
-      <div class="dir-meta">${escapeHTML(dir.genre)} · ${escapeHTML(dir.tone)}</div>
-      ${dir.hook ? `<div class="dir-hook">"${escapeHTML(dir.hook)}"</div>` : ''}
-      ${dir.visual_angle ? `<div class="dir-meta">Visual: ${escapeHTML(dir.visual_angle)}</div>` : ''}
-      ${dir.rationale ? `<div class="dir-rationale">${escapeHTML(dir.rationale)}</div>` : ''}
-      <button class="btn primary small" onclick="selectDirection('${dirId}')">Use This Direction</button>
-    `;
-    list.appendChild(card);
-  });
-
-  // Fallback: if we parsed fewer than 2 real directions, show raw output with manual parse button
-  if (parsedCount < 2) {
-    list.innerHTML = '';
+      const card = document.createElement('div');
+      card.className = 'direction-card';
+      card.innerHTML = `
+        <h4>${escapeHTML(dir.title || `Direction ${idx + 1}`)}</h4>
+        <div class="dir-meta">${escapeHTML(dir.genre)} · ${escapeHTML(dir.tone)}</div>
+        ${dir.hook ? `<div class="dir-hook">"${escapeHTML(dir.hook)}"</div>` : ''}
+        ${dir.visual_style ? `<div class="dir-meta">Visual: ${escapeHTML(dir.visual_style)}</div>` : ''}
+        ${dir.rationale ? `<div class="dir-rationale">${escapeHTML(dir.rationale)}</div>` : ''}
+        <button class="btn primary small" onclick="selectDirection('${dirId}')">Use This Direction</button>
+      `;
+      list.appendChild(card);
+    });
+    saveState();
+  } else {
+    // Fallback: show raw output
     state.directions = state.directions.filter(d => d.song_id !== proj.id);
     const fallback = document.createElement('div');
     fallback.className = 'card';
     fallback.innerHTML = `
-      <h4>⚠️ Could not parse directions automatically</h4>
+      <h4>⚠️ Could not parse directions</h4>
       <p style="color:var(--text-2); font-size:.9rem; margin-bottom:.5rem;">The AI returned directions, but the format was unexpected. Here is the raw output — you can copy a direction into a new project manually, or try again.</p>
       <pre style="background:var(--bg-3); padding:.6rem; border-radius:6px; font-size:.85rem; white-space:pre-wrap; max-height:300px; overflow:auto;">${escapeHTML(text)}</pre>
       <div style="margin-top:.5rem; display:flex; gap:.4rem;">
@@ -2175,13 +2211,64 @@ function parseAndShowDirections(text) {
       </div>
     `;
     list.appendChild(fallback);
+    saveState();
   }
+}
 
-  saveState();
+function tryParseDirectionsJSON(text) {
+  try {
+    // Extract JSON from possible markdown code fences
+    let jsonText = text.trim();
+    const codeFence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeFence) jsonText = codeFence[1].trim();
+    // Sometimes the model wraps in a plain text preamble; find first { and last }
+    const firstBrace = jsonText.indexOf('{');
+    const lastBrace = jsonText.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      jsonText = jsonText.slice(firstBrace, lastBrace + 1);
+    }
+    const parsed = JSON.parse(jsonText);
+    if (parsed.directions && Array.isArray(parsed.directions)) {
+      return parsed.directions.map(d => ({
+        title: d.title || d.title_idea || '',
+        genre: d.genre || '',
+        tone: d.tone || '',
+        lyrical_angle: d.lyrical_angle || d.lyricalAngle || '',
+        hook: d.hook || d.one_line_hook || d.oneLineHook || '',
+        visual_style: d.visual_style || d.visualStyle || d.visual_style_idea || '',
+        rationale: d.rationale || d.why_it_works || d.whyItWorks || ''
+      }));
+    }
+    if (Array.isArray(parsed)) {
+      return parsed.map(d => ({
+        title: d.title || d.title_idea || '',
+        genre: d.genre || '',
+        tone: d.tone || '',
+        lyrical_angle: d.lyrical_angle || '',
+        hook: d.hook || '',
+        visual_style: d.visual_style || '',
+        rationale: d.rationale || ''
+      }));
+    }
+  } catch (e) {
+    console.log('JSON parse failed, falling back to markdown parser:', e.message);
+  }
+  return null;
+}
+
+function parseDirectionsMarkdown(text) {
+  const blocks = text.split(/(?:^|\n)(?:#{1,3}\s*)?(?:Direction|Option)\s*\d*[.:\-\s]*/im).filter(b => b.trim().length > 20);
+  const useBlocks = blocks.length >= 2 ? blocks : [text];
+  const results = [];
+  useBlocks.forEach((block, idx) => {
+    if (!block.trim()) return;
+    const parsed = parseDirectionBlock(block.trim(), idx);
+    if (parsed.title || parsed.genre || parsed.hook) results.push(parsed);
+  });
+  return results;
 }
 
 function parseDirectionBlock(text, idx) {
-  // Normalize markdown: strip bold/italic, bullets, numbering
   const clean = text
     .replace(/\*\*/g, '')
     .replace(/\*/g, '')
@@ -2189,7 +2276,6 @@ function parseDirectionBlock(text, idx) {
     .replace(/_/g, '')
     .replace(/^\s*[-•]\s+/gm, '')
     .replace(/^\s*\d+\.\s+/gm, '');
-
   const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
 
   const getVal = (keys) => {
@@ -2211,7 +2297,7 @@ function parseDirectionBlock(text, idx) {
   const visual = getVal(['visual style idea', 'visual style', 'visual', 'aesthetic', 'look']);
   const rationale = getVal(['why it works', 'rationale', 'why this works', 'reasoning', 'why']);
 
-  return { title, genre, tone, hook, visual_angle: visual, rationale };
+  return { title, genre, tone, hook, visual_style: visual, rationale };
 }
 
 function selectDirection(dirId) {
@@ -3748,6 +3834,17 @@ function renderDebug() {
     `Lyrics versions: ${state.lyrics_versions.length}\nSections: ${state.sections.length}\n` +
     `Image prompts: ${state.image_prompts.length}\nGenerated images: ${state.generated_images.length}\n` +
     `AI jobs: ${state.ai_jobs.length}`;
+  const phEl = document.getElementById('debug-prompt-history');
+  if (phEl) {
+    const recent = state.prompt_history.slice(-10).reverse();
+    if (!recent.length) {
+      phEl.textContent = 'No prompts sent yet.';
+    } else {
+      phEl.textContent = recent.map(p =>
+        `[${p.type}] ${new Date(p.sent_at).toLocaleTimeString()}\n${p.prompt.slice(0, 500)}${p.prompt.length > 500 ? '…' : ''}`
+      ).join('\n\n---\n\n');
+    }
+  }
   updateStorageEstimate();
 }
 
