@@ -844,9 +844,9 @@ pre.debug {
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.3" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.3" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.3
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.4" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.4" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.4
 </footer>
 
 <script>
@@ -1311,6 +1311,7 @@ async function callTextModel(taskType, messages, options = {}) {
   const maxTokens = settings.text_tokens;
 
   if (!key) throw new Error('Text AI API key not configured. Go to Settings, enter your key, and click Save Settings.');
+  if (!Array.isArray(messages)) throw new Error('Internal error: messages must be an array');
 
   recordAIJob({ song_id: currentProjectId, type: taskType, provider, model, status: 'running', input_summary: JSON.stringify(messages).slice(0, 200) });
 
@@ -1328,29 +1329,50 @@ async function callTextModel(taskType, messages, options = {}) {
       'X-Title': 'SongForge AI'
     };
     if (provider === 'openrouter') headers['OpenRouter-Beta'] = 'true';
-    body = JSON.stringify({
+    const payload = {
       model: model || 'openrouter/auto',
       messages: [
-        { role: 'system', content: settings.text_system },
+        { role: 'system', content: settings.text_system || 'You are a helpful assistant.' },
         ...messages
       ],
-      temperature: temp,
-      max_tokens: maxTokens,
+      temperature: typeof temp === 'number' && !isNaN(temp) ? temp : 0.8,
+      max_tokens: typeof maxTokens === 'number' && maxTokens > 0 ? maxTokens : 2048,
       ...options
-    });
+    };
+    body = JSON.stringify(payload);
   } else {
     throw new Error('Unsupported text provider: ' + provider);
   }
 
-  document.getElementById('debug-last-text').textContent = `POST ${url}\n\n${body}`;
+  const debugEl = document.getElementById('debug-last-text');
+  if (debugEl) debugEl.textContent = `POST ${url}\nmodel: ${model}\ntemp: ${temp}\nmax_tokens: ${maxTokens}\n\n${body.slice(0, 800)}`;
+  console.log('callTextModel request:', url, { model, temp, maxTokens, messagesCount: messages.length });
 
-  const resp = await fetch(url, { method: 'POST', headers, body });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error((data.error && data.error.message) || `HTTP ${resp.status}`);
-
-  const content = data.choices?.[0]?.message?.content || '';
-  recordAIJob({ song_id: currentProjectId, type: taskType, provider, model, status: 'complete', input_summary: JSON.stringify(messages).slice(0, 200), output_id: data.id || '' });
-  return { content, usage: data.usage, raw: data };
+  try {
+    const resp = await fetch(url, { method: 'POST', headers, body });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = (data.error && data.error.message) || `HTTP ${resp.status}`;
+      console.error('callTextModel HTTP error:', resp.status, data);
+      throw new Error(msg);
+    }
+    const content = data.choices?.[0]?.message?.content || '';
+    recordAIJob({ song_id: currentProjectId, type: taskType, provider, model, status: 'complete', input_summary: JSON.stringify(messages).slice(0, 200), output_id: data.id || '' });
+    return { content, usage: data.usage, raw: data };
+  } catch (err) {
+    console.error('callTextModel fetch error:', err);
+    if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+      throw new Error(
+        `Network error: Failed to fetch ${url}.\n` +
+        `This usually means:\n` +
+        `1. CORS blocked: serve this file from localhost (e.g. npx serve or python -m http.server) instead of opening file:// directly\n` +
+        `2. Network offline or URL unreachable\n` +
+        `3. Browser extension blocking the request\n` +
+        `Original error: ${err.message}`
+      );
+    }
+    throw err;
+  }
 }
 
 async function callImageModel(prompt, options = {}) {
@@ -1365,41 +1387,65 @@ async function callImageModel(prompt, options = {}) {
   }
   if (!key) throw new Error('Image AI API key not configured. Go to Settings, enter your key, and click Save Settings.');
 
-  recordAIJob({ song_id: currentProjectId, type: 'image', provider, model: settings.image_model, status: 'running', input_summary: prompt.slice(0, 200) });
+  recordAIJob({ song_id: currentProjectId, type: 'image', provider, model, status: 'running', input_summary: prompt.slice(0, 200) });
 
-  let result;
-  if (provider === 'openai') {
-    result = await callOpenAIImage(prompt, options);
-  } else if (provider === 'stability') {
-    result = await callStabilityImage(prompt, options);
-  } else if (provider === 'custom') {
-    result = await callCustomImage(prompt, options);
-  } else {
-    throw new Error('Unsupported image provider: ' + provider);
+  try {
+    let result;
+    if (provider === 'openai') {
+      result = await callOpenAIImage(prompt, options, key, model);
+    } else if (provider === 'stability') {
+      result = await callStabilityImage(prompt, options);
+    } else if (provider === 'custom') {
+      result = await callCustomImage(prompt, options);
+    } else {
+      throw new Error('Unsupported image provider: ' + provider);
+    }
+
+    recordAIJob({ song_id: currentProjectId, type: 'image', provider, model, status: 'complete', input_summary: prompt.slice(0, 200) });
+    const debugImg = document.getElementById('debug-last-image');
+    if (debugImg) debugImg.textContent = JSON.stringify({ prompt, result }, null, 2);
+    return result;
+  } catch (err) {
+    console.error('callImageModel error:', err);
+    if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+      throw new Error(
+        `Network error: Failed to fetch image API.\n` +
+        `This usually means CORS blocked the request. Serve this file from localhost instead of opening file:// directly.\n` +
+        `Original error: ${err.message}`
+      );
+    }
+    throw err;
   }
-
-  recordAIJob({ song_id: currentProjectId, type: 'image', provider, model: settings.image_model, status: 'complete', input_summary: prompt.slice(0, 200) });
-  document.getElementById('debug-last-image').textContent = JSON.stringify({ prompt, result }, null, 2);
-  return result;
 }
 
-async function callOpenAIImage(prompt, options) {
-  const resp = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.settings.image_key}` },
-    body: JSON.stringify({
-      model: state.settings.image_model || 'dall-e-3',
-      prompt,
-      n: options.n || state.settings.image_variants || 1,
-      size: mapAspectToSize(options.aspect || state.settings.image_aspect || 'wide'),
-      quality: state.settings.image_quality || 'standard',
-      style: state.settings.image_style || 'vivid',
-      response_format: 'url'
-    })
-  });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
-  return { url: data.data[0].url, provider: 'openai', model: state.settings.image_model, revised_prompt: data.data[0].revised_prompt };
+async function callOpenAIImage(prompt, options, key, model) {
+  const url = 'https://api.openai.com/v1/images/generations';
+  const payload = {
+    model: model || 'dall-e-3',
+    prompt,
+    n: options.n || state.settings.image_variants || 1,
+    size: mapAspectToSize(options.aspect || state.settings.image_aspect || 'wide'),
+    quality: state.settings.image_quality || 'standard',
+    style: state.settings.image_style || 'vivid',
+    response_format: 'url'
+  };
+  console.log('callOpenAIImage request:', url, { model: payload.model, size: payload.size });
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
+    return { url: data.data[0].url, provider: 'openai', model: payload.model, revised_prompt: data.data[0].revised_prompt };
+  } catch (err) {
+    console.error('callOpenAIImage fetch error:', err);
+    if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+      throw new Error(`Failed to reach OpenAI image API at ${url}. Check network/CORS.`);
+    }
+    throw err;
+  }
 }
 
 async function callStabilityImage(prompt, options) {
@@ -3668,8 +3714,9 @@ async function testTextModel() {
     alert('Text model OK:\n\n' + res.content.slice(0, 300));
     updateStatus('Text model test passed');
   } catch (e) {
-    alert('Text model test failed:\n' + e.message);
-    updateStatus('Text model test failed');
+    console.error('testTextModel error:', e);
+    alert('Text model test failed:\n' + e.message + '\n\nCheck browser console (F12) for full details.');
+    updateStatus('Text model test failed: ' + e.message.slice(0, 80));
   }
 }
 
@@ -3680,8 +3727,9 @@ async function testImageModel() {
     alert('Image model OK. URL/preview:\n' + res.url.slice(0, 100) + '…');
     updateStatus('Image model test passed');
   } catch (e) {
-    alert('Image model test failed:\n' + e.message);
-    updateStatus('Image model test failed');
+    console.error('testImageModel error:', e);
+    alert('Image model test failed:\n' + e.message + '\n\nCheck browser console (F12) for full details.');
+    updateStatus('Image model test failed: ' + e.message.slice(0, 80));
   }
 }
 
