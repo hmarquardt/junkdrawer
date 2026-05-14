@@ -737,7 +737,7 @@
             <thead><tr>
               <th>Species</th><th>Scientific name</th><th>Date</th><th>Year</th><th>Month</th>
               <th>County</th><th>Locality</th><th>Basis</th><th>Dataset</th>
-              <th>Lat</th><th>Lon</th><th>Uncertainty</th><th>ID</th>
+              <th>Lat</th><th>Lon</th><th>Uncertainty</th><th>ID</th><th>Copy</th>
             </tr></thead>
             <tbody id="records-tbody"></tbody>
           </table>
@@ -791,6 +791,7 @@
           <div class="chart-wrap"><h4 class="card-title">Records by Month</h4><canvas id="chart-months"></canvas></div>
           <div class="chart-wrap"><h4 class="card-title">Records by Year</h4><canvas id="chart-years"></canvas></div>
           <div class="chart-wrap"><h4 class="card-title">Species by Month</h4><canvas id="chart-species-month"></canvas></div>
+          <div class="chart-wrap"><h4 class="card-title">Basis of Record by Month</h4><canvas id="chart-basis-month"></canvas></div>
         </div>
         <div class="alert info" role="note" style="margin-top:1rem;">
           <span>ℹ️</span>
@@ -907,9 +908,9 @@
     </section>
   </main>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt &middot; GBIF Explorer &middot; version 2026.05.13.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt &middot; GBIF Explorer &middot; version 2026.05.14.1
   </footer>
 
   <script>
@@ -917,7 +918,7 @@
       'use strict';
 
       // ======================= Config =======================
-      const APP_VERSION = '2026.05.13.1';
+      const APP_VERSION = '2026.05.14.1';
       const GBIF_BASE = 'https://api.gbif.org/v1';
       const MAX_POINTS_RENDER = 5000;
       const RECORDS_PER_PAGE = 50;
@@ -1505,7 +1506,16 @@
           <td>${r.decimalLongitude != null ? r.decimalLongitude.toFixed(4) : ''}</td>
           <td>${r.coordinateUncertaintyInMeters != null ? Math.round(r.coordinateUncertaintyInMeters) + ' m' : ''}</td>
           <td><a href="${esc(r.references)}" target="_blank" rel="noopener" style="color:var(--accent);">${esc(r.gbifID).slice(0,12)}</a></td>
+          <td><button class="btn small secondary" data-copy-idx="${start+i}" title="Copy record JSON">📋</button></td>
         </tr>`).join('');
+        // attach copy handlers
+        elRecordsTbody.querySelectorAll('[data-copy-idx]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.copyIdx);
+            const rec = state.filteredRecords[idx];
+            navigator.clipboard.writeText(JSON.stringify(rec, null, 2)).then(() => showAlert('Record JSON copied to clipboard.', 'success'));
+          });
+        });
 
         // Pagination
         const pages = Math.max(1, Math.ceil(recs.length / RECORDS_PER_PAGE));
@@ -1662,12 +1672,17 @@
         const months = Array(12).fill(0);
         const years = {};
         const speciesByMonth = {};
+        const basisByMonth = {};
         recs.forEach(r => {
           if (r.month >= 1 && r.month <= 12) months[r.month - 1]++;
           if (r.year) years[r.year] = (years[r.year] || 0) + 1;
           if (r.species && r.month >= 1 && r.month <= 12) {
             if (!speciesByMonth[r.species]) speciesByMonth[r.species] = Array(12).fill(0);
             speciesByMonth[r.species][r.month - 1]++;
+          }
+          if (r.basisOfRecord && r.month >= 1 && r.month <= 12) {
+            if (!basisByMonth[r.basisOfRecord]) basisByMonth[r.basisOfRecord] = Array(12).fill(0);
+            basisByMonth[r.basisOfRecord][r.month - 1]++;
           }
         });
 
@@ -1679,13 +1694,23 @@
 
         // Species-by-month heatmap-like stacked bar
         const topSpecies = Object.entries(speciesByMonth).sort((a,b)=>b[1].reduce((s,n)=>s+n,0)-a[1].reduce((s,n)=>s+n,0)).slice(0,8);
-        const datasets = topSpecies.map(([sp, data], i) => ({
+        const spDatasets = topSpecies.map(([sp, data], i) => ({
           label: sp,
           data,
           backgroundColor: ['rgba(200,164,92,0.7)','rgba(93,138,102,0.7)','rgba(90,138,168,0.7)','rgba(168,122,90,0.7)','rgba(138,109,158,0.7)','rgba(109,138,138,0.7)','rgba(196,91,91,0.7)','rgba(138,158,109,0.7)'][i % 8],
           borderWidth: 0
         }));
-        renderChart('chart-species-month', 'bar', labels, datasets, true);
+        renderChart('chart-species-month', 'bar', labels, spDatasets, true);
+
+        // Basis-of-record by month stacked bar
+        const basisPalette = ['rgba(200,164,92,0.7)','rgba(93,138,102,0.7)','rgba(90,138,168,0.7)','rgba(168,122,90,0.7)','rgba(138,109,158,0.7)','rgba(109,138,138,0.7)','rgba(196,91,91,0.7)'];
+        const basisDatasets = Object.entries(basisByMonth).map(([basis, data], i) => ({
+          label: basis.replace(/_/g, ' '),
+          data,
+          backgroundColor: basisPalette[i % basisPalette.length],
+          borderWidth: 0
+        }));
+        renderChart('chart-basis-month', 'bar', labels, basisDatasets, true);
       }
 
       $('#season-species').addEventListener('change', renderSeasonality);

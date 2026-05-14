@@ -1,0 +1,3304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SongForge AI</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>" />
+<style>
+/* ── Theme Variables ── */
+:root {
+  --bg: #0f172a;
+  --bg-2: #1e293b;
+  --bg-3: #334155;
+  --text: #f1f5f9;
+  --text-2: #94a3b8;
+  --accent: #38bdf8;
+  --accent-2: #818cf8;
+  --danger: #f87171;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --border: #334155;
+  --input-bg: #1e293b;
+  --shadow: 0 4px 24px rgba(0,0,0,0.45);
+  --radius: 10px;
+  --font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --bg-2: #ffffff;
+  --bg-3: #e2e8f0;
+  --text: #0f172a;
+  --text-2: #475569;
+  --accent: #0284c7;
+  --accent-2: #6366f1;
+  --border: #cbd5e1;
+  --input-bg: #ffffff;
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+[data-theme="hc-dark"] {
+  --bg: #000000;
+  --bg-2: #111111;
+  --bg-3: #222222;
+  --text: #ffffff;
+  --text-2: #cccccc;
+  --accent: #00ffff;
+  --accent-2: #ff00ff;
+  --danger: #ff4444;
+  --success: #00ff00;
+  --warning: #ffff00;
+  --border: #ffffff;
+  --input-bg: #000000;
+  --shadow: none;
+}
+[data-theme="hc-light"] {
+  --bg: #ffffff;
+  --bg-2: #ffffff;
+  --bg-3: #eeeeee;
+  --text: #000000;
+  --text-2: #333333;
+  --accent: #0000ff;
+  --accent-2: #0000aa;
+  --danger: #cc0000;
+  --success: #008800;
+  --warning: #cc8800;
+  --border: #000000;
+  --input-bg: #ffffff;
+  --shadow: none;
+}
+
+/* ── Base ── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Layout ── */
+#app { display: flex; flex-direction: column; height: 100vh; }
+#top-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .6rem 1rem; background: var(--bg-2); border-bottom: 1px solid var(--border);
+  gap: .75rem; flex-wrap: wrap;
+}
+#top-bar h1 { font-size: 1.15rem; margin: 0; display: flex; align-items: center; gap: .4rem; }
+#top-bar .actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+#tab-bar {
+  display: flex; gap: .15rem; padding: .4rem .6rem 0; background: var(--bg-2);
+  border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin;
+}
+.tab-btn {
+  background: transparent; border: none; color: var(--text-2); padding: .5rem .9rem;
+  border-radius: var(--radius) var(--radius) 0 0; cursor: pointer; white-space: nowrap;
+  font-size: .82rem; font-weight: 600; transition: background .15s, color .15s;
+}
+.tab-btn:hover { color: var(--text); background: var(--bg-3); }
+.tab-btn.active { color: var(--text); background: var(--bg); border-bottom: 2px solid var(--accent); }
+#main { flex: 1; display: flex; overflow: hidden; }
+#sidebar {
+  width: 260px; min-width: 200px; background: var(--bg-2); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow-y: auto; padding: .75rem;
+}
+#sidebar h2 { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin: .5rem 0 .4rem; }
+#project-list { display: flex; flex-direction: column; gap: .35rem; }
+.project-item {
+  padding: .55rem .7rem; border-radius: 6px; cursor: pointer; font-size: .88rem;
+  background: var(--bg-3); border: 1px solid transparent; transition: border .15s;
+}
+.project-item:hover { border-color: var(--accent); }
+.project-item.active { border-color: var(--accent); background: rgba(56,189,248,.12); }
+.project-item .proj-title { font-weight: 600; }
+.project-item .proj-meta { font-size: .75rem; color: var(--text-2); }
+#content {
+  flex: 1; overflow-y: auto; padding: 1.25rem 1.5rem;
+}
+#status-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .35rem .9rem; background: var(--bg-2); border-top: 1px solid var(--border);
+  font-size: .78rem; color: var(--text-2); gap: .5rem; flex-wrap: wrap;
+}
+
+/* ── Utility ── */
+.hidden { display: none !important; }
+.card {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 1rem; margin-bottom: 1rem; box-shadow: var(--shadow);
+}
+.card h3 { margin: 0 0 .6rem; font-size: 1rem; }
+.row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.col { flex: 1; min-width: 220px; }
+label { display: block; font-size: .82rem; font-weight: 600; margin-bottom: .25rem; color: var(--text-2); }
+input[type="text"], input[type="password"], input[type="number"],
+select, textarea {
+  width: 100%; padding: .55rem .7rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--input-bg); color: var(--text); font-family: var(--font); font-size: .9rem;
+  outline: none; transition: border .15s, box-shadow .15s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.25); }
+textarea { resize: vertical; min-height: 80px; }
+select { cursor: pointer; }
+.btn {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .55rem .9rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg-3); color: var(--text); font-size: .85rem; font-weight: 600;
+  cursor: pointer; transition: background .15s, border .15s;
+}
+.btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn.small { padding: .35rem .55rem; font-size: .78rem; }
+.badge {
+  display: inline-block; padding: .18rem .5rem; border-radius: 999px; font-size: .72rem;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+}
+.badge.empty { background: var(--bg-3); color: var(--text-2); }
+.badge.good { background: rgba(74,222,128,.18); color: var(--success); }
+.badge.warn { background: rgba(251,191,36,.18); color: var(--warning); }
+.badge.error { background: rgba(248,113,113,.18); color: var(--danger); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: .3rem; }
+.status-dot.ok { background: var(--success); }
+.status-dot.bad { background: var(--danger); }
+.status-dot.warn { background: var(--warning); }
+
+/* ── Direction Cards ── */
+.direction-card {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 1rem; margin-bottom: .75rem; cursor: pointer; transition: border .2s, transform .15s;
+}
+.direction-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.direction-card.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.18); }
+.direction-card h4 { margin: 0 0 .35rem; font-size: 1rem; }
+.direction-card .dir-meta { font-size: .82rem; color: var(--text-2); margin-bottom: .4rem; }
+.direction-card .dir-hook { font-style: italic; color: var(--accent); margin-bottom: .4rem; }
+.direction-card .dir-rationale { font-size: .82rem; margin-bottom: .6rem; }
+
+/* ── Tabs content placeholder styling ── */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── Settings grid ── */
+.settings-group { margin-bottom: 1.5rem; }
+.settings-group h3 { font-size: .9rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-2); margin: 0 0 .6rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
+.field { margin-bottom: .75rem; }
+.field-row { display: flex; gap: .75rem; align-items: flex-end; flex-wrap: wrap; }
+.field-row .field { flex: 1; min-width: 180px; }
+
+/* ── Debug ── */
+.debug-section { margin-bottom: 1rem; }
+.debug-section h4 { margin: 0 0 .4rem; font-size: .88rem; }
+pre.debug {
+  background: var(--bg-3); padding: .6rem .8rem; border-radius: 6px; font-size: .8rem;
+  overflow-x: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--mono);
+}
+
+/* ── Responsive ── */
+@media (max-width: 760px) {
+  #sidebar { display: none; }
+  #top-bar { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Top Bar -->
+  <div id="top-bar">
+    <h1>🎵 SongForge AI</h1>
+    <div class="actions">
+      <button class="btn small" id="btn-new-project" onclick="createProject()">+ New Project</button>
+      <button class="btn small" id="btn-load-demo" onclick="loadDemo()">Load Demo</button>
+      <button class="btn small" onclick="switchTab('settings')">⚙️ Settings</button>
+      <select id="theme-select" onchange="setTheme(this.value)" aria-label="Theme">
+        <option value="system">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+        <option value="hc-dark">High Contrast Dark</option>
+        <option value="hc-light">High Contrast Light</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Tab Bar -->
+  <div id="tab-bar">
+    <button class="tab-btn active" data-tab="concept" onclick="switchTab('concept')">Concept</button>
+    <button class="tab-btn" data-tab="plan" onclick="switchTab('plan')">AI Plan</button>
+    <button class="tab-btn" data-tab="lyrics" onclick="switchTab('lyrics')">Lyrics</button>
+    <button class="tab-btn" data-tab="music" onclick="switchTab('music')">Music Prompt</button>
+    <button class="tab-btn" data-tab="visual" onclick="switchTab('visual')">Visual Style</button>
+    <button class="tab-btn" data-tab="images" onclick="switchTab('images')">Image Generation</button>
+    <button class="tab-btn" data-tab="thumbnail" onclick="switchTab('thumbnail')">Thumbnail</button>
+    <button class="tab-btn" data-tab="youtube" onclick="switchTab('youtube')">YouTube Package</button>
+    <button class="tab-btn" data-tab="review" onclick="switchTab('review')">Review</button>
+    <button class="tab-btn" data-tab="export" onclick="switchTab('export')">Export</button>
+    <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+    <button class="tab-btn" data-tab="debug" onclick="switchTab('debug')">Debug</button>
+  </div>
+
+  <!-- Main -->
+  <div id="main">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <h2>Projects</h2>
+      <div id="project-list"></div>
+      <div style="margin-top:auto; padding-top:1rem; border-top:1px solid var(--border);">
+        <div style="font-size:.75rem; color:var(--text-2);">
+          <span id="storage-used">Storage: calculating…</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main id="content">
+      <!-- CONCEPT TAB -->
+      <section id="tab-concept" class="tab-panel active">
+        <div class="card">
+          <h3>🎤 Start with a Concept</h3>
+          <div class="row">
+            <div class="col">
+              <div class="field">
+                <label for="c-working-title">Working Title</label>
+                <input type="text" id="c-working-title" placeholder="Untitled Song" />
+              </div>
+              <div class="field">
+                <label for="c-concept">Core Concept <span style="color:var(--danger)">*</span></label>
+                <textarea id="c-concept" rows="3" placeholder="Describe your song idea in a sentence or two."></textarea>
+              </div>
+              <div class="field">
+                <label for="c-tone">Tone</label>
+                <input type="text" id="c-tone" placeholder="e.g. sarcastic, earnest, dark" />
+              </div>
+              <div class="field">
+                <label for="c-genre">Genre Preference (optional)</label>
+                <input type="text" id="c-genre" placeholder="e.g. hard rock, synth-pop, country" />
+              </div>
+              <div class="field">
+                <label for="c-vocal">Vocal Preference (optional)</label>
+                <input type="text" id="c-vocal" placeholder="e.g. male, female, gritty, clean" />
+              </div>
+            </div>
+            <div class="col">
+              <div class="field">
+                <label for="c-humor">Humor Level</label>
+                <select id="c-humor">
+                  <option value="none">None / Serious</option>
+                  <option value="subtle">Subtle</option>
+                  <option value="moderate" selected>Moderate</option>
+                  <option value="high">High / Satirical</option>
+                  <option value="absurdist">Absurdist</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="c-explicit">Explicitness Level</label>
+                <select id="c-explicit">
+                  <option value="clean" selected>Clean / Family-Friendly</option>
+                  <option value="mild">Mild (suggestive)</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="explicit">Explicit</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="c-audience">Target Audience</label>
+                <input type="text" id="c-audience" placeholder="e.g. millennials, rock fans, YouTube algorithm" />
+              </div>
+              <div class="field">
+                <label for="c-symbols">Important Symbols / Images</label>
+                <input type="text" id="c-symbols" placeholder="e.g. neon signs, desert roads, broken mirrors" />
+              </div>
+              <div class="field">
+                <label for="c-avoid">Things to Avoid</label>
+                <input type="text" id="c-avoid" placeholder="e.g. cliches, specific artist names, certain topics" />
+              </div>
+            </div>
+          </div>
+          <div class="field" style="margin-top:.5rem;">
+            <label for="c-reference">Reference Notes</label>
+            <textarea id="c-reference" rows="2" placeholder="Links, inspirations, notes…"></textarea>
+          </div>
+          <div style="margin-top:.75rem; display:flex; gap:.5rem; flex-wrap:wrap; align-items:center;">
+            <button class="btn primary" onclick="generateDirections()">🎲 Generate 5 Directions</button>
+            <button class="btn" onclick="generatePlanDirect()">📋 Generate Full Song Plan</button>
+            <button class="btn" onclick="generateTitlesOnly()">🏷 Generate Titles Only</button>
+            <button class="btn" onclick="surpriseMe()">✨ Surprise Me</button>
+            <span id="concept-status" class="badge empty">Ready</span>
+          </div>
+        </div>
+
+        <!-- Directions container -->
+        <div id="directions-container" class="hidden">
+          <h3 style="margin:1rem 0 .5rem;">🧭 Creative Directions</h3>
+          <div id="directions-list"></div>
+        </div>
+      </section>
+
+      <!-- AI PLAN TAB -->
+      <section id="tab-plan" class="tab-panel">
+        <div class="card">
+          <h3>📋 AI Production Plan</h3>
+          <p style="color:var(--text-2); font-size:.9rem;">Select a direction from the Concept tab, then generate or refine your production plan here.</p>
+          <div id="plan-content">
+            <div class="field">
+              <label>Final Working Title</label>
+              <input type="text" id="p-title" />
+            </div>
+            <div class="field">
+              <label>Creative Brief</label>
+              <textarea id="p-brief" rows="3"></textarea>
+            </div>
+            <div class="row">
+              <div class="col">
+                <div class="field"><label>Genre / Style</label><input type="text" id="p-genre" /></div>
+                <div class="field"><label>Vocal Direction</label><input type="text" id="p-vocal" /></div>
+                <div class="field"><label>Lyrical POV</label><input type="text" id="p-pov" /></div>
+                <div class="field"><label>Narrative Arc</label><textarea id="p-arc" rows="2"></textarea></div>
+              </div>
+              <div class="col">
+                <div class="field"><label>Chorus Strategy</label><textarea id="p-chorus" rows="2"></textarea></div>
+                <div class="field"><label>Visual Style Idea</label><input type="text" id="p-visual" /></div>
+                <div class="field"><label>Recurring Symbols</label><input type="text" id="p-symbols" /></div>
+                <div class="field"><label>Thumbnail Angle</label><input type="text" id="p-thumbnail" /></div>
+                <div class="field"><label>YouTube Positioning</label><textarea id="p-youtube" rows="2"></textarea></div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:.75rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button class="btn primary" onclick="acceptPlan()">✅ Accept Plan</button>
+            <button class="btn" onclick="regeneratePlan()">🔄 Regenerate Plan</button>
+            <button class="btn small" onclick="tweakPlan('funnier')">😂 Funnier</button>
+            <button class="btn small" onclick="tweakPlan('darker')">🌑 Darker</button>
+            <button class="btn small" onclick="tweakPlan('commercial')">💰 More Commercial</button>
+            <button class="btn small" onclick="tweakPlan('absurd')">🤪 More Absurd</button>
+            <button class="btn small" onclick="tweakPlan('less-mean')">😇 Less Mean</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- LYRICS TAB -->
+      <section id="tab-lyrics" class="tab-panel">
+        <div class="card">
+          <h3>🎤 Lyrics</h3>
+          <div style="display:flex; gap:.5rem; align-items:center; margin-bottom:.6rem; flex-wrap:wrap;">
+            <label>Version:</label>
+            <select id="lyrics-version-select" onchange="loadLyricsVersion(this.value)"></select>
+            <button class="btn small" onclick="generateLyrics()">📝 Generate Lyrics</button>
+            <button class="btn small" onclick="regenerateLyrics()">🔄 Regenerate</button>
+            <button class="btn small" onclick="saveLyricsVersion()">💾 Save Version</button>
+          </div>
+          <textarea id="lyrics-editor" rows="16" placeholder="[Verse 1]
+…
+
+[Chorus]
+…"></textarea>
+          <div style="margin-top:.5rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button class="btn small" onclick="tweakLyrics('catchier-chorus')">🎯 Catchier Chorus</button>
+            <button class="btn small" onclick="tweakLyrics('more-sarcastic')">😏 More Sarcastic</button>
+            <button class="btn small" onclick="tweakLyrics('cleaner')">🧼 Cleaner</button>
+            <button class="btn small" onclick="tweakLyrics('dirtier')">🔥 Dirtier</button>
+            <button class="btn small" onclick="tweakLyrics('more-80s')">🎸 More 80s Rock</button>
+            <button class="btn small" onclick="tweakLyrics('shorten')">➖ Shorten</button>
+            <button class="btn small" onclick="tweakLyrics('expand')">➕ Expand</button>
+            <button class="btn small" onclick="copyToClipboard(document.getElementById('lyrics-editor').value)">📋 Copy</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- MUSIC PROMPT TAB -->
+      <section id="tab-music" class="tab-panel">
+        <div class="card">
+          <h3>🎶 Suno Music Prompt</h3>
+          <div class="field">
+            <label>Generated Prompt <span id="music-char-count" class="badge empty">0 / 200</span></label>
+            <textarea id="music-prompt" rows="3" oninput="updateMusicCharCount()"></textarea>
+          </div>
+          <div class="row">
+            <div class="col">
+              <div class="field"><label>Genre</label><input type="text" id="m-genre" /></div>
+              <div class="field"><label>Instrumentation</label><input type="text" id="m-instrumentation" /></div>
+              <div class="field"><label>Tempo</label><input type="text" id="m-tempo" /></div>
+            </div>
+            <div class="col">
+              <div class="field"><label>Vocal</label><input type="text" id="m-vocal" /></div>
+              <div class="field"><label>Mood</label><input type="text" id="m-mood" /></div>
+              <div class="field"><label>Production Notes</label><textarea id="m-production" rows="2"></textarea></div>
+            </div>
+          </div>
+          <div class="field"><label>Avoid Notes</label><input type="text" id="m-avoid" /></div>
+          <div style="margin-top:.5rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button class="btn primary" onclick="generateMusicPrompt()">🎵 Generate Suno Prompt</button>
+            <button class="btn" onclick="shortenMusicPrompt()">✂️ Shorten to 200</button>
+            <button class="btn small" onclick="tweakMusic('guitar')">🎸 More Guitar</button>
+            <button class="btn small" onclick="tweakMusic('bluesy')">🎺 More Bluesy</button>
+            <button class="btn small" onclick="tweakMusic('metal')">🤘 More Metal</button>
+            <button class="btn small" onclick="tweakMusic('danceable')">💃 More Danceable</button>
+            <button class="btn" onclick="copyToClipboard(document.getElementById('music-prompt').value)">📋 Copy</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- VISUAL STYLE TAB -->
+      <section id="tab-visual" class="tab-panel">
+        <div class="card">
+          <h3>🎨 Visual Style Guide</h3>
+          <div id="visual-lock-banner" class="hidden" style="background:rgba(74,222,128,.12); border:1px solid var(--success); padding:.6rem .9rem; border-radius:6px; margin-bottom:.75rem; font-size:.9rem;">
+            🔒 Visual style is <strong>locked</strong>. It will be injected into all section image prompts.
+            <button class="btn small danger" style="margin-left:.5rem;" onclick="unlockVisualStyle()">Unlock</button>
+          </div>
+          <div class="row">
+            <div class="col">
+              <div class="field"><label>Visual Style Name</label><input type="text" id="v-name" /></div>
+              <div class="field"><label>Medium</label><input type="text" id="v-medium" placeholder="e.g. digital painting, 3D render, photography" /></div>
+              <div class="field"><label>Palette</label><input type="text" id="v-palette" placeholder="e.g. neon magenta and deep navy" /></div>
+              <div class="field"><label>Lighting</label><input type="text" id="v-lighting" /></div>
+              <div class="field"><label>Camera / Composition</label><textarea id="v-camera" rows="2"></textarea></div>
+            </div>
+            <div class="col">
+              <div class="field"><label>Character Continuity Notes</label><textarea id="v-character" rows="2"></textarea></div>
+              <div class="field"><label>Recurring Symbols</label><input type="text" id="v-symbols" /></div>
+              <div class="field"><label>Negative Rules</label><textarea id="v-negative" rows="2" placeholder="e.g. no text, no logos, no readable signage"></textarea></div>
+              <div class="field">
+                <label>Aspect Ratio</label>
+                <select id="v-aspect">
+                  <option value="wide" selected>Wide (16:9)</option>
+                  <option value="square">Square (1:1)</option>
+                  <option value="portrait">Portrait (9:16)</option>
+                  <option value="cinematic">Cinematic (21:9)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label><input type="checkbox" id="v-no-text" checked /> No text / logos in section images</label>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:.5rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button class="btn primary" onclick="generateVisualStyle()">🎨 Generate Visual Style</button>
+            <button class="btn" onclick="regenerateVisualStyle()">🔄 Regenerate</button>
+            <button class="btn small" onclick="tweakVisual('hyper-realistic')">📷 Hyper-Realistic</button>
+            <button class="btn small" onclick="tweakVisual('comic-noir')">🖋 Comic Noir</button>
+            <button class="btn small" onclick="tweakVisual('absurd')">🤪 More Absurd</button>
+            <button class="btn small" onclick="tweakVisual('darker')">🌑 Darker</button>
+            <button class="btn small" onclick="tweakVisual('colorful')">🌈 More Colorful</button>
+            <button class="btn" id="btn-lock-style" onclick="lockVisualStyle()">🔒 Lock Style</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- IMAGE GENERATION TAB -->
+      <section id="tab-images" class="tab-panel">
+        <div class="card">
+          <h3>🖼 Image Generation</h3>
+          <p style="color:var(--text-2); font-size:.9rem;">Detect sections from lyrics, generate prompts, then generate actual images.</p>
+          <div style="display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:.75rem;">
+            <button class="btn" onclick="detectSections()">🔍 Detect Sections</button>
+            <button class="btn" onclick="generateSectionImagePrompts()">📝 Generate All Prompts</button>
+            <button class="btn primary" onclick="generateAllImages()">🖼 Generate All Images</button>
+            <button class="btn" onclick="generateMissingImages()">➕ Generate Missing</button>
+            <button class="btn" onclick="regenerateRejectedImages()">🔄 Regenerate Rejected</button>
+            <button class="btn" onclick="copyAllImagePrompts()">📋 Copy All Prompts</button>
+            <button class="btn" onclick="exportImageManifest()">📄 Export Manifest</button>
+          </div>
+          <div id="sections-container"></div>
+        </div>
+      </section>
+
+      <!-- THUMBNAIL TAB -->
+      <section id="tab-thumbnail" class="tab-panel">
+        <div class="card">
+          <h3>🎬 Thumbnail</h3>
+          <div class="row">
+            <div class="col">
+              <div class="field"><label>Thumbnail Strategy</label><input type="text" id="t-strategy" /></div>
+              <div class="field"><label>Thumbnail Title Text</label><input type="text" id="t-title-text" /></div>
+              <div class="field"><label>Subtitle (optional)</label><input type="text" id="t-subtitle" /></div>
+              <div class="field"><label>Composition</label><textarea id="t-composition" rows="2"></textarea></div>
+            </div>
+            <div class="col">
+              <div class="field"><label>Character / Subject</label><input type="text" id="t-character" /></div>
+              <div class="field"><label>Background</label><input type="text" id="t-background" /></div>
+              <div class="field"><label>Font Direction</label><input type="text" id="t-font" /></div>
+              <div class="field"><label>Text Placement</label><input type="text" id="t-placement" /></div>
+              <div class="field">
+                <label><input type="checkbox" id="t-high-contrast" /> High contrast</label>
+                <label><input type="checkbox" id="t-include-text" checked /> Include text on thumbnail</label>
+                <label><input type="checkbox" id="t-no-text" /> No text (cover visual only)</label>
+              </div>
+            </div>
+          </div>
+          <div id="thumbnail-preview" style="margin:.75rem 0; min-height:120px; border:1px dashed var(--border); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:.9rem;">
+            No thumbnail generated yet.
+          </div>
+          <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button class="btn" onclick="generateThumbnailConcepts()">💡 Generate Concepts</button>
+            <button class="btn" onclick="generateThumbnailPrompt()">📝 Generate Prompt</button>
+            <button class="btn primary" onclick="generateThumbnailImage()">🖼 Generate Thumbnail</button>
+            <button class="btn" onclick="generateThumbnailVariants()">🎲 4 Variants</button>
+            <button class="btn" onclick="copyToClipboard(document.getElementById('t-prompt')?.value||'')">📋 Copy Prompt</button>
+            <button class="btn" onclick="downloadThumbnail()">⬇ Download</button>
+            <button class="btn" onclick="acceptThumbnail()">✅ Accept</button>
+          </div>
+          <div class="field" style="margin-top:.5rem;">
+            <label>Thumbnail Prompt</label>
+            <textarea id="t-prompt" rows="3" placeholder="Generated prompt will appear here…"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- YOUTUBE PACKAGE TAB -->
+      <section id="tab-youtube" class="tab-panel">
+        <div class="card">
+          <h3>📺 YouTube Package</h3>
+          <div class="row">
+            <div class="col">
+              <div class="field"><label>Video Title</label><input type="text" id="y-title" /></div>
+              <div class="field"><label>Alternate Titles</label><textarea id="y-alts" rows="3"></textarea></div>
+              <div class="field"><label>Description</label><textarea id="y-description" rows="5"></textarea></div>
+            </div>
+            <div class="col">
+              <div class="field"><label>Hashtags</label><textarea id="y-hashtags" rows="2"></textarea></div>
+              <div class="field"><label>Pinned Comment</label><textarea id="y-comment" rows="3"></textarea></div>
+              <div class="field"><label>Thumbnail Title Text</label><input type="text" id="y-thumb-text" /></div>
+              <div class="field">
+                <label><input type="checkbox" id="y-tipjar" /> Include tip jar</label>
+              </div>
+              <div class="field"><label>YouTube URL (after publish)</label><input type="text" id="y-url" /></div>
+              <div class="field"><label>Published Date</label><input type="date" id="y-date" /></div>
+            </div>
+          </div>
+          <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button class="btn primary" onclick="generateYouTubePackage()">📺 Generate Package</button>
+            <button class="btn" onclick="generateTitleOptions()">🏷 10 Title Options</button>
+            <button class="btn" onclick="rewriteDescription()">📝 Rewrite Description</button>
+            <button class="btn small" onclick="tweakYouTube('clickable')">👆 More Clickable</button>
+            <button class="btn small" onclick="tweakYouTube('less-clickbait')">😇 Less Clickbaity</button>
+            <button class="btn" onclick="copyToClipboard(document.getElementById('y-title').value + '\n\n' + document.getElementById('y-description').value)">📋 Copy Full</button>
+            <button class="btn" onclick="copyToClipboard(document.getElementById('y-description').value)">📋 Copy Desc</button>
+            <button class="btn" onclick="copyToClipboard(document.getElementById('y-hashtags').value)">📋 Copy Hashtags</button>
+            <button class="btn" onclick="copyToClipboard(document.getElementById('y-comment').value)">📋 Copy Comment</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- REVIEW TAB -->
+      <section id="tab-review" class="tab-panel">
+        <div class="card">
+          <h3>🔍 Production Review</h3>
+          <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+            <div class="col" style="flex:1; min-width:260px;">
+              <h4>Mechanical Checklist</h4>
+              <ul id="review-checklist" style="list-style:none; padding:0; font-size:.9rem;">
+                <!-- populated by JS -->
+              </ul>
+            </div>
+            <div class="col" style="flex:2; min-width:260px;">
+              <h4>AI Production Review</h4>
+              <button class="btn primary" onclick="runProductionReview()">🤖 Run AI Review</button>
+              <div id="ai-review-output" style="margin-top:.6rem; padding:.6rem; background:var(--bg-3); border-radius:6px; font-size:.9rem; min-height:60px;">
+                Click "Run AI Review" to analyze your song project.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- EXPORT TAB -->
+      <section id="tab-export" class="tab-panel">
+        <div class="card">
+          <h3>📦 Export</h3>
+          <div class="row">
+            <div class="col">
+              <h4>Text Exports</h4>
+              <div style="display:flex; flex-direction:column; gap:.4rem;">
+                <button class="btn" onclick="exportProjectMarkdown()">📝 Full Project Markdown</button>
+                <button class="btn" onclick="exportLyricsTXT()">📄 Lyrics TXT</button>
+                <button class="btn" onclick="exportSunoTXT()">🎵 Suno Prompt TXT</button>
+                <button class="btn" onclick="exportImagePromptsMD()">🖼 Image Prompts Markdown</button>
+                <button class="btn" onclick="exportYouTubeMD()">📺 YouTube Package Markdown</button>
+                <button class="btn" onclick="exportReviewMD()">🔍 Review Markdown</button>
+                <button class="btn" onclick="exportProjectJSON()">📋 Project JSON</button>
+                <button class="btn" onclick="exportAllProjectsJSON()">📁 All Projects JSON</button>
+              </div>
+            </div>
+            <div class="col">
+              <h4>Image Exports</h4>
+              <div style="display:flex; flex-direction:column; gap:.4rem;">
+                <button class="btn" onclick="downloadAllAcceptedImages()">⬇ All Accepted Section Images</button>
+                <button class="btn" onclick="downloadThumbnail()">⬇ Thumbnail</button>
+                <button class="btn" onclick="exportImageManifest()">📄 Image Manifest JSON</button>
+              </div>
+              <h4 style="margin-top:.75rem;">Bundle</h4>
+              <button class="btn primary" onclick="exportZIPBundle()">🗜 ZIP Bundle (JSZip)</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS TAB -->
+      <section id="tab-settings" class="tab-panel">
+        <div class="card">
+          <h3>⚙️ Settings</h3>
+
+          <div class="settings-group">
+            <h3>Text AI</h3>
+            <div class="field-row">
+              <div class="field"><label>Provider</label><select id="s-text-provider"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="custom">Custom</option></select></div>
+              <div class="field"><label>API Key</label><input type="password" id="s-text-key" placeholder="sk-… or openrouter key" /></div>
+              <div class="field"><label>Model</label><input type="text" id="s-text-model" value="openrouter/auto" placeholder="e.g. openrouter/auto" /></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Temperature</label><input type="number" id="s-text-temp" step="0.1" min="0" max="2" value="0.8" /></div>
+              <div class="field"><label>Max Tokens</label><input type="number" id="s-text-tokens" value="2048" /></div>
+            </div>
+            <div class="field"><label>System Prompt</label><textarea id="s-text-system" rows="2">You are a creative songwriting and production assistant. You write vivid lyrics, sharp prompts, and actionable creative briefs.</textarea></div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Image AI</h3>
+            <div class="field-row">
+              <div class="field"><label>Provider</label><select id="s-img-provider"><option value="openai">OpenAI DALL-E</option><option value="stability">Stability AI</option><option value="custom">Custom</option><option value="">None / Prompts Only</option></select></div>
+              <div class="field"><label>API Key</label><input type="password" id="s-img-key" /></div>
+              <div class="field"><label>Model</label><input type="text" id="s-img-model" placeholder="dall-e-3, etc." /></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Default Aspect</label><select id="s-img-aspect"><option value="wide" selected>Wide (16:9)</option><option value="square">Square (1:1)</option><option value="portrait">Portrait (9:16)</option></select></div>
+              <div class="field"><label>Default Variants</label><input type="number" id="s-img-variants" value="1" min="1" max="4" /></div>
+              <div class="field"><label>Quality</label><input type="text" id="s-img-quality" placeholder="standard, hd" /></div>
+              <div class="field"><label>Style</label><input type="text" id="s-img-style" placeholder="vivid, natural" /></div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Review AI</h3>
+            <div class="field">
+              <label><input type="checkbox" id="s-review-same" checked /> Use same settings as Text AI</label>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Provider</label><select id="s-review-provider"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="custom">Custom</option></select></div>
+              <div class="field"><label>API Key</label><input type="password" id="s-review-key" /></div>
+              <div class="field"><label>Model</label><input type="text" id="s-review-model" /></div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Workflow Defaults</h3>
+            <div class="field-row">
+              <div class="field"><label>Default Genre</label><input type="text" id="s-def-genre" /></div>
+              <div class="field"><label>Default Vocal</label><input type="text" id="s-def-vocal" /></div>
+              <div class="field"><label>Default Tone</label><input type="text" id="s-def-tone" /></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Default Aspect Ratio</label><select id="s-def-aspect"><option value="wide" selected>Wide</option><option value="square">Square</option><option value="portrait">Portrait</option></select></div>
+              <div class="field"><label>Default Image Count</label><input type="number" id="s-def-img-count" value="1" /></div>
+              <div class="field"><label>Suno Max Chars</label><input type="number" id="s-suno-max" value="200" /></div>
+            </div>
+            <div class="field">
+              <label><input type="checkbox" id="s-no-text" checked /> Default no-text rule for section images</label>
+              <label><input type="checkbox" id="s-thumb-text" checked /> Default thumbnail includes text</label>
+              <label><input type="checkbox" id="s-autosave" checked /> Autosave on/off</label>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>YouTube Settings</h3>
+            <div class="field"><label>Default Hashtags</label><textarea id="s-def-hashtags" rows="2">#AImusic #Suno #NewMusic #IndieMusic #SongForge</textarea></div>
+            <div class="field"><label>Tip Jar Block</label><textarea id="s-tipjar-block" rows="3">☕ If you enjoy this track, support the channel: [your tip link]</textarea></div>
+            <div class="field">
+              <label><input type="checkbox" id="s-tipjar-default" /> Include tip jar by default</label>
+              <label><input type="checkbox" id="s-tipjar-above" checked /> Place tip jar above hashtags</label>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Advanced — Prompt Templates</h3>
+            <p style="font-size:.85rem; color:var(--text-2);">Edit the system prompts used for each generation step. Use {{variable}} placeholders.</p>
+            <div id="prompt-templates-container"></div>
+          </div>
+
+          <div style="display:flex; gap:.5rem; margin-top:1rem;">
+            <button class="btn primary" onclick="saveSettings()">💾 Save Settings</button>
+            <button class="btn danger" onclick="resetSettings()">↺ Reset to Defaults</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- DEBUG TAB -->
+      <section id="tab-debug" class="tab-panel">
+        <div class="card">
+          <h3>🐛 Debug</h3>
+          <div class="debug-section">
+            <h4>App Info</h4>
+            <pre class="debug" id="debug-app-info"></pre>
+          </div>
+          <div class="debug-section">
+            <h4>AI Provider Status</h4>
+            <pre class="debug" id="debug-provider-status"></pre>
+          </div>
+          <div class="debug-section">
+            <h4>Last Text Request</h4>
+            <pre class="debug" id="debug-last-text"></pre>
+          </div>
+          <div class="debug-section">
+            <h4>Last Image Request</h4>
+            <pre class="debug" id="debug-last-image"></pre>
+          </div>
+          <div class="debug-section">
+            <h4>Project Stats</h4>
+            <pre class="debug" id="debug-project-stats"></pre>
+          </div>
+          <div class="debug-section">
+            <h4>Storage Estimate</h4>
+            <pre class="debug" id="debug-storage"></pre>
+          </div>
+          <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button class="btn" onclick="testTextModel()">🧪 Test Text Model</button>
+            <button class="btn" onclick="testImageModel()">🧪 Test Image Model</button>
+            <button class="btn" onclick="copyDebugReport()">📋 Copy Debug Report</button>
+            <button class="btn" onclick="exportRawState()">📄 Export Raw State</button>
+            <button class="btn" onclick="clearFailedJobs()">🧹 Clear Failed Jobs</button>
+            <button class="btn danger" onclick="factoryReset()">💥 Factory Reset</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Status Bar -->
+  <div id="status-bar">
+    <span id="status-msg">Ready</span>
+    <span id="status-project">No project selected</span>
+  </div>
+</div>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.1" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.1
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   SongForge AI — Core Engine
+   ═══════════════════════════════════════════════════════════════ */
+
+const APP_VERSION = '1.0';
+const STORAGE_KEY = 'songforge_state';
+const DB_NAME = 'songforge_images';
+const DB_VERSION = 1;
+
+let state = null;
+let currentProjectId = null;
+let db = null;
+
+/* ── Default State ── */
+function getDefaultState() {
+  return {
+    version: APP_VERSION,
+    settings: getDefaultSettings(),
+    projects: [],
+    directions: [],
+    plans: [],
+    lyrics_versions: [],
+    sections: [],
+    music_prompts: [],
+    visual_styles: [],
+    image_prompts: [],
+    generated_images: [],
+    thumbnail_assets: [],
+    youtube_packages: [],
+    reviews: [],
+    ai_jobs: []
+  };
+}
+
+function getDefaultSettings() {
+  return {
+    text_provider: 'openrouter',
+    text_key: '',
+    text_model: 'openrouter/auto',
+    text_temp: 0.8,
+    text_tokens: 2048,
+    text_system: 'You are a creative songwriting and production assistant. You write vivid lyrics, sharp prompts, and actionable creative briefs.',
+    image_provider: '',
+    image_key: '',
+    image_model: '',
+    image_aspect: 'wide',
+    image_variants: 1,
+    image_quality: '',
+    image_style: '',
+    review_same: true,
+    review_provider: 'openrouter',
+    review_key: '',
+    review_model: '',
+    def_genre: '',
+    def_vocal: '',
+    def_tone: '',
+    def_aspect: 'wide',
+    def_img_count: 1,
+    suno_max: 200,
+    no_text_rule: true,
+    thumb_text: true,
+    autosave: true,
+    def_hashtags: '#AImusic #Suno #NewMusic #IndieMusic #SongForge',
+    tipjar_block: '☕ If you enjoy this track, support the channel: [your tip link]',
+    tipjar_default: false,
+    tipjar_above: true,
+    theme: 'system',
+    prompt_templates: getDefaultPromptTemplates()
+  };
+}
+
+function getDefaultPromptTemplates() {
+  return {
+    directions: `Given this song concept, generate 5 distinct creative directions.
+
+Concept:
+{{concept}}
+
+For each direction return:
+- title idea
+- genre
+- tone
+- lyrical angle
+- one-line hook
+- visual style idea
+- why it works
+
+Make the ideas distinct. Favor witty, vivid, usable concepts.`,
+    plan: `Create a full production plan for this song direction.
+
+Direction:
+{{direction}}
+
+Concept:
+{{concept}}
+
+Generate:
+- final working title
+- creative brief
+- genre/style
+- vocal direction
+- lyrical POV
+- narrative arc
+- chorus strategy
+- visual style
+- recurring symbols
+- thumbnail angle
+- YouTube positioning`,
+    lyrics: `Write complete song lyrics based on this approved plan.
+
+Title: {{title}}
+Concept: {{concept}}
+Genre: {{genre}}
+Tone: {{tone}}
+Vocal: {{vocal}}
+Creative brief: {{brief}}
+
+Requirements:
+- Use bracketed section headers.
+- Include verses, chorus, and bridge unless the concept calls for otherwise.
+- Make the chorus memorable.
+- Match the requested tone.
+- Avoid artist names.
+- Do not include production notes inside the lyrics.`,
+    music: `Create a concise music generation prompt under {{max_chars}} characters.
+
+Song title: {{title}}
+Genre: {{genre}}
+Tone: {{tone}}
+Vocal: {{vocal}}
+Lyrics summary: {{lyrics_summary}}
+
+Requirements:
+- Focus on genre, instrumentation, vocal style, energy, and production.
+- No artist names.
+- Keep under {{max_chars}} characters.`,
+    visual: `Create a consistent visual style guide for generated images for this song.
+
+Title: {{title}}
+Concept: {{concept}}
+Lyrics: {{lyrics}}
+
+Requirements:
+- Wide aspect by default.
+- No text in section images.
+- Strong visual symbolism.
+- Consistent palette.
+- Include medium, palette, lighting, camera/composition, recurring symbols, and negative rules.`,
+    section_image: `Create one final image generation prompt for this song section.
+
+Song title: {{title}}
+Section: {{section_label}}
+Section lyrics: {{section_text}}
+Locked visual style: {{visual_style}}
+
+Requirements:
+- Wide aspect.
+- No text, no logos, no readable signage.
+- Use vivid cinematic visual language.
+- Preserve style consistency.
+- Focus on symbolic imagery, not literal lyric captions.
+- Output only the final image prompt.`,
+    thumbnail: `Create a YouTube thumbnail generation prompt for this song.
+
+Title: {{title}}
+Concept: {{concept}}
+Visual style: {{visual_style}}
+Include text: {{include_text}}
+Thumbnail title text: {{thumb_title}}
+
+Requirements:
+- Wide aspect, high contrast, cinematic.
+- Readable at small size.
+- Central character or strong focal point.`,
+    youtube: `Create a YouTube package for this AI-generated song.
+
+Title: {{title}}
+Concept: {{concept}}
+Genre: {{genre}}
+Tone: {{tone}}
+Lyrics: {{lyrics}}
+
+Include:
+- strong video title
+- 5 alternate titles
+- description
+- hashtags
+- pinned comment
+- thumbnail title text
+
+Respect this tip jar setting: {{tipjar_setting}}`,
+    review: `Review this song project for production readiness.
+
+Title: {{title}}
+Concept: {{concept}}
+Lyrics: {{lyrics}}
+Music prompt: {{music_prompt}}
+Visual style: {{visual_style}}
+Image prompts: {{image_prompts}}
+YouTube package: {{youtube_package}}
+
+Check:
+- Are lyrics coherent?
+- Is chorus strong?
+- Does Suno prompt match genre?
+- Do image prompts maintain visual consistency?
+- Do image prompts accidentally request text?
+- Does thumbnail fit the song?
+- Is YouTube package aligned?
+- What is missing?
+- What should be improved before publishing?
+
+Output: Pass / Warnings / Recommended fixes.`
+  };
+}
+
+/* ── Init ── */
+function initApp() {
+  loadState();
+  applyTheme(state.settings.theme);
+  document.getElementById('theme-select').value = state.settings.theme;
+  populateSettingsUI();
+  renderProjectList();
+  if (state.projects.length) selectProject(state.projects[0].id);
+  updateStatus('Ready');
+  setupAutosave();
+  initIndexedDB().catch(e => console.warn('IDB init failed', e));
+}
+
+function setupAutosave() {
+  const inputs = document.querySelectorAll('input, textarea, select');
+  inputs.forEach(el => {
+    el.addEventListener('change', () => { if (state.settings.autosave) { saveConceptFields(); saveState(); } });
+    el.addEventListener('blur', () => { if (state.settings.autosave) { saveConceptFields(); saveState(); } });
+  });
+}
+
+/* ── State Persistence ── */
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // merge with defaults for new fields
+      state = { ...getDefaultState(), ...parsed };
+      state.settings = { ...getDefaultSettings(), ...parsed.settings };
+    } else {
+      state = getDefaultState();
+    }
+  } catch (e) {
+    console.error('loadState error', e);
+    state = getDefaultState();
+  }
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    updateStorageEstimate();
+  } catch (e) {
+    console.error('saveState error', e);
+    showError('Failed to save state. Storage may be full.');
+  }
+}
+
+/* ── IndexedDB for Images ── */
+function initIndexedDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const database = e.target.result;
+      if (!database.objectStoreNames.contains('images')) {
+        database.createObjectStore('images', { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = (e) => { db = e.target.result; resolve(); };
+    req.onerror = (e) => { reject(e); };
+  });
+}
+
+function storeImageBlob(id, blob) {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('DB not ready')); return; }
+    const tx = db.transaction('images', 'readwrite');
+    const store = tx.objectStore('images');
+    const req = store.put({ id, blob, saved_at: Date.now() });
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function getImageBlob(id) {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('DB not ready')); return; }
+    const tx = db.transaction('images', 'readonly');
+    const store = tx.objectStore('images');
+    const req = store.get(id);
+    req.onsuccess = () => resolve(req.result?.blob || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function deleteImageBlob(id) {
+  return new Promise((resolve, reject) => {
+    if (!db) { resolve(); return; }
+    const tx = db.transaction('images', 'readwrite');
+    const store = tx.objectStore('images');
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/* ── Themes ── */
+function setTheme(name) {
+  document.documentElement.setAttribute('data-theme', name === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : name);
+  state.settings.theme = name;
+  saveState();
+}
+
+function applyTheme(name) {
+  setTheme(name);
+}
+
+/* ── Project Management ── */
+function createProject() {
+  const id = 'song_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+  const proj = {
+    id,
+    title: 'Untitled Song',
+    concept: '',
+    selected_direction_id: '',
+    status: 'Concept',
+    genre: '',
+    tone: '',
+    vocal: '',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    notes: ''
+  };
+  state.projects.push(proj);
+  saveState();
+  renderProjectList();
+  selectProject(id);
+  updateStatus('New project created');
+}
+
+function selectProject(id) {
+  currentProjectId = id;
+  renderProjectList();
+  const proj = state.projects.find(p => p.id === id);
+  if (proj) {
+    document.getElementById('status-project').textContent = proj.title;
+    populateConceptFields(proj);
+  }
+}
+
+function renderProjectList() {
+  const container = document.getElementById('project-list');
+  container.innerHTML = '';
+  state.projects.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'project-item' + (p.id === currentProjectId ? ' active' : '');
+    div.innerHTML = `<div class="proj-title">${escapeHTML(p.title || 'Untitled')}</div><div class="proj-meta">${escapeHTML(p.status || 'Concept')}</div>`;
+    div.onclick = () => selectProject(p.id);
+    container.appendChild(div);
+  });
+  if (!state.projects.length) {
+    container.innerHTML = '<div style="color:var(--text-2); font-size:.85rem; padding:.5rem;">No projects yet.</div>';
+  }
+}
+
+/* ── Concept Tab Fields ── */
+function populateConceptFields(proj) {
+  if (!proj) return;
+  document.getElementById('c-working-title').value = proj.title || '';
+  document.getElementById('c-concept').value = proj.concept || '';
+  // Load from project notes if stored there, or from state directly
+  const meta = proj._concept_meta || {};
+  document.getElementById('c-tone').value = meta.tone || '';
+  document.getElementById('c-genre').value = meta.genre || '';
+  document.getElementById('c-vocal').value = meta.vocal || '';
+  document.getElementById('c-humor').value = meta.humor || 'moderate';
+  document.getElementById('c-explicit').value = meta.explicit || 'clean';
+  document.getElementById('c-audience').value = meta.audience || '';
+  document.getElementById('c-symbols').value = meta.symbols || '';
+  document.getElementById('c-avoid').value = meta.avoid || '';
+  document.getElementById('c-reference').value = meta.reference || '';
+}
+
+function saveConceptFields() {
+  const proj = state.projects.find(p => p.id === currentProjectId);
+  if (!proj) return;
+  proj.title = document.getElementById('c-working-title').value.trim() || proj.title;
+  proj.concept = document.getElementById('c-concept').value.trim();
+  proj._concept_meta = {
+    tone: document.getElementById('c-tone').value,
+    genre: document.getElementById('c-genre').value,
+    vocal: document.getElementById('c-vocal').value,
+    humor: document.getElementById('c-humor').value,
+    explicit: document.getElementById('c-explicit').value,
+    audience: document.getElementById('c-audience').value,
+    symbols: document.getElementById('c-symbols').value,
+    avoid: document.getElementById('c-avoid').value,
+    reference: document.getElementById('c-reference').value
+  };
+  proj.updated_at = new Date().toISOString();
+  renderProjectList();
+}
+
+/* ── Tab Switching ── */
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  if (name === 'debug') renderDebug();
+  if (name === 'settings') populateSettingsUI();
+  if (name === 'review') renderReviewChecklist();
+  if (name === 'images') renderSections();
+  if (name === 'export') updateExportState();
+  if (name === 'plan') populatePlanFields();
+  if (name === 'lyrics') populateLyricsFields();
+  if (name === 'music') populateMusicFields();
+  if (name === 'visual') populateVisualFields();
+  if (name === 'thumbnail') populateThumbnailFields();
+  if (name === 'youtube') populateYouTubeFields();
+  window.scrollTo(0, 0);
+}
+
+function fillTemplate(template, vars) {
+  let result = template;
+  for (const [key, val] of Object.entries(vars)) {
+    result = result.replace(new RegExp('{{' + key + '}}', 'g'), val == null ? '' : String(val));
+  }
+  return result;
+}
+
+/* ── AI Provider Wrappers (Stubs for Ticket 1) ── */
+async function callTextModel(taskType, messages, options = {}) {
+  const settings = state.settings;
+  const provider = settings.text_provider;
+  const key = settings.text_key;
+  const model = settings.text_model;
+  const temp = settings.text_temp;
+  const maxTokens = settings.text_tokens;
+
+  if (!key) throw new Error('Text AI API key not configured. Go to Settings.');
+
+  recordAIJob({ song_id: currentProjectId, type: taskType, provider, model, status: 'running', input_summary: JSON.stringify(messages).slice(0, 200) });
+
+  // OpenRouter / OpenAI-compatible endpoint
+  let url, headers, body;
+  if (provider === 'openrouter' || provider === 'openai' || provider === 'custom') {
+    const baseUrl = provider === 'openrouter' ? 'https://openrouter.ai/api/v1' :
+                    provider === 'openai' ? 'https://api.openai.com/v1' :
+                    (settings.custom_text_url || 'https://openrouter.ai/api/v1');
+    url = `${baseUrl}/chat/completions`;
+    headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`,
+      'HTTP-Referer': location.href,
+      'X-Title': 'SongForge AI'
+    };
+    if (provider === 'openrouter') headers['OpenRouter-Beta'] = 'true';
+    body = JSON.stringify({
+      model: model || 'openrouter/auto',
+      messages: [
+        { role: 'system', content: settings.text_system },
+        ...messages
+      ],
+      temperature: temp,
+      max_tokens: maxTokens,
+      ...options
+    });
+  } else {
+    throw new Error('Unsupported text provider: ' + provider);
+  }
+
+  document.getElementById('debug-last-text').textContent = `POST ${url}\n\n${body}`;
+
+  const resp = await fetch(url, { method: 'POST', headers, body });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error((data.error && data.error.message) || `HTTP ${resp.status}`);
+
+  const content = data.choices?.[0]?.message?.content || '';
+  recordAIJob({ song_id: currentProjectId, type: taskType, provider, model, status: 'complete', input_summary: JSON.stringify(messages).slice(0, 200), output_id: data.id || '' });
+  return { content, usage: data.usage, raw: data };
+}
+
+async function callImageModel(prompt, options = {}) {
+  const settings = state.settings;
+  const provider = settings.image_provider;
+  const key = settings.image_key;
+
+  if (!provider) {
+    // Prompts-only mode: return a placeholder data URL with text overlay
+    return { url: createPlaceholderImage(prompt), provider: 'none', model: 'prompt-only' };
+  }
+  if (!key) throw new Error('Image AI API key not configured. Go to Settings.');
+
+  recordAIJob({ song_id: currentProjectId, type: 'image', provider, model: settings.image_model, status: 'running', input_summary: prompt.slice(0, 200) });
+
+  let result;
+  if (provider === 'openai') {
+    result = await callOpenAIImage(prompt, options);
+  } else if (provider === 'stability') {
+    result = await callStabilityImage(prompt, options);
+  } else if (provider === 'custom') {
+    result = await callCustomImage(prompt, options);
+  } else {
+    throw new Error('Unsupported image provider: ' + provider);
+  }
+
+  recordAIJob({ song_id: currentProjectId, type: 'image', provider, model: settings.image_model, status: 'complete', input_summary: prompt.slice(0, 200) });
+  document.getElementById('debug-last-image').textContent = JSON.stringify({ prompt, result }, null, 2);
+  return result;
+}
+
+async function callOpenAIImage(prompt, options) {
+  const resp = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.settings.image_key}` },
+    body: JSON.stringify({
+      model: state.settings.image_model || 'dall-e-3',
+      prompt,
+      n: options.n || state.settings.image_variants || 1,
+      size: mapAspectToSize(options.aspect || state.settings.image_aspect || 'wide'),
+      quality: state.settings.image_quality || 'standard',
+      style: state.settings.image_style || 'vivid',
+      response_format: 'url'
+    })
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
+  return { url: data.data[0].url, provider: 'openai', model: state.settings.image_model, revised_prompt: data.data[0].revised_prompt };
+}
+
+async function callStabilityImage(prompt, options) {
+  // Stub for Stability AI — can be implemented in Ticket 4
+  throw new Error('Stability AI integration not yet implemented. Use OpenAI or Prompts Only mode.');
+}
+
+async function callCustomImage(prompt, options) {
+  throw new Error('Custom image provider not yet implemented.');
+}
+
+function mapAspectToSize(aspect) {
+  const map = { wide: '1792x1024', square: '1024x1024', portrait: '1024x1792', cinematic: '1792x1024' };
+  return map[aspect] || '1792x1024';
+}
+
+function createPlaceholderImage(prompt) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 640; canvas.height = 360;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = '16px system-ui';
+  ctx.textAlign = 'center';
+  const words = prompt.split(' ');
+  let line = '', y = 80;
+  for (let i = 0; i < words.length; i++) {
+    const test = line + words[i] + ' ';
+    if (ctx.measureText(test).width > 560 && i > 0) {
+      ctx.fillText(line, 320, y);
+      line = words[i] + ' ';
+      y += 24;
+      if (y > 280) break;
+    } else {
+      line = test;
+    }
+  }
+  if (y <= 280) ctx.fillText(line, 320, y);
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '14px system-ui';
+  ctx.fillText('(Placeholder — no image provider configured)', 320, 320);
+  return canvas.toDataURL('image/png');
+}
+
+async function callReviewModel(messages, options = {}) {
+  const settings = state.settings;
+  if (settings.review_same) {
+    return callTextModel('review', messages, options);
+  }
+  // Separate review provider path
+  const provider = settings.review_provider;
+  const key = settings.review_key;
+  if (!key) throw new Error('Review AI API key not configured.');
+  // For now, delegate to text model with review settings
+  return callTextModel('review', messages, { ...options, model: settings.review_model });
+}
+
+/* ── AI Jobs ── */
+function recordAIJob(job) {
+  job.id = 'job_' + Date.now().toString(36);
+  job.started_at = job.started_at || new Date().toISOString();
+  if (!job.status || job.status === 'complete' || job.status === 'error') {
+    job.completed_at = new Date().toISOString();
+  }
+  state.ai_jobs.push(job);
+  // keep last 200
+  if (state.ai_jobs.length > 200) state.ai_jobs = state.ai_jobs.slice(-200);
+  saveState();
+}
+
+/* ── Demo Mode ── */
+function loadDemo() {
+  const id = 'demo_' + Date.now().toString(36);
+  const proj = {
+    id,
+    title: 'Demo: Know Your Worth',
+    concept: 'A sarcastic hard rock song about someone who says they know their worth but treats dating like a hostile real estate negotiation.',
+    selected_direction_id: 'demo_dir_1',
+    status: 'Plan',
+    genre: '80s Hard Rock Satire',
+    tone: 'Sarcastic',
+    vocal: 'Male, gritty',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    notes: 'Demo project loaded for exploration without API keys.'
+  };
+  proj._concept_meta = {
+    tone: 'Sarcastic', genre: '80s Hard Rock Satire', vocal: 'Male, gritty',
+    humor: 'moderate', explicit: 'mild', audience: 'Rock fans, millennials',
+    symbols: 'For-sale signs, broken mirrors, keys, neon', avoid: 'No real artist names, no slurs',
+    reference: 'Demo project for exploration'
+  };
+  state.projects.push(proj);
+
+  // Directions
+  state.directions.push(
+    { id: 'demo_dir_1', song_id: id, title: 'Listings & Liars', genre: '80s Hard Rock Satire', tone: 'Sarcastic', hook: 'She says she knows her worth, but her terms sheet says “as-is, no disclosure.”', visual_angle: 'Neon real estate signs in a desert junkyard, leather jacket silhouettes.', rationale: 'Hard rock swagger makes the sarcasm land with punch. Great visual potential for YouTube.', selected: true },
+    { id: 'demo_dir_2', song_id: id, title: 'Open House Heart', genre: 'Funk Rock Dating Roast', tone: 'Playful', hook: 'Every date is an inspection, every kiss is a counteroffer.', visual_angle: 'Colorful 70s split-level interiors with exaggerated facial expressions.', rationale: 'Funk groove gives the roast a danceable bounce.', selected: false },
+    { id: 'demo_dir_3', song_id: id, title: 'Closing Costs', genre: 'Country Rock Comedy', tone: 'Dry wit', hook: 'Love is a 30-year fixed with a balloon payment of betrayal.', visual_angle: 'Dusty courthouse steps, cowboy boots, a for-sale sign on a broken heart.', rationale: 'Country storytelling + comedic twist = viral potential.', selected: false },
+    { id: 'demo_dir_4', song_id: id, title: 'Escrow Nights', genre: 'Dark Synth Noir', tone: 'Cynical', hook: 'In a city of glass towers, every swipe is a foreclosure.', visual_angle: 'Rain-slicked city streets, holographic ads, lonely diner booths.', rationale: 'Synth noir offers cinematic depth and niche appeal.', selected: false },
+    { id: 'demo_dir_5', song_id: id, title: 'Appraisal Blues', genre: 'Blues Rock Confessional', tone: 'Wry', hook: 'I got appraised below market value by someone who never read the comps.', visual_angle: 'Dim blues club, single spotlight, a guitar case full of rejected contracts.', rationale: 'Blues authenticity + modern dating metaphor = emotional hook.', selected: false }
+  );
+
+  // Plan
+  state.plans.push({
+    id: 'plan_demo', song_id: id, title: 'Listings & Liars',
+    brief: 'An anthemic 80s hard rock satire roasting performative self-worth in modern dating, using real estate metaphors as lyrical weapons.',
+    genre: '80s Hard Rock Satire', vocal: 'Male, gritty with glam-metal swagger', pov: 'First-person observer / victim',
+    arc: 'Setup the contradiction → catalog the offenses → build to a sarcastic climax → final dismissive outro.',
+    chorus_strategy: 'Big anthemic hook with a repeated real estate phrase that becomes an earworm.',
+    visual_style: 'Neon-drenched desert junkyard with real estate signs, leather jackets, and chrome.',
+    recurring_symbols: 'For-sale signs, keys, contracts, broken mirrors, neon.',
+    thumbnail_angle: 'Close-up of a for-sale sign with a lipstick kiss mark, backlit by neon.',
+    youtube_positioning: 'Shareable satire for anyone who has survived dating apps. Comment-bait title.',
+    accepted: true
+  });
+
+  // Lyrics version
+  state.lyrics_versions.push({
+    id: 'lyrics_demo_v1', song_id: id, label: 'Draft 1', is_current: true,
+    lyrics: `[Verse 1]
+She walked in with a Zestimate
+Said her heart was undervalued
+But every offer got rejected
+And the inspections always failed
+
+[Pre-Chorus]
+She's got a listing in her eyes
+And a terms sheet for a soul
+
+[Chorus]
+Listings and liars, all she's selling is smoke
+Know your worth, baby, but you're going for broke
+For-sale sign where her heart should be
+Listings and liars, buyer beware of me
+
+[Verse 2]
+She wants a mansion on a trailer budget
+Says the market's just too cruel
+But every showing's a disaster
+And the open house is empty
+
+[Pre-Chorus]
+She's got a listing in her eyes
+And a terms sheet for a soul
+
+[Chorus]
+Listings and liars, all she's selling is smoke
+Know your worth, baby, but you're going for broke
+For-sale sign where her heart should be
+Listings and liars, buyer beware of me
+
+[Bridge]
+No disclosure, no warranty
+Sold as-is, no guarantee
+
+[Final Chorus]
+Listings and liars, all she's selling is smoke
+Know your worth, baby, but you're going for broke
+For-sale sign where her heart should be
+Listings and liars, buyer beware of me
+
+[Outro]
+Closing costs are due… and I'm walking away.`
+  });
+
+  // Music prompt
+  state.music_prompts.push({
+    id: 'mp_demo', song_id: id,
+    prompt: 'Anthemic 80s hard rock, sarcastic male vocal, huge drums, crunchy guitars, glam-metal swagger, catchy chorus, punchy arena mix.',
+    genre: '80s Hard Rock Satire', instrumentation: 'Crunchy guitars, huge drums, synth pads', tempo: 'Mid-fast, driving',
+    vocal: 'Male, gritty with swagger', mood: 'Sarcastic, anthemic', production: 'Punchy arena mix, big reverb on snare',
+    avoid: 'No ballad tempos, no acoustic guitars'
+  });
+
+  // Visual style
+  state.visual_styles.push({
+    id: 'vs_demo', song_id: id, name: 'Neon Junkyard Glam',
+    medium: 'Digital painting with photographic textures', palette: 'Hot magenta, electric cyan, deep navy, chrome silver',
+    lighting: 'Neon backlighting with hard rim lights, desert dusk ambient',
+    camera: 'Low angles, wide lenses, dramatic perspective distortion',
+    character_continuity: 'Leather jacket silhouette, gender-ambiguous, back to camera or shadowed face',
+    recurring_symbols: 'For-sale signs, broken mirrors, keys, neon tubes',
+    negative_rules: 'No text, no logos, no readable signage, no cartoon style',
+    aspect_ratio: 'wide', no_text_rule: true, locked: true
+  });
+
+  // Sections
+  state.sections.push(
+    { id: 'sec_demo_1', song_id: id, label: 'Verse 1', text: "She walked in with a Zestimate\nSaid her heart was undervalued\nBut every offer got rejected\nAnd the inspections always failed", order: 1, double_length: false },
+    { id: 'sec_demo_2', song_id: id, label: 'Pre-Chorus', text: "She's got a listing in her eyes\nAnd a terms sheet for a soul", order: 2, double_length: false },
+    { id: 'sec_demo_3', song_id: id, label: 'Chorus', text: "Listings and liars, all she's selling is smoke\nKnow your worth, baby, but you're going for broke\nFor-sale sign where her heart should be\nListings and liars, buyer beware of me", order: 3, double_length: false },
+    { id: 'sec_demo_4', song_id: id, label: 'Verse 2', text: "She wants a mansion on a trailer budget\nSays the market's just too cruel\nBut every showing's a disaster\nAnd the open house is empty", order: 4, double_length: false },
+    { id: 'sec_demo_5', song_id: id, label: 'Bridge', text: "No disclosure, no warranty\nSold as-is, no guarantee", order: 5, double_length: false },
+    { id: 'sec_demo_6', song_id: id, label: 'Final Chorus', text: "Listings and liars, all she's selling is smoke\nKnow your worth, baby, but you're going for broke\nFor-sale sign where her heart should be\nListings and liars, buyer beware of me", order: 6, double_length: false },
+    { id: 'sec_demo_7', song_id: id, label: 'Outro', text: "Closing costs are due… and I'm walking away.", order: 7, double_length: false }
+  );
+
+  // Image prompts (placeholder)
+  state.image_prompts.push(
+    { id: 'ip_demo_1', song_id: id, section_id: 'sec_demo_1', prompt_order: 1, prompt_text: 'Wide cinematic shot of a desert junkyard at dusk, neon real estate signs glowing hot magenta, a lone figure in a leather jacket silhouetted against the chrome wreckage, no text, digital painting, electric cyan rim lighting.', status: 'Prompt Ready', contains_text: false },
+    { id: 'ip_demo_2', song_id: id, section_id: 'sec_demo_2', prompt_order: 1, prompt_text: 'Close-up of a silhouetted face with neon reflections in the eyes like glowing listing signs, dark navy background, electric cyan and magenta highlights, cinematic, no text.', status: 'Prompt Ready', contains_text: false },
+    { id: 'ip_demo_3', song_id: id, section_id: 'sec_demo_3', prompt_order: 1, prompt_text: 'Wide shot of a figure standing on a pile of chrome debris holding a glowing for-sale sign overhead, backlit by massive neon tubes, anthemic energy, cinematic, no text.', status: 'Prompt Ready', contains_text: false },
+    { id: 'ip_demo_4', song_id: id, section_id: 'sec_demo_4', prompt_order: 1, prompt_text: 'Interior of a decaying split-level house in the desert, broken mirrors reflecting neon, a figure in a leather jacket inspecting the damage, cinematic, no text.', status: 'Prompt Ready', contains_text: false },
+    { id: 'ip_demo_5', song_id: id, section_id: 'sec_demo_5', prompt_order: 1, prompt_text: 'Abstract close-up of weathered contract papers burning at the edges, keys melting into chrome liquid, neon magenta and cyan light, cinematic, no text.', status: 'Prompt Ready', contains_text: false },
+    { id: 'ip_demo_6', song_id: id, section_id: 'sec_demo_6', prompt_order: 1, prompt_text: 'Wide dramatic shot of the figure walking away down a desert highway lined with flickering neon for-sale signs, storm clouds gathering, cinematic, no text.', status: 'Prompt Ready', contains_text: false },
+    { id: 'ip_demo_7', song_id: id, section_id: 'sec_demo_7', prompt_order: 1, prompt_text: 'Empty desert road at night, a single discarded key glowing neon on the asphalt, distant lightning, cinematic, no text.', status: 'Prompt Ready', contains_text: false }
+  );
+
+  // Thumbnail
+  state.thumbnail_assets.push({
+    id: 'thumb_demo', song_id: id,
+    strategy: 'High contrast neon thumbnail with central character and bold title text.',
+    title_text: 'LISTINGS & LIARS', subtitle: '',
+    composition: 'Central figure holding a glowing for-sale sign, neon rim lighting, desert background.',
+    character: 'Leather jacket silhouette, gender-ambiguous, back to camera.',
+    background: 'Desert junkyard at dusk, neon signs, chrome wreckage.',
+    font_direction: 'Bold outlined sans-serif, high contrast against dark background.',
+    text_placement: 'Top center, large title. No subtitle.',
+    high_contrast: true, include_text: true, no_text: false,
+    prompt: 'Wide-aspect cinematic thumbnail, large bold outlined title text "LISTINGS & LIARS", high contrast, central character in leather jacket holding glowing for-sale sign, neon magenta and cyan rim lighting, desert junkyard background, readable at small size.',
+    image_url: '', status: 'Prompt Ready'
+  });
+
+  // YouTube package
+  state.youtube_packages.push({
+    id: 'yt_demo', song_id: id,
+    title: 'LISTINGS & LIARS — Sarcastic 80s Hard Rock Satire About Modern Dating',
+    alternate_titles: [
+      'She Says She Knows Her Worth (But Treats Love Like Real Estate)',
+      '80s Hard Rock Roast of Dating App Culture',
+      'For-Sale Sign Where Her Heart Should Be',
+      'The Zestimate of Her Soul — Hard Rock Satire',
+      'Buyer Beware: A Rock Anthem for the Heartbroken'
+    ].join('\n'),
+    description: `🎸 LISTINGS & LIARS — a sarcastic 80s hard rock satire about someone who says they know their worth but treats dating like a hostile real estate negotiation.
+
+Written and produced with AI assistance. All vocals and instrumentation generated via Suno.
+
+🎵 Listen / Stream: [link when available]
+📸 Behind the scenes: [link]
+
+☕ If you enjoy this track, support the channel: [your tip link]
+
+#AImusic #Suno #NewMusic #IndieMusic #SongForge #HardRock #Satire`,
+    hashtags: '#AImusic #Suno #NewMusic #IndieMusic #SongForge #HardRock #Satire #80sRock #Dating #ComedyMusic',
+    pinned_comment: 'Which line hit hardest? Drop a 🔑 if you have ever been through a "hostile real estate negotiation" in dating.',
+    thumb_title_text: 'LISTINGS & LIARS',
+    tipjar_included: true,
+    youtube_url: '',
+    published_date: ''
+  });
+
+  saveState();
+  renderProjectList();
+  selectProject(id);
+  updateStatus('Demo project loaded — explore without API keys');
+  switchTab('concept');
+}
+
+/* ── Directions (Stub) ── */
+function generateDirections() {
+  saveConceptFields();
+  const proj = getCurrentProject();
+  if (!proj || !proj.concept.trim()) { showError('Enter a core concept first.'); return; }
+  setLoading(true);
+  updateStatus('Generating 5 creative directions…');
+  // Use template
+  const tmpl = state.settings.prompt_templates.directions;
+  const prompt = tmpl.replace(/{{concept}}/g, proj.concept);
+  callTextModel('directions', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndShowDirections(res.content); updateStatus('Directions generated'); })
+    .catch(err => { showError(err.message); updateStatus('Error generating directions'); })
+    .finally(() => setLoading(false));
+}
+
+function parseAndShowDirections(text) {
+  // Simple parser for demo; robust parser in Ticket 2
+  const container = document.getElementById('directions-container');
+  const list = document.getElementById('directions-list');
+  list.innerHTML = '';
+  container.classList.remove('hidden');
+
+  // Try to extract direction blocks
+  const blocks = text.split(/(?:Direction|Option)\s*\d*[:\-\s]*/i).filter(Boolean);
+  const proj = getCurrentProject();
+  blocks.forEach((block, idx) => {
+    if (!block.trim()) return;
+    const lines = block.trim().split('\n').map(l => l.trim()).filter(Boolean);
+    const title = lines.find(l => l.toLowerCase().startsWith('title'))?.split(/[:\-]/, 2)[1]?.trim() || `Direction ${idx + 1}`;
+    const genre = lines.find(l => l.toLowerCase().startsWith('genre'))?.split(/[:\-]/, 2)[1]?.trim() || '';
+    const tone = lines.find(l => l.toLowerCase().startsWith('tone'))?.split(/[:\-]/, 2)[1]?.trim() || '';
+    const hook = lines.find(l => l.toLowerCase().startsWith('hook') || l.toLowerCase().startsWith('one-line'))?.split(/[:\-]/, 2)[1]?.trim() || '';
+    const visual = lines.find(l => l.toLowerCase().startsWith('visual'))?.split(/[:\-]/, 2)[1]?.trim() || '';
+    const rationale = lines.find(l => l.toLowerCase().startsWith('why') || l.toLowerCase().startsWith('rationale'))?.split(/[:\-]/, 2)[1]?.trim() || '';
+
+    const dirId = 'dir_' + Date.now().toString(36) + '_' + idx;
+    const dir = { id: dirId, song_id: proj.id, title, genre, tone, hook: hook || '', visual_angle: visual || '', rationale: rationale || '' };
+    state.directions.push(dir);
+
+    const card = document.createElement('div');
+    card.className = 'direction-card';
+    card.innerHTML = `
+      <h4>${escapeHTML(title)}</h4>
+      <div class="dir-meta">${escapeHTML(genre)} · ${escapeHTML(tone)}</div>
+      <div class="dir-hook">“${escapeHTML(hook || '')}”</div>
+      <div class="dir-meta">Visual: ${escapeHTML(visual || '')}</div>
+      <div class="dir-rationale">${escapeHTML(rationale || '')}</div>
+      <button class="btn primary small" onclick="selectDirection('${dirId}')">Use This Direction</button>
+    `;
+    list.appendChild(card);
+  });
+  saveState();
+}
+
+function selectDirection(dirId) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  proj.selected_direction_id = dirId;
+  state.directions.forEach(d => { if (d.song_id === proj.id) d.selected = (d.id === dirId); });
+  document.querySelectorAll('.direction-card').forEach((c, i) => {
+    c.classList.toggle('selected', state.directions.filter(d => d.song_id === proj.id)[i]?.id === dirId);
+  });
+  saveState();
+  updateStatus('Direction selected — go to AI Plan tab');
+  switchTab('plan');
+}
+
+function generatePlanDirect() {
+  saveConceptFields();
+  const proj = getCurrentProject();
+  if (!proj || !proj.concept.trim()) { showError('Enter a core concept first.'); return; }
+  // Build direction text from concept + selected direction if any
+  const dir = state.directions.find(d => d.id === proj.selected_direction_id);
+  const directionText = dir ? [
+    `Title idea: ${dir.title}`, `Genre: ${dir.genre}`, `Tone: ${dir.tone}`,
+    `Hook: ${dir.hook}`, `Visual: ${dir.visual_angle}`, `Rationale: ${dir.rationale}`
+  ].join('\n') : `Concept: ${proj.concept}`;
+  setLoading(true);
+  updateStatus('Generating full song plan…');
+  const tmpl = state.settings.prompt_templates.plan;
+  const prompt = fillTemplate(tmpl, { direction: directionText, concept: proj.concept });
+  callTextModel('plan', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetPlan(res.content); updateStatus('Plan generated'); switchTab('plan'); })
+    .catch(err => { showError(err.message); updateStatus('Error generating plan'); })
+    .finally(() => setLoading(false));
+}
+
+function parseAndSetPlan(text) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const getVal = (keys) => {
+    for (const k of keys) {
+      const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
+      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+    }
+    return '';
+  };
+  const plan = {
+    id: 'plan_' + Date.now().toString(36), song_id: proj.id,
+    title: getVal(['final working title', 'working title', 'title']) || proj.title,
+    brief: getVal(['creative brief', 'brief']) || text.slice(0, 300),
+    genre: getVal(['genre/style', 'genre', 'style']),
+    vocal: getVal(['vocal direction', 'vocal']),
+    pov: getVal(['lyrical pov', 'pov', 'point of view']),
+    arc: getVal(['narrative arc', 'arc']),
+    chorus_strategy: getVal(['chorus strategy', 'chorus']),
+    visual_style: getVal(['visual style', 'visual']),
+    recurring_symbols: getVal(['recurring symbols', 'symbols']),
+    thumbnail_angle: getVal(['thumbnail angle', 'thumbnail']),
+    youtube_positioning: getVal(['youtube positioning', 'youtube', 'positioning']),
+    accepted: false
+  };
+  state.plans.push(plan);
+  proj.title = plan.title || proj.title;
+  proj.genre = plan.genre || proj.genre;
+  proj.tone = plan.tone || proj.tone;
+  proj.vocal = plan.vocal || proj.vocal;
+  proj.status = 'Plan Generated';
+  saveState();
+  renderProjectList();
+  populatePlanFields();
+}
+
+function populatePlanFields() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const plan = state.plans.filter(p => p.song_id === proj.id).pop();
+  if (!plan) return;
+  document.getElementById('p-title').value = plan.title || '';
+  document.getElementById('p-brief').value = plan.brief || '';
+  document.getElementById('p-genre').value = plan.genre || '';
+  document.getElementById('p-vocal').value = plan.vocal || '';
+  document.getElementById('p-pov').value = plan.pov || '';
+  document.getElementById('p-arc').value = plan.arc || '';
+  document.getElementById('p-chorus').value = plan.chorus_strategy || '';
+  document.getElementById('p-visual').value = plan.visual_style || '';
+  document.getElementById('p-symbols').value = plan.recurring_symbols || '';
+  document.getElementById('p-thumbnail').value = plan.thumbnail_angle || '';
+  document.getElementById('p-youtube').value = plan.youtube_positioning || '';
+}
+
+function generateTitlesOnly() {
+  saveConceptFields();
+  const proj = getCurrentProject();
+  if (!proj || !proj.concept.trim()) { showError('Enter a core concept first.'); return; }
+  setLoading(true);
+  updateStatus('Generating title ideas…');
+  const prompt = `Given this song concept, generate 10 catchy, unique song title ideas.\n\nConcept: ${proj.concept}\n\nReturn only the titles as a numbered list.`;
+  callTextModel('titles', [{ role: 'user', content: prompt }])
+    .then(res => {
+      alert('Title Ideas:\n\n' + res.content);
+      updateStatus('Titles generated');
+    })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function surpriseMe() {
+  saveConceptFields();
+  const proj = getCurrentProject();
+  if (!proj) return;
+  setLoading(true);
+  updateStatus('Surprising you…');
+  const prompt = `Take this concept and generate a wildly unexpected, creative song direction. Make it bold, specific, and memorable.\n\nConcept: ${proj.concept || 'A song about life, love, and the universe'}`;
+  callTextModel('surprise', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndShowDirections(res.content); updateStatus('Surprise direction generated'); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+/* ── Plan ── */
+function acceptPlan() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const plan = state.plans.filter(p => p.song_id === proj.id).pop();
+  if (plan) {
+    plan.title = document.getElementById('p-title').value;
+    plan.brief = document.getElementById('p-brief').value;
+    plan.genre = document.getElementById('p-genre').value;
+    plan.vocal = document.getElementById('p-vocal').value;
+    plan.pov = document.getElementById('p-pov').value;
+    plan.arc = document.getElementById('p-arc').value;
+    plan.chorus_strategy = document.getElementById('p-chorus').value;
+    plan.visual_style = document.getElementById('p-visual').value;
+    plan.recurring_symbols = document.getElementById('p-symbols').value;
+    plan.thumbnail_angle = document.getElementById('p-thumbnail').value;
+    plan.youtube_positioning = document.getElementById('p-youtube').value;
+    plan.accepted = true;
+    proj.title = plan.title || proj.title;
+    proj.genre = plan.genre || proj.genre;
+    proj.vocal = plan.vocal || proj.vocal;
+  }
+  proj.status = 'Plan Accepted';
+  saveState();
+  renderProjectList();
+  updateStatus('Plan accepted — go to Lyrics tab');
+  switchTab('lyrics');
+}
+
+function regeneratePlan() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const plan = state.plans.filter(p => p.song_id === proj.id).pop();
+  const previous = plan ? `Previous plan:\n${JSON.stringify(plan, null, 2)}\n\nGenerate a fresh alternative.` : '';
+  setLoading(true);
+  updateStatus('Regenerating plan…');
+  const dir = state.directions.find(d => d.id === proj.selected_direction_id);
+  const directionText = dir ? `${dir.title} / ${dir.genre} / ${dir.tone}` : proj.concept;
+  const tmpl = state.settings.prompt_templates.plan;
+  const prompt = fillTemplate(tmpl, { direction: directionText, concept: proj.concept }) + '\n\n' + previous;
+  callTextModel('plan', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetPlan(res.content); updateStatus('Plan regenerated'); })
+    .catch(err => { showError(err.message); updateStatus('Error'); })
+    .finally(() => setLoading(false));
+}
+
+function tweakPlan(mode) {
+  const proj = getCurrentProject();
+  const plan = state.plans.filter(p => p.song_id === proj.id).pop();
+  if (!plan) { showError('Generate a plan first.'); return; }
+  setLoading(true);
+  const instruction = {
+    funnier: 'Make the plan funnier, wittier, and more satirical.',
+    darker: 'Make the plan darker, more cynical, and emotionally raw.',
+    commercial: 'Make the plan more commercially viable for YouTube and streaming.',
+    absurd: 'Make the plan more absurd, surreal, and unexpected.',
+    'less-mean': 'Make the plan less mean, more empathetic, but keep the edge.'
+  }[mode] || 'Adjust the plan.';
+  const prompt = `Here is the current song plan. ${instruction}\n\n${JSON.stringify(plan, null, 2)}\n\nReturn the updated plan with all the same fields.`;
+  callTextModel('plan-tweak', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetPlan(res.content); updateStatus('Plan tweaked: ' + mode); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+/* ── Lyrics ── */
+function populateLyricsFields() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const versions = state.lyrics_versions.filter(l => l.song_id === proj.id);
+  const select = document.getElementById('lyrics-version-select');
+  select.innerHTML = '';
+  versions.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v.id;
+    opt.textContent = v.label + (v.is_current ? ' (current)' : '');
+    if (v.is_current) opt.selected = true;
+    select.appendChild(opt);
+  });
+  if (!versions.length) {
+    select.innerHTML = '<option value="">No versions yet</option>';
+    document.getElementById('lyrics-editor').value = '';
+    return;
+  }
+  const current = versions.find(v => v.is_current) || versions[versions.length - 1];
+  document.getElementById('lyrics-editor').value = current.lyrics;
+}
+
+function generateLyrics() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const plan = state.plans.filter(p => p.song_id === proj.id && p.accepted).pop();
+  if (!plan) { showError('Accept a plan first.'); return; }
+  setLoading(true);
+  updateStatus('Generating lyrics…');
+  const tmpl = state.settings.prompt_templates.lyrics;
+  const prompt = fillTemplate(tmpl, {
+    title: plan.title || proj.title,
+    concept: proj.concept,
+    genre: plan.genre || proj.genre,
+    tone: proj.tone || plan.tone || '',
+    vocal: plan.vocal || proj.vocal || '',
+    brief: plan.brief || ''
+  });
+  callTextModel('lyrics', [{ role: 'user', content: prompt }])
+    .then(res => {
+      saveLyrics(res.content, 'Draft 1', true);
+      updateStatus('Lyrics generated');
+      populateLyricsFields();
+    })
+    .catch(err => { showError(err.message); updateStatus('Error generating lyrics'); })
+    .finally(() => setLoading(false));
+}
+
+function regenerateLyrics() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  setLoading(true);
+  updateStatus('Regenerating lyrics…');
+  const plan = state.plans.filter(p => p.song_id === proj.id && p.accepted).pop();
+  const current = state.lyrics_versions.filter(l => l.song_id === proj.id).pop();
+  const previous = current ? `Previous version (for reference, do not copy):\n${current.lyrics}\n\nGenerate a completely fresh version.` : '';
+  const tmpl = state.settings.prompt_templates.lyrics;
+  const prompt = fillTemplate(tmpl, {
+    title: plan?.title || proj.title, concept: proj.concept, genre: plan?.genre || proj.genre,
+    tone: proj.tone || plan?.tone || '', vocal: plan?.vocal || proj.vocal || '', brief: plan?.brief || ''
+  }) + '\n\n' + previous;
+  callTextModel('lyrics', [{ role: 'user', content: prompt }])
+    .then(res => { saveLyrics(res.content, 'Draft ' + (state.lyrics_versions.filter(l => l.song_id === proj.id).length + 1), true); populateLyricsFields(); updateStatus('Lyrics regenerated'); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function saveLyrics(text, label, makeCurrent) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  if (makeCurrent) state.lyrics_versions.forEach(l => { if (l.song_id === proj.id) l.is_current = false; });
+  state.lyrics_versions.push({ id: 'lyr_' + Date.now().toString(36), song_id: proj.id, label, lyrics: text, is_current: !!makeCurrent });
+  saveState();
+}
+
+function saveLyricsVersion() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const text = document.getElementById('lyrics-editor').value;
+  const count = state.lyrics_versions.filter(l => l.song_id === proj.id).length;
+  saveLyrics(text, 'Saved ' + (count + 1), true);
+  populateLyricsFields();
+  updateStatus('Lyrics version saved');
+}
+
+function loadLyricsVersion(id) {
+  const proj = getCurrentProject();
+  if (!proj || !id) return;
+  state.lyrics_versions.forEach(l => { if (l.song_id === proj.id) l.is_current = (l.id === id); });
+  saveState();
+  populateLyricsFields();
+}
+
+function tweakLyrics(mode) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const current = state.lyrics_versions.find(l => l.song_id === proj.id && l.is_current);
+  const text = current ? current.lyrics : document.getElementById('lyrics-editor').value;
+  if (!text.trim()) { showError('No lyrics to tweak.'); return; }
+  const instructions = {
+    'catchier-chorus': 'Make the chorus catchier, more anthemic, and more memorable. Keep all sections.',
+    'more-sarcastic': 'Make the lyrics more sarcastic, biting, and witty. Keep the structure.',
+    cleaner: 'Clean up any explicit language while keeping the meaning and energy intact.',
+    dirtier: 'Make the lyrics more explicit, raw, and unfiltered.',
+    'more-80s': 'Rewrite with more 80s hard rock attitude, big hair swagger, and arena-rock imagery.',
+    shorten: 'Shorten the song by trimming verses and keeping only the strongest lines.',
+    expand: 'Expand the song with richer details, extra pre-chorus, and more vivid imagery.'
+  };
+  const instruction = instructions[mode] || 'Adjust the lyrics.';
+  setLoading(true);
+  const prompt = `Here are the current lyrics. ${instruction}\n\n${text}\n\nReturn the complete updated lyrics with bracketed section headers.`;
+  callTextModel('lyrics-tweak', [{ role: 'user', content: prompt }])
+    .then(res => {
+      const label = mode.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      saveLyrics(res.content, label, true);
+      populateLyricsFields();
+      updateStatus('Lyrics tweaked: ' + label);
+    })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+/* ── Music Prompt ── */
+function populateMusicFields() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const mp = state.music_prompts.filter(m => m.song_id === proj.id).pop();
+  if (!mp) return;
+  document.getElementById('music-prompt').value = mp.prompt || '';
+  document.getElementById('m-genre').value = mp.genre || '';
+  document.getElementById('m-instrumentation').value = mp.instrumentation || '';
+  document.getElementById('m-tempo').value = mp.tempo || '';
+  document.getElementById('m-vocal').value = mp.vocal || '';
+  document.getElementById('m-mood').value = mp.mood || '';
+  document.getElementById('m-production').value = mp.production || '';
+  document.getElementById('m-avoid').value = mp.avoid || '';
+  updateMusicCharCount();
+}
+
+function generateMusicPrompt() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const plan = state.plans.filter(p => p.song_id === proj.id && p.accepted).pop();
+  const lyrics = state.lyrics_versions.filter(l => l.song_id === proj.id).pop();
+  setLoading(true);
+  updateStatus('Generating Suno prompt…');
+  const tmpl = state.settings.prompt_templates.music;
+  const prompt = fillTemplate(tmpl, {
+    max_chars: state.settings.suno_max || 200,
+    title: plan?.title || proj.title,
+    genre: plan?.genre || proj.genre,
+    tone: proj.tone || plan?.tone || '',
+    vocal: plan?.vocal || proj.vocal || '',
+    lyrics_summary: lyrics ? lyrics.lyrics.slice(0, 400) + '…' : ''
+  });
+  callTextModel('music', [{ role: 'user', content: prompt }])
+    .then(res => {
+      parseAndSetMusicPrompt(res.content);
+      updateStatus('Suno prompt generated');
+      populateMusicFields();
+    })
+    .catch(err => { showError(err.message); updateStatus('Error'); })
+    .finally(() => setLoading(false));
+}
+
+function parseAndSetMusicPrompt(text) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const getVal = (keys) => {
+    for (const k of keys) {
+      const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
+      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+    }
+    return '';
+  };
+  const mp = {
+    id: 'mp_' + Date.now().toString(36), song_id: proj.id,
+    prompt: lines[0] || text.slice(0, 250),
+    genre: getVal(['genre']),
+    instrumentation: getVal(['instrumentation', 'instruments']),
+    tempo: getVal(['tempo', 'bpm']),
+    vocal: getVal(['vocal']),
+    mood: getVal(['mood', 'energy']),
+    production: getVal(['production', 'production notes']),
+    avoid: getVal(['avoid', 'do not'])
+  };
+  state.music_prompts.push(mp);
+  saveState();
+}
+
+function shortenMusicPrompt() {
+  const el = document.getElementById('music-prompt');
+  if (!el.value.trim()) return;
+  setLoading(true);
+  updateStatus('Shortening prompt…');
+  const prompt = `Shorten this music generation prompt to under ${state.settings.suno_max || 200} characters while keeping the key descriptors:\n\n${el.value}`;
+  callTextModel('music-shorten', [{ role: 'user', content: prompt }])
+    .then(res => { el.value = res.content.slice(0, state.settings.suno_max || 200); updateMusicCharCount(); updateStatus('Prompt shortened'); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function updateMusicCharCount() {
+  const val = document.getElementById('music-prompt').value;
+  const max = state.settings.suno_max || 200;
+  const badge = document.getElementById('music-char-count');
+  badge.textContent = `${val.length} / ${max}`;
+  badge.className = 'badge ' + (val.length === 0 ? 'empty' : val.length <= max ? 'good' : 'error');
+}
+
+function tweakMusic(mode) {
+  const el = document.getElementById('music-prompt');
+  if (!el.value.trim()) { showError('Generate a prompt first.'); return; }
+  const instructions = {
+    guitar: 'Make the prompt emphasize guitars: crunchy riffs, shred solos, power chords, heavy distortion.',
+    bluesy: 'Make the prompt bluesier: slide guitar, soulful vocals, swampy groove, delta blues feel.',
+    metal: 'Make the prompt more metal: double kick, downtuned guitars, growl vocals, dark atmosphere.',
+    danceable: 'Make the prompt more danceable: four-on-the-floor beat, synth bass, disco groove, upbeat energy.'
+  };
+  setLoading(true);
+  const prompt = `Current prompt: "${el.value}"\n\n${instructions[mode] || 'Adjust the prompt.'}\n\nReturn only the updated prompt under ${state.settings.suno_max || 200} characters.`;
+  callTextModel('music-tweak', [{ role: 'user', content: prompt }])
+    .then(res => { el.value = res.content.slice(0, state.settings.suno_max || 200); updateMusicCharCount(); updateStatus('Prompt tweaked: ' + mode); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+/* ── Visual Style ── */
+function populateVisualFields() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id).pop();
+  if (!vs) return;
+  document.getElementById('v-name').value = vs.name || '';
+  document.getElementById('v-medium').value = vs.medium || '';
+  document.getElementById('v-palette').value = vs.palette || '';
+  document.getElementById('v-lighting').value = vs.lighting || '';
+  document.getElementById('v-camera').value = vs.camera || '';
+  document.getElementById('v-character').value = vs.character_continuity || '';
+  document.getElementById('v-symbols').value = vs.recurring_symbols || '';
+  document.getElementById('v-negative').value = vs.negative_rules || '';
+  document.getElementById('v-aspect').value = vs.aspect_ratio || 'wide';
+  document.getElementById('v-no-text').checked = vs.no_text_rule !== false;
+  const banner = document.getElementById('visual-lock-banner');
+  const btn = document.getElementById('btn-lock-style');
+  if (vs.locked) { banner.classList.remove('hidden'); btn.classList.add('hidden'); }
+  else { banner.classList.add('hidden'); btn.classList.remove('hidden'); }
+}
+
+function generateVisualStyle() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const lyrics = state.lyrics_versions.filter(l => l.song_id === proj.id).pop();
+  const plan = state.plans.filter(p => p.song_id === proj.id && p.accepted).pop();
+  setLoading(true);
+  updateStatus('Generating visual style…');
+  const tmpl = state.settings.prompt_templates.visual;
+  const prompt = fillTemplate(tmpl, {
+    title: plan?.title || proj.title,
+    concept: proj.concept,
+    lyrics: lyrics ? lyrics.lyrics.slice(0, 600) + '…' : ''
+  });
+  callTextModel('visual', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetVisualStyle(res.content); populateVisualFields(); updateStatus('Visual style generated'); })
+    .catch(err => { showError(err.message); updateStatus('Error'); })
+    .finally(() => setLoading(false));
+}
+
+function parseAndSetVisualStyle(text) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const getVal = (keys) => {
+    for (const k of keys) {
+      const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
+      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+    }
+    return '';
+  };
+  const vs = {
+    id: 'vs_' + Date.now().toString(36), song_id: proj.id,
+    name: getVal(['visual style name', 'style name', 'name']) || 'Custom Style',
+    medium: getVal(['medium']),
+    palette: getVal(['palette', 'color palette']),
+    lighting: getVal(['lighting']),
+    camera: getVal(['camera', 'composition', 'camera/composition']),
+    character_continuity: getVal(['character continuity', 'character']),
+    recurring_symbols: getVal(['recurring symbols', 'symbols']),
+    negative_rules: getVal(['negative rules', 'negative', 'do not include']),
+    aspect_ratio: getVal(['aspect ratio', 'aspect']) || state.settings.def_aspect || 'wide',
+    no_text_rule: true,
+    locked: false
+  };
+  state.visual_styles.push(vs);
+  saveState();
+}
+
+function regenerateVisualStyle() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const prev = state.visual_styles.filter(v => v.song_id === proj.id).pop();
+  setLoading(true);
+  const prompt = (state.settings.prompt_templates.visual) + '\n\nPrevious style (for reference, generate a fresh alternative):\n' + JSON.stringify(prev, null, 2);
+  callTextModel('visual', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetVisualStyle(res.content); populateVisualFields(); updateStatus('Visual style regenerated'); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function tweakVisual(mode) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id).pop();
+  if (!vs) { showError('Generate a visual style first.'); return; }
+  const instructions = {
+    'hyper-realistic': 'Make the visual style hyper-realistic, photographic, with stunning detail and natural light.',
+    'comic-noir': 'Make the visual style comic book noir: heavy shadows, ink lines, dramatic chiaroscuro, limited palette.',
+    absurd: 'Make the visual style more absurd, surreal, and dreamlike with impossible architecture and whimsical elements.',
+    darker: 'Make the visual style darker, more moody, with deeper shadows and desaturated colors.',
+    colorful: 'Make the visual style more colorful, vibrant, saturated, and bold.'
+  };
+  setLoading(true);
+  const prompt = `Current visual style:\n${JSON.stringify(vs, null, 2)}\n\n${instructions[mode] || 'Adjust the style.'}\n\nReturn the updated visual style with all fields.`;
+  callTextModel('visual-tweak', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetVisualStyle(res.content); populateVisualFields(); updateStatus('Visual style tweaked: ' + mode); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function lockVisualStyle() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id).pop();
+  if (vs) {
+    vs.name = document.getElementById('v-name').value;
+    vs.medium = document.getElementById('v-medium').value;
+    vs.palette = document.getElementById('v-palette').value;
+    vs.lighting = document.getElementById('v-lighting').value;
+    vs.camera = document.getElementById('v-camera').value;
+    vs.character_continuity = document.getElementById('v-character').value;
+    vs.recurring_symbols = document.getElementById('v-symbols').value;
+    vs.negative_rules = document.getElementById('v-negative').value;
+    vs.aspect_ratio = document.getElementById('v-aspect').value;
+    vs.no_text_rule = document.getElementById('v-no-text').checked;
+    vs.locked = true;
+  }
+  document.getElementById('visual-lock-banner').classList.remove('hidden');
+  document.getElementById('btn-lock-style').classList.add('hidden');
+  saveState();
+  updateStatus('Visual style locked');
+}
+function unlockVisualStyle() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id).pop();
+  if (vs) vs.locked = false;
+  document.getElementById('visual-lock-banner').classList.add('hidden');
+  document.getElementById('btn-lock-style').classList.remove('hidden');
+  saveState();
+  updateStatus('Visual style unlocked');
+}
+
+/* ── Image Generation ── */
+function detectSections() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const currentLyrics = state.lyrics_versions.filter(l => l.song_id === proj.id && l.is_current).pop();
+  const text = currentLyrics ? currentLyrics.lyrics : '';
+  if (!text.trim()) { showError('Generate lyrics first.'); return; }
+  // Parse bracketed headers
+  const regex = /\[([^\]]+)\]/g;
+  const sections = [];
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const label = match[1].trim();
+    const startIdx = match.index + match[0].length;
+    const nextMatch = regex.exec(text);
+    const endIdx = nextMatch ? nextMatch.index : text.length;
+    regex.lastIndex = nextMatch ? nextMatch.index : text.length; // Reset for next iteration
+    const sectionText = text.slice(startIdx, endIdx).trim();
+    sections.push({ label, text: sectionText });
+  }
+  if (!sections.length) { showError('No bracketed sections found in lyrics.'); return; }
+  // Remove old sections for this project
+  state.sections = state.sections.filter(s => s.song_id !== proj.id);
+  sections.forEach((sec, idx) => {
+    state.sections.push({
+      id: 'sec_' + Date.now().toString(36) + '_' + idx,
+      song_id: proj.id,
+      label: sec.label,
+      text: sec.text,
+      order: idx + 1,
+      double_length: false
+    });
+  });
+  saveState();
+  renderSections();
+  updateStatus(`Detected ${sections.length} sections`);
+}
+
+function generateSectionImagePrompts() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const sections = state.sections.filter(s => s.song_id === proj.id).sort((a, b) => a.order - b.order);
+  if (!sections.length) { showError('Detect sections first.'); return; }
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id && v.locked).pop();
+  const visualStyleText = vs ? JSON.stringify(vs, null, 2) : 'No locked visual style yet. Use a consistent cinematic style.';
+  const plan = state.plans.filter(p => p.song_id === proj.id && p.accepted).pop();
+  setLoading(true);
+  updateStatus('Generating image prompts…');
+  let completed = 0;
+  const promises = sections.map(sec => {
+    const tmpl = state.settings.prompt_templates.section_image;
+    const prompt = fillTemplate(tmpl, {
+      title: plan?.title || proj.title,
+      section_label: sec.label,
+      section_text: sec.text,
+      visual_style: visualStyleText
+    });
+    return callTextModel('section-image', [{ role: 'user', content: prompt }])
+      .then(res => {
+        const ip = {
+          id: 'ip_' + Date.now().toString(36) + '_' + sec.order,
+          song_id: proj.id,
+          section_id: sec.id,
+          prompt_order: 1,
+          prompt_text: res.content.trim(),
+          status: 'Prompt Ready',
+          contains_text: false,
+          created_by_model: state.settings.text_model,
+          updated_at: new Date().toISOString()
+        };
+        state.image_prompts.push(ip);
+        completed++;
+      })
+      .catch(err => { console.error('Prompt error for section', sec.label, err); });
+  });
+  Promise.all(promises).then(() => {
+    saveState();
+    renderSections();
+    updateStatus(`Generated ${completed} section image prompts`);
+  }).finally(() => setLoading(false));
+}
+
+function generateAllImages() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const prompts = state.image_prompts.filter(p => p.song_id === proj.id && p.status === 'Prompt Ready');
+  if (!prompts.length) { showError('Generate image prompts first.'); return; }
+  let completed = 0;
+  setLoading(true);
+  updateStatus('Generating images…');
+  const promises = prompts.map(p => generateImageForPrompt(p.id).then(() => { completed++; }));
+  Promise.all(promises).then(() => {
+    updateStatus(`Generated ${completed} images`);
+  }).finally(() => setLoading(false));
+}
+
+function generateMissingImages() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const missing = state.image_prompts.filter(p => p.song_id === proj.id && p.status === 'Prompt Ready');
+  if (!missing.length) { showInfo('No missing images.'); return; }
+  setLoading(true);
+  let completed = 0;
+  const promises = missing.map(p => generateImageForPrompt(p.id).then(() => completed++));
+  Promise.all(promises).then(() => updateStatus(`Generated ${completed} missing images`)).finally(() => setLoading(false));
+}
+
+function regenerateRejectedImages() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const rejected = state.generated_images.filter(i => i.song_id === proj.id && i.status === 'Rejected');
+  if (!rejected.length) { showInfo('No rejected images.'); return; }
+  setLoading(true);
+  let completed = 0;
+  const promises = rejected.map(img => {
+    const prompt = state.image_prompts.find(p => p.id === img.image_prompt_id);
+    if (prompt) {
+      img.status = 'Needs Prompt';
+      return generateImageForPrompt(prompt.id).then(() => completed++);
+    }
+    return Promise.resolve();
+  });
+  Promise.all(promises).then(() => updateStatus(`Regenerated ${completed} rejected images`)).finally(() => setLoading(false));
+}
+
+function copyAllImagePrompts() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const prompts = state.image_prompts.filter(p => p.song_id === proj.id).map(p => p.prompt_text).join('\n\n---\n\n');
+  copyToClipboard(prompts);
+}
+
+function exportImageManifest() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const images = state.generated_images.filter(i => i.song_id === proj.id);
+  const prompts = state.image_prompts.filter(p => p.song_id === proj.id);
+  const manifest = { project_id: proj.id, title: proj.title, generated_at: new Date().toISOString(), images, prompts };
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `image_manifest_${proj.id}.json`;
+  a.click();
+}
+
+function renderSections() {
+  const container = document.getElementById('sections-container');
+  const proj = getCurrentProject();
+  if (!proj) { container.innerHTML = '<p style="color:var(--text-2)">Select a project first.</p>'; return; }
+  const sections = state.sections.filter(s => s.song_id === proj.id).sort((a, b) => a.order - b.order);
+  const prompts = state.image_prompts.filter(p => p.song_id === proj.id);
+  const images = state.generated_images.filter(i => i.song_id === proj.id);
+  if (!sections.length) { container.innerHTML = '<p style="color:var(--text-2)">No sections detected. Click "Detect Sections" after generating lyrics.</p>'; return; }
+  container.innerHTML = '';
+  sections.forEach(sec => {
+    const secPrompts = prompts.filter(p => p.section_id === sec.id).sort((a, b) => a.prompt_order - b.prompt_order);
+    const secImages = images.filter(i => i.section_id === sec.id);
+    const card = document.createElement('div');
+    card.className = 'card';
+    let imgHtml = '';
+    secImages.forEach(img => {
+      imgHtml += `<div style="border:1px solid var(--border); border-radius:6px; padding:.5rem; margin-bottom:.4rem; background:var(--bg-3);">
+        <div style="display:flex; gap:.4rem; align-items:center; margin-bottom:.3rem;">
+          <span class="badge ${img.status === 'Final' ? 'good' : img.status === 'Rejected' ? 'error' : 'warn'}">${img.status}</span>
+          <span style="font-size:.75rem; color:var(--text-2);">${img.provider} · ${img.model || ''}</span>
+        </div>
+        ${img.image_url ? `<img src="${escapeHTML(img.image_url)}" style="max-width:100%; border-radius:4px; display:block; margin-bottom:.3rem;" alt="Generated image" />` : ''}
+        <div style="display:flex; gap:.3rem; flex-wrap:wrap;">
+          <button class="btn small" onclick="acceptGeneratedImage('${img.id}')">✅ Accept</button>
+          <button class="btn small danger" onclick="rejectGeneratedImage('${img.id}')">❌ Reject</button>
+          <button class="btn small" onclick="downloadImage('${img.id}')">⬇ Download</button>
+        </div>
+      </div>`;
+    });
+    card.innerHTML = `
+      <h4>${escapeHTML(sec.label)}</h4>
+      <pre style="font-size:.85rem; color:var(--text-2); white-space:pre-wrap; margin:0 0 .5rem;">${escapeHTML(sec.text)}</pre>
+      <div style="display:flex; gap:.4rem; flex-wrap:wrap; margin-bottom:.5rem;">
+        <span class="badge ${sec.double_length ? 'warn' : 'good'}">${sec.double_length ? '2 images' : '1 image'}</span>
+        <button class="btn small" onclick="toggleDoubleLength('${sec.id}')">Toggle Double Length</button>
+      </div>
+      <div class="image-prompts">
+        ${secPrompts.map(p => `
+          <div style="border:1px solid var(--border); border-radius:6px; padding:.6rem; margin-bottom:.4rem;">
+            <div style="font-size:.75rem; color:var(--text-2); margin-bottom:.3rem;">${escapeHTML(p.status)}</div>
+            <textarea rows="3" style="font-size:.85rem;" onchange="updateImagePrompt('${p.id}', this.value)">${escapeHTML(p.prompt_text)}</textarea>
+            <div style="display:flex; gap:.3rem; margin-top:.3rem; flex-wrap:wrap;">
+              <button class="btn small" onclick="generateImageForPrompt('${p.id}')">🖼 Generate</button>
+              <button class="btn small" onclick="regenerateImagePrompt('${p.id}')">🔄 Regen Prompt</button>
+              <button class="btn small" onclick="copyToClipboard(this.closest('.image-prompts').querySelector('textarea').value)">📋 Copy</button>
+              <button class="btn small" onclick="useAsThumbnailCandidate('${p.id}')">🎬 Thumbnail</button>
+            </div>
+          </div>
+        `).join('')}
+        ${!secPrompts.length ? '<p style="color:var(--text-2); font-size:.85rem;">No prompts yet. Click "Generate All Prompts".</p>' : ''}
+      </div>
+      <div style="margin-top:.5rem;">
+        <h5 style="margin:.4rem 0; font-size:.85rem; color:var(--text-2);">Generated Images</h5>
+        ${imgHtml || '<p style="font-size:.85rem; color:var(--text-2);">No images generated yet.</p>'}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function toggleDoubleLength(secId) {
+  const sec = state.sections.find(s => s.id === secId);
+  if (sec) { sec.double_length = !sec.double_length; saveState(); renderSections(); }
+}
+function updateImagePrompt(pid, text) {
+  const p = state.image_prompts.find(x => x.id === pid);
+  if (p) { p.prompt_text = text; p.status = 'Prompt Ready'; saveState(); }
+}
+
+async function generateImageForPrompt(pid) {
+  const prompt = state.image_prompts.find(p => p.id === pid);
+  if (!prompt) return;
+  prompt.status = 'Generating';
+  saveState();
+  renderSections();
+  try {
+    const result = await callImageModel(prompt.prompt_text, { aspect: state.visual_styles.filter(v => v.song_id === prompt.song_id && v.locked).pop()?.aspect_ratio || 'wide' });
+    const img = {
+      id: 'img_' + Date.now().toString(36),
+      song_id: prompt.song_id,
+      image_prompt_id: prompt.id,
+      section_id: prompt.section_id,
+      provider: result.provider,
+      model: result.model || state.settings.image_model,
+      prompt: prompt.prompt_text,
+      image_url: result.url,
+      image_data_url: result.data_url || '',
+      blob_ref: '',
+      width: result.width || null,
+      height: result.height || null,
+      status: 'Generated',
+      accepted: false,
+      created_at: new Date().toISOString(),
+      error: ''
+    };
+    state.generated_images.push(img);
+    prompt.status = 'Generated';
+    saveState();
+    renderSections();
+    // If URL is a data URL or blob, try to store in IndexedDB
+    if (result.url && result.url.startsWith('data:')) {
+      try {
+        const blob = await (await fetch(result.url)).blob();
+        await storeImageBlob(img.id, blob);
+      } catch (e) { console.warn('Could not store blob', e); }
+    }
+  } catch (err) {
+    prompt.status = 'Error';
+    console.error('Image generation error', err);
+    state.generated_images.push({
+      id: 'img_' + Date.now().toString(36), song_id: prompt.song_id, image_prompt_id: prompt.id,
+      section_id: prompt.section_id, provider: state.settings.image_provider, model: state.settings.image_model,
+      prompt: prompt.prompt_text, image_url: '', status: 'Error', error: err.message, created_at: new Date().toISOString()
+    });
+    saveState();
+    renderSections();
+  }
+}
+
+function regenerateImagePrompt(pid) {
+  const prompt = state.image_prompts.find(p => p.id === pid);
+  if (!prompt) return;
+  const proj = state.projects.find(p => p.id === prompt.song_id);
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id && v.locked).pop();
+  const visualStyleText = vs ? JSON.stringify(vs, null, 2) : 'Consistent cinematic style.';
+  setLoading(true);
+  const tmpl = state.settings.prompt_templates.section_image;
+  const sec = state.sections.find(s => s.id === prompt.section_id);
+  const callPrompt = fillTemplate(tmpl, {
+    title: proj.title, section_label: sec.label, section_text: sec.text, visual_style: visualStyleText
+  }) + '\n\nPrevious prompt (generate a fresh alternative):\n' + prompt.prompt_text;
+  callTextModel('section-image', [{ role: 'user', content: callPrompt }])
+    .then(res => { prompt.prompt_text = res.content.trim(); prompt.status = 'Prompt Ready'; saveState(); renderSections(); updateStatus('Prompt regenerated'); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function acceptGeneratedImage(imgId) {
+  const img = state.generated_images.find(i => i.id === imgId);
+  if (img) { img.status = 'Final'; img.accepted = true; saveState(); renderSections(); }
+}
+function rejectGeneratedImage(imgId) {
+  const img = state.generated_images.find(i => i.id === imgId);
+  if (img) { img.status = 'Rejected'; img.accepted = false; saveState(); renderSections(); }
+}
+async function downloadImage(imgId) {
+  const img = state.generated_images.find(i => i.id === imgId);
+  if (!img || !img.image_url) return;
+  try {
+    let blob;
+    if (img.image_url.startsWith('data:')) {
+      blob = await (await fetch(img.image_url)).blob();
+    } else if (img.image_url.startsWith('http')) {
+      blob = await (await fetch(img.image_url)).blob();
+    } else {
+      blob = await getImageBlob(imgId);
+    }
+    if (!blob) { showError('No image data available'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `songforge_${imgId}.png`;
+    a.click();
+  } catch (e) { showError('Download failed: ' + e.message); }
+}
+function useAsThumbnailCandidate(pid) {
+  const prompt = state.image_prompts.find(p => p.id === pid);
+  if (!prompt) return;
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  if (thumb) {
+    thumb.prompt = 'Based on section image: ' + prompt.prompt_text;
+    thumb.status = 'Prompt Ready';
+  } else {
+    state.thumbnail_assets.push({
+      id: 'thumb_' + Date.now().toString(36), song_id: proj.id,
+      strategy: '', title_text: proj.title, subtitle: '',
+      composition: '', character: '', background: '', font_direction: '', text_placement: '',
+      high_contrast: true, include_text: true, no_text: false,
+      prompt: 'Based on section image: ' + prompt.prompt_text,
+      image_url: '', status: 'Prompt Ready'
+    });
+  }
+  saveState();
+  updateStatus('Thumbnail candidate set from section image');
+  switchTab('thumbnail');
+}
+
+/* ── Thumbnail ── */
+function populateThumbnailFields() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  if (!thumb) return;
+  document.getElementById('t-strategy').value = thumb.strategy || '';
+  document.getElementById('t-title-text').value = thumb.title_text || '';
+  document.getElementById('t-subtitle').value = thumb.subtitle || '';
+  document.getElementById('t-composition').value = thumb.composition || '';
+  document.getElementById('t-character').value = thumb.character || '';
+  document.getElementById('t-background').value = thumb.background || '';
+  document.getElementById('t-font').value = thumb.font_direction || '';
+  document.getElementById('t-placement').value = thumb.text_placement || '';
+  document.getElementById('t-high-contrast').checked = !!thumb.high_contrast;
+  document.getElementById('t-include-text').checked = thumb.include_text !== false;
+  document.getElementById('t-no-text').checked = !!thumb.no_text;
+  document.getElementById('t-prompt').value = thumb.prompt || '';
+  const preview = document.getElementById('thumbnail-preview');
+  if (thumb.image_url) {
+    preview.innerHTML = `<img src="${escapeHTML(thumb.image_url)}" style="max-width:100%; border-radius:var(--radius);" alt="Thumbnail" />`;
+  } else {
+    preview.textContent = 'No thumbnail generated yet.';
+  }
+}
+
+function generateThumbnailConcepts() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id && v.locked).pop();
+  setLoading(true);
+  const prompt = `Generate 3 distinct thumbnail concept ideas for this song.\n\nTitle: ${proj.title}\nConcept: ${proj.concept}\nVisual style: ${vs ? vs.name : 'cinematic'}\n\nFor each concept give: strategy, composition, character, background, and text placement.`;
+  callTextModel('thumbnail-concepts', [{ role: 'user', content: prompt }])
+    .then(res => { alert(res.content); updateStatus('Thumbnail concepts generated'); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function generateThumbnailPrompt() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id && v.locked).pop();
+  const includeText = document.getElementById('t-include-text').checked;
+  const thumbTitle = document.getElementById('t-title-text').value || proj.title;
+  setLoading(true);
+  const tmpl = state.settings.prompt_templates.thumbnail;
+  const prompt = fillTemplate(tmpl, {
+    title: proj.title, concept: proj.concept,
+    visual_style: vs ? JSON.stringify(vs, null, 2) : '',
+    include_text: includeText ? 'yes' : 'no',
+    thumb_title: thumbTitle
+  });
+  callTextModel('thumbnail-prompt', [{ role: 'user', content: prompt }])
+    .then(res => {
+      const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+      if (thumb) thumb.prompt = res.content.trim();
+      else state.thumbnail_assets.push({ id: 'thumb_' + Date.now().toString(36), song_id: proj.id, strategy: '', title_text: thumbTitle, subtitle: '', composition: '', character: '', background: '', font_direction: '', text_placement: '', high_contrast: true, include_text, no_text: false, prompt: res.content.trim(), image_url: '', status: 'Prompt Ready' });
+      saveState();
+      populateThumbnailFields();
+      updateStatus('Thumbnail prompt generated');
+    })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function generateThumbnailImage() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  const promptText = thumb?.prompt || document.getElementById('t-prompt').value;
+  if (!promptText.trim()) { showError('Generate a thumbnail prompt first.'); return; }
+  setLoading(true);
+  updateStatus('Generating thumbnail image…');
+  callImageModel(promptText, { aspect: 'wide' })
+    .then(res => {
+      if (thumb) { thumb.image_url = res.url; thumb.status = 'Generated'; }
+      else state.thumbnail_assets.push({ id: 'thumb_' + Date.now().toString(36), song_id: proj.id, strategy: '', title_text: '', subtitle: '', composition: '', character: '', background: '', font_direction: '', text_placement: '', high_contrast: true, include_text: true, no_text: false, prompt: promptText, image_url: res.url, status: 'Generated' });
+      saveState();
+      populateThumbnailFields();
+      updateStatus('Thumbnail generated');
+    })
+    .catch(err => { showError(err.message); updateStatus('Error'); })
+    .finally(() => setLoading(false));
+}
+
+function generateThumbnailVariants() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  const promptText = thumb?.prompt || document.getElementById('t-prompt').value;
+  if (!promptText.trim()) { showError('Generate a thumbnail prompt first.'); return; }
+  setLoading(true);
+  updateStatus('Generating 4 thumbnail variants…');
+  const promises = [1,2,3,4].map(() => callImageModel(promptText + ' (variant)', { aspect: 'wide' }).then(res => {
+    state.generated_images.push({
+      id: 'img_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,5),
+      song_id: proj.id, image_prompt_id: thumb?.id || '', section_id: '',
+      provider: res.provider, model: res.model, prompt: promptText,
+      image_url: res.url, status: 'Generated', accepted: false, created_at: new Date().toISOString(), error: ''
+    });
+  }).catch(e => console.error('Variant error', e)));
+  Promise.all(promises).then(() => {
+    saveState();
+    updateStatus('Thumbnail variants generated');
+    switchTab('images');
+  }).finally(() => setLoading(false));
+}
+
+function downloadThumbnail() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  if (!thumb || !thumb.image_url) { showError('No thumbnail to download.'); return; }
+  const a = document.createElement('a');
+  a.href = thumb.image_url;
+  a.download = `thumbnail_${proj.id}.png`;
+  a.click();
+}
+
+function acceptThumbnail() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  if (thumb) { thumb.status = 'Final'; saveState(); updateStatus('Thumbnail accepted'); }
+}
+
+/* ── YouTube ── */
+function populateYouTubeFields() {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const yt = state.youtube_packages.filter(y => y.song_id === proj.id).pop();
+  if (!yt) return;
+  document.getElementById('y-title').value = yt.title || '';
+  document.getElementById('y-alts').value = yt.alternate_titles || '';
+  document.getElementById('y-description').value = yt.description || '';
+  document.getElementById('y-hashtags').value = yt.hashtags || '';
+  document.getElementById('y-comment').value = yt.pinned_comment || '';
+  document.getElementById('y-thumb-text').value = yt.thumb_title_text || '';
+  document.getElementById('y-tipjar').checked = !!yt.tipjar_included;
+  document.getElementById('y-url').value = yt.youtube_url || '';
+  document.getElementById('y-date').value = yt.published_date || '';
+}
+
+function generateYouTubePackage() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const lyrics = state.lyrics_versions.filter(l => l.song_id === proj.id && l.is_current).pop();
+  const plan = state.plans.filter(p => p.song_id === proj.id && p.accepted).pop();
+  setLoading(true);
+  updateStatus('Generating YouTube package…');
+  const tmpl = state.settings.prompt_templates.youtube;
+  const tipjar = state.settings.tipjar_default ? state.settings.tipjar_block : 'No tip jar';
+  const prompt = fillTemplate(tmpl, {
+    title: plan?.title || proj.title,
+    concept: proj.concept,
+    genre: plan?.genre || proj.genre,
+    tone: proj.tone || plan?.tone || '',
+    lyrics: lyrics ? lyrics.lyrics.slice(0, 800) + '…' : '',
+    tipjar_setting: tipjar
+  });
+  callTextModel('youtube', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetYouTubePackage(res.content); populateYouTubeFields(); updateStatus('YouTube package generated'); })
+    .catch(err => { showError(err.message); updateStatus('Error'); })
+    .finally(() => setLoading(false));
+}
+
+function parseAndSetYouTubePackage(text) {
+  const proj = getCurrentProject();
+  if (!proj) return;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const getVal = (keys) => {
+    for (const k of keys) {
+      const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
+      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+    }
+    return '';
+  };
+  const getBlock = (startKeys, stopKeys) => {
+    let capturing = false;
+    const out = [];
+    for (const line of lines) {
+      if (capturing && stopKeys.some(k => line.toLowerCase().startsWith(k.toLowerCase()))) break;
+      if (!capturing && startKeys.some(k => line.toLowerCase().startsWith(k.toLowerCase()))) { capturing = true; out.push(line.split(/[:\-]/, 2)[1]?.trim() || line); continue; }
+      if (capturing) out.push(line);
+    }
+    return out.join('\n');
+  };
+  const yt = {
+    id: 'yt_' + Date.now().toString(36), song_id: proj.id,
+    title: getVal(['video title', 'title']),
+    alternate_titles: getBlock(['alternate titles', 'alt titles'], ['description', 'hashtags', 'pinned comment']),
+    description: getBlock(['description'], ['hashtags', 'pinned comment', 'thumbnail title text']),
+    hashtags: getBlock(['hashtags', 'tags'], ['pinned comment', 'thumbnail title text']),
+    pinned_comment: getBlock(['pinned comment', 'comment'], ['thumbnail title text']),
+    thumb_title_text: getVal(['thumbnail title text', 'thumbnail text']),
+    tipjar_included: state.settings.tipjar_default,
+    youtube_url: '',
+    published_date: ''
+  };
+  if (state.settings.tipjar_default && state.settings.tipjar_above) {
+    yt.description = (state.settings.tipjar_block + '\n\n') + yt.description;
+  } else if (state.settings.tipjar_default) {
+    yt.description = yt.description + '\n\n' + state.settings.tipjar_block;
+  }
+  state.youtube_packages.push(yt);
+  saveState();
+}
+
+function generateTitleOptions() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  setLoading(true);
+  const prompt = `Generate 10 clickable YouTube title options for this song. Make them varied: some straightforward, some clickbait, some mysterious.\n\nTitle: ${proj.title}\nConcept: ${proj.concept}\nGenre: ${proj.genre}`;
+  callTextModel('youtube-titles', [{ role: 'user', content: prompt }])
+    .then(res => { alert(res.content); updateStatus('Title options generated'); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function rewriteDescription() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const yt = state.youtube_packages.filter(y => y.song_id === proj.id).pop();
+  const currentDesc = yt?.description || document.getElementById('y-description').value;
+  if (!currentDesc.trim()) { showError('No description to rewrite.'); return; }
+  setLoading(true);
+  const prompt = `Rewrite this YouTube description to be more engaging and better formatted. Keep hashtags and tip jar if present.\n\n${currentDesc}`;
+  callTextModel('youtube-desc', [{ role: 'user', content: prompt }])
+    .then(res => {
+      if (yt) yt.description = res.content;
+      document.getElementById('y-description').value = res.content;
+      saveState();
+      updateStatus('Description rewritten');
+    })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+function tweakYouTube(mode) {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const yt = state.youtube_packages.filter(y => y.song_id === proj.id).pop();
+  if (!yt) { showError('Generate a YouTube package first.'); return; }
+  const instructions = {
+    clickable: 'Make the title and description more clickable and engaging without being misleading.',
+    'less-clickbait': 'Make the title and description less clickbaity, more authentic and grounded.'
+  };
+  setLoading(true);
+  const prompt = `Current YouTube package:\nTitle: ${yt.title}\nDescription: ${yt.description}\n\n${instructions[mode] || 'Adjust the package.'}\n\nReturn updated title and description.`;
+  callTextModel('youtube-tweak', [{ role: 'user', content: prompt }])
+    .then(res => { parseAndSetYouTubePackage(res.content); populateYouTubeFields(); updateStatus('YouTube package tweaked: ' + mode); })
+    .catch(err => { showError(err.message); })
+    .finally(() => setLoading(false));
+}
+
+/* ── Review ── */
+function runProductionReview() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project'); return; }
+  const plan = state.plans.filter(p => p.song_id === proj.id && p.accepted).pop();
+  const lyrics = state.lyrics_versions.filter(l => l.song_id === proj.id && l.is_current).pop();
+  const music = state.music_prompts.filter(m => m.song_id === proj.id).pop();
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id).pop();
+  const imgs = state.generated_images.filter(i => i.song_id === proj.id);
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  const yt = state.youtube_packages.filter(y => y.song_id === proj.id).pop();
+  setLoading(true);
+  updateStatus('Running AI production review…');
+  const tmpl = state.settings.prompt_templates.review;
+  const prompt = fillTemplate(tmpl, {
+    title: plan?.title || proj.title,
+    concept: proj.concept,
+    lyrics: lyrics ? lyrics.lyrics : '(none)',
+    music_prompt: music ? music.prompt : '(none)',
+    visual_style: vs ? JSON.stringify(vs, null, 2) : '(none)',
+    image_prompts: state.image_prompts.filter(p => p.song_id === proj.id).map(p => p.prompt_text).join('\n\n') || '(none)',
+    youtube_package: yt ? JSON.stringify(yt, null, 2) : '(none)'
+  });
+  callReviewModel([{ role: 'user', content: prompt }])
+    .then(res => {
+      const review = {
+        id: 'rev_' + Date.now().toString(36), song_id: proj.id,
+        content: res.content, created_at: new Date().toISOString()
+      };
+      state.reviews.push(review);
+      saveState();
+      document.getElementById('ai-review-output').innerHTML = `<pre style="white-space:pre-wrap; margin:0; font-family:var(--font); font-size:.9rem;">${escapeHTML(res.content)}</pre>`;
+      updateStatus('AI review complete');
+    })
+    .catch(err => { showError(err.message); updateStatus('AI review failed'); })
+    .finally(() => setLoading(false));
+}
+
+function renderReviewChecklist() {
+  const list = document.getElementById('review-checklist');
+  const proj = getCurrentProject();
+  if (!proj) { list.innerHTML = '<li style="color:var(--text-2)">No project selected</li>'; return; }
+  const items = calculateChecklist(proj);
+  list.innerHTML = items.map(it => `<li style="margin-bottom:.3rem;"><span class="status-dot ${it.ok ? 'ok' : 'bad'}"></span> ${escapeHTML(it.label)}</li>`).join('');
+}
+function calculateChecklist(proj) {
+  if (!proj) return [];
+  const plan = state.plans.filter(p => p.song_id === proj.id).pop();
+  const lyrics = state.lyrics_versions.filter(l => l.song_id === proj.id);
+  const music = state.music_prompts.filter(m => m.song_id === proj.id).pop();
+  const sections = state.sections.filter(s => s.song_id === proj.id);
+  const imgs = state.generated_images.filter(i => i.song_id === proj.id);
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  const yt = state.youtube_packages.filter(y => y.song_id === proj.id).pop();
+  return [
+    { label: 'Concept exists', ok: !!proj.concept },
+    { label: 'Direction selected', ok: !!proj.selected_direction_id },
+    { label: 'Plan accepted', ok: !!(plan && plan.accepted) },
+    { label: 'Lyrics generated', ok: lyrics.length > 0 },
+    { label: 'Music prompt exists', ok: !!(music && music.prompt) },
+    { label: 'Music prompt ≤ ' + (state.settings.suno_max || 200) + ' chars', ok: !!(music && music.prompt && music.prompt.length <= (state.settings.suno_max || 200)) },
+    { label: 'Sections detected', ok: sections.length > 0 },
+    { label: 'Visual style locked', ok: !!state.visual_styles.find(v => v.song_id === proj.id && v.locked) },
+    { label: 'All required image prompts exist', ok: sections.length > 0 && state.image_prompts.filter(p => p.song_id === proj.id).length >= sections.length },
+    { label: 'All required images generated', ok: imgs.filter(i => i.status === 'Generated' || i.status === 'Final').length >= sections.length },
+    { label: 'Thumbnail generated', ok: !!(thumb && (thumb.image_url || thumb.status === 'Generated')) },
+    { label: 'YouTube package exists', ok: !!(yt && yt.title) },
+    { label: 'Export package available', ok: true }
+  ];
+}
+
+/* ── Export ── */
+function updateExportState() { /* UI updates handled per-tab */ }
+
+function getCurrentProjectData() {
+  const proj = getCurrentProject();
+  if (!proj) return null;
+  return {
+    project: proj,
+    directions: state.directions.filter(d => d.song_id === proj.id),
+    plan: state.plans.filter(p => p.song_id === proj.id).pop(),
+    lyrics: state.lyrics_versions.filter(l => l.song_id === proj.id),
+    music: state.music_prompts.filter(m => m.song_id === proj.id).pop(),
+    visual: state.visual_styles.filter(v => v.song_id === proj.id).pop(),
+    sections: state.sections.filter(s => s.song_id === proj.id).sort((a,b)=>a.order-b.order),
+    imagePrompts: state.image_prompts.filter(p => p.song_id === proj.id),
+    images: state.generated_images.filter(i => i.song_id === proj.id),
+    thumbnail: state.thumbnail_assets.filter(t => t.song_id === proj.id).pop(),
+    youtube: state.youtube_packages.filter(y => y.song_id === proj.id).pop(),
+    review: state.reviews.filter(r => r.song_id === proj.id).pop()
+  };
+}
+
+function exportProjectMarkdown() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const lines = [
+    `# ${d.project.title || 'Untitled Song'}`,
+    `**Status:** ${d.project.status}`,
+    `**Genre:** ${d.project.genre || ''} · **Tone:** ${d.project.tone || ''} · **Vocal:** ${d.project.vocal || ''}`,
+    '',
+    '## Concept',
+    d.project.concept,
+    '',
+    '## Creative Brief',
+    d.plan?.brief || '(no plan)',
+    '',
+    '## Lyrics',
+    d.lyrics.filter(l=>l.is_current).pop()?.lyrics || '(no lyrics)',
+    '',
+    '## Suno Music Prompt',
+    d.music?.prompt || '(none)',
+    '',
+    '## Visual Style',
+    d.visual ? `${d.visual.name}\n- Medium: ${d.visual.medium}\n- Palette: ${d.visual.palette}\n- Lighting: ${d.visual.lighting}\n- Camera: ${d.visual.camera}` : '(none)',
+    '',
+    '## Image Prompts',
+    d.imagePrompts.map((p,i) => `${i+1}. **${d.sections.find(s=>s.id===p.section_id)?.label || ''}**\n   ${p.prompt_text}`).join('\n\n'),
+    '',
+    '## YouTube Package',
+    d.youtube ? `**Title:** ${d.youtube.title}\n**Description:**\n${d.youtube.description}\n**Hashtags:** ${d.youtube.hashtags}` : '(none)',
+    '',
+    '---',
+    `Exported from SongForge AI on ${new Date().toLocaleDateString()}`
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slugify(d.project.title || 'project')}.md`;
+  a.click();
+  updateStatus('Project Markdown exported');
+}
+
+function exportLyricsTXT() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const lyrics = d.lyrics.filter(l=>l.is_current).pop()?.lyrics || '';
+  const blob = new Blob([lyrics], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slugify(d.project.title || 'lyrics')}_lyrics.txt`;
+  a.click();
+  updateStatus('Lyrics exported');
+}
+
+function exportSunoTXT() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const text = d.music?.prompt || '';
+  const blob = new Blob([text], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slugify(d.project.title || 'suno')}_suno_prompt.txt`;
+  a.click();
+  updateStatus('Suno prompt exported');
+}
+
+function exportImagePromptsMD() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const lines = d.imagePrompts.map((p,i) => {
+    const sec = d.sections.find(s=>s.id===p.section_id);
+    return `## ${sec?.label || 'Image '+(i+1)}\n\n${p.prompt_text}\n\n**Status:** ${p.status}`;
+  });
+  const blob = new Blob([lines.join('\n\n')], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slugify(d.project.title || 'project')}_image_prompts.md`;
+  a.click();
+  updateStatus('Image prompts exported');
+}
+
+function exportYouTubeMD() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const yt = d.youtube;
+  if (!yt) { showError('No YouTube package'); return; }
+  const lines = [
+    '# YouTube Package',
+    `## Title\n${yt.title}`,
+    `## Alternate Titles\n${yt.alternate_titles}`,
+    `## Description\n${yt.description}`,
+    `## Hashtags\n${yt.hashtags}`,
+    `## Pinned Comment\n${yt.pinned_comment}`,
+    `## Thumbnail Text\n${yt.thumb_title_text}`
+  ];
+  const blob = new Blob([lines.join('\n\n')], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slugify(d.project.title || 'project')}_youtube.md`;
+  a.click();
+  updateStatus('YouTube package exported');
+}
+
+function exportReviewMD() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const rev = d.review;
+  if (!rev) { showError('No review generated. Run AI review first.'); return; }
+  const blob = new Blob([`# Production Review\n\n${rev.content}`], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slugify(d.project.title || 'project')}_review.md`;
+  a.click();
+  updateStatus('Review exported');
+}
+
+function exportProjectJSON() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slugify(d.project.title || 'project')}.json`;
+  a.click();
+  updateStatus('Project JSON exported');
+}
+
+function exportAllProjectsJSON() {
+  const blob = new Blob([JSON.stringify(state.projects, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'songforge_all_projects.json';
+  a.click();
+  updateStatus('All projects exported');
+}
+
+async function downloadAllAcceptedImages() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  const accepted = d.images.filter(i => i.status === 'Final' || i.accepted);
+  if (!accepted.length) { showInfo('No accepted images to download.'); return; }
+  for (const img of accepted) {
+    try {
+      let blob;
+      if (img.image_url.startsWith('data:')) blob = await (await fetch(img.image_url)).blob();
+      else if (img.image_url.startsWith('http')) blob = await (await fetch(img.image_url)).blob();
+      else blob = await getImageBlob(img.id);
+      if (!blob) continue;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `songforge_${img.id}.png`;
+      a.click();
+    } catch (e) { console.error('Download error', e); }
+  }
+  updateStatus('Accepted images downloaded');
+}
+
+async function exportZIPBundle() {
+  const d = getCurrentProjectData();
+  if (!d) return;
+  // Dynamically load JSZip if needed
+  if (typeof JSZip === 'undefined') {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+  const zip = new JSZip();
+  const folder = zip.folder(slugify(d.project.title || 'project'));
+  folder.file('project.md', [
+    `# ${d.project.title || 'Untitled Song'}`,
+    `**Status:** ${d.project.status}`,
+    '',
+    '## Concept\n' + d.project.concept,
+    '## Brief\n' + (d.plan?.brief || ''),
+    '## Lyrics\n' + (d.lyrics.filter(l=>l.is_current).pop()?.lyrics || ''),
+    '## Suno Prompt\n' + (d.music?.prompt || ''),
+    '## YouTube Package\n' + JSON.stringify(d.youtube || {}, null, 2)
+  ].join('\n\n'));
+  folder.file('lyrics.txt', d.lyrics.filter(l=>l.is_current).pop()?.lyrics || '');
+  folder.file('suno_prompt.txt', d.music?.prompt || '');
+  folder.file('youtube_package.md', [
+    '# YouTube Package',
+    `## Title\n${d.youtube?.title || ''}`,
+    `## Description\n${d.youtube?.description || ''}`,
+    `## Hashtags\n${d.youtube?.hashtags || ''}`
+  ].join('\n\n'));
+  folder.file('image_prompts.md', d.imagePrompts.map((p,i) => `## ${d.sections.find(s=>s.id===p.section_id)?.label || i+1}\n${p.prompt_text}`).join('\n\n'));
+  folder.file('manifest.json', JSON.stringify({
+    project: d.project, sections: d.sections, image_prompts: d.imagePrompts,
+    images: d.images, thumbnail: d.thumbnail, youtube: d.youtube
+  }, null, 2));
+  // Add images if possible
+  const imagesFolder = folder.folder('images');
+  for (const img of d.images) {
+    if (!img.image_url) continue;
+    try {
+      let blob;
+      if (img.image_url.startsWith('data:')) blob = await (await fetch(img.image_url)).blob();
+      else if (img.image_url.startsWith('http')) blob = await (await fetch(img.image_url)).blob();
+      else blob = await getImageBlob(img.id);
+      if (blob) imagesFolder.file(`section_${img.section_id || img.id}.png`, blob);
+    } catch (e) { console.error('ZIP image error', e); }
+  }
+  const content = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(content);
+  a.download = `${slugify(d.project.title || 'project')}_bundle.zip`;
+  a.click();
+  updateStatus('ZIP bundle exported');
+}
+
+function slugify(str) {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+}
+
+/* ── Settings ── */
+function populateSettingsUI() {
+  const s = state.settings;
+  document.getElementById('s-text-provider').value = s.text_provider;
+  document.getElementById('s-text-key').value = s.text_key;
+  document.getElementById('s-text-model').value = s.text_model;
+  document.getElementById('s-text-temp').value = s.text_temp;
+  document.getElementById('s-text-tokens').value = s.text_tokens;
+  document.getElementById('s-text-system').value = s.text_system;
+
+  document.getElementById('s-img-provider').value = s.image_provider;
+  document.getElementById('s-img-key').value = s.image_key;
+  document.getElementById('s-img-model').value = s.image_model;
+  document.getElementById('s-img-aspect').value = s.image_aspect;
+  document.getElementById('s-img-variants').value = s.image_variants;
+  document.getElementById('s-img-quality').value = s.image_quality;
+  document.getElementById('s-img-style').value = s.image_style;
+
+  document.getElementById('s-review-same').checked = s.review_same;
+  document.getElementById('s-review-provider').value = s.review_provider;
+  document.getElementById('s-review-key').value = s.review_key;
+  document.getElementById('s-review-model').value = s.review_model;
+
+  document.getElementById('s-def-genre').value = s.def_genre;
+  document.getElementById('s-def-vocal').value = s.def_vocal;
+  document.getElementById('s-def-tone').value = s.def_tone;
+  document.getElementById('s-def-aspect').value = s.def_aspect;
+  document.getElementById('s-def-img-count').value = s.def_img_count;
+  document.getElementById('s-suno-max').value = s.suno_max;
+  document.getElementById('s-no-text').checked = s.no_text_rule;
+  document.getElementById('s-thumb-text').checked = s.thumb_text;
+  document.getElementById('s-autosave').checked = s.autosave;
+
+  document.getElementById('s-def-hashtags').value = s.def_hashtags;
+  document.getElementById('s-tipjar-block').value = s.tipjar_block;
+  document.getElementById('s-tipjar-default').checked = s.tipjar_default;
+  document.getElementById('s-tipjar-above').checked = s.tipjar_above;
+
+  // Render prompt templates
+  const ptContainer = document.getElementById('prompt-templates-container');
+  ptContainer.innerHTML = '';
+  Object.entries(s.prompt_templates).forEach(([key, val]) => {
+    const div = document.createElement('div');
+    div.className = 'field';
+    div.innerHTML = `<label>${escapeHTML(key)}</label><textarea rows="4" id="pt-${key}">${escapeHTML(val)}</textarea>`;
+    ptContainer.appendChild(div);
+  });
+}
+
+function saveSettings() {
+  const s = state.settings;
+  s.text_provider = document.getElementById('s-text-provider').value;
+  s.text_key = document.getElementById('s-text-key').value;
+  s.text_model = document.getElementById('s-text-model').value;
+  s.text_temp = parseFloat(document.getElementById('s-text-temp').value);
+  s.text_tokens = parseInt(document.getElementById('s-text-tokens').value);
+  s.text_system = document.getElementById('s-text-system').value;
+
+  s.image_provider = document.getElementById('s-img-provider').value;
+  s.image_key = document.getElementById('s-img-key').value;
+  s.image_model = document.getElementById('s-img-model').value;
+  s.image_aspect = document.getElementById('s-img-aspect').value;
+  s.image_variants = parseInt(document.getElementById('s-img-variants').value);
+  s.image_quality = document.getElementById('s-img-quality').value;
+  s.image_style = document.getElementById('s-img-style').value;
+
+  s.review_same = document.getElementById('s-review-same').checked;
+  s.review_provider = document.getElementById('s-review-provider').value;
+  s.review_key = document.getElementById('s-review-key').value;
+  s.review_model = document.getElementById('s-review-model').value;
+
+  s.def_genre = document.getElementById('s-def-genre').value;
+  s.def_vocal = document.getElementById('s-def-vocal').value;
+  s.def_tone = document.getElementById('s-def-tone').value;
+  s.def_aspect = document.getElementById('s-def-aspect').value;
+  s.def_img_count = parseInt(document.getElementById('s-def-img-count').value);
+  s.suno_max = parseInt(document.getElementById('s-suno-max').value);
+  s.no_text_rule = document.getElementById('s-no-text').checked;
+  s.thumb_text = document.getElementById('s-thumb-text').checked;
+  s.autosave = document.getElementById('s-autosave').checked;
+
+  s.def_hashtags = document.getElementById('s-def-hashtags').value;
+  s.tipjar_block = document.getElementById('s-tipjar-block').value;
+  s.tipjar_default = document.getElementById('s-tipjar-default').checked;
+  s.tipjar_above = document.getElementById('s-tipjar-above').checked;
+
+  // Save prompt templates
+  Object.keys(s.prompt_templates).forEach(key => {
+    const el = document.getElementById('pt-' + key);
+    if (el) s.prompt_templates[key] = el.value;
+  });
+
+  saveState();
+  updateStatus('Settings saved');
+}
+
+function resetSettings() {
+  state.settings = getDefaultSettings();
+  saveState();
+  populateSettingsUI();
+  updateStatus('Settings reset to defaults');
+}
+
+/* ── Debug ── */
+function renderDebug() {
+  document.getElementById('debug-app-info').textContent = `SongForge AI v${APP_VERSION}\nUser Agent: ${navigator.userAgent.slice(0, 120)}`;
+  const s = state.settings;
+  document.getElementById('debug-provider-status').textContent =
+    `Text provider: ${s.text_provider} (${s.text_key ? 'key set' : 'NO KEY'})\n` +
+    `Image provider: ${s.image_provider || 'none'} (${s.image_key ? 'key set' : 'NO KEY'})\n` +
+    `Review same as text: ${s.review_same}`;
+  document.getElementById('debug-project-stats').textContent =
+    `Projects: ${state.projects.length}\nCurrent: ${currentProjectId || 'none'}\n` +
+    `Directions: ${state.directions.length}\nPlans: ${state.plans.length}\n` +
+    `Lyrics versions: ${state.lyrics_versions.length}\nSections: ${state.sections.length}\n` +
+    `Image prompts: ${state.image_prompts.length}\nGenerated images: ${state.generated_images.length}\n` +
+    `AI jobs: ${state.ai_jobs.length}`;
+  updateStorageEstimate();
+}
+
+function updateStorageEstimate() {
+  const raw = localStorage.getItem(STORAGE_KEY) || '';
+  const kb = (raw.length * 2 / 1024).toFixed(1);
+  document.getElementById('storage-used').textContent = `Storage: ~${kb} KB`;
+  const debugStorage = document.getElementById('debug-storage');
+  if (debugStorage) debugStorage.textContent = `localStorage used: ~${kb} KB\nItems: ${Object.keys(localStorage).length}`;
+}
+
+async function testTextModel() {
+  updateStatus('Testing text model…');
+  try {
+    const res = await callTextModel('test', [{ role: 'user', content: 'Say "SongForge AI text model is working."' }]);
+    alert('Text model OK:\n\n' + res.content.slice(0, 300));
+    updateStatus('Text model test passed');
+  } catch (e) {
+    alert('Text model test failed:\n' + e.message);
+    updateStatus('Text model test failed');
+  }
+}
+
+async function testImageModel() {
+  updateStatus('Testing image model…');
+  try {
+    const res = await callImageModel('A simple test image of a blue circle on a white background.', { aspect: 'square' });
+    alert('Image model OK. URL/preview:\n' + res.url.slice(0, 100) + '…');
+    updateStatus('Image model test passed');
+  } catch (e) {
+    alert('Image model test failed:\n' + e.message);
+    updateStatus('Image model test failed');
+  }
+}
+
+function copyDebugReport() {
+  const lines = [
+    'SongForge AI Debug Report',
+    'Version: ' + APP_VERSION,
+    'Projects: ' + state.projects.length,
+    'Current: ' + (currentProjectId || 'none'),
+    'Text provider: ' + state.settings.text_provider + ' (key: ' + (state.settings.text_key ? 'yes' : 'no') + ')',
+    'Image provider: ' + (state.settings.image_provider || 'none') + ' (key: ' + (state.settings.image_key ? 'yes' : 'no') + ')',
+    'Last error: ' + (state.ai_jobs.filter(j => j.status === 'error').pop()?.error || 'none')
+  ];
+  copyToClipboard(lines.join('\n'));
+}
+
+function exportRawState() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'songforge_raw_state.json';
+  a.click();
+}
+
+function clearFailedJobs() {
+  state.ai_jobs = state.ai_jobs.filter(j => j.status !== 'error');
+  saveState();
+  renderDebug();
+  updateStatus('Failed jobs cleared');
+}
+
+function factoryReset() {
+  if (!confirm('This will delete ALL projects, settings, and data. Are you sure?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  if (db) {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = () => location.reload();
+    req.onerror = () => location.reload();
+  } else {
+    location.reload();
+  }
+}
+
+/* ── Utilities ── */
+function getCurrentProject() {
+  return state.projects.find(p => p.id === currentProjectId);
+}
+
+function updateStatus(msg) {
+  document.getElementById('status-msg').textContent = msg;
+}
+
+function setLoading(isLoading) {
+  document.body.style.cursor = isLoading ? 'wait' : '';
+}
+
+function showError(msg) {
+  updateStatus('Error: ' + msg);
+  // Simple alert for now; could be a toast in later tickets
+  console.error(msg);
+}
+
+function showInfo(msg) {
+  updateStatus(msg);
+  console.info(msg);
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => updateStatus('Copied to clipboard'));
+}
+
+function escapeHTML(value) {
+  if (value == null) return '';
+  const str = String(value);
+  return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+/* ── Boot ── */
+document.addEventListener('DOMContentLoaded', initApp);
+</script>
+</body>
+</html>
