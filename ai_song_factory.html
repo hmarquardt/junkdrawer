@@ -844,9 +844,9 @@ pre.debug {
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.5" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.5" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.5
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.6" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.6" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.6
 </footer>
 
 <script>
@@ -2123,42 +2123,95 @@ function generateDirections() {
 }
 
 function parseAndShowDirections(text) {
-  // Simple parser for demo; robust parser in Ticket 2
   const container = document.getElementById('directions-container');
   const list = document.getElementById('directions-list');
   list.innerHTML = '';
   container.classList.remove('hidden');
 
-  // Try to extract direction blocks
-  const blocks = text.split(/(?:Direction|Option)\s*\d*[:\-\s]*/i).filter(Boolean);
   const proj = getCurrentProject();
-  blocks.forEach((block, idx) => {
+  if (!proj) return;
+
+  // Try to extract direction blocks using multiple separators
+  const blocks = text.split(/(?:^|\n)(?:#{1,3}\s*)?(?:Direction|Option)\s*\d*[.:\-\s]*/im).filter(b => b.trim().length > 20);
+  const useBlocks = blocks.length >= 2 ? blocks : [text];
+
+  let parsedCount = 0;
+  useBlocks.forEach((block, idx) => {
     if (!block.trim()) return;
-    const lines = block.trim().split('\n').map(l => l.trim()).filter(Boolean);
-    const title = lines.find(l => l.toLowerCase().startsWith('title'))?.split(/[:\-]/, 2)[1]?.trim() || `Direction ${idx + 1}`;
-    const genre = lines.find(l => l.toLowerCase().startsWith('genre'))?.split(/[:\-]/, 2)[1]?.trim() || '';
-    const tone = lines.find(l => l.toLowerCase().startsWith('tone'))?.split(/[:\-]/, 2)[1]?.trim() || '';
-    const hook = lines.find(l => l.toLowerCase().startsWith('hook') || l.toLowerCase().startsWith('one-line'))?.split(/[:\-]/, 2)[1]?.trim() || '';
-    const visual = lines.find(l => l.toLowerCase().startsWith('visual'))?.split(/[:\-]/, 2)[1]?.trim() || '';
-    const rationale = lines.find(l => l.toLowerCase().startsWith('why') || l.toLowerCase().startsWith('rationale'))?.split(/[:\-]/, 2)[1]?.trim() || '';
+    const parsed = parseDirectionBlock(block.trim(), idx);
+    if (!parsed.title && !parsed.genre && !parsed.hook && block.trim().length < 40) return; // skip empty stubs
 
     const dirId = 'dir_' + Date.now().toString(36) + '_' + idx;
-    const dir = { id: dirId, song_id: proj.id, title, genre, tone, hook: hook || '', visual_angle: visual || '', rationale: rationale || '' };
+    const dir = { id: dirId, song_id: proj.id, ...parsed };
     state.directions.push(dir);
+    parsedCount++;
 
     const card = document.createElement('div');
     card.className = 'direction-card';
     card.innerHTML = `
-      <h4>${escapeHTML(title)}</h4>
-      <div class="dir-meta">${escapeHTML(genre)} · ${escapeHTML(tone)}</div>
-      <div class="dir-hook">“${escapeHTML(hook || '')}”</div>
-      <div class="dir-meta">Visual: ${escapeHTML(visual || '')}</div>
-      <div class="dir-rationale">${escapeHTML(rationale || '')}</div>
+      <h4>${escapeHTML(dir.title || `Direction ${idx + 1}`)}</h4>
+      <div class="dir-meta">${escapeHTML(dir.genre)} · ${escapeHTML(dir.tone)}</div>
+      ${dir.hook ? `<div class="dir-hook">"${escapeHTML(dir.hook)}"</div>` : ''}
+      ${dir.visual_angle ? `<div class="dir-meta">Visual: ${escapeHTML(dir.visual_angle)}</div>` : ''}
+      ${dir.rationale ? `<div class="dir-rationale">${escapeHTML(dir.rationale)}</div>` : ''}
       <button class="btn primary small" onclick="selectDirection('${dirId}')">Use This Direction</button>
     `;
     list.appendChild(card);
   });
+
+  // Fallback: if we parsed fewer than 2 real directions, show raw output with manual parse button
+  if (parsedCount < 2) {
+    list.innerHTML = '';
+    state.directions = state.directions.filter(d => d.song_id !== proj.id);
+    const fallback = document.createElement('div');
+    fallback.className = 'card';
+    fallback.innerHTML = `
+      <h4>⚠️ Could not parse directions automatically</h4>
+      <p style="color:var(--text-2); font-size:.9rem; margin-bottom:.5rem;">The AI returned directions, but the format was unexpected. Here is the raw output — you can copy a direction into a new project manually, or try again.</p>
+      <pre style="background:var(--bg-3); padding:.6rem; border-radius:6px; font-size:.85rem; white-space:pre-wrap; max-height:300px; overflow:auto;">${escapeHTML(text)}</pre>
+      <div style="margin-top:.5rem; display:flex; gap:.4rem;">
+        <button class="btn small" onclick="copyToClipboard(document.querySelector('#directions-list pre').textContent)">📋 Copy Raw</button>
+        <button class="btn small" onclick="generateDirections()">🔄 Try Again</button>
+      </div>
+    `;
+    list.appendChild(fallback);
+  }
+
   saveState();
+}
+
+function parseDirectionBlock(text, idx) {
+  // Normalize markdown: strip bold/italic, bullets, numbering
+  const clean = text
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/__/g, '')
+    .replace(/_/g, '')
+    .replace(/^\s*[-•]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '');
+
+  const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+
+  const getVal = (keys) => {
+    for (const k of keys) {
+      const re = new RegExp('^' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[:\-–—]\\s*(.+)', 'i');
+      const line = lines.find(l => re.test(l));
+      if (line) {
+        const m = line.match(re);
+        return m ? m[1].trim() : '';
+      }
+    }
+    return '';
+  };
+
+  const title = getVal(['title idea', 'title', 'name']) || `Direction ${idx + 1}`;
+  const genre = getVal(['genre', 'style', 'musical style']);
+  const tone = getVal(['tone', 'mood', 'attitude']);
+  const hook = getVal(['one-line hook', 'hook', 'tagline', 'elevator pitch', 'pitch']);
+  const visual = getVal(['visual style idea', 'visual style', 'visual', 'aesthetic', 'look']);
+  const rationale = getVal(['why it works', 'rationale', 'why this works', 'reasoning', 'why']);
+
+  return { title, genre, tone, hook, visual_angle: visual, rationale };
 }
 
 function selectDirection(dirId) {
