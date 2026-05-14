@@ -197,6 +197,31 @@ pre.debug {
   overflow-x: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--mono);
 }
 
+/* ── Queue Controls ── */
+.queue-panel {
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .75rem 1rem; margin-bottom: 1rem;
+}
+.queue-status {
+  display: flex; align-items: center; gap: .75rem; margin-bottom: .5rem; flex-wrap: wrap;
+}
+.queue-progress {
+  flex: 1; min-width: 200px; height: 8px; background: var(--bg-2); border-radius: 4px; overflow: hidden;
+}
+.queue-progress-bar {
+  height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s;
+  width: 0%;
+}
+.queue-controls { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+/* ── Error Card ── */
+.error-card {
+  background: rgba(248,113,113,.12); border: 1px solid var(--danger); border-radius: 6px;
+  padding: .75rem; margin: .5rem 0;
+}
+.error-card h5 { margin: 0 0 .3rem; color: var(--danger); font-size: .9rem; }
+.error-card .error-actions { display: flex; gap: .3rem; margin-top: .4rem; flex-wrap: wrap; }
+
 /* ── Responsive ── */
 @media (max-width: 760px) {
   #sidebar { display: none; }
@@ -490,16 +515,34 @@ pre.debug {
       <section id="tab-images" class="tab-panel">
         <div class="card">
           <h3>🖼 Image Generation</h3>
-          <p style="color:var(--text-2); font-size:.9rem;">Detect sections from lyrics, generate prompts, then generate actual images.</p>
+          <p style="color:var(--text-2); font-size:.9rem;">Detect sections from lyrics, generate prompts, then generate actual images one by one.</p>
           <div style="display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:.75rem;">
             <button class="btn" onclick="detectSections()">🔍 Detect Sections</button>
             <button class="btn" onclick="generateSectionImagePrompts()">📝 Generate All Prompts</button>
-            <button class="btn primary" onclick="generateAllImages()">🖼 Generate All Images</button>
-            <button class="btn" onclick="generateMissingImages()">➕ Generate Missing</button>
-            <button class="btn" onclick="regenerateRejectedImages()">🔄 Regenerate Rejected</button>
             <button class="btn" onclick="copyAllImagePrompts()">📋 Copy All Prompts</button>
             <button class="btn" onclick="exportImageManifest()">📄 Export Manifest</button>
           </div>
+
+          <!-- Queue Panel -->
+          <div id="queue-panel" class="queue-panel">
+            <div class="queue-status">
+              <span id="queue-status-text" class="badge empty">Queue idle</span>
+              <div class="queue-progress">
+                <div id="queue-progress-bar" class="queue-progress-bar"></div>
+              </div>
+              <span id="queue-count" style="font-size:.8rem; color:var(--text-2);">0 / 0</span>
+            </div>
+            <div class="queue-controls">
+              <button class="btn primary" id="btn-queue-start" onclick="queueStart()">▶ Start Queue</button>
+              <button class="btn" id="btn-queue-pause" onclick="queuePause()" disabled>⏸ Pause</button>
+              <button class="btn" id="btn-queue-skip" onclick="queueSkip()" disabled>⏭ Skip</button>
+              <button class="btn danger" id="btn-queue-cancel" onclick="queueCancel()" disabled>⏹ Cancel All</button>
+              <button class="btn" onclick="generateMissingImages()">➕ Queue Missing</button>
+              <button class="btn" onclick="regenerateRejectedImages()">🔄 Queue Rejected</button>
+            </div>
+            <div id="queue-error-container" style="margin-top:.5rem;"></div>
+          </div>
+
           <div id="sections-container"></div>
         </div>
       </section>
@@ -647,6 +690,15 @@ pre.debug {
               <div class="field"><label>API Key</label><input type="password" id="s-text-key" placeholder="sk-… or openrouter key" /></div>
               <div class="field"><label>Model</label><input type="text" id="s-text-model" value="openrouter/auto" placeholder="e.g. openrouter/auto" /></div>
             </div>
+            <div class="field-row" style="align-items:flex-end;">
+              <div class="field" style="flex:2;">
+                <label>Model Select</label>
+                <select id="s-text-model-select" onchange="document.getElementById('s-text-model').value=this.value">
+                  <option value="">-- type above or discover --</option>
+                </select>
+              </div>
+              <button class="btn" onclick="discoverModels('text')">🔍 Discover Models</button>
+            </div>
             <div class="field-row">
               <div class="field"><label>Temperature</label><input type="number" id="s-text-temp" step="0.1" min="0" max="2" value="0.8" /></div>
               <div class="field"><label>Max Tokens</label><input type="number" id="s-text-tokens" value="2048" /></div>
@@ -660,6 +712,15 @@ pre.debug {
               <div class="field"><label>Provider</label><select id="s-img-provider"><option value="openai">OpenAI DALL-E</option><option value="stability">Stability AI</option><option value="custom">Custom</option><option value="">None / Prompts Only</option></select></div>
               <div class="field"><label>API Key</label><input type="password" id="s-img-key" /></div>
               <div class="field"><label>Model</label><input type="text" id="s-img-model" placeholder="dall-e-3, etc." /></div>
+            </div>
+            <div class="field-row" style="align-items:flex-end;">
+              <div class="field" style="flex:2;">
+                <label>Model Select</label>
+                <select id="s-img-model-select" onchange="document.getElementById('s-img-model').value=this.value">
+                  <option value="">-- type above or discover --</option>
+                </select>
+              </div>
+              <button class="btn" onclick="discoverModels('image')">🔍 Discover Models</button>
             </div>
             <div class="field-row">
               <div class="field"><label>Default Aspect</label><select id="s-img-aspect"><option value="wide" selected>Wide (16:9)</option><option value="square">Square (1:1)</option><option value="portrait">Portrait (9:16)</option></select></div>
@@ -697,6 +758,18 @@ pre.debug {
               <label><input type="checkbox" id="s-no-text" checked /> Default no-text rule for section images</label>
               <label><input type="checkbox" id="s-thumb-text" checked /> Default thumbnail includes text</label>
               <label><input type="checkbox" id="s-autosave" checked /> Autosave on/off</label>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Image Queue Settings</h3>
+            <div class="field-row">
+              <div class="field"><label><input type="checkbox" id="s-pause-between" checked /> Pause between images for review</label></div>
+              <div class="field"><label>Delay between requests (ms)</label><input type="number" id="s-image-delay" value="2000" min="0" step="500" /></div>
+              <div class="field"><label>Max retries per image</label><input type="number" id="s-max-retries" value="2" min="0" max="5" /></div>
+            </div>
+            <div class="field">
+              <label><input type="checkbox" id="s-queue-auto-accept" /> Auto-accept generated images (batch mode)</label>
             </div>
           </div>
 
@@ -771,9 +844,9 @@ pre.debug {
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.1" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.2" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.2
 </footer>
 
 <script>
@@ -807,7 +880,8 @@ function getDefaultState() {
     thumbnail_assets: [],
     youtube_packages: [],
     reviews: [],
-    ai_jobs: []
+    ai_jobs: [],
+    model_cache: { text: [], image: [] }
   };
 }
 
@@ -839,6 +913,10 @@ function getDefaultSettings() {
     no_text_rule: true,
     thumb_text: true,
     autosave: true,
+    pause_between_images: true,
+    image_delay_ms: 2000,
+    image_max_retries: 2,
+    queue_auto_accept: false,
     def_hashtags: '#AImusic #Suno #NewMusic #IndieMusic #SongForge',
     tipjar_block: '☕ If you enjoy this track, support the channel: [your tip link]',
     tipjar_default: false,
@@ -1380,6 +1458,390 @@ function recordAIJob(job) {
   // keep last 200
   if (state.ai_jobs.length > 200) state.ai_jobs = state.ai_jobs.slice(-200);
   saveState();
+}
+
+/* ── Model Discovery ── */
+async function discoverModels(type) {
+  const keyId = type === 'text' ? 's-text-key' : 's-img-key';
+  const providerId = type === 'text' ? 's-text-provider' : 's-img-provider';
+  const key = document.getElementById(keyId)?.value;
+  const provider = document.getElementById(providerId)?.value;
+  if (!key) { alert('Enter an API key first.'); return; }
+  if (provider !== 'openrouter' && provider !== 'openai') { alert('Model discovery only supported for OpenRouter and OpenAI right now.'); return; }
+
+  updateStatus(`Discovering ${type} models…`);
+  try {
+    let models = [];
+    if (provider === 'openrouter') {
+      const resp = await fetch('https://openrouter.ai/api/v1/models', { headers: { 'Authorization': `Bearer ${key}` } });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
+      models = (data.data || []).map(m => ({ id: m.id, name: m.name || m.id, provider: 'openrouter', pricing: m.pricing }));
+    } else if (provider === 'openai') {
+      const resp = await fetch('https://api.openai.com/v1/models', { headers: { 'Authorization': `Bearer ${key}` } });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
+      models = (data.data || []).map(m => ({ id: m.id, name: m.id, provider: 'openai' }));
+      if (type === 'image') models = models.filter(m => m.id.includes('dall-e') || m.id.includes('image'));
+    }
+    state.model_cache[type] = models;
+    saveState();
+    populateModelSelect(type, models);
+    updateStatus(`Discovered ${models.length} ${type} models`);
+  } catch (err) {
+    showError('Discovery failed: ' + err.message);
+    updateStatus('Model discovery failed');
+  }
+}
+
+function populateModelSelect(type, models) {
+  const selectId = type === 'text' ? 's-text-model-select' : 's-img-model-select';
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  select.innerHTML = '<option value="">-- select a model --</option>';
+  models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name + (m.pricing ? ` (~$${JSON.stringify(m.pricing).slice(0,40)})` : '');
+    select.appendChild(opt);
+  });
+}
+
+/* ── Prompt Sanitizer ── */
+const BLOCKED_WORDS = ['nude', 'naked', 'nsfw', 'gore', 'violence', 'blood', 'death', 'kill', 'murder', 'torture'];
+function sanitizeImagePrompt(prompt) {
+  let clean = prompt;
+  for (const word of BLOCKED_WORDS) {
+    const re = new RegExp('\\\\b' + word + '\\\\b', 'gi');
+    clean = clean.replace(re, '[redacted]');
+  }
+  if (clean.length > 3800) clean = clean.slice(0, 3800);
+  return clean;
+}
+
+/* ── Error Classification ── */
+function isContentPolicyError(err) {
+  const msg = (err.message || '').toLowerCase();
+  return msg.includes('content') || msg.includes('policy') || msg.includes('safety') || msg.includes('moderation') || msg.includes('violation');
+}
+function isRateLimitError(err) {
+  const msg = (err.message || '').toLowerCase();
+  return msg.includes('rate') || msg.includes('too many') || msg.includes('429');
+}
+function isServerError(err) {
+  const msg = (err.message || '').toLowerCase();
+  return msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('server');
+}
+function isAuthError(err) {
+  const msg = (err.message || '').toLowerCase();
+  return msg.includes('auth') || msg.includes('key') || msg.includes('credit') || msg.includes('billing') || msg.includes('402') || msg.includes('403');
+}
+
+/* ── Prompt Rewriter for Safety ── */
+async function rewritePromptForSafety(prompt) {
+  const instruction = `This image prompt was rejected by a content policy filter. Rewrite it to be completely safe while preserving the artistic intent, mood, and subject matter. Remove any potentially sensitive elements. Keep it cinematic and visually rich.\n\nOriginal prompt:\n${prompt}\n\nReturn only the rewritten prompt, nothing else.`;
+  try {
+    const res = await callTextModel('prompt-safety', [{ role: 'user', content: instruction }]);
+    return res.content.trim();
+  } catch (e) {
+    // Fallback: strip words manually
+    let fallback = prompt;
+    for (const word of BLOCKED_WORDS) {
+      const re = new RegExp('\\\\b' + word + '\\\\b', 'gi');
+      fallback = fallback.replace(re, '');
+    }
+    return fallback.replace(/\\s+/g, ' ').trim();
+  }
+}
+
+/* ── Image Queue Engine ── */
+class ImageQueue {
+  constructor() {
+    this.jobs = [];
+    this.running = false;
+    this.paused = false;
+    this.cancelled = false;
+    this.currentIndex = -1;
+    this.skipped = false;
+    this.projectId = null;
+  }
+
+  add(promptId, promptText, sectionId, sectionLabel) {
+    this.jobs.push({
+      promptId, promptText, sectionId, sectionLabel,
+      status: 'Waiting', attempt: 0, error: null, result: null
+    });
+  }
+
+  clear() {
+    this.jobs = [];
+    this.running = false;
+    this.paused = false;
+    this.cancelled = false;
+    this.currentIndex = -1;
+  }
+
+  async start(projectId) {
+    if (this.running) return;
+    this.projectId = projectId;
+    this.running = true;
+    this.paused = false;
+    this.cancelled = false;
+    updateQueueUI();
+
+    for (let i = 0; i < this.jobs.length; i++) {
+      if (this.cancelled) break;
+      this.currentIndex = i;
+      const job = this.jobs[i];
+      if (job.status === 'Done' || job.status === 'Skipped') continue;
+
+      // Wait if paused
+      while (this.paused && !this.cancelled) {
+        job.status = 'Paused';
+        updateQueueUI();
+        await sleep(500);
+      }
+      if (this.cancelled) break;
+
+      job.status = 'Running';
+      updateQueueUI();
+      this.skipped = false;
+
+      try {
+        const result = await generateImageWithRetry(job, projectId);
+        if (this.skipped) {
+          job.status = 'Skipped';
+        } else {
+          job.result = result;
+          job.status = 'Done';
+        }
+      } catch (err) {
+        job.error = err.message;
+        job.status = 'Failed';
+        showQueueError(job, err);
+      }
+
+      updateQueueUI();
+
+      // Pause between images if configured
+      if (state.settings.pause_between_images && i < this.jobs.length - 1 && !this.cancelled) {
+        this.paused = true;
+        updateQueueUI();
+        // Auto-resume after a moment so user can click pause again if they want to stop
+        await sleep(state.settings.image_delay_ms || 2000);
+        this.paused = false;
+      } else if (i < this.jobs.length - 1) {
+        await sleep(state.settings.image_delay_ms || 2000);
+      }
+    }
+
+    this.running = false;
+    this.currentIndex = -1;
+    updateQueueUI();
+    updateStatus(this.cancelled ? 'Queue cancelled' : `Queue complete — ${this.jobs.filter(j => j.status === 'Done').length} done, ${this.jobs.filter(j => j.status === 'Failed').length} failed`);
+  }
+
+  pause() { this.paused = true; updateQueueUI(); }
+  resume() { this.paused = false; updateQueueUI(); }
+  skip() { this.skipped = true; }
+  cancel() { this.cancelled = true; this.paused = false; updateQueueUI(); }
+}
+
+let imageQueue = new ImageQueue();
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function updateQueueUI() {
+  const total = imageQueue.jobs.length;
+  const done = imageQueue.jobs.filter(j => j.status === 'Done' || j.status === 'Skipped').length;
+  const pct = total > 0 ? (done / total) * 100 : 0;
+  const statusText = imageQueue.cancelled ? 'Cancelled' :
+    !imageQueue.running ? (total === 0 ? 'Queue idle' : 'Queue finished') :
+    imageQueue.paused ? 'Paused' :
+    imageQueue.currentIndex >= 0 ? `Generating: ${imageQueue.jobs[imageQueue.currentIndex]?.sectionLabel || ''}` : 'Starting…';
+
+  const badge = document.getElementById('queue-status-text');
+  const bar = document.getElementById('queue-progress-bar');
+  const count = document.getElementById('queue-count');
+  const btnStart = document.getElementById('btn-queue-start');
+  const btnPause = document.getElementById('btn-queue-pause');
+  const btnSkip = document.getElementById('btn-queue-skip');
+  const btnCancel = document.getElementById('btn-queue-cancel');
+
+  if (badge) {
+    badge.textContent = statusText;
+    badge.className = 'badge ' + (imageQueue.running ? (imageQueue.paused ? 'warn' : 'good') : 'empty');
+  }
+  if (bar) bar.style.width = pct + '%';
+  if (count) count.textContent = `${done} / ${total}`;
+  if (btnStart) { btnStart.disabled = imageQueue.running; btnStart.textContent = imageQueue.running ? 'Running…' : '▶ Start Queue'; }
+  if (btnPause) { btnPause.disabled = !imageQueue.running || imageQueue.paused; btnPause.textContent = imageQueue.paused ? '⏸ Paused' : '⏸ Pause'; }
+  if (btnSkip) btnSkip.disabled = !imageQueue.running;
+  if (btnCancel) btnCancel.disabled = !imageQueue.running;
+}
+
+function queueStart() {
+  const proj = getCurrentProject();
+  if (!proj) { showError('No project selected.'); return; }
+  // Pre-flight checks
+  const provider = state.settings.image_provider;
+  const key = state.settings.image_key;
+  if (provider && !key) { showError('Image provider configured but no API key set.'); return; }
+  const prompts = state.image_prompts.filter(p => p.song_id === proj.id && p.status === 'Prompt Ready');
+  if (!prompts.length) { showError('No image prompts ready. Generate prompts first.'); return; }
+
+  imageQueue.clear();
+  prompts.forEach(p => {
+    const sec = state.sections.find(s => s.id === p.section_id);
+    imageQueue.add(p.id, p.prompt_text, p.section_id, sec?.label || p.section_id);
+  });
+  imageQueue.start(proj.id);
+}
+
+function queuePause() { imageQueue.pause(); }
+function queueResume() { imageQueue.resume(); }
+function queueSkip() { imageQueue.skip(); }
+function queueCancel() { imageQueue.cancel(); }
+
+function showQueueError(job, err) {
+  const container = document.getElementById('queue-error-container');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.className = 'error-card';
+  let actionButtons = '';
+  if (isContentPolicyError(err)) {
+    actionButtons = `<button class="btn small" onclick="retryQueueJobRewrite('${job.promptId}')">✏️ Rewrite & Retry</button>`;
+  } else if (isRateLimitError(err) || isServerError(err)) {
+    actionButtons = `<button class="btn small" onclick="retryQueueJob('${job.promptId}')">🔄 Retry</button>`;
+  }
+  div.innerHTML = `
+    <h5>⚠️ ${escapeHTML(job.sectionLabel || 'Image')} — ${escapeHTML(err.message || 'Error')}</h5>
+    <div class="error-actions">
+      ${actionButtons}
+      <button class="btn small" onclick="skipQueueJob('${job.promptId}')">⏭ Skip</button>
+      <button class="btn small" onclick="editQueuePrompt('${job.promptId}')">✏️ Edit Prompt</button>
+    </div>
+  `;
+  container.appendChild(div);
+}
+
+function clearQueueErrors() {
+  const container = document.getElementById('queue-error-container');
+  if (container) container.innerHTML = '';
+}
+
+async function generateImageWithRetry(job, projectId) {
+  const settings = state.settings;
+  const maxRetries = settings.image_max_retries || 2;
+  let lastErr = null;
+  let currentPrompt = sanitizeImagePrompt(job.promptText);
+
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    job.attempt = attempt;
+    updateQueueUI();
+    try {
+      const result = await callImageModel(currentPrompt, { aspect: 'wide' });
+      // Store result
+      const img = {
+        id: 'img_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5),
+        song_id: projectId,
+        image_prompt_id: job.promptId,
+        section_id: job.sectionId,
+        provider: result.provider,
+        model: result.model || settings.image_model,
+        prompt: currentPrompt,
+        image_url: result.url,
+        image_data_url: result.data_url || '',
+        blob_ref: '',
+        width: result.width || null,
+        height: result.height || null,
+        status: settings.queue_auto_accept ? 'Final' : 'Generated',
+        accepted: !!settings.queue_auto_accept,
+        created_at: new Date().toISOString(),
+        error: ''
+      };
+      state.generated_images.push(img);
+      // Update prompt status
+      const prompt = state.image_prompts.find(p => p.id === job.promptId);
+      if (prompt) prompt.status = settings.queue_auto_accept ? 'Final' : 'Generated';
+      saveState();
+      renderSections();
+      if (result.url && result.url.startsWith('data:')) {
+        try { const blob = await (await fetch(result.url)).blob(); await storeImageBlob(img.id, blob); } catch (e) { console.warn('Blob storage failed', e); }
+      }
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (isContentPolicyError(err) && attempt <= maxRetries) {
+        updateStatus(`Guard rail tripped, rewriting prompt (attempt ${attempt})…`);
+        currentPrompt = await rewritePromptForSafety(currentPrompt);
+        continue;
+      }
+      if (isRateLimitError(err) && attempt <= maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        updateStatus(`Rate limited. Retrying in ${delay/1000}s…`);
+        await sleep(delay);
+        continue;
+      }
+      if (isServerError(err) && attempt <= maxRetries) {
+        const delay = attempt === 1 ? 1000 : Math.pow(2, attempt) * 1000;
+        updateStatus(`Server error. Retrying in ${delay/1000}s…`);
+        await sleep(delay);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
+function retryQueueJob(promptId) {
+  const job = imageQueue.jobs.find(j => j.promptId === promptId);
+  if (!job) return;
+  job.status = 'Waiting';
+  job.error = null;
+  job.attempt = 0;
+  clearQueueErrors();
+  // Re-run just this job
+  if (!imageQueue.running) {
+    imageQueue.start(getCurrentProject()?.id);
+  }
+}
+
+async function retryQueueJobRewrite(promptId) {
+  const job = imageQueue.jobs.find(j => j.promptId === promptId);
+  if (!job) return;
+  job.promptText = await rewritePromptForSafety(job.promptText);
+  job.status = 'Waiting';
+  job.error = null;
+  job.attempt = 0;
+  clearQueueErrors();
+  if (!imageQueue.running) {
+    imageQueue.start(getCurrentProject()?.id);
+  }
+}
+
+function skipQueueJob(promptId) {
+  const job = imageQueue.jobs.find(j => j.promptId === promptId);
+  if (job) { job.status = 'Skipped'; job.error = null; }
+  clearQueueErrors();
+  updateQueueUI();
+}
+
+function editQueuePrompt(promptId) {
+  const prompt = state.image_prompts.find(p => p.id === promptId);
+  if (!prompt) return;
+  const newText = window.prompt('Edit image prompt:', prompt.prompt_text);
+  if (newText !== null && newText.trim()) {
+    prompt.prompt_text = newText.trim();
+    prompt.status = 'Prompt Ready';
+    const job = imageQueue.jobs.find(j => j.promptId === promptId);
+    if (job) { job.promptText = newText.trim(); job.status = 'Waiting'; job.error = null; }
+    saveState();
+    renderSections();
+    clearQueueErrors();
+    if (!imageQueue.running) imageQueue.start(getCurrentProject()?.id);
+  }
 }
 
 /* ── Demo Mode ── */
@@ -2256,17 +2718,8 @@ function generateSectionImagePrompts() {
 }
 
 function generateAllImages() {
-  const proj = getCurrentProject();
-  if (!proj) { showError('No project'); return; }
-  const prompts = state.image_prompts.filter(p => p.song_id === proj.id && p.status === 'Prompt Ready');
-  if (!prompts.length) { showError('Generate image prompts first.'); return; }
-  let completed = 0;
-  setLoading(true);
-  updateStatus('Generating images…');
-  const promises = prompts.map(p => generateImageForPrompt(p.id).then(() => { completed++; }));
-  Promise.all(promises).then(() => {
-    updateStatus(`Generated ${completed} images`);
-  }).finally(() => setLoading(false));
+  // Replaced by queueStart()
+  queueStart();
 }
 
 function generateMissingImages() {
@@ -2274,10 +2727,12 @@ function generateMissingImages() {
   if (!proj) { showError('No project'); return; }
   const missing = state.image_prompts.filter(p => p.song_id === proj.id && p.status === 'Prompt Ready');
   if (!missing.length) { showInfo('No missing images.'); return; }
-  setLoading(true);
-  let completed = 0;
-  const promises = missing.map(p => generateImageForPrompt(p.id).then(() => completed++));
-  Promise.all(promises).then(() => updateStatus(`Generated ${completed} missing images`)).finally(() => setLoading(false));
+  imageQueue.clear();
+  missing.forEach(p => {
+    const sec = state.sections.find(s => s.id === p.section_id);
+    imageQueue.add(p.id, p.prompt_text, p.section_id, sec?.label || p.section_id);
+  });
+  imageQueue.start(proj.id);
 }
 
 function regenerateRejectedImages() {
@@ -2285,17 +2740,17 @@ function regenerateRejectedImages() {
   if (!proj) { showError('No project'); return; }
   const rejected = state.generated_images.filter(i => i.song_id === proj.id && i.status === 'Rejected');
   if (!rejected.length) { showInfo('No rejected images.'); return; }
-  setLoading(true);
-  let completed = 0;
-  const promises = rejected.map(img => {
+  imageQueue.clear();
+  rejected.forEach(img => {
     const prompt = state.image_prompts.find(p => p.id === img.image_prompt_id);
     if (prompt) {
       img.status = 'Needs Prompt';
-      return generateImageForPrompt(prompt.id).then(() => completed++);
+      const sec = state.sections.find(s => s.id === prompt.section_id);
+      imageQueue.add(prompt.id, prompt.prompt_text, prompt.section_id, sec?.label || prompt.section_id);
     }
-    return Promise.resolve();
   });
-  Promise.all(promises).then(() => updateStatus(`Regenerated ${completed} rejected images`)).finally(() => setLoading(false));
+  saveState();
+  imageQueue.start(proj.id);
 }
 
 function copyAllImagePrompts() {
@@ -2388,53 +2843,19 @@ function updateImagePrompt(pid, text) {
 }
 
 async function generateImageForPrompt(pid) {
+  // Route single-image generation through the queue for consistency
   const prompt = state.image_prompts.find(p => p.id === pid);
   if (!prompt) return;
-  prompt.status = 'Generating';
-  saveState();
-  renderSections();
-  try {
-    const result = await callImageModel(prompt.prompt_text, { aspect: state.visual_styles.filter(v => v.song_id === prompt.song_id && v.locked).pop()?.aspect_ratio || 'wide' });
-    const img = {
-      id: 'img_' + Date.now().toString(36),
-      song_id: prompt.song_id,
-      image_prompt_id: prompt.id,
-      section_id: prompt.section_id,
-      provider: result.provider,
-      model: result.model || state.settings.image_model,
-      prompt: prompt.prompt_text,
-      image_url: result.url,
-      image_data_url: result.data_url || '',
-      blob_ref: '',
-      width: result.width || null,
-      height: result.height || null,
-      status: 'Generated',
-      accepted: false,
-      created_at: new Date().toISOString(),
-      error: ''
-    };
-    state.generated_images.push(img);
-    prompt.status = 'Generated';
-    saveState();
-    renderSections();
-    // If URL is a data URL or blob, try to store in IndexedDB
-    if (result.url && result.url.startsWith('data:')) {
-      try {
-        const blob = await (await fetch(result.url)).blob();
-        await storeImageBlob(img.id, blob);
-      } catch (e) { console.warn('Could not store blob', e); }
-    }
-  } catch (err) {
-    prompt.status = 'Error';
-    console.error('Image generation error', err);
-    state.generated_images.push({
-      id: 'img_' + Date.now().toString(36), song_id: prompt.song_id, image_prompt_id: prompt.id,
-      section_id: prompt.section_id, provider: state.settings.image_provider, model: state.settings.image_model,
-      prompt: prompt.prompt_text, image_url: '', status: 'Error', error: err.message, created_at: new Date().toISOString()
-    });
-    saveState();
-    renderSections();
+  const proj = getCurrentProject();
+  if (!proj) return;
+  if (imageQueue.running) {
+    showError('Queue is already running. Pause or cancel it first, or wait for it to finish.');
+    return;
   }
+  imageQueue.clear();
+  const sec = state.sections.find(s => s.id === prompt.section_id);
+  imageQueue.add(prompt.id, prompt.prompt_text, prompt.section_id, sec?.label || prompt.section_id);
+  await imageQueue.start(proj.id);
 }
 
 function regenerateImagePrompt(pid) {
@@ -3103,6 +3524,14 @@ function populateSettingsUI() {
   document.getElementById('s-no-text').checked = s.no_text_rule;
   document.getElementById('s-thumb-text').checked = s.thumb_text;
   document.getElementById('s-autosave').checked = s.autosave;
+  document.getElementById('s-pause-between').checked = s.pause_between_images;
+  document.getElementById('s-image-delay').value = s.image_delay_ms;
+  document.getElementById('s-max-retries').value = s.image_max_retries;
+  document.getElementById('s-queue-auto-accept').checked = s.queue_auto_accept;
+
+  // Populate cached model lists
+  populateModelSelect('text', state.model_cache.text || []);
+  populateModelSelect('image', state.model_cache.image || []);
 
   document.getElementById('s-def-hashtags').value = s.def_hashtags;
   document.getElementById('s-tipjar-block').value = s.tipjar_block;
@@ -3151,6 +3580,10 @@ function saveSettings() {
   s.no_text_rule = document.getElementById('s-no-text').checked;
   s.thumb_text = document.getElementById('s-thumb-text').checked;
   s.autosave = document.getElementById('s-autosave').checked;
+  s.pause_between_images = document.getElementById('s-pause-between').checked;
+  s.image_delay_ms = parseInt(document.getElementById('s-image-delay').value) || 2000;
+  s.image_max_retries = parseInt(document.getElementById('s-max-retries').value) || 2;
+  s.queue_auto_accept = document.getElementById('s-queue-auto-accept').checked;
 
   s.def_hashtags = document.getElementById('s-def-hashtags').value;
   s.tipjar_block = document.getElementById('s-tipjar-block').value;
