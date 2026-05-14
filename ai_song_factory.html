@@ -848,9 +848,9 @@ pre.debug {
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.11" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.11" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.11
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.12" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.12" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.12
 </footer>
 
 <script>
@@ -1118,8 +1118,12 @@ function initApp() {
 function setupAutosave() {
   const inputs = document.querySelectorAll('input, textarea, select');
   inputs.forEach(el => {
-    el.addEventListener('change', () => { if (state.settings.autosave) { saveConceptFields(); saveState(); } });
-    el.addEventListener('blur', () => { if (state.settings.autosave) { saveConceptFields(); saveState(); } });
+    const persist = () => {
+      if (el.closest('#tab-settings')) { saveSettings(false); return; }
+      if (state.settings.autosave) { syncActiveTabToState(); saveState(); }
+    };
+    el.addEventListener('change', persist);
+    el.addEventListener('blur', persist);
   });
 }
 
@@ -1234,6 +1238,10 @@ function createProject() {
 }
 
 function selectProject(id) {
+  if (currentProjectId && currentProjectId !== id) {
+    syncActiveTabToState();
+    saveState();
+  }
   currentProjectId = id;
   renderProjectList();
   const proj = state.projects.find(p => p.id === id);
@@ -1303,6 +1311,7 @@ function saveConceptFields() {
 
 /* ── Tab Switching ── */
 function switchTab(name) {
+  syncActiveTabToState();
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
   if (name === 'concept') populateConceptFields(getCurrentProject());
@@ -1320,6 +1329,26 @@ function switchTab(name) {
   window.scrollTo(0, 0);
 }
 
+function getActiveTabName() {
+  const active = document.querySelector('.tab-panel.active');
+  return active ? active.id.replace(/^tab-/, '') : '';
+}
+
+function syncActiveTabToState() {
+  if (!state) return;
+  const tab = getActiveTabName();
+  const proj = getCurrentProject();
+  if (tab === 'settings') { saveSettings(false); return; }
+  if (!proj) return;
+  if (tab === 'concept') { saveConceptFields(); return; }
+  if (tab === 'plan') { syncPlanFields(proj); return; }
+  if (tab === 'lyrics') { syncLyricsFields(proj); return; }
+  if (tab === 'music') { syncMusicFields(proj); return; }
+  if (tab === 'visual') { syncVisualFields(proj); return; }
+  if (tab === 'thumbnail') { syncThumbnailFields(proj); return; }
+  if (tab === 'youtube') { syncYouTubeFields(proj); }
+}
+
 function fillTemplate(template, vars) {
   let result = template;
   for (const [key, val] of Object.entries(vars)) {
@@ -1328,15 +1357,25 @@ function fillTemplate(template, vars) {
   return result;
 }
 
+function labelValue(line) {
+  const match = String(line).match(/^[^:–—-]+?\s*[:–—-]\s*(.*)$/);
+  return match ? match[1].trim() : '';
+}
+
 /* ── AI Provider Wrappers (Stubs for Ticket 1) ── */
 async function callTextModel(taskType, messages, options = {}) {
   const settings = state.settings;
-  const provider = settings.text_provider;
+  const provider = options.provider || settings.text_provider;
   // Fall back to DOM input if state hasn't been saved yet
-  const key = settings.text_key || document.getElementById('s-text-key')?.value || '';
-  const model = settings.text_model || document.getElementById('s-text-model')?.value || 'openrouter/auto';
-  const temp = settings.text_temp;
-  const maxTokens = settings.text_tokens;
+  const key = options.key || settings.text_key || document.getElementById('s-text-key')?.value || '';
+  const model = options.model || settings.text_model || document.getElementById('s-text-model')?.value || 'openrouter/auto';
+  const temp = options.temperature ?? settings.text_temp;
+  const maxTokens = options.max_tokens ?? settings.text_tokens;
+  const systemPrompt = options.system || settings.text_system || 'You are a helpful assistant.';
+  const requestOptions = { ...options };
+  delete requestOptions.provider;
+  delete requestOptions.key;
+  delete requestOptions.system;
 
   if (!key) throw new Error('Text AI API key not configured. Go to Settings, enter your key, and click Save Settings.');
   if (!Array.isArray(messages)) throw new Error('Internal error: messages must be an array');
@@ -1359,12 +1398,12 @@ async function callTextModel(taskType, messages, options = {}) {
     const payload = {
       model: model || 'openrouter/auto',
       messages: [
-        { role: 'system', content: settings.text_system || 'You are a helpful assistant.' },
+        { role: 'system', content: systemPrompt },
         ...messages
       ],
       temperature: typeof temp === 'number' && !isNaN(temp) ? temp : 0.8,
       max_tokens: typeof maxTokens === 'number' && maxTokens > 0 ? maxTokens : 2048,
-      ...options
+      ...requestOptions
     };
     body = JSON.stringify(payload);
   } else {
@@ -1527,8 +1566,13 @@ async function callReviewModel(messages, options = {}) {
   const provider = settings.review_provider;
   const key = settings.review_key;
   if (!key) throw new Error('Review AI API key not configured.');
-  // For now, delegate to text model with review settings
-  return callTextModel('review', messages, { ...options, model: settings.review_model });
+  return callTextModel('review', messages, {
+    ...options,
+    provider,
+    key,
+    model: settings.review_model || settings.text_model,
+    system: settings.text_system
+  });
 }
 
 /* ── AI Jobs ── */
@@ -2328,7 +2372,7 @@ function generatePlanDirect() {
   const dir = state.directions.find(d => d.id === proj.selected_direction_id);
   const directionText = dir ? [
     `Title idea: ${dir.title}`, `Genre: ${dir.genre}`, `Tone: ${dir.tone}`,
-    `Hook: ${dir.hook}`, `Visual: ${dir.visual_angle}`, `Rationale: ${dir.rationale}`
+    `Hook: ${dir.hook}`, `Visual: ${dir.visual_style || dir.visual_angle || ''}`, `Rationale: ${dir.rationale}`
   ].join('\n') : `Concept: ${proj.concept}`;
   setLoading(true);
   updateStatus('Generating full song plan…');
@@ -2347,7 +2391,7 @@ function parseAndSetPlan(text) {
   const getVal = (keys) => {
     for (const k of keys) {
       const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
-      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+      if (line) return labelValue(line);
     }
     return '';
   };
@@ -2394,6 +2438,25 @@ function populatePlanFields() {
   document.getElementById('p-symbols').value = plan.recurring_symbols || '';
   document.getElementById('p-thumbnail').value = plan.thumbnail_angle || '';
   document.getElementById('p-youtube').value = plan.youtube_positioning || '';
+}
+
+function syncPlanFields(proj) {
+  const plan = state.plans.filter(p => p.song_id === proj.id).pop();
+  if (!plan) return;
+  plan.title = document.getElementById('p-title').value;
+  plan.brief = document.getElementById('p-brief').value;
+  plan.genre = document.getElementById('p-genre').value;
+  plan.vocal = document.getElementById('p-vocal').value;
+  plan.pov = document.getElementById('p-pov').value;
+  plan.arc = document.getElementById('p-arc').value;
+  plan.chorus_strategy = document.getElementById('p-chorus').value;
+  plan.visual_style = document.getElementById('p-visual').value;
+  plan.recurring_symbols = document.getElementById('p-symbols').value;
+  plan.thumbnail_angle = document.getElementById('p-thumbnail').value;
+  plan.youtube_positioning = document.getElementById('p-youtube').value;
+  proj.title = plan.title || proj.title;
+  proj.genre = plan.genre || proj.genre;
+  proj.vocal = plan.vocal || proj.vocal;
 }
 
 function generateTitlesOnly() {
@@ -2577,6 +2640,13 @@ function saveLyricsVersion() {
   updateStatus('Lyrics version saved');
 }
 
+function syncLyricsFields(proj) {
+  const current = state.lyrics_versions.find(l => l.song_id === proj.id && l.is_current) ||
+    state.lyrics_versions.filter(l => l.song_id === proj.id).pop();
+  if (!current) return;
+  current.lyrics = document.getElementById('lyrics-editor').value;
+}
+
 function loadLyricsVersion(id) {
   const proj = getCurrentProject();
   if (!proj || !id) return;
@@ -2631,6 +2701,19 @@ function populateMusicFields() {
   updateMusicCharCount();
 }
 
+function syncMusicFields(proj) {
+  const mp = state.music_prompts.filter(m => m.song_id === proj.id).pop();
+  if (!mp) return;
+  mp.prompt = document.getElementById('music-prompt').value;
+  mp.genre = document.getElementById('m-genre').value;
+  mp.instrumentation = document.getElementById('m-instrumentation').value;
+  mp.tempo = document.getElementById('m-tempo').value;
+  mp.vocal = document.getElementById('m-vocal').value;
+  mp.mood = document.getElementById('m-mood').value;
+  mp.production = document.getElementById('m-production').value;
+  mp.avoid = document.getElementById('m-avoid').value;
+}
+
 function generateMusicPrompt() {
   const proj = getCurrentProject();
   if (!proj) { showError('No project'); return; }
@@ -2664,7 +2747,7 @@ function parseAndSetMusicPrompt(text) {
   const getVal = (keys) => {
     for (const k of keys) {
       const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
-      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+      if (line) return labelValue(line);
     }
     return '';
   };
@@ -2742,6 +2825,21 @@ function populateVisualFields() {
   else { banner.classList.add('hidden'); btn.classList.remove('hidden'); }
 }
 
+function syncVisualFields(proj) {
+  const vs = state.visual_styles.filter(v => v.song_id === proj.id).pop();
+  if (!vs) return;
+  vs.name = document.getElementById('v-name').value;
+  vs.medium = document.getElementById('v-medium').value;
+  vs.palette = document.getElementById('v-palette').value;
+  vs.lighting = document.getElementById('v-lighting').value;
+  vs.camera = document.getElementById('v-camera').value;
+  vs.character_continuity = document.getElementById('v-character').value;
+  vs.recurring_symbols = document.getElementById('v-symbols').value;
+  vs.negative_rules = document.getElementById('v-negative').value;
+  vs.aspect_ratio = document.getElementById('v-aspect').value;
+  vs.no_text_rule = document.getElementById('v-no-text').checked;
+}
+
 function generateVisualStyle() {
   const proj = getCurrentProject();
   if (!proj) { showError('No project'); return; }
@@ -2768,7 +2866,7 @@ function parseAndSetVisualStyle(text) {
   const getVal = (keys) => {
     for (const k of keys) {
       const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
-      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+      if (line) return labelValue(line);
     }
     return '';
   };
@@ -3173,6 +3271,23 @@ function populateThumbnailFields() {
   }
 }
 
+function syncThumbnailFields(proj) {
+  const thumb = state.thumbnail_assets.filter(t => t.song_id === proj.id).pop();
+  if (!thumb) return;
+  thumb.strategy = document.getElementById('t-strategy').value;
+  thumb.title_text = document.getElementById('t-title-text').value;
+  thumb.subtitle = document.getElementById('t-subtitle').value;
+  thumb.composition = document.getElementById('t-composition').value;
+  thumb.character = document.getElementById('t-character').value;
+  thumb.background = document.getElementById('t-background').value;
+  thumb.font_direction = document.getElementById('t-font').value;
+  thumb.text_placement = document.getElementById('t-placement').value;
+  thumb.high_contrast = document.getElementById('t-high-contrast').checked;
+  thumb.include_text = document.getElementById('t-include-text').checked;
+  thumb.no_text = document.getElementById('t-no-text').checked;
+  thumb.prompt = document.getElementById('t-prompt').value;
+}
+
 function generateThumbnailConcepts() {
   const proj = getCurrentProject();
   if (!proj) { showError('No project'); return; }
@@ -3290,6 +3405,20 @@ function populateYouTubeFields() {
   document.getElementById('y-date').value = yt.published_date || '';
 }
 
+function syncYouTubeFields(proj) {
+  const yt = state.youtube_packages.filter(y => y.song_id === proj.id).pop();
+  if (!yt) return;
+  yt.title = document.getElementById('y-title').value;
+  yt.alternate_titles = document.getElementById('y-alts').value;
+  yt.description = document.getElementById('y-description').value;
+  yt.hashtags = document.getElementById('y-hashtags').value;
+  yt.pinned_comment = document.getElementById('y-comment').value;
+  yt.thumb_title_text = document.getElementById('y-thumb-text').value;
+  yt.tipjar_included = document.getElementById('y-tipjar').checked;
+  yt.youtube_url = document.getElementById('y-url').value;
+  yt.published_date = document.getElementById('y-date').value;
+}
+
 function generateYouTubePackage() {
   const proj = getCurrentProject();
   if (!proj) { showError('No project'); return; }
@@ -3320,7 +3449,7 @@ function parseAndSetYouTubePackage(text) {
   const getVal = (keys) => {
     for (const k of keys) {
       const line = lines.find(l => l.toLowerCase().startsWith(k.toLowerCase()));
-      if (line) return line.split(/[:\-]/, 2)[1]?.trim() || '';
+      if (line) return labelValue(line);
     }
     return '';
   };
@@ -3329,7 +3458,7 @@ function parseAndSetYouTubePackage(text) {
     const out = [];
     for (const line of lines) {
       if (capturing && stopKeys.some(k => line.toLowerCase().startsWith(k.toLowerCase()))) break;
-      if (!capturing && startKeys.some(k => line.toLowerCase().startsWith(k.toLowerCase()))) { capturing = true; out.push(line.split(/[:\-]/, 2)[1]?.trim() || line); continue; }
+      if (!capturing && startKeys.some(k => line.toLowerCase().startsWith(k.toLowerCase()))) { capturing = true; out.push(labelValue(line) || line); continue; }
       if (capturing) out.push(line);
     }
     return out.join('\n');
@@ -3769,7 +3898,7 @@ function populateSettingsUI() {
   });
 }
 
-function saveSettings() {
+function saveSettings(showStatus = true) {
   const s = state.settings;
   s.text_provider = document.getElementById('s-text-provider').value;
   s.text_key = document.getElementById('s-text-key').value;
@@ -3817,7 +3946,7 @@ function saveSettings() {
   });
 
   saveState();
-  updateStatus('Settings saved');
+  if (showStatus) updateStatus('Settings saved');
 }
 
 function resetSettings() {
