@@ -1,0 +1,1951 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Browser-based GBIF occurrence explorer for wildlife and species records. Search, map, filter, summarize, and export." />
+  <title>GBIF Explorer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦎</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Source+Sans+3:wght@300;400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin=""></script>
+  <style>
+    :root {
+      --bg-deep: #0b0f14;
+      --bg-base: #101820;
+      --bg-surface: #16202b;
+      --bg-raised: #1e2d3d;
+      --bg-hover: #243447;
+      --text-primary: #e6dfd5;
+      --text-secondary: #94a3b8;
+      --text-muted: #5f7285;
+      --accent: #c8a45c;
+      --accent-dim: rgba(200, 164, 92, 0.15);
+      --accent-hover: #d4b36a;
+      --border: rgba(148, 163, 184, 0.12);
+      --border-strong: rgba(148, 163, 184, 0.25);
+      --success: #5d8a66;
+      --success-bg: rgba(93, 138, 102, 0.12);
+      --warning: #c9a227;
+      --warning-bg: rgba(201, 162, 39, 0.12);
+      --error: #c45b5b;
+      --error-bg: rgba(196, 91, 91, 0.12);
+      --info: #5a8aa8;
+      --font-display: 'Crimson Pro', Georgia, serif;
+      --font-body: 'Source Sans 3', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --radius: 8px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.35);
+      --transition: 0.2s ease;
+    }
+
+    [data-theme="light"] {
+      --bg-deep: #f6f3ee;
+      --bg-base: #faf8f5;
+      --bg-surface: #ffffff;
+      --bg-raised: #f0ece5;
+      --bg-hover: #e8e3db;
+      --text-primary: #1a1612;
+      --text-secondary: #4a453d;
+      --text-muted: #8a8075;
+      --accent: #8a6d2f;
+      --accent-dim: rgba(138, 109, 47, 0.10);
+      --accent-hover: #6b5423;
+      --border: rgba(60, 50, 30, 0.10);
+      --border-strong: rgba(60, 50, 30, 0.22);
+      --success: #3d6b46;
+      --success-bg: rgba(61, 107, 70, 0.10);
+      --warning: #8a6d1a;
+      --warning-bg: rgba(138, 109, 26, 0.10);
+      --error: #a04040;
+      --error-bg: rgba(160, 64, 64, 0.10);
+      --info: #3d6b8a;
+      --shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      line-height: 1.55;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    header {
+      background: var(--bg-base);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      text-decoration: none;
+      color: inherit;
+    }
+    .brand-emoji { font-size: 1.6rem; line-height: 1; }
+    .brand-text {
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+    .brand-sub {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-top: -0.15rem;
+    }
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .theme-toggle, .status-badge {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: var(--radius);
+      padding: 0.35rem 0.7rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-family: var(--font-body);
+      transition: var(--transition);
+    }
+    .theme-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .status-badge {
+      cursor: default;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .status-badge .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--text-muted);
+      display: inline-block;
+    }
+    .status-badge.ready .dot { background: var(--success); }
+    .status-badge.searching .dot { background: var(--warning); animation: pulse 1.2s infinite; }
+    .status-badge.error .dot { background: var(--error); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    /* Tabs */
+    .tab-bar {
+      background: var(--bg-base);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 0.25rem;
+      padding: 0 1rem;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      padding: 0.65rem 0.9rem;
+      font-family: var(--font-body);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: var(--transition);
+    }
+    .tab-btn:hover { color: var(--text-secondary); }
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    /* Main */
+    main {
+      flex: 1;
+      padding: 1.25rem;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; animation: fadeIn .25s ease; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+
+    /* Cards */
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 0 0 0.75rem;
+      color: var(--text-primary);
+    }
+    .card-subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin: -0.5rem 0 0.75rem;
+    }
+
+    /* Forms */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .field { display: flex; flex-direction: column; gap: 0.35rem; }
+    .field label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .field input, .field select {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      border-radius: var(--radius);
+      padding: 0.55rem 0.75rem;
+      font-family: var(--font-body);
+      font-size: 0.92rem;
+      transition: var(--transition);
+    }
+    .field input:focus, .field select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+    .field input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+    .field .checkbox-row { display: flex; align-items: center; gap: 0.5rem; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      background: var(--accent);
+      color: var(--bg-deep);
+      border: none;
+      border-radius: var(--radius);
+      padding: 0.6rem 1.1rem;
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn.secondary {
+      background: var(--bg-raised);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .btn.secondary:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .btn.small { padding: 0.35rem 0.65rem; font-size: 0.8rem; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-row { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.75rem; }
+
+    /* Quick searches */
+    .quick-searches { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+    .chip {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-family: var(--font-body);
+      transition: var(--transition);
+    }
+    .chip:hover { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+    /* Autocomplete */
+    .autocomplete-wrap { position: relative; }
+    .autocomplete-list {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: var(--bg-raised);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      max-height: 220px;
+      overflow-y: auto;
+      z-index: 200;
+      box-shadow: var(--shadow);
+      display: none;
+    }
+    .autocomplete-list.visible { display: block; }
+    .autocomplete-item {
+      padding: 0.55rem 0.75rem;
+      cursor: pointer;
+      font-size: 0.88rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-primary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .autocomplete-item:last-child { border-bottom: none; }
+    .autocomplete-item:hover, .autocomplete-item.active { background: var(--accent-dim); }
+    .autocomplete-item .taxon-rank {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      background: var(--bg-surface);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    /* Map */
+    #map-container { height: 65vh; min-height: 420px; border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; }
+    .leaflet-popup-content-wrapper {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .leaflet-popup-tip { background: var(--bg-surface); }
+    .map-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th, td { padding: 0.55rem 0.7rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th {
+      background: var(--bg-raised);
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+    tr:hover td { background: var(--bg-hover); }
+    td { color: var(--text-primary); font-family: var(--font-mono); font-size: 0.82rem; }
+    td .cell-main { font-family: var(--font-body); font-size: 0.88rem; }
+    .table-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+    .stat-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      text-align: center;
+    }
+    .stat-value {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1.2;
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-top: 0.35rem;
+    }
+
+    /* Charts */
+    .chart-wrap {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1rem;
+    }
+
+    /* Export */
+    .export-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .export-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .export-card h4 {
+      margin: 0 0 0.5rem;
+      font-family: var(--font-display);
+      font-size: 1rem;
+    }
+    .export-card p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin: 0 0 0.75rem;
+    }
+
+    /* Debug */
+    .debug-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .debug-row .key { color: var(--text-secondary); font-weight: 600; }
+    .debug-row .value { color: var(--text-primary); font-family: var(--font-mono); }
+    .debug-section { margin-bottom: 1.25rem; }
+    .debug-section h4 {
+      font-family: var(--font-display);
+      margin: 0 0 0.5rem;
+      color: var(--accent);
+    }
+    pre.code {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      overflow-x: auto;
+      color: var(--text-secondary);
+    }
+
+    /* Filters bar */
+    .filters-bar {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .filters-bar input, .filters-bar select {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      border-radius: var(--radius);
+      padding: 0.45rem 0.7rem;
+      font-family: var(--font-body);
+      font-size: 0.88rem;
+    }
+    .filters-bar label { font-size: 0.8rem; color: var(--text-secondary); }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-muted);
+    }
+    .empty-state h3 {
+      font-family: var(--font-display);
+      color: var(--text-secondary);
+      margin-bottom: 0.5rem;
+    }
+
+    /* Alert */
+    .alert {
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .alert.info { background: rgba(90,138,168,0.12); border: 1px solid rgba(90,138,168,0.25); color: var(--info); }
+    .alert.warn { background: var(--warning-bg); border: 1px solid rgba(201,162,39,0.25); color: var(--warning); }
+    .alert.error { background: var(--error-bg); border: 1px solid rgba(196,91,91,0.25); color: var(--error); }
+    .alert.success { background: var(--success-bg); border: 1px solid rgba(93,138,102,0.25); color: var(--success); }
+
+    /* Pagination */
+    .pagination { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.75rem; }
+    .pagination button {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: var(--radius);
+      padding: 0.35rem 0.65rem;
+      cursor: pointer;
+      font-family: var(--font-body);
+    }
+    .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Field planning */
+    .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+    .plan-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .plan-card h4 { margin: 0 0 0.5rem; font-family: var(--font-display); }
+    .plan-card ul { margin: 0; padding-left: 1.2rem; font-size: 0.9rem; color: var(--text-secondary); }
+    .plan-card li { margin-bottom: 0.3rem; }
+
+    /* Compare */
+    .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+    .compare-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+
+    /* Recent searches */
+    .recent-list { display: flex; flex-direction: column; gap: 0.4rem; }
+    .recent-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.45rem 0.7rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: var(--text-secondary);
+    }
+    .recent-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .recent-item button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1rem; }
+    .recent-item button:hover { color: var(--error); }
+
+    /* Responsive */
+    @media (max-width: 720px) {
+      .form-grid { grid-template-columns: 1fr; }
+      #map-container { height: 50vh; }
+      .brand-text { font-size: 1.1rem; }
+      main { padding: 0.75rem; }
+      .tab-btn { padding: 0.55rem 0.65rem; font-size: 0.8rem; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-deep); }
+    ::-webkit-scrollbar-thumb { background: var(--bg-raised); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="index.html" class="brand" aria-label="Home">
+      <span class="brand-emoji" aria-hidden="true">🦎</span>
+      <div>
+        <div class="brand-text">GBIF Explorer</div>
+        <div class="brand-sub">Occurrence records &middot; Maps &middot; Seasonality</div>
+      </div>
+    </a>
+    <div class="header-controls">
+      <span id="app-status" class="status-badge" title="Status"><span class="dot" aria-hidden="true"></span> Ready</span>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌓</button>
+    </div>
+  </header>
+
+  <nav class="tab-bar" role="tablist" aria-label="Main tabs">
+    <button class="tab-btn active" role="tab" aria-selected="true" data-tab="search">Search</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="map">Map</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="records">Records</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="summary">Species Summary</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="seasonality">Seasonality</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="fieldplan">Field Plan</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="compare">Compare</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="export">Export</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="debug">Debug</button>
+  </nav>
+
+  <main>
+    <!-- Search Tab -->
+    <section id="tab-search" class="tab-panel active" role="tabpanel">
+      <div class="card">
+        <h2 class="card-title">Search GBIF Occurrences</h2>
+        <p class="card-subtitle">Find occurrence records by taxon and geography. Use the taxon picker for reliable matches.</p>
+        <div class="form-grid">
+          <div class="field autocomplete-wrap">
+            <label for="taxon-search">Taxon name (common or scientific)</label>
+            <input id="taxon-search" type="text" placeholder="e.g. Reptilia, Nerodia sipedon" autocomplete="off" />
+            <div id="taxon-autocomplete" class="autocomplete-list" role="listbox"></div>
+          </div>
+          <div class="field">
+            <label for="taxon-key">Taxon key (optional)</label>
+            <input id="taxon-key" type="text" placeholder="GBIF taxonKey" readonly />
+          </div>
+          <div class="field">
+            <label for="country">Country</label>
+            <select id="country">
+              <option value="">Any</option>
+              <option value="US" selected>United States</option>
+              <option value="CA">Canada</option>
+              <option value="MX">Mexico</option>
+              <option value="GB">United Kingdom</option>
+              <option value="AU">Australia</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="state">State / Province</label>
+            <input id="state" type="text" placeholder="e.g. Indiana" value="Indiana" />
+          </div>
+          <div class="field">
+            <label for="county">County (optional)</label>
+            <input id="county" type="text" placeholder="e.g. Gibson" />
+          </div>
+          <div class="field">
+            <label for="year-start">Year start</label>
+            <input id="year-start" type="number" placeholder="e.g. 2000" min="1500" max="2099" />
+          </div>
+          <div class="field">
+            <label for="year-end">Year end</label>
+            <input id="year-end" type="number" placeholder="e.g. 2024" min="1500" max="2099" />
+          </div>
+          <div class="field">
+            <label for="basis">Basis of record</label>
+            <select id="basis">
+              <option value="">Any</option>
+              <option value="HUMAN_OBSERVATION">Human observation</option>
+              <option value="OBSERVATION">Observation</option>
+              <option value="PRESERVED_SPECIMEN">Preserved specimen</option>
+              <option value="MACHINE_OBSERVATION">Machine observation</option>
+              <option value="LIVING_SPECIMEN">Living specimen</option>
+              <option value="MATERIAL_SAMPLE">Material sample</option>
+              <option value="FOSSIL_SPECIMEN">Fossil specimen</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="limit">Result limit</label>
+            <select id="limit">
+              <option value="100">100</option>
+              <option value="300" selected>300</option>
+              <option value="500">500</option>
+              <option value="1000">1,000</option>
+              <option value="2000">2,000</option>
+            </select>
+          </div>
+          <div class="field checkbox-row">
+            <input id="has-coords" type="checkbox" checked />
+            <label for="has-coords">Has coordinates</label>
+          </div>
+          <div class="field checkbox-row">
+            <input id="v2-quality" type="checkbox" checked />
+            <label for="v2-quality">Enable data-quality filters (V2)</label>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="btn-search" class="btn">🔍 Search GBIF</button>
+          <button id="btn-clear" class="btn secondary">Clear</button>
+          <button id="btn-load-demo" class="btn secondary">Load Demo Data</button>
+        </div>
+
+        <div style="margin-top:1rem;">
+          <label style="font-size:0.78rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Quick searches</label>
+          <div class="quick-searches" id="quick-searches"></div>
+        </div>
+
+        <div id="search-alerts"></div>
+      </div>
+
+      <div class="card" id="recent-searches-card" style="display:none;">
+        <h3 class="card-title">Recent Searches</h3>
+        <div class="recent-list" id="recent-searches-list"></div>
+      </div>
+
+      <div class="card" id="saved-taxa-card" style="display:none;">
+        <h3 class="card-title">Saved Taxa</h3>
+        <div class="quick-searches" id="saved-taxa-list"></div>
+      </div>
+    </section>
+
+    <!-- Map Tab -->
+    <section id="tab-map" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="map-controls">
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="map-cluster" type="checkbox" checked /> Cluster points
+          </label>
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="map-color-species" type="checkbox" checked /> Color by species
+          </label>
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="map-hide-uncertain" type="checkbox" /> Hide high uncertainty (&gt;1 km)
+          </label>
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="map-hide-no-date" type="checkbox" /> Hide records without date
+          </label>
+          <button id="map-fit-bounds" class="btn small secondary">Fit to results</button>
+          <button id="map-clear" class="btn small secondary">Clear map</button>
+        </div>
+        <div id="map-container"></div>
+        <div class="table-note">Points show occurrence locations from the current filtered result set. Popups contain record details and a link to the GBIF record.</div>
+      </div>
+    </section>
+
+    <!-- Records Tab -->
+    <section id="tab-records" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="filters-bar">
+          <input id="record-text-filter" type="text" placeholder="Search within results…" style="min-width:220px;" />
+          <select id="record-species-filter"><option value="">All species</option></select>
+          <select id="record-county-filter"><option value="">All counties</option></select>
+          <select id="record-basis-filter"><option value="">All basis</option></select>
+          <select id="record-year-filter"><option value="">All years</option></select>
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="record-hide-no-coords" type="checkbox" /> Hide missing coords
+          </label>
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="record-hide-no-date" type="checkbox" /> Hide missing dates
+          </label>
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="record-hide-uncertain" type="checkbox" /> Hide uncertainty &gt; 
+            <input id="record-uncertainty-threshold" type="number" value="1000" style="width:60px;margin-left:4px;" /> m
+          </label>
+        </div>
+        <div id="records-table-wrap" class="table-wrap">
+          <table id="records-table">
+            <thead><tr>
+              <th>Species</th><th>Scientific name</th><th>Date</th><th>Year</th><th>Month</th>
+              <th>County</th><th>Locality</th><th>Basis</th><th>Dataset</th>
+              <th>Lat</th><th>Lon</th><th>Uncertainty</th><th>ID</th>
+            </tr></thead>
+            <tbody id="records-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="records-pagination"></div>
+        <div class="table-note" id="records-note"></div>
+      </div>
+    </section>
+
+    <!-- Summary Tab -->
+    <section id="tab-summary" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="alert warn" role="note">
+          <span>⚠️</span>
+          <span>GBIF occurrence records reflect reporting, collection, and digitization effort. They should not be treated as direct abundance estimates without additional correction.</span>
+        </div>
+        <div class="stats-grid" id="summary-stats"></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Top Species</h3>
+        <div id="summary-top-species" class="table-wrap"><table><thead><tr><th>Species</th><th>Records</th><th>%</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">By County</h3>
+        <div id="summary-by-county" class="table-wrap"><table><thead><tr><th>County</th><th>Records</th><th>%</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">By Basis of Record</h3>
+        <div id="summary-by-basis" class="table-wrap"><table><thead><tr><th>Basis</th><th>Records</th><th>%</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">By Dataset</h3>
+        <div id="summary-by-dataset" class="table-wrap"><table><thead><tr><th>Dataset</th><th>Records</th><th>%</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">By Decade</h3>
+        <div id="summary-by-decade" class="table-wrap"><table><thead><tr><th>Decade</th><th>Records</th><th>%</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- Seasonality Tab -->
+    <section id="tab-seasonality" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="filters-bar">
+          <select id="season-species"><option value="">All species</option></select>
+          <label class="checkbox-row" style="font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+            <input id="season-require-date" type="checkbox" checked /> Require full eventDate
+          </label>
+        </div>
+        <div class="chart-grid">
+          <div class="chart-wrap"><h4 class="card-title">Records by Month</h4><canvas id="chart-months"></canvas></div>
+          <div class="chart-wrap"><h4 class="card-title">Records by Year</h4><canvas id="chart-years"></canvas></div>
+          <div class="chart-wrap"><h4 class="card-title">Species by Month</h4><canvas id="chart-species-month"></canvas></div>
+        </div>
+        <div class="alert info" role="note" style="margin-top:1rem;">
+          <span>ℹ️</span>
+          <span>Monthly patterns reflect collection and observation effort. Spikes often correspond to field seasons, not true population peaks.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Field Plan Tab -->
+    <section id="tab-fieldplan" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2 class="card-title">Field Planning</h2>
+        <p class="card-subtitle">Broad patterns from occurrence records to inform field strategy — not exact locations for sensitive species.</p>
+        <div class="plan-grid" id="field-plan-grid">
+          <div class="empty-state"><h3>No data yet</h3><p>Run a search first to generate field-plan insights.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Compare Tab -->
+    <section id="tab-compare" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2 class="card-title">Compare Taxa</h2>
+        <p class="card-subtitle">Pin searches from your session and compare seasonality, geography, and record counts side by side.</p>
+        <div class="btn-row">
+          <button id="btn-pin-current" class="btn">📌 Pin current search</button>
+          <button id="btn-clear-pins" class="btn secondary">Clear pins</button>
+        </div>
+        <div id="pinned-searches" class="quick-searches" style="margin-top:0.75rem;"></div>
+        <div id="compare-results" style="margin-top:1.5rem;"></div>
+      </div>
+    </section>
+
+    <!-- Export Tab -->
+    <section id="tab-export" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2 class="card-title">Export</h2>
+        <div class="export-grid">
+          <div class="export-card">
+            <h4>Filtered Records CSV</h4>
+            <p>Clean CSV of the current filtered record set.</p>
+            <button class="btn small" id="export-csv">Download CSV</button>
+          </div>
+          <div class="export-card">
+            <h4>Filtered Records JSON</h4>
+            <p>Raw JSON array of filtered records.</p>
+            <button class="btn small" id="export-json">Download JSON</button>
+          </div>
+          <div class="export-card">
+            <h4>Map GeoJSON</h4>
+            <p>GeoJSON FeatureCollection of mapped points.</p>
+            <button class="btn small" id="export-geojson">Download GeoJSON</button>
+          </div>
+          <div class="export-card">
+            <h4>Species Summary CSV</h4>
+            <p>Top species and counts.</p>
+            <button class="btn small" id="export-species-csv">Download</button>
+          </div>
+          <div class="export-card">
+            <h4>County Summary CSV</h4>
+            <p>Records grouped by county.</p>
+            <button class="btn small" id="export-county-csv">Download</button>
+          </div>
+          <div class="export-card">
+            <h4>Month Summary CSV</h4>
+            <p>Records grouped by month.</p>
+            <button class="btn small" id="export-month-csv">Download</button>
+          </div>
+          <div class="export-card">
+            <h4>Markdown Report</h4>
+            <p>Human-readable report with search params, top species, counties, and caveats.</p>
+            <button class="btn small" id="export-markdown">Download Markdown</button>
+          </div>
+          <div class="export-card">
+            <h4>Open in Quack Drawer</h4>
+            <p>Export a clean CSV and hand off to the DuckDB workbench.</p>
+            <button class="btn small" id="export-quack">Prepare for Quack Drawer</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Debug Tab -->
+    <section id="tab-debug" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="debug-section">
+          <h4>App</h4>
+          <div class="debug-row"><span class="key">Version</span><span class="value" id="dbg-version"></span></div>
+          <div class="debug-row"><span class="key">User Agent</span><span class="value" id="dbg-ua"></span></div>
+          <div class="debug-row"><span class="key">Theme</span><span class="value" id="dbg-theme"></span></div>
+        </div>
+        <div class="debug-section">
+          <h4>Last Requests</h4>
+          <div class="debug-row"><span class="key">Taxon lookup URL</span><span class="value" id="dbg-taxon-url">—</span></div>
+          <div class="debug-row"><span class="key">Occurrence URL</span><span class="value" id="dbg-occ-url">—</span></div>
+          <div class="debug-row"><span class="key">Request status</span><span class="value" id="dbg-status">—</span></div>
+          <div class="debug-row"><span class="key">Response time</span><span class="value" id="dbg-time">—</span></div>
+          <div class="debug-row"><span class="key">Last error</span><span class="value" id="dbg-error">—</span></div>
+        </div>
+        <div class="debug-section">
+          <h4>Data</h4>
+          <div class="debug-row"><span class="key">Total fetched</span><span class="value" id="dbg-total"></span></div>
+          <div class="debug-row"><span class="key">Filtered count</span><span class="value" id="dbg-filtered"></span></div>
+          <div class="debug-row"><span class="key">Map points</span><span class="value" id="dbg-mapped"></span></div>
+          <div class="debug-row"><span class="key">localStorage keys</span><span class="value" id="dbg-ls"></span></div>
+          <div class="debug-row"><span class="key">IndexedDB status</span><span class="value" id="dbg-idb"></span></div>
+        </div>
+        <div class="btn-row">
+          <button id="btn-copy-debug" class="btn">Copy Debug Report</button>
+          <button id="btn-clear-cache" class="btn secondary">Clear Cache &amp; Recent</button>
+        </div>
+        <pre class="code" id="debug-report" style="margin-top:1rem;max-height:300px;overflow:auto;"></pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-muted); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt &middot; GBIF Explorer &middot; version 2026.05.13.1
+  </footer>
+
+  <script>
+    (function() {
+      'use strict';
+
+      // ======================= Config =======================
+      const APP_VERSION = '2026.05.13.1';
+      const GBIF_BASE = 'https://api.gbif.org/v1';
+      const MAX_POINTS_RENDER = 5000;
+      const RECORDS_PER_PAGE = 50;
+
+      // ======================= State =======================
+      const state = {
+        rawRecords: [],
+        filteredRecords: [],
+        taxonKey: null,
+        taxonName: '',
+        lastTaxonUrl: '',
+        lastOccUrl: '',
+        lastStatus: '',
+        lastError: '',
+        lastTimeMs: 0,
+        isSearching: false,
+        currentSearchParams: null,
+        map: null,
+        markerLayer: null,
+        charts: {},
+        theme: localStorage.getItem('gbif-theme') || 'dark',
+        recentSearches: JSON.parse(localStorage.getItem('gbif-recent') || '[]'),
+        savedTaxa: JSON.parse(localStorage.getItem('gbif-taxa') || '[]'),
+        pinned: [], // { id, name, records, params }
+        pageOffset: 0
+      };
+
+      // ======================= IndexedDB Cache =======================
+      const DB_NAME = 'GBIFExplorerCache';
+      const DB_VERSION = 1;
+      let idb = null;
+
+      function openDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => { idb = req.result; resolve(idb); };
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('searches')) db.createObjectStore('searches', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('records')) db.createObjectStore('records', { keyPath: 'cacheKey' });
+          };
+        });
+      }
+
+      async function cacheSearch(id, data) {
+        if (!idb) return;
+        const tx = idb.transaction(['searches'], 'readwrite');
+        const store = tx.objectStore('searches');
+        store.put({ id, data, ts: Date.now() });
+      }
+      async function getCachedSearch(id) {
+        if (!idb) return null;
+        return new Promise((resolve) => {
+          const tx = idb.transaction(['searches'], 'readonly');
+          const store = tx.objectStore('searches');
+          const req = store.get(id);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        });
+      }
+      async function clearCache() {
+        if (!idb) return;
+        const tx = idb.transaction(['searches', 'records'], 'readwrite');
+        tx.objectStore('searches').clear();
+        tx.objectStore('records').clear();
+      }
+
+      // ======================= DOM refs =======================
+      const $ = (sel) => document.querySelector(sel);
+      const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+      const elTaxonSearch = $('#taxon-search');
+      const elTaxonKey = $('#taxon-key');
+      const elAutocomplete = $('#taxon-autocomplete');
+      const elCountry = $('#country');
+      const elState = $('#state');
+      const elCounty = $('#county');
+      const elYearStart = $('#year-start');
+      const elYearEnd = $('#year-end');
+      const elBasis = $('#basis');
+      const elLimit = $('#limit');
+      const elHasCoords = $('#has-coords');
+      const elQuality = $('#v2-quality');
+      const elStatus = $('#app-status');
+      const elAlerts = $('#search-alerts');
+      const elRecordsTbody = $('#records-tbody');
+      const elRecordsPagination = $('#records-pagination');
+      const elRecordsNote = $('#records-note');
+
+      // ======================= Theme =======================
+      function applyTheme(t) {
+        document.documentElement.setAttribute('data-theme', t);
+        localStorage.setItem('gbif-theme', t);
+      }
+      applyTheme(state.theme);
+      $('#theme-toggle').addEventListener('click', () => {
+        state.theme = state.theme === 'dark' ? 'light' : 'dark';
+        applyTheme(state.theme);
+      });
+
+      // ======================= Tabs =======================
+      $$('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tab = btn.dataset.tab;
+          $$('.tab-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+          $$('.tab-panel').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          btn.setAttribute('aria-selected', 'true');
+          $(`#tab-${tab}`).classList.add('active');
+          if (tab === 'map') setTimeout(() => { if (state.map) state.map.invalidateSize(); renderMap(); }, 50);
+          if (tab === 'seasonality') setTimeout(renderSeasonality, 50);
+        });
+      });
+
+      // ======================= Utilities =======================
+      function esc(s) {
+        if (s == null) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+      function fmtNum(n) {
+        return new Intl.NumberFormat('en-US').format(n);
+      }
+      function setStatus(text, type) {
+        elStatus.innerHTML = `<span class="dot" aria-hidden="true"></span> ${esc(text)}`;
+        elStatus.className = 'status-badge ' + (type || '');
+      }
+      function showAlert(html, type) {
+        const div = document.createElement('div');
+        div.className = `alert ${type}`;
+        div.innerHTML = html;
+        elAlerts.appendChild(div);
+        setTimeout(() => div.remove(), 8000);
+      }
+      function clearAlerts() { elAlerts.innerHTML = ''; }
+      function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+      function normalizeRecord(r) {
+        const d = r.eventDate ? new Date(r.eventDate) : null;
+        return {
+          key: r.key || r.gbifID || r.occurrenceID || Math.random().toString(36).slice(2),
+          gbifID: r.gbifID || r.key || '',
+          species: r.species || r.scientificName || 'Unidentified',
+          scientificName: r.scientificName || '',
+          taxonKey: r.taxonKey || '',
+          kingdom: r.kingdom || '',
+          phylum: r.phylum || '',
+          class: r.class || '',
+          order: r.order || '',
+          family: r.family || '',
+          genus: r.genus || '',
+          eventDate: r.eventDate || '',
+          year: r.year || (d ? d.getFullYear() : ''),
+          month: r.month || (d ? d.getMonth() + 1 : ''),
+          day: r.day || (d ? d.getDate() : ''),
+          countryCode: r.countryCode || '',
+          stateProvince: r.stateProvince || '',
+          county: r.county || '',
+          locality: r.locality || '',
+          decimalLatitude: r.decimalLatitude != null ? parseFloat(r.decimalLatitude) : null,
+          decimalLongitude: r.decimalLongitude != null ? parseFloat(r.decimalLongitude) : null,
+          coordinateUncertaintyInMeters: r.coordinateUncertaintyInMeters != null ? parseFloat(r.coordinateUncertaintyInMeters) : null,
+          basisOfRecord: r.basisOfRecord || '',
+          datasetName: r.datasetName || '',
+          institutionCode: r.institutionCode || '',
+          catalogNumber: r.catalogNumber || '',
+          recordedBy: r.recordedBy || '',
+          identifiedBy: r.identifiedBy || '',
+          license: r.license || '',
+          references: r.references || `https://www.gbif.org/occurrence/${r.key || r.gbifID || ''}`
+        };
+      }
+
+      function downloadBlob(content, filename, type) {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      // ======================= GBIF API =======================
+      async function gbifFetch(url) {
+        const start = performance.now();
+        const res = await fetch(url);
+        state.lastTimeMs = Math.round(performance.now() - start);
+        if (!res.ok) {
+          const text = await res.text().catch(()=>'');
+          throw new Error(`GBIF ${res.status}: ${text.slice(0,200)}`);
+        }
+        return res.json();
+      }
+
+      async function resolveTaxon(name) {
+        if (!name || !name.trim()) return null;
+        const url = `${GBIF_BASE}/species/match?name=${encodeURIComponent(name.trim())}&verbose=true`;
+        state.lastTaxonUrl = url;
+        const data = await gbifFetch(url);
+        if (!data || !data.usageKey) return null;
+        return { taxonKey: data.usageKey, scientificName: data.scientificName, rank: data.rank, canonicalName: data.canonicalName, confidence: data.confidence };
+      }
+
+      async function suggestTaxon(q) {
+        if (!q || q.length < 2) return [];
+        const url = `${GBIF_BASE}/species/suggest?q=${encodeURIComponent(q)}&limit=10`;
+        return gbifFetch(url);
+      }
+
+      async function fetchOccurrences(params, onProgress) {
+        const limit = Math.min(parseInt(params.limit) || 300, 2000);
+        const records = [];
+        let offset = 0;
+        const base = new URLSearchParams();
+        if (params.taxonKey) base.set('taxonKey', params.taxonKey);
+        else if (params.scientificName) base.set('scientificName', params.scientificName);
+        if (params.country) base.set('country', params.country);
+        if (params.stateProvince) base.set('stateProvince', params.stateProvince);
+        if (params.county) base.set('county', params.county);
+        if (params.yearStart) base.set('year', `${params.yearStart},${params.yearEnd || params.yearStart}`);
+        if (params.hasCoordinate) base.set('hasCoordinate', 'true');
+        if (params.basisOfRecord) base.set('basisOfRecord', params.basisOfRecord);
+        base.set('limit', '300');
+
+        while (records.length < limit) {
+          base.set('offset', String(offset));
+          const url = `${GBIF_BASE}/occurrence/search?${base.toString()}`;
+          state.lastOccUrl = url;
+          const data = await gbifFetch(url);
+          if (!data || !data.results || data.results.length === 0) break;
+          for (const r of data.results) records.push(normalizeRecord(r));
+          offset += data.results.length;
+          if (offset >= (data.count || 0)) break;
+          if (onProgress) onProgress(records.length, data.count || records.length);
+          if (records.length < limit) await sleep(120); // be polite
+        }
+        return records.slice(0, limit);
+      }
+
+      // ======================= Autocomplete =======================
+      let acAbort = null;
+      elTaxonSearch.addEventListener('input', async () => {
+        const q = elTaxonSearch.value.trim();
+        if (!q) { elAutocomplete.classList.remove('visible'); return; }
+        if (acAbort) acAbort.abort();
+        acAbort = new AbortController();
+        try {
+          const items = await suggestTaxon(q);
+          elAutocomplete.innerHTML = items.map((it, i) =>
+            `<div class="autocomplete-item" data-key="${esc(it.key)}" data-name="${esc(it.scientificName)}" data-rank="${esc(it.rank)}">
+              <span>${esc(it.scientificName)}</span>
+              <span class="taxon-rank">${esc(it.rank)}</span>
+            </div>`
+          ).join('');
+          elAutocomplete.classList.add('visible');
+          elAutocomplete.querySelectorAll('.autocomplete-item').forEach(item => {
+            item.addEventListener('click', () => {
+              elTaxonSearch.value = item.dataset.name;
+              elTaxonKey.value = item.dataset.key;
+              state.taxonKey = item.dataset.key;
+              elAutocomplete.classList.remove('visible');
+            });
+          });
+        } catch (e) { /* ignore */ }
+      });
+      document.addEventListener('click', (e) => {
+        if (!elTaxonSearch.contains(e.target) && !elAutocomplete.contains(e.target)) elAutocomplete.classList.remove('visible');
+      });
+
+      // ======================= Search =======================
+      async function doSearch(demoData) {
+        clearAlerts();
+        state.isSearching = true;
+        setStatus('Searching…', 'searching');
+        state.pageOffset = 0;
+
+        let taxonKey = state.taxonKey || elTaxonKey.value || '';
+        let scientificName = elTaxonSearch.value.trim();
+
+        if (!demoData) {
+          if (!taxonKey && scientificName) {
+            const match = await resolveTaxon(scientificName);
+            if (match) {
+              taxonKey = match.taxonKey;
+              scientificName = match.scientificName;
+              elTaxonKey.value = taxonKey;
+              showAlert(`Matched <strong>${esc(match.scientificName)}</strong> (rank: ${esc(match.rank)}, confidence: ${match.confidence})`, 'success');
+            } else {
+              showAlert('No exact GBIF taxon match found. Using text search — results may include related taxa.', 'warn');
+            }
+          }
+          if (!taxonKey && !scientificName) {
+            showAlert('Enter a taxon name to search.', 'error');
+            state.isSearching = false; setStatus('Ready'); return;
+          }
+        }
+
+        const params = {
+          taxonKey: demoData ? '' : taxonKey,
+          scientificName: demoData ? '' : scientificName,
+          country: demoData ? '' : elCountry.value,
+          stateProvince: demoData ? '' : elState.value,
+          county: demoData ? '' : elCounty.value,
+          yearStart: demoData ? '' : elYearStart.value,
+          yearEnd: demoData ? '' : elYearEnd.value,
+          hasCoordinate: demoData ? true : elHasCoords.checked,
+          basisOfRecord: demoData ? '' : elBasis.value,
+          limit: demoData ? 200 : elLimit.value
+        };
+        state.currentSearchParams = params;
+
+        try {
+          if (demoData) {
+            state.rawRecords = generateDemoData();
+            state.lastOccUrl = '(demo data)';
+            state.lastStatus = 'OK (demo)';
+          } else {
+            const recs = await fetchOccurrences(params, (got, total) => {
+              setStatus(`Fetched ${fmtNum(got)} / ~${fmtNum(total)}…`, 'searching');
+            });
+            state.rawRecords = recs;
+            state.lastStatus = 'OK';
+            // Save recent
+            const recent = state.recentSearches;
+            const label = `${scientificName || 'Unnamed'} ${params.stateProvince ? 'in ' + params.stateProvince : ''} (${recs.length})`;
+            recent.unshift({ label, params, ts: Date.now() });
+            state.recentSearches = recent.slice(0, 10);
+            localStorage.setItem('gbif-recent', JSON.stringify(state.recentSearches));
+            // Cache in IDB
+            const cacheId = `search-${Date.now()}`;
+            await cacheSearch(cacheId, { params, records: recs });
+          }
+
+          applyFilters();
+          populateFilterOptions();
+          renderRecords();
+          renderSummary();
+          renderMap();
+          renderFieldPlan();
+          updateDebug();
+
+          setStatus(`${fmtNum(state.filteredRecords.length)} records ready`, 'ready');
+          showAlert(`Loaded <strong>${fmtNum(state.rawRecords.length)}</strong> records.`, 'success');
+        } catch (err) {
+          state.lastError = err.message;
+          state.lastStatus = 'Error';
+          showAlert(`Search failed: ${esc(err.message)}`, 'error');
+          setStatus('Error', 'error');
+        } finally {
+          state.isSearching = false;
+          renderRecentSearches();
+        }
+      }
+
+      $('#btn-search').addEventListener('click', () => doSearch(false));
+      $('#btn-clear').addEventListener('click', () => {
+        elTaxonSearch.value = '';
+        elTaxonKey.value = '';
+        state.taxonKey = '';
+        elState.value = '';
+        elCounty.value = '';
+        elYearStart.value = '';
+        elYearEnd.value = '';
+        elBasis.value = '';
+        state.rawRecords = [];
+        state.filteredRecords = [];
+        renderRecords(); renderSummary(); clearMap(); updateDebug();
+        setStatus('Ready');
+      });
+      $('#btn-load-demo').addEventListener('click', () => doSearch(true));
+
+      // Quick searches
+      const quickSearches = [
+        { label: 'Reptilia in Indiana', taxon: 'Reptilia', state: 'Indiana' },
+        { label: 'Amphibia in Indiana', taxon: 'Amphibia', state: 'Indiana' },
+        { label: 'Serpentes in Indiana', taxon: 'Serpentes', state: 'Indiana' },
+        { label: 'Testudines in Indiana', taxon: 'Testudines', state: 'Indiana' },
+        { label: 'Terrapene carolina in Indiana', taxon: 'Terrapene carolina', state: 'Indiana' },
+        { label: 'Nerodia sipedon in Indiana', taxon: 'Nerodia sipedon', state: 'Indiana' },
+        { label: 'Thamnophis sirtalis in Indiana', taxon: 'Thamnophis sirtalis', state: 'Indiana' },
+        { label: 'Ambystoma maculatum in Indiana', taxon: 'Ambystoma maculatum', state: 'Indiana' },
+      ];
+      const qsWrap = $('#quick-searches');
+      quickSearches.forEach(q => {
+        const b = document.createElement('button');
+        b.className = 'chip';
+        b.textContent = q.label;
+        b.addEventListener('click', async () => {
+          elTaxonSearch.value = q.taxon;
+          elState.value = q.state;
+          elCountry.value = 'US';
+          elHasCoords.checked = true;
+          await doSearch(false);
+        });
+        qsWrap.appendChild(b);
+      });
+
+      // Region presets
+      const regionPresets = [
+        { label: 'Indiana', country: 'US', state: 'Indiana' },
+        { label: 'Southern Indiana', country: 'US', state: 'Indiana' }, // same filter, user knows context
+        { label: 'Gibson County', country: 'US', state: 'Indiana', county: 'Gibson' },
+        { label: 'US', country: 'US' },
+        { label: 'Canada', country: 'CA' },
+      ];
+      const regionWrap = document.createElement('div');
+      regionWrap.className = 'quick-searches';
+      regionWrap.style.marginTop = '0.5rem';
+      regionPresets.forEach(r => {
+        const b = document.createElement('button');
+        b.className = 'chip';
+        b.textContent = '📍 ' + r.label;
+        b.addEventListener('click', () => {
+          elCountry.value = r.country || '';
+          elState.value = r.state || '';
+          elCounty.value = r.county || '';
+        });
+        regionWrap.appendChild(b);
+      });
+      qsWrap.parentElement.appendChild(document.createElement('br'));
+      const regionLabel = document.createElement('label');
+      regionLabel.textContent = 'Region presets';
+      regionLabel.style = 'font-size:0.78rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em;margin-top:1rem;display:block;';
+      qsWrap.parentElement.appendChild(regionLabel);
+      qsWrap.parentElement.appendChild(regionWrap);
+
+      function renderRecentSearches() {
+        const list = $('#recent-searches-list');
+        const card = $('#recent-searches-card');
+        if (!state.recentSearches.length) { card.style.display = 'none'; return; }
+        card.style.display = 'block';
+        list.innerHTML = state.recentSearches.map((r, i) =>
+          `<div class="recent-item" data-idx="${i}">
+            <span>${esc(r.label)}</span>
+            <button data-idx="${i}" title="Remove">&times;</button>
+          </div>`
+        ).join('');
+        list.querySelectorAll('.recent-item').forEach(item => {
+          item.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') return;
+            const r = state.recentSearches[parseInt(item.dataset.idx)];
+            if (!r || !r.params) return;
+            const p = r.params;
+            elTaxonSearch.value = p.scientificName || '';
+            elTaxonKey.value = p.taxonKey || '';
+            state.taxonKey = p.taxonKey || '';
+            elCountry.value = p.country || '';
+            elState.value = p.stateProvince || '';
+            elCounty.value = p.county || '';
+            elYearStart.value = p.yearStart || '';
+            elYearEnd.value = p.yearEnd || '';
+            elBasis.value = p.basisOfRecord || '';
+            elLimit.value = String(p.limit || 300);
+            elHasCoords.checked = !!p.hasCoordinate;
+          });
+        });
+        list.querySelectorAll('button').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.idx);
+            state.recentSearches.splice(idx, 1);
+            localStorage.setItem('gbif-recent', JSON.stringify(state.recentSearches));
+            renderRecentSearches();
+          });
+        });
+      }
+      renderRecentSearches();
+
+      // ======================= Demo Data =======================
+      function generateDemoData() {
+        const speciesList = [
+          { s: 'Nerodia sipedon', sn: 'Nerodia sipedon' },
+          { s: 'Thamnophis sirtalis', sn: 'Thamnophis sirtalis' },
+          { s: 'Terrapene carolina', sn: 'Terrapene carolina' },
+          { s: 'Ambystoma maculatum', sn: 'Ambystoma maculatum' },
+          { s: 'Lithobates catesbeianus', sn: 'Lithobates catesbeianus' },
+        ];
+        const counties = ['Gibson','Knox','Daviess','Pike','Posey','Vanderburgh','Warrick','Spencer'];
+        const datasets = ['iNaturalist','USGS Herp Survey','Indiana DNR','INHS Collections'];
+        const bases = ['HUMAN_OBSERVATION','PRESERVED_SPECIMEN','MACHINE_OBSERVATION'];
+        const records = [];
+        const baseLat = 38.3, baseLon = -87.3;
+        for (let i = 0; i < 180; i++) {
+          const sp = speciesList[Math.floor(Math.random() * speciesList.length)];
+          const year = 1990 + Math.floor(Math.random() * 35);
+          const month = 1 + Math.floor(Math.random() * 12);
+          const day = 1 + Math.floor(Math.random() * 28);
+          const lat = baseLat + (Math.random() - 0.5) * 1.2;
+          const lon = baseLon + (Math.random() - 0.5) * 1.6;
+          records.push(normalizeRecord({
+            key: `demo-${i}`,
+            gbifID: `demo-${i}`,
+            species: sp.s,
+            scientificName: sp.sn,
+            eventDate: `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`,
+            year, month, day,
+            stateProvince: 'Indiana',
+            county: counties[Math.floor(Math.random() * counties.length)],
+            locality: 'Near road crossing',
+            decimalLatitude: lat,
+            decimalLongitude: lon,
+            coordinateUncertaintyInMeters: Math.random() > 0.3 ? Math.round(50 + Math.random()*2000) : null,
+            basisOfRecord: bases[Math.floor(Math.random() * bases.length)],
+            datasetName: datasets[Math.floor(Math.random() * datasets.length)]
+          }));
+        }
+        return records;
+      }
+
+      // ======================= Filters =======================
+      function applyFilters() {
+        let recs = [...state.rawRecords];
+        const q = $('#record-text-filter').value.trim().toLowerCase();
+        const sp = $('#record-species-filter').value;
+        const co = $('#record-county-filter').value;
+        const ba = $('#record-basis-filter').value;
+        const yr = $('#record-year-filter').value;
+        const hideNoCoords = $('#record-hide-no-coords').checked;
+        const hideNoDate = $('#record-hide-no-date').checked;
+        const hideUncertain = $('#record-hide-uncertain').checked;
+        const threshold = parseFloat($('#record-uncertainty-threshold').value) || 1000;
+        const quality = elQuality.checked;
+
+        if (q) recs = recs.filter(r =>
+          (r.species||'').toLowerCase().includes(q) ||
+          (r.scientificName||'').toLowerCase().includes(q) ||
+          (r.locality||'').toLowerCase().includes(q) ||
+          (r.datasetName||'').toLowerCase().includes(q)
+        );
+        if (sp) recs = recs.filter(r => r.species === sp);
+        if (co) recs = recs.filter(r => r.county === co);
+        if (ba) recs = recs.filter(r => r.basisOfRecord === ba);
+        if (yr) recs = recs.filter(r => String(r.year) === yr);
+        if (hideNoCoords) recs = recs.filter(r => r.decimalLatitude != null && r.decimalLongitude != null);
+        if (hideNoDate) recs = recs.filter(r => !!r.eventDate);
+        if (hideUncertain && quality) recs = recs.filter(r => {
+          if (r.coordinateUncertaintyInMeters == null) return true;
+          return r.coordinateUncertaintyInMeters <= threshold;
+        });
+        state.filteredRecords = recs;
+        updateDebug();
+      }
+
+      function populateFilterOptions() {
+        const species = [...new Set(state.rawRecords.map(r => r.species).filter(Boolean))].sort();
+        const counties = [...new Set(state.rawRecords.map(r => r.county).filter(Boolean))].sort();
+        const bases = [...new Set(state.rawRecords.map(r => r.basisOfRecord).filter(Boolean))].sort();
+        const years = [...new Set(state.rawRecords.map(r => r.year).filter(Boolean))].sort((a,b)=>a-b);
+
+        function fill(sel, items) {
+          const val = sel.value;
+          sel.innerHTML = '<option value="">All</option>' + items.map(i => `<option value="${esc(i)}">${esc(i)}</option>`).join('');
+          sel.value = val;
+        }
+        fill($('#record-species-filter'), species);
+        fill($('#record-county-filter'), counties);
+        fill($('#record-basis-filter'), bases);
+        fill($('#record-year-filter'), years);
+        fill($('#season-species'), species);
+      }
+
+      $$('#record-text-filter, #record-species-filter, #record-county-filter, #record-basis-filter, #record-year-filter, #record-hide-no-coords, #record-hide-no-date, #record-hide-uncertain, #record-uncertainty-threshold, #v2-quality').forEach(el => {
+        el.addEventListener('input', () => { applyFilters(); state.pageOffset = 0; renderRecords(); renderMap(); });
+        el.addEventListener('change', () => { applyFilters(); state.pageOffset = 0; renderRecords(); renderMap(); });
+      });
+
+      // ======================= Records Table =======================
+      function renderRecords() {
+        const recs = state.filteredRecords;
+        const start = state.pageOffset;
+        const end = start + RECORDS_PER_PAGE;
+        const page = recs.slice(start, end);
+
+        elRecordsTbody.innerHTML = page.map(r => `<tr>
+          <td class="cell-main">${esc(r.species)}</td>
+          <td>${esc(r.scientificName)}</td>
+          <td>${esc(r.eventDate).slice(0,10)}</td>
+          <td>${esc(r.year)}</td>
+          <td>${esc(r.month)}</td>
+          <td>${esc(r.county)}</td>
+          <td title="${esc(r.locality)}">${esc(r.locality).slice(0,40)}${r.locality && r.locality.length>40?'…':''}</td>
+          <td>${esc(r.basisOfRecord)}</td>
+          <td title="${esc(r.datasetName)}">${esc(r.datasetName).slice(0,30)}${r.datasetName && r.datasetName.length>30?'…':''}</td>
+          <td>${r.decimalLatitude != null ? r.decimalLatitude.toFixed(4) : ''}</td>
+          <td>${r.decimalLongitude != null ? r.decimalLongitude.toFixed(4) : ''}</td>
+          <td>${r.coordinateUncertaintyInMeters != null ? Math.round(r.coordinateUncertaintyInMeters) + ' m' : ''}</td>
+          <td><a href="${esc(r.references)}" target="_blank" rel="noopener" style="color:var(--accent);">${esc(r.gbifID).slice(0,12)}</a></td>
+        </tr>`).join('');
+
+        // Pagination
+        const pages = Math.max(1, Math.ceil(recs.length / RECORDS_PER_PAGE));
+        const current = Math.floor(start / RECORDS_PER_PAGE) + 1;
+        let pagHtml = `<span style="color:var(--text-muted);font-size:0.85rem;">Page ${current} of ${pages} &middot; ${fmtNum(recs.length)} records</span>`;
+        pagHtml += `<button ${current<=1?'disabled':''} data-action="first">&laquo;</button>`;
+        pagHtml += `<button ${current<=1?'disabled':''} data-action="prev">&lsaquo;</button>`;
+        pagHtml += `<button ${current>=pages?'disabled':''} data-action="next">&rsaquo;</button>`;
+        pagHtml += `<button ${current>=pages?'disabled':''} data-action="last">&raquo;</button>`;
+        elRecordsPagination.innerHTML = pagHtml;
+        elRecordsPagination.querySelectorAll('button').forEach(b => {
+          b.addEventListener('click', () => {
+            const act = b.dataset.action;
+            const total = state.filteredRecords.length;
+            if (act === 'first') state.pageOffset = 0;
+            if (act === 'prev') state.pageOffset = Math.max(0, state.pageOffset - RECORDS_PER_PAGE);
+            if (act === 'next') state.pageOffset = Math.min(total - 1, state.pageOffset + RECORDS_PER_PAGE);
+            if (act === 'last') state.pageOffset = Math.max(0, total - RECORDS_PER_PAGE);
+            renderRecords();
+          });
+        });
+        elRecordsNote.textContent = `Showing ${fmtNum(page.length)} of ${fmtNum(recs.length)} filtered records (${fmtNum(state.rawRecords.length)} total fetched).`;
+      }
+
+      // ======================= Map =======================
+      function initMap() {
+        if (state.map) return;
+        state.map = L.map('map-container').setView([38.3, -87.3], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          maxZoom: 18
+        }).addTo(state.map);
+      }
+      function clearMap() {
+        if (state.markerLayer) { state.map.removeLayer(state.markerLayer); state.markerLayer = null; }
+      }
+      function renderMap() {
+        initMap();
+        clearMap();
+        const recs = state.filteredRecords.filter(r => r.decimalLatitude != null && r.decimalLongitude != null);
+        if (!recs.length) return;
+
+        const cluster = $('#map-cluster').checked;
+        const colorBySpecies = $('#map-color-species').checked;
+        const hideUncertain = $('#map-hide-uncertain').checked;
+        const hideNoDate = $('#map-hide-no-date').checked;
+        const threshold = parseFloat($('#record-uncertainty-threshold').value) || 1000;
+
+        let points = recs;
+        if (hideUncertain && elQuality.checked) points = points.filter(r => !r.coordinateUncertaintyInMeters || r.coordinateUncertaintyInMeters <= threshold);
+        if (hideNoDate) points = points.filter(r => !!r.eventDate);
+
+        if (points.length > MAX_POINTS_RENDER) {
+          if (!confirm(`This result set has ${fmtNum(points.length)} mappable points. Render the first ${fmtNum(MAX_POINTS_RENDER)}? Cancel to skip mapping.`)) return;
+          points = points.slice(0, MAX_POINTS_RENDER);
+        }
+
+        const speciesColors = {};
+        const palette = ['#c8a45c','#5d8a66','#5a8aa8','#a87a5a','#8a6d9e','#6d8a8a','#c45b5b','#8a9e6d','#6d7a9e','#9e8a6d'];
+        let cIdx = 0;
+        function getColor(sp) {
+          if (!colorBySpecies) return '#c8a45c';
+          if (!speciesColors[sp]) { speciesColors[sp] = palette[cIdx % palette.length]; cIdx++; }
+          return speciesColors[sp];
+        }
+
+        const markers = [];
+        points.forEach(r => {
+          const color = getColor(r.species);
+          const radius = r.coordinateUncertaintyInMeters ? Math.min(12, 3 + Math.log10(r.coordinateUncertaintyInMeters + 1)) : 6;
+          const m = L.circleMarker([r.decimalLatitude, r.decimalLongitude], {
+            radius, color, fillColor: color, fillOpacity: 0.65, weight: 1.5
+          });
+          const popup = `
+            <div style="font-family:var(--font-body);min-width:220px;">
+              <strong>${esc(r.species)}</strong><br/>
+              <span style="color:var(--text-muted);font-size:0.8rem;">${esc(r.scientificName)}</span><br/>
+              <hr style="border-color:var(--border);margin:0.4rem 0;"/>
+              <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.4;">
+                <div>Date: ${esc(r.eventDate).slice(0,10) || '—'}</div>
+                <div>County: ${esc(r.county)}, ${esc(r.stateProvince)}</div>
+                <div>Basis: ${esc(r.basisOfRecord)}</div>
+                <div>Dataset: ${esc(r.datasetName).slice(0,40)}</div>
+                <div>Uncertainty: ${r.coordinateUncertaintyInMeters != null ? Math.round(r.coordinateUncertaintyInMeters)+' m' : '—'}</div>
+                <div>Lat/Lon: ${r.decimalLatitude?.toFixed(4)}, ${r.decimalLongitude?.toFixed(4)}</div>
+                <div>By: ${esc(r.recordedBy) || '—'}</div>
+                <a href="${esc(r.references)}" target="_blank" rel="noopener" style="color:var(--accent);">View on GBIF ↗</a>
+              </div>
+            </div>`;
+          m.bindPopup(popup);
+          markers.push(m);
+        });
+
+        if (cluster && L.markerClusterGroup) {
+          state.markerLayer = L.markerClusterGroup({ maxClusterRadius: 60 });
+          markers.forEach(m => state.markerLayer.addLayer(m));
+          state.map.addLayer(state.markerLayer);
+        } else {
+          state.markerLayer = L.featureGroup(markers).addTo(state.map);
+        }
+        const bounds = markers.map(m => m.getLatLng());
+        if (bounds.length) state.map.fitBounds(L.latLngBounds(bounds), { padding: [20,20], maxZoom: 13 });
+        updateDebug();
+      }
+
+      $('#map-cluster').addEventListener('change', renderMap);
+      $('#map-color-species').addEventListener('change', renderMap);
+      $('#map-hide-uncertain').addEventListener('change', renderMap);
+      $('#map-hide-no-date').addEventListener('change', renderMap);
+      $('#map-fit-bounds').addEventListener('click', () => { if (state.map && state.markerLayer) state.map.fitBounds(state.markerLayer.getBounds(), { padding: [20,20], maxZoom: 13 }); });
+      $('#map-clear').addEventListener('click', clearMap);
+
+      // ======================= Summary =======================
+      function renderSummary() {
+        const recs = state.filteredRecords;
+        const total = recs.length;
+        const withCoords = recs.filter(r => r.decimalLatitude != null).length;
+        const withDates = recs.filter(r => !!r.eventDate).length;
+        const speciesSet = new Set(recs.map(r => r.species).filter(Boolean));
+
+        $('#summary-stats').innerHTML = `
+          <div class="stat-card"><div class="stat-value">${fmtNum(total)}</div><div class="stat-label">Total records</div></div>
+          <div class="stat-card"><div class="stat-value">${fmtNum(speciesSet.size)}</div><div class="stat-label">Unique species</div></div>
+          <div class="stat-card"><div class="stat-value">${fmtNum(withCoords)}</div><div class="stat-label">With coordinates</div></div>
+          <div class="stat-card"><div class="stat-value">${fmtNum(withDates)}</div><div class="stat-label">With dates</div></div>
+          <div class="stat-card"><div class="stat-value">${fmtNum(total - withCoords)}</div><div class="stat-label">Missing coordinates</div></div>
+          <div class="stat-card"><div class="stat-value">${fmtNum(total - withDates)}</div><div class="stat-label">Missing dates</div></div>
+        `;
+
+        function makeTable(containerId, keyFn) {
+          const counts = {};
+          recs.forEach(r => { const k = keyFn(r) || '(unknown)'; counts[k] = (counts[k]||0)+1; });
+          const rows = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,25);
+          const html = '<table><thead><tr><th>Name</th><th>Records</th><th>%</th></tr></thead><tbody>' +
+            rows.map(([k,v]) => `<tr><td>${esc(k)}</td><td>${fmtNum(v)}</td><td>${((v/total)*100).toFixed(1)}%</td></tr>`).join('') +
+            '</tbody></table>';
+          $(containerId).innerHTML = html;
+        }
+        makeTable('#summary-top-species', r => r.species);
+        makeTable('#summary-by-county', r => r.county);
+        makeTable('#summary-by-basis', r => r.basisOfRecord);
+        makeTable('#summary-by-dataset', r => r.datasetName);
+        makeTable('#summary-by-decade', r => r.year ? `${Math.floor(r.year/10)*10}s` : 'Unknown');
+      }
+
+      // ======================= Seasonality =======================
+      function renderSeasonality() {
+        const sel = $('#season-species').value;
+        const requireDate = $('#season-require-date').checked;
+        let recs = state.filteredRecords;
+        if (sel) recs = recs.filter(r => r.species === sel);
+        if (requireDate) recs = recs.filter(r => r.month != null);
+
+        const months = Array(12).fill(0);
+        const years = {};
+        const speciesByMonth = {};
+        recs.forEach(r => {
+          if (r.month >= 1 && r.month <= 12) months[r.month - 1]++;
+          if (r.year) years[r.year] = (years[r.year] || 0) + 1;
+          if (r.species && r.month >= 1 && r.month <= 12) {
+            if (!speciesByMonth[r.species]) speciesByMonth[r.species] = Array(12).fill(0);
+            speciesByMonth[r.species][r.month - 1]++;
+          }
+        });
+
+        const labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        renderChart('chart-months', 'bar', labels, [{ label: 'Records', data: months, backgroundColor: 'rgba(200,164,92,0.7)', borderColor: '#c8a45c', borderWidth: 1 }]);
+
+        const yrKeys = Object.keys(years).sort((a,b)=>a-b);
+        renderChart('chart-years', 'line', yrKeys, [{ label: 'Records', data: yrKeys.map(y=>years[y]), backgroundColor: 'rgba(90,138,168,0.2)', borderColor: '#5a8aa8', borderWidth: 2, tension: 0.3, fill: true }]);
+
+        // Species-by-month heatmap-like stacked bar
+        const topSpecies = Object.entries(speciesByMonth).sort((a,b)=>b[1].reduce((s,n)=>s+n,0)-a[1].reduce((s,n)=>s+n,0)).slice(0,8);
+        const datasets = topSpecies.map(([sp, data], i) => ({
+          label: sp,
+          data,
+          backgroundColor: ['rgba(200,164,92,0.7)','rgba(93,138,102,0.7)','rgba(90,138,168,0.7)','rgba(168,122,90,0.7)','rgba(138,109,158,0.7)','rgba(109,138,138,0.7)','rgba(196,91,91,0.7)','rgba(138,158,109,0.7)'][i % 8],
+          borderWidth: 0
+        }));
+        renderChart('chart-species-month', 'bar', labels, datasets, true);
+      }
+
+      $('#season-species').addEventListener('change', renderSeasonality);
+      $('#season-require-date').addEventListener('change', renderSeasonality);
+
+      function renderChart(canvasId, type, labels, datasets, stacked) {
+        const ctx = $(`#${canvasId}`);
+        if (!ctx) return;
+        if (state.charts[canvasId]) { state.charts[canvasId].destroy(); delete state.charts[canvasId]; }
+        Chart.defaults.color = getComputedStyle(document.body).getPropertyValue('--text-secondary').trim();
+        Chart.defaults.borderColor = getComputedStyle(document.body).getPropertyValue('--border').trim();
+        state.charts[canvasId] = new Chart(ctx, {
+          type,
+          data: { labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: { legend: { display: datasets.length > 1 || type === 'line' } },
+            scales: stacked ? { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } : { y: { beginAtZero: true } }
+          }
+        });
+      }
+
+      // ======================= Field Plan =======================
+      function renderFieldPlan() {
+        const recs = state.filteredRecords;
+        const grid = $('#field-plan-grid');
+        if (!recs.length) {
+          grid.innerHTML = '<div class="empty-state"><h3>No data yet</h3><p>Run a search first to generate field-plan insights.</p></div>';
+          return;
+        }
+        const monthCounts = Array(12).fill(0);
+        recs.forEach(r => { if (r.month >=1 && r.month <=12) monthCounts[r.month-1]++; });
+        const bestMonths = monthCounts.map((c,i)=>({m:i+1,c})).filter(x=>x.c>0).sort((a,b)=>b.c-a.c).slice(0,4).map(x=>{
+          const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          return `${names[x.m-1]} (${fmtNum(x.c)})`;
+        }).join(', ');
+
+        const countyCounts = {};
+        recs.forEach(r => { if (r.county) countyCounts[r.county] = (countyCounts[r.county]||0)+1; });
+        const topCounties = Object.entries(countyCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([c,n])=>`${esc(c)} (${fmtNum(n)})`).join(', ');
+
+        const recent = recs.filter(r => r.year && r.year >= 2020).length;
+        const historical = recs.filter(r => r.year && r.year < 2000).length;
+
+        grid.innerHTML = `
+          <div class="plan-card">
+            <h4>🗓️ Best Months</h4>
+            <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 0.5rem;">Based on occurrence record counts.</p>
+            <ul><li>${bestMonths || 'No month data available'}</li></ul>
+          </div>
+          <div class="plan-card">
+            <h4>📍 Top Counties</h4>
+            <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 0.5rem;">Counties with the most records.</p>
+            <ul><li>${topCounties || 'No county data available'}</li></ul>
+          </div>
+          <div class="plan-card">
+            <h4>🕰️ Recency Mix</h4>
+            <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 0.5rem;">Recent (2020+) vs historical (&lt;2000).</p>
+            <ul>
+              <li>Recent records: ${fmtNum(recent)}</li>
+              <li>Historical records: ${fmtNum(historical)}</li>
+            </ul>
+          </div>
+          <div class="plan-card">
+            <h4>⚠️ Caveats</h4>
+            <ul>
+              <li>These patterns reflect effort, not abundance.</li>
+              <li>Seasonal peaks often match field seasons.</li>
+              <li>County coverage is biased by road access.</li>
+              <li>Do not use for exact sensitive species locations.</li>
+            </ul>
+          </div>
+        `;
+      }
+
+      // ======================= Compare =======================
+      $('#btn-pin-current').addEventListener('click', () => {
+        if (!state.filteredRecords.length) { showAlert('Run a search first to pin.', 'warn'); return; }
+        const name = state.currentSearchParams ? (state.currentSearchParams.scientificName || state.currentSearchParams.taxonKey || 'Search') : 'Search';
+        const pin = {
+          id: 'pin-' + Date.now(),
+          name: name + ' (' + fmtNum(state.filteredRecords.length) + ')',
+          records: state.filteredRecords.slice(),
+          params: JSON.parse(JSON.stringify(state.currentSearchParams || {}))
+        };
+        state.pinned.push(pin);
+        renderPins();
+      });
+      $('#btn-clear-pins').addEventListener('click', () => { state.pinned = []; renderPins(); });
+
+      function renderPins() {
+        const wrap = $('#pinned-searches');
+        if (!state.pinned.length) { wrap.innerHTML = ''; $('#compare-results').innerHTML = ''; return; }
+        wrap.innerHTML = state.pinned.map(p =>
+          `<button class="chip" data-id="${p.id}">${esc(p.name)}</button>`
+        ).join('');
+        // Show comparison
+        const container = $('#compare-results');
+        container.innerHTML = '<div class="compare-grid">' + state.pinned.map(p => {
+          const total = p.records.length;
+          const species = new Set(p.records.map(r=>r.species).filter(Boolean)).size;
+          const withCoords = p.records.filter(r=>r.decimalLatitude!=null).length;
+          const withDates = p.records.filter(r=>!!r.eventDate).length;
+          return `<div class="compare-card">
+            <h4 style="margin:0 0 0.5rem;font-family:var(--font-display);">${esc(p.name)}</h4>
+            <div class="stats-grid" style="gap:0.5rem;">
+              <div class="stat-card" style="padding:0.6rem;"><div class="stat-value" style="font-size:1.2rem;">${fmtNum(total)}</div><div class="stat-label">Records</div></div>
+              <div class="stat-card" style="padding:0.6rem;"><div class="stat-value" style="font-size:1.2rem;">${fmtNum(species)}</div><div class="stat-label">Species</div></div>
+              <div class="stat-card" style="padding:0.6rem;"><div class="stat-value" style="font-size:1.2rem;">${fmtNum(withCoords)}</div><div class="stat-label">Mapped</div></div>
+              <div class="stat-card" style="padding:0.6rem;"><div class="stat-value" style="font-size:1.2rem;">${fmtNum(withDates)}</div><div class="stat-label">Dated</div></div>
+            </div>
+          </div>`;
+        }).join('') + '</div>';
+      }
+
+      // ======================= Export =======================
+      function toCSV(rows, headers) {
+        const h = headers.map(esc).join(',');
+        const lines = rows.map(r => headers.map(h => {
+          const v = r[h] != null ? String(r[h]) : '';
+          return v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g,'""')}"` : v;
+        }).join(','));
+        return [h, ...lines].join('\n');
+      }
+
+      $('#export-csv').addEventListener('click', () => {
+        const headers = ['species','scientificName','eventDate','year','month','day','county','stateProvince','locality','basisOfRecord','datasetName','decimalLatitude','decimalLongitude','coordinateUncertaintyInMeters','gbifID'];
+        downloadBlob(toCSV(state.filteredRecords, headers), 'gbif_records.csv', 'text/csv');
+      });
+      $('#export-json').addEventListener('click', () => {
+        downloadBlob(JSON.stringify(state.filteredRecords, null, 2), 'gbif_records.json', 'application/json');
+      });
+      $('#export-geojson').addEventListener('click', () => {
+        const features = state.filteredRecords.filter(r=>r.decimalLatitude!=null).map(r => ({
+          type: 'Feature',
+          properties: { species: r.species, scientificName: r.scientificName, eventDate: r.eventDate, county: r.county, basisOfRecord: r.basisOfRecord, datasetName: r.datasetName, coordinateUncertaintyInMeters: r.coordinateUncertaintyInMeters, gbifID: r.gbifID },
+          geometry: { type: 'Point', coordinates: [r.decimalLongitude, r.decimalLatitude] }
+        }));
+        const geo = { type: 'FeatureCollection', features };
+        downloadBlob(JSON.stringify(geo, null, 2), 'gbif_points.geojson', 'application/geo+json');
+      });
+
+      function summaryCSV(key) {
+        const counts = {};
+        state.filteredRecords.forEach(r => { const k = r[key] || '(unknown)'; counts[k] = (counts[k]||0)+1; });
+        const rows = Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([name,count])=>({name,count}));
+        downloadBlob(toCSV(rows, ['name','count']), `gbif_${key}_summary.csv`, 'text/csv');
+      }
+      $('#export-species-csv').addEventListener('click', () => summaryCSV('species'));
+      $('#export-county-csv').addEventListener('click', () => summaryCSV('county'));
+      $('#export-month-csv').addEventListener('click', () => {
+        const counts = Array(12).fill(0);
+        state.filteredRecords.forEach(r => { if (r.month >=1 && r.month <=12) counts[r.month-1]++; });
+        const rows = counts.map((c,i)=>({month:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i],count:c}));
+        downloadBlob(toCSV(rows, ['month','count']), 'gbif_month_summary.csv', 'text/csv');
+      });
+
+      $('#export-markdown').addEventListener('click', () => {
+        const p = state.currentSearchParams || {};
+        const total = state.filteredRecords.length;
+        const speciesCounts = {};
+        state.filteredRecords.forEach(r => { speciesCounts[r.species||'(unknown)'] = (speciesCounts[r.species||'(unknown)']||0)+1; });
+        const topSpecies = Object.entries(speciesCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+        const countyCounts = {};
+        state.filteredRecords.forEach(r => { if (r.county) countyCounts[r.county] = (countyCounts[r.county]||0)+1; });
+        const topCounties = Object.entries(countyCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+
+        const md = `# GBIF Explorer Report
+
+**Search parameters**
+- Taxon: ${p.scientificName || '—'}
+- Region: ${[p.stateProvince, p.country].filter(Boolean).join(', ') || '—'}
+- Has coordinates: ${p.hasCoordinate ? 'Yes' : 'No'}
+- Basis of record: ${p.basisOfRecord || 'Any'}
+- Year range: ${p.yearStart || '—'} – ${p.yearEnd || '—'}
+
+**Summary**
+- Total records: ${fmtNum(total)}
+- Unique species: ${fmtNum(Object.keys(speciesCounts).length)}
+
+**Top species**
+${topSpecies.map(([s,n])=>`- ${s}: ${fmtNum(n)}`).join('\n')}
+
+**Top counties**
+${topCounties.map(([c,n])=>`- ${c}: ${fmtNum(n)}`).join('\n')}
+
+**Cautions**
+GBIF records are occurrence records and should not be interpreted as abundance without effort correction. Patterns reflect reporting, collection, and digitization biases.
+`;
+        downloadBlob(md, 'gbif_report.md', 'text/markdown');
+      });
+
+      $('#export-quack').addEventListener('click', () => {
+        const headers = ['species','scientificName','eventDate','year','month','county','stateProvince','basisOfRecord','datasetName','decimalLatitude','decimalLongitude','coordinateUncertaintyInMeters','gbifID'];
+        const csv = toCSV(state.filteredRecords, headers);
+        localStorage.setItem('quack-drawer-import', csv);
+        showAlert('CSV saved to localStorage as <strong>quack-drawer-import</strong>. Open Quack Drawer and load it.', 'success');
+      });
+
+      // ======================= Debug =======================
+      function updateDebug() {
+        $('#dbg-version').textContent = APP_VERSION;
+        $('#dbg-ua').textContent = navigator.userAgent;
+        $('#dbg-theme').textContent = state.theme;
+        $('#dbg-taxon-url').textContent = state.lastTaxonUrl || '—';
+        $('#dbg-occ-url').textContent = state.lastOccUrl || '—';
+        $('#dbg-status').textContent = state.lastStatus || '—';
+        $('#dbg-time').textContent = state.lastTimeMs ? state.lastTimeMs + ' ms' : '—';
+        $('#dbg-error').textContent = state.lastError || '—';
+        $('#dbg-total').textContent = fmtNum(state.rawRecords.length);
+        $('#dbg-filtered').textContent = fmtNum(state.filteredRecords.length);
+        const mapped = state.filteredRecords.filter(r=>r.decimalLatitude!=null).length;
+        $('#dbg-mapped').textContent = fmtNum(mapped);
+        $('#dbg-ls').textContent = Object.keys(localStorage).filter(k=>k.startsWith('gbif')||k.startsWith('quack')).join(', ') || '—';
+        $('#dbg-idb').textContent = idb ? 'Open' : 'Unavailable';
+      }
+
+      $('#btn-copy-debug').addEventListener('click', () => {
+        const report = {
+          version: APP_VERSION,
+          userAgent: navigator.userAgent,
+          theme: state.theme,
+          lastTaxonUrl: state.lastTaxonUrl,
+          lastOccUrl: state.lastOccUrl,
+          status: state.lastStatus,
+          responseTimeMs: state.lastTimeMs,
+          error: state.lastError,
+          totalFetched: state.rawRecords.length,
+          filteredCount: state.filteredRecords.length,
+          localStorageKeys: Object.keys(localStorage),
+          timestamp: new Date().toISOString()
+        };
+        const text = JSON.stringify(report, null, 2);
+        navigator.clipboard.writeText(text).then(() => showAlert('Debug report copied to clipboard.', 'success'));
+        $('#debug-report').textContent = text;
+      });
+
+      $('#btn-clear-cache').addEventListener('click', async () => {
+        state.recentSearches = [];
+        state.savedTaxa = [];
+        localStorage.removeItem('gbif-recent');
+        localStorage.removeItem('gbif-taxa');
+        await clearCache();
+        renderRecentSearches();
+        showAlert('Cache and recent searches cleared.', 'success');
+        updateDebug();
+      });
+
+      // ======================= Init =======================
+      openDB().then(() => {
+        updateDebug();
+        setStatus('Ready');
+      }).catch(err => {
+        console.warn('IDB unavailable', err);
+        updateDebug();
+        setStatus('Ready');
+      });
+
+    })();
+  </script>
+</body>
+</html>
