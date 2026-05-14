@@ -844,9 +844,9 @@ pre.debug {
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.2" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.14.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.14.3" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.05.14.3
 </footer>
 
 <script>
@@ -1078,7 +1078,12 @@ function initApp() {
   document.getElementById('theme-select').value = state.settings.theme;
   populateSettingsUI();
   renderProjectList();
-  if (state.projects.length) selectProject(state.projects[0].id);
+  if (state.projects.length) {
+    selectProject(state.projects[0].id);
+  } else {
+    // Auto-create a blank project so the user can start immediately
+    createProject();
+  }
   updateStatus('Ready');
   setupAutosave();
   initIndexedDB().catch(e => console.warn('IDB init failed', e));
@@ -1247,7 +1252,10 @@ function populateConceptFields(proj) {
 
 function saveConceptFields() {
   const proj = state.projects.find(p => p.id === currentProjectId);
-  if (!proj) return;
+  if (!proj) {
+    console.warn('saveConceptFields: no project selected (currentProjectId=' + currentProjectId + ')');
+    return;
+  }
   proj.title = document.getElementById('c-working-title').value.trim() || proj.title;
   proj.concept = document.getElementById('c-concept').value.trim();
   proj._concept_meta = {
@@ -1263,6 +1271,7 @@ function saveConceptFields() {
   };
   proj.updated_at = new Date().toISOString();
   renderProjectList();
+  saveState();
 }
 
 /* ── Tab Switching ── */
@@ -1295,12 +1304,13 @@ function fillTemplate(template, vars) {
 async function callTextModel(taskType, messages, options = {}) {
   const settings = state.settings;
   const provider = settings.text_provider;
-  const key = settings.text_key;
-  const model = settings.text_model;
+  // Fall back to DOM input if state hasn't been saved yet
+  const key = settings.text_key || document.getElementById('s-text-key')?.value || '';
+  const model = settings.text_model || document.getElementById('s-text-model')?.value || 'openrouter/auto';
   const temp = settings.text_temp;
   const maxTokens = settings.text_tokens;
 
-  if (!key) throw new Error('Text AI API key not configured. Go to Settings.');
+  if (!key) throw new Error('Text AI API key not configured. Go to Settings, enter your key, and click Save Settings.');
 
   recordAIJob({ song_id: currentProjectId, type: taskType, provider, model, status: 'running', input_summary: JSON.stringify(messages).slice(0, 200) });
 
@@ -1345,14 +1355,15 @@ async function callTextModel(taskType, messages, options = {}) {
 
 async function callImageModel(prompt, options = {}) {
   const settings = state.settings;
-  const provider = settings.image_provider;
-  const key = settings.image_key;
+  const provider = settings.image_provider || document.getElementById('s-img-provider')?.value || '';
+  const key = settings.image_key || document.getElementById('s-img-key')?.value || '';
+  const model = settings.image_model || document.getElementById('s-img-model')?.value || '';
 
-  if (!provider) {
+  if (!provider || provider === 'prompt-only' || provider === '') {
     // Prompts-only mode: return a placeholder data URL with text overlay
     return { url: createPlaceholderImage(prompt), provider: 'none', model: 'prompt-only' };
   }
-  if (!key) throw new Error('Image AI API key not configured. Go to Settings.');
+  if (!key) throw new Error('Image AI API key not configured. Go to Settings, enter your key, and click Save Settings.');
 
   recordAIJob({ song_id: currentProjectId, type: 'image', provider, model: settings.image_model, status: 'running', input_summary: prompt.slice(0, 200) });
 
@@ -1469,6 +1480,16 @@ async function discoverModels(type) {
   if (!key) { alert('Enter an API key first.'); return; }
   if (provider !== 'openrouter' && provider !== 'openai') { alert('Model discovery only supported for OpenRouter and OpenAI right now.'); return; }
 
+  // Persist key and provider to state so API calls work without explicit Save Settings
+  if (type === 'text') {
+    state.settings.text_key = key;
+    state.settings.text_provider = provider;
+  } else {
+    state.settings.image_key = key;
+    state.settings.image_provider = provider;
+  }
+  saveState();
+
   updateStatus(`Discovering ${type} models…`);
   try {
     let models = [];
@@ -1477,11 +1498,15 @@ async function discoverModels(type) {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
       models = (data.data || []).map(m => ({ id: m.id, name: m.name || m.id, provider: 'openrouter', pricing: m.pricing }));
+      // Filter by modality
+      if (type === 'text') models = models.filter(m => !m.id.includes('dall-e') && !m.id.includes('image') && !m.id.includes('stability'));
+      if (type === 'image') models = models.filter(m => m.id.includes('dall-e') || m.id.includes('image') || m.id.includes('stability'));
     } else if (provider === 'openai') {
       const resp = await fetch('https://api.openai.com/v1/models', { headers: { 'Authorization': `Bearer ${key}` } });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error?.message || `HTTP ${resp.status}`);
       models = (data.data || []).map(m => ({ id: m.id, name: m.id, provider: 'openai' }));
+      if (type === 'text') models = models.filter(m => m.id.startsWith('gpt-') || m.id.startsWith('text-'));
       if (type === 'image') models = models.filter(m => m.id.includes('dall-e') || m.id.includes('image'));
     }
     state.model_cache[type] = models;
@@ -2038,7 +2063,9 @@ Written and produced with AI assistance. All vocals and instrumentation generate
 function generateDirections() {
   saveConceptFields();
   const proj = getCurrentProject();
-  if (!proj || !proj.concept.trim()) { showError('Enter a core concept first.'); return; }
+  if (!proj) { showError('No project selected. Create or select a project first.'); return; }
+  console.log('generateDirections — currentProjectId:', currentProjectId, 'concept:', JSON.stringify(proj.concept));
+  if (!proj.concept.trim()) { showError('Enter a core concept first.'); return; }
   setLoading(true);
   updateStatus('Generating 5 creative directions…');
   // Use template
@@ -2105,7 +2132,8 @@ function selectDirection(dirId) {
 function generatePlanDirect() {
   saveConceptFields();
   const proj = getCurrentProject();
-  if (!proj || !proj.concept.trim()) { showError('Enter a core concept first.'); return; }
+  if (!proj) { showError('No project selected.'); return; }
+  if (!proj.concept.trim()) { showError('Enter a core concept first.'); return; }
   // Build direction text from concept + selected direction if any
   const dir = state.directions.find(d => d.id === proj.selected_direction_id);
   const directionText = dir ? [
@@ -2180,7 +2208,8 @@ function populatePlanFields() {
 function generateTitlesOnly() {
   saveConceptFields();
   const proj = getCurrentProject();
-  if (!proj || !proj.concept.trim()) { showError('Enter a core concept first.'); return; }
+  if (!proj) { showError('No project selected.'); return; }
+  if (!proj.concept.trim()) { showError('Enter a core concept first.'); return; }
   setLoading(true);
   updateStatus('Generating title ideas…');
   const prompt = `Given this song concept, generate 10 catchy, unique song title ideas.\n\nConcept: ${proj.concept}\n\nReturn only the titles as a numbered list.`;
@@ -2196,7 +2225,7 @@ function generateTitlesOnly() {
 function surpriseMe() {
   saveConceptFields();
   const proj = getCurrentProject();
-  if (!proj) return;
+  if (!proj) { showError('No project selected.'); return; }
   setLoading(true);
   updateStatus('Surprising you…');
   const prompt = `Take this concept and generate a wildly unexpected, creative song direction. Make it bold, specific, and memorable.\n\nConcept: ${proj.concept || 'A song about life, love, and the universe'}`;
