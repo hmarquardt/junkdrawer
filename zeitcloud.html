@@ -702,9 +702,9 @@ main {
     <div id="detail-content"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.5" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.5" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
-    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.5
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.6" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.6" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
+    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.6
   </footer>
 
   <div class="toast-container" id="toasts"></div>
@@ -994,14 +994,16 @@ async function runFetch() {
   updateStatus(run.status === 'ok' ? 'active' : 'error');
   toast(`Scan complete. ${run.itemCount} items from ${sources.length - run.errorCount} sources.`, run.status === 'ok' ? 'success' : 'error');
 
+  let aiSummary = null;
   if (state.settings.aiEnabled && state.settings.openRouterKey) {
-    await generateAISummary(runId);
+    aiSummary = await generateAISummary(runId);
   }
 
   await loadTerms();
   await loadRawItems();
   await loadFetchRuns();
   renderCurrentView();
+  if (aiSummary) playCompletionChime();
 }
 
 function getEnabledSourcesForRegion() {
@@ -1249,7 +1251,8 @@ async function generateAISummary(fetchRunId) {
       })
     });
     const json = await res.json();
-    const summary = json.choices?.[0]?.message?.content || 'No response from AI.';
+    let summary = json.choices?.[0]?.message?.content || 'No response from AI.';
+    summary = stripThinking(summary);
 
     await state.db.aiSummaries.add({
       fetchRunId,
@@ -1260,10 +1263,11 @@ async function generateAISummary(fetchRunId) {
     });
 
     toast('AI summary generated', 'success');
-    playCompletionChime();
+    return summary;
   } catch (e) {
     console.error('AI summary failed:', e);
     toast('AI summary failed: ' + e.message, 'error');
+    return null;
   }
 }
 
@@ -1595,8 +1599,11 @@ function renderAIView(container) {
     runBtn.disabled = true;
     runBtn.textContent = 'Analyzing...';
     try {
-      await generateAISummary(state.lastFetchRunId);
-    } finally {
+      const aiSummary = await generateAISummary(state.lastFetchRunId);
+      state.isGeneratingAISummary = false;
+      renderAIView(container);
+      if (aiSummary) playCompletionChime();
+    } catch (e) {
       state.isGeneratingAISummary = false;
       renderAIView(container);
     }
@@ -2292,6 +2299,21 @@ function populateModelSelect() {
 // ============================================================
 // Utilities
 // ============================================================
+
+function stripThinking(text) {
+  if (!text) return '';
+  // Remove <thinking>...</thinking> and <reasoning>...</reasoning> blocks
+  let cleaned = text.replace(/<thinking[^>]*>[\s\S]*?<\/thinking>/gi, '');
+  cleaned = cleaned.replace(/<reasoning[^>]*>[\s\S]*?<\/reasoning>/gi, '');
+  // Remove standalone thinking/reasoning tags
+  cleaned = cleaned.replace(/<\/?thinking>/gi, '');
+  cleaned = cleaned.replace(/<\/?reasoning>/gi, '');
+  // Remove DeepSeek-style "analysis:" or "thinking:" preamble blocks
+  cleaned = cleaned.replace(/^(?:analysis|thinking|reasoning|planning|internal monologue):[\s\S]*?(?=\n\n|\n[A-Z]|$)/gim, '');
+  // Trim leading whitespace and blank lines
+  cleaned = cleaned.replace(/^\s+\n+/m, '');
+  return cleaned.trim();
+}
 
 function playCompletionChime() {
   try {
