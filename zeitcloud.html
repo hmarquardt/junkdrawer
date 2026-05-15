@@ -702,9 +702,9 @@ main {
     <div id="detail-content"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.3" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.3" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
-    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.3
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.4" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.4" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
+    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.4
   </footer>
 
   <div class="toast-container" id="toasts"></div>
@@ -786,6 +786,7 @@ const state = {
   rawItems: [],
   fetchRuns: [],
   isScanning: false,
+  isGeneratingAISummary: false,
   autoRefreshTimer: null,
   autoRefreshMinutes: 0,
   lastFetchRunId: null
@@ -1153,16 +1154,25 @@ function guessCategory(term) {
 
 async function loadTerms() {
   const all = await state.db.terms.toArray();
-  // Decay old terms
+  const elimSet = new Set((state.settings.eliminationList || []).map(x => x.toLowerCase()));
   const now = Date.now();
-  state.terms = all.map(t => {
-    let score = t.totalScore || 0;
-    if (state.settings.decayOldTerms) {
-      const hoursOld = (now - t.lastSeen) / 3600000;
-      if (hoursOld > 24) score *= Math.pow(0.95, hoursOld / 24);
-    }
-    return { ...t, displayScore: score };
-  }).sort((a, b) => b.displayScore - a.displayScore);
+  state.terms = all
+    .filter(t => {
+      const norm = t.normalized;
+      if (!norm) return false;
+      if (state.settings.removeStopWords && STOP_WORDS.has(norm)) return false;
+      if (elimSet.has(norm)) return false;
+      return true;
+    })
+    .map(t => {
+      let score = t.totalScore || 0;
+      if (state.settings.decayOldTerms) {
+        const hoursOld = (now - t.lastSeen) / 3600000;
+        if (hoursOld > 24) score *= Math.pow(0.95, hoursOld / 24);
+      }
+      return { ...t, displayScore: score };
+    })
+    .sort((a, b) => b.displayScore - a.displayScore);
 }
 
 async function loadRawItems(limit = 200) {
@@ -1250,6 +1260,7 @@ async function generateAISummary(fetchRunId) {
     });
 
     toast('AI summary generated', 'success');
+    playCompletionChime();
   } catch (e) {
     console.error('AI summary failed:', e);
     toast('AI summary failed: ' + e.message, 'error');
@@ -1548,7 +1559,8 @@ function renderClustersView(container) {
 }
 
 // ---- AI View ----
-async function renderAIView(container) {
+function renderAIView(container) {
+  container.innerHTML = '';
   const panel = document.createElement('div');
   panel.className = 'ai-panel';
 
@@ -1568,45 +1580,66 @@ async function renderAIView(container) {
 
   // Manual trigger
   const runBtn = document.createElement('button');
-  runBtn.textContent = 'Run AI Analysis';
+  runBtn.id = 'ai-run-btn';
+  runBtn.textContent = state.isGeneratingAISummary ? 'Analyzing...' : 'Run AI Analysis';
   runBtn.className = 'btn primary';
   runBtn.style.marginLeft = 'auto';
-  runBtn.disabled = !state.settings.openRouterKey || state.isScanning;
+  runBtn.disabled = !state.settings.openRouterKey || state.isScanning || state.isGeneratingAISummary;
   runBtn.onclick = async () => {
+    if (state.isGeneratingAISummary) return;
     if (!state.lastFetchRunId) {
       toast('Run a refresh first', 'error');
       return;
     }
+    state.isGeneratingAISummary = true;
     runBtn.disabled = true;
     runBtn.textContent = 'Analyzing...';
-    await generateAISummary(state.lastFetchRunId);
-    renderAIView(container);
+    try {
+      await generateAISummary(state.lastFetchRunId);
+    } finally {
+      state.isGeneratingAISummary = false;
+      renderAIView(container);
+    }
   };
   controls.appendChild(runBtn);
 
   panel.appendChild(controls);
 
-  const summary = await getLatestSummary();
   const output = document.createElement('div');
+  output.id = 'ai-output-panel';
   output.className = 'ai-output';
-
   if (!state.settings.openRouterKey) {
     output.innerHTML = '<span style="color:var(--text-dim)">Add your OpenRouter API key in Sources &rarr; Settings to enable AI summaries.</span>';
-  } else if (!summary) {
-    output.innerHTML = '<span style="color:var(--text-dim)">No AI summary yet. Run a scan or click "Run AI Analysis".</span>';
-  } else {
-    if (state.settings.aiMode === 'doom') {
-      output.innerHTML = formatDoomMeter(summary.summary);
-    } else {
-      output.textContent = summary.summary;
-    }
-    output.innerHTML += `<div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.1);color:var(--text-dim);font-size:11px;">
-      ${esc(summary.model || 'unknown')} &middot; ${new Date(summary.createdAt).toLocaleString()} &middot; ${esc(summary.prompt || '')}
-    </div>`;
+    panel.appendChild(output);
+    container.appendChild(panel);
+    return;
   }
-
+  if (state.isGeneratingAISummary) {
+    output.innerHTML = '<span style="color:var(--text-dim);font-style:italic;">Generating summary, please wait...</span>';
+    panel.appendChild(output);
+    container.appendChild(panel);
+    return;
+  }
+  output.innerHTML = '<span style="color:var(--text-dim)">Loading latest summary...</span>';
   panel.appendChild(output);
   container.appendChild(panel);
+
+  getLatestSummary().then(summary => {
+    const out = document.getElementById('ai-output-panel');
+    if (!out) return;
+    if (!summary) {
+      out.innerHTML = '<span style="color:var(--text-dim)">No AI summary yet. Run a scan or click "Run AI Analysis".</span>';
+      return;
+    }
+    if (state.settings.aiMode === 'doom') {
+      out.innerHTML = formatDoomMeter(summary.summary);
+    } else {
+      out.textContent = summary.summary;
+    }
+    out.innerHTML += `<div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.1);color:var(--text-dim);font-size:11px;">
+      ${esc(summary.model || 'unknown')} &middot; ${new Date(summary.createdAt).toLocaleString()} &middot; ${esc(summary.prompt || '')}
+    </div>`;
+  });
 }
 
 function formatDoomMeter(text) {
@@ -1814,6 +1847,14 @@ function renderSourcesView(container) {
     <span style="font-size:12px;color:var(--text-dim);margin-left:12px;">This deletes all stored terms, items, and history.</span>
   `;
   settingsSection.appendChild(dataDiv);
+
+  const purgeDiv = document.createElement('div');
+  purgeDiv.style.marginTop = '12px';
+  purgeDiv.innerHTML = `
+    <button class="btn danger" onclick="purgeEliminatedTerms()">Purge Eliminated Terms</button>
+    <span style="font-size:12px;color:var(--text-dim);margin-left:12px;">Delete terms matching current elimination list or stop words.</span>
+  `;
+  settingsSection.appendChild(purgeDiv);
 
   wrapper.appendChild(settingsSection);
   container.appendChild(wrapper);
@@ -2114,6 +2155,23 @@ window.clearAllData = async function() {
   renderCurrentView();
 };
 
+window.purgeEliminatedTerms = async function() {
+  if (!confirm('Purge all terms matching the current elimination list and stop words?')) return;
+  const elimSet = new Set((state.settings.eliminationList || []).map(x => x.toLowerCase()));
+  const all = await state.db.terms.toArray();
+  let count = 0;
+  for (const t of all) {
+    const norm = (t.normalized || '').toLowerCase();
+    if (STOP_WORDS.has(norm) || elimSet.has(norm)) {
+      await state.db.terms.delete(t.id);
+      count++;
+    }
+  }
+  await loadTerms();
+  renderCurrentView();
+  toast(`Purged ${count} eliminated terms`, 'success');
+};
+
 window.saveEliminationList = async function() {
   const raw = document.getElementById('elimination-list').value;
   const list = raw.split('\n').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -2234,6 +2292,32 @@ function populateModelSelect() {
 // ============================================================
 // Utilities
 // ============================================================
+
+function playCompletionChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51]; // C5, E5, G5, C6, E6
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.08, now + i * 0.08 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.08);
+      osc.stop(now + i * 0.08 + 0.4);
+    });
+    setTimeout(() => ctx.close(), 1000);
+  } catch (e) {
+    console.warn('Audio chime failed:', e);
+  }
+}
 
 function esc(str) {
   if (!str) return '';
