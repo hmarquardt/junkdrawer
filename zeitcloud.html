@@ -702,9 +702,9 @@ main {
     <div id="detail-content"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.1" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
-    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.2" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.2" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
+    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.2
   </footer>
 
   <div class="toast-container" id="toasts"></div>
@@ -752,6 +752,8 @@ const DEFAULT_SOURCES = [
   { id: 'hn_front', name: 'Hacker News Front Page', type: 'json_api', url: 'https://hn.algolia.com/api/v1/search_by_date?tags=front_page&hitsPerPage=30', enabled: true, weight: 1.1, category: 'tech', parser: 'hackernews_algolia', corsMode: 'direct', region: 'world' },
 ];
 
+const DEFAULT_ELIMINATION_LIST = ['and','000','001','002','003','004','005','006','007','008','009','010','100','200','300','400','500','600','700','800','900','111','222','333','444','555','666','777','888','999','na','n/a','tbd','todo','fixme','null','undefined','true','false','yes','no','ok','okay','thx','pls','plz','wtf','lol','omg','imo','imho','tl;dr','tl dr','fyi','btw','aka','etc','ie','eg','vs','v','et al','et cetera','cuz','cause','coz','gonna','wanna','gotta','kinda','sorta','dunno','lemme','gimme','brb','bbl','afk','gtg','ttyl','idk','idc','irl','dm','pm','am','hrs','mins','secs','yr','yrs','mo','mos','jan','feb','mar','apr','may','jun','jul','aug','sep','sept','oct','nov','dec','mon','tue','wed','thu','fri','sat','sun','today','tomorrow','yesterday','week','month','year','day','time','date','hour','minute','second','morning','afternoon','evening','night','midnight','noon','now','later','soon','recently','currently','previously','eventually','finally','already','just','still','yet','already','almost','quite','rather','pretty','fairly','enough','else'];
+
 const DEFAULT_SETTINGS = {
   openRouterKey: '',
   aiModel: 'openai/gpt-4o-mini',
@@ -767,7 +769,8 @@ const DEFAULT_SETTINGS = {
   boostMultiSource: true,
   maxTermsCloud: 100,
   region: 'US',
-  proxyUrl: CORS_PROXY
+  proxyUrl: CORS_PROXY,
+  eliminationList: [...DEFAULT_ELIMINATION_LIST]
 };
 
 // ============================================================
@@ -1087,7 +1090,8 @@ function extractTerms(text) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const words = clean.split(/\s+/).filter(w => w.length >= state.settings.minTermLength && !STOP_WORDS.has(w));
+  const elimSet = new Set((state.settings.eliminationList || []).map(x => x.toLowerCase()));
+  const words = clean.split(/\s+/).filter(w => w.length >= state.settings.minTermLength && !STOP_WORDS.has(w) && !elimSet.has(w));
 
   // Single words
   words.forEach(w => terms.push({ term: w, type: 'word' }));
@@ -1098,7 +1102,7 @@ function extractTerms(text) {
     for (let n = 2; n <= maxLen; n++) {
       for (let i = 0; i <= words.length - n; i++) {
         const phrase = words.slice(i, i + n).join(' ');
-        if (phrase.length >= 6) {
+        if (phrase.length >= 6 && !elimSet.has(phrase)) {
           terms.push({ term: phrase, type: 'phrase' });
         }
       }
@@ -1107,7 +1111,10 @@ function extractTerms(text) {
 
   // Capitalized phrases (potential entities)
   const entityMatches = text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\b/g) || [];
-  entityMatches.forEach(e => terms.push({ term: e.toLowerCase(), type: 'entity' }));
+  entityMatches.forEach(e => {
+    const lower = e.toLowerCase();
+    if (!elimSet.has(lower)) terms.push({ term: lower, type: 'entity' });
+  });
 
   return terms;
 }
@@ -1683,6 +1690,35 @@ function renderSourcesView(container) {
   sourcesSection.appendChild(addBtn);
   wrapper.appendChild(sourcesSection);
 
+  // Elimination List (noise / stop terms)
+  const elimSection = document.createElement('div');
+  elimSection.className = 'admin-section';
+  elimSection.innerHTML = `<h2>Elimination List</h2>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+      Terms listed here are dropped during extraction before scoring. Add noise words, artifacts (e.g. <code>and</code>, <code>000</code>), or anything that keeps surfacing but carries no signal.
+    </div>`;
+
+  const elimTextarea = document.createElement('textarea');
+  elimTextarea.id = 'elimination-list';
+  elimTextarea.style.minHeight = '140px';
+  elimTextarea.style.fontSize = '12px';
+  elimTextarea.style.lineHeight = '1.6';
+  elimTextarea.placeholder = 'one term per line';
+  elimTextarea.value = (state.settings.eliminationList || []).join('\n');
+  elimSection.appendChild(elimTextarea);
+
+  const elimActions = document.createElement('div');
+  elimActions.style.display = 'flex';
+  elimActions.style.gap = '8px';
+  elimActions.style.marginTop = '12px';
+  elimActions.innerHTML = `
+    <button class="btn primary" onclick="saveEliminationList()">Save Elimination List</button>
+    <button class="btn" onclick="resetEliminationList()">Reset to Defaults</button>
+    <span id="elim-count" style="font-size:12px;color:var(--text-muted);align-self:center;margin-left:auto;font-family:var(--font-mono);">${(state.settings.eliminationList || []).length} terms</span>
+  `;
+  elimSection.appendChild(elimActions);
+  wrapper.appendChild(elimSection);
+
   // Settings / OpenRouter
   const settingsSection = document.createElement('div');
   settingsSection.className = 'admin-section';
@@ -2055,6 +2091,25 @@ window.clearAllData = async function() {
   state.fetchRuns = [];
   toast('All data cleared', 'info');
   renderCurrentView();
+};
+
+window.saveEliminationList = async function() {
+  const raw = document.getElementById('elimination-list').value;
+  const list = raw.split('\n').map(s => s.trim().toLowerCase()).filter(Boolean);
+  await saveSetting('eliminationList', list);
+  const counter = document.getElementById('elim-count');
+  if (counter) counter.textContent = list.length + ' terms';
+  toast(`Elimination list saved (${list.length} terms)`, 'success');
+};
+
+window.resetEliminationList = async function() {
+  if (!confirm('Reset elimination list to default seeds?')) return;
+  await saveSetting('eliminationList', [...DEFAULT_ELIMINATION_LIST]);
+  const ta = document.getElementById('elimination-list');
+  if (ta) ta.value = DEFAULT_ELIMINATION_LIST.join('\n');
+  const counter = document.getElementById('elim-count');
+  if (counter) counter.textContent = DEFAULT_ELIMINATION_LIST.length + ' terms';
+  toast('Elimination list reset to defaults', 'info');
 };
 
 // ============================================================
