@@ -702,9 +702,9 @@ main {
     <div id="detail-content"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.2" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
-    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.2
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.3" style="margin: 0; padding: 12px; text-align: center; color: rgba(148, 163, 184, 0.5); font: 11px/1.4 var(--font-mono); border-top: 1px solid rgba(148,163,184,0.06); flex-shrink: 0;">
+    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.3
   </footer>
 
   <div class="toast-container" id="toasts"></div>
@@ -1729,11 +1729,16 @@ function renderSourcesView(container) {
   settingsForm.innerHTML = `
     <div class="form-group">
       <label>OpenRouter API Key</label>
-      <input type="password" id="setting-key" value="${esc(state.settings.openRouterKey || '')}" placeholder="sk-or-...">
+      <div style="display:flex;gap:8px;">
+        <input type="password" id="setting-key" value="${esc(state.settings.openRouterKey || '')}" placeholder="sk-or-..." style="flex:1;">
+        <button class="btn" type="button" onclick="fetchOpenRouterModels()">Fetch Models</button>
+      </div>
     </div>
     <div class="form-group">
       <label>AI Model</label>
-      <input type="text" id="setting-model" value="${esc(state.settings.aiModel || 'openai/gpt-4o-mini')}">
+      <select id="setting-model-select" style="margin-bottom:6px;"></select>
+      <input type="text" id="setting-model-custom" value="${esc(state.settings.aiModel || 'openai/gpt-4o-mini')}" placeholder="custom model id" style="display:none;">
+      <div id="model-fetch-status" style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono);margin-top:4px;"></div>
     </div>
     <div class="form-group">
       <label>AI Enabled</label>
@@ -1763,7 +1768,12 @@ function renderSourcesView(container) {
   saveSettingsBtn.textContent = 'Save Settings';
   saveSettingsBtn.onclick = async () => {
     await saveSetting('openRouterKey', document.getElementById('setting-key').value);
-    await saveSetting('aiModel', document.getElementById('setting-model').value);
+    const modelSelect = document.getElementById('setting-model-select');
+    const modelCustom = document.getElementById('setting-model-custom');
+    let chosenModel = modelSelect.value;
+    if (chosenModel === '__custom__') chosenModel = modelCustom.value.trim();
+    if (!chosenModel) chosenModel = 'openai/gpt-4o-mini';
+    await saveSetting('aiModel', chosenModel);
     await saveSetting('aiEnabled', document.getElementById('setting-ai-enabled').value === 'true');
     await saveSetting('proxyUrl', document.getElementById('setting-proxy').value);
     await saveSetting('minTermLength', parseInt(document.getElementById('setting-min-len').value) || 3);
@@ -1807,6 +1817,17 @@ function renderSourcesView(container) {
 
   wrapper.appendChild(settingsSection);
   container.appendChild(wrapper);
+
+  requestAnimationFrame(() => {
+    populateModelSelect();
+    // Auto-fetch if key exists and cache is empty or older than 24h
+    const key = state.settings.openRouterKey || '';
+    const cached = state.settings.availableModels;
+    const fetchedAt = state.settings.modelsFetchedAt || 0;
+    if (key && (!cached || !cached.length || (Date.now() - fetchedAt) > 86400000)) {
+      fetchOpenRouterModels();
+    }
+  });
 }
 
 // ---- History View ----
@@ -2111,6 +2132,104 @@ window.resetEliminationList = async function() {
   if (counter) counter.textContent = DEFAULT_ELIMINATION_LIST.length + ' terms';
   toast('Elimination list reset to defaults', 'info');
 };
+
+window.fetchOpenRouterModels = async function() {
+  const keyInput = document.getElementById('setting-key');
+  const key = keyInput ? keyInput.value.trim() : (state.settings.openRouterKey || '');
+  const statusEl = document.getElementById('model-fetch-status');
+
+  if (!key) {
+    if (statusEl) statusEl.textContent = 'Enter an API key first.';
+    toast('Enter OpenRouter API key to fetch models', 'error');
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = 'Fetching models...';
+  toast('Fetching models from OpenRouter...', 'info');
+
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models', {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + key,
+        'HTTP-Referer': location.origin,
+        'X-Title': 'ZeitCloud'
+      }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const models = (json.data || []).map(m => ({
+      id: m.id,
+      name: m.name || m.id,
+      context_length: m.context_length,
+      pricing: m.pricing
+    }));
+
+    await saveSetting('availableModels', models);
+    await saveSetting('modelsFetchedAt', Date.now());
+    populateModelSelect();
+
+    if (statusEl) statusEl.textContent = `${models.length} models loaded`;
+    toast(`${models.length} models fetched from OpenRouter`, 'success');
+  } catch (e) {
+    console.error('Model fetch failed:', e);
+    if (statusEl) statusEl.textContent = 'Fetch failed: ' + e.message;
+    toast('Model fetch failed: ' + e.message, 'error');
+  }
+};
+
+function populateModelSelect() {
+  const select = document.getElementById('setting-model-select');
+  const customInput = document.getElementById('setting-model-custom');
+  if (!select) return;
+
+  const models = state.settings.availableModels || [];
+  const currentModel = state.settings.aiModel || 'openai/gpt-4o-mini';
+
+  // Build options
+  let html = '';
+
+  if (models.length === 0) {
+    html += `<option value="${esc(currentModel)}">${esc(currentModel)} (cached)</option>`;
+  } else {
+    // Group by provider
+    const byProvider = {};
+    models.forEach(m => {
+      const provider = m.id.split('/')[0] || 'Other';
+      if (!byProvider[provider]) byProvider[provider] = [];
+      byProvider[provider].push(m);
+    });
+
+    for (const [provider, list] of Object.entries(byProvider).sort((a, b) => a[0].localeCompare(b[0]))) {
+      html += `<optgroup label="${esc(provider)}">`;
+      list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+      list.forEach(m => {
+        const selected = m.id === currentModel ? ' selected' : '';
+        const priceHint = m.pricing?.prompt ? ` ($${(m.pricing.prompt * 1e6).toFixed(2)}/M)` : '';
+        html += `<option value="${esc(m.id)}"${selected}>${esc(m.name || m.id)}${priceHint}</option>`;
+      });
+      html += '</optgroup>';
+    }
+  }
+
+  // Custom option
+  const isCustom = models.length > 0 && !models.some(m => m.id === currentModel);
+  html += `<option value="__custom__"${isCustom ? ' selected' : ''}>Custom / Other...</option>`;
+
+  select.innerHTML = html;
+
+  if (customInput) {
+    customInput.style.display = isCustom ? 'block' : 'none';
+    if (isCustom) customInput.value = currentModel;
+  }
+
+  select.onchange = () => {
+    if (customInput) {
+      customInput.style.display = select.value === '__custom__' ? 'block' : 'none';
+      if (select.value === '__custom__') customInput.focus();
+    }
+  };
+}
 
 // ============================================================
 // Utilities
