@@ -64,13 +64,13 @@ html[data-theme="light"] {
   --text-main: #0f172a;
   --text-muted: #64748b;
   --text-dim: #94a3b8;
-  --accent-amber: #d97706;
+  --accent-amber: #f59e0b;
   --accent-cyan: #0284c7;
   --accent-magenta: #db2777;
   --accent-green: #059669;
   --accent-red: #dc2626;
   --shadow-card: 0 0 0 1px rgba(100, 116, 139, 0.15), 0 4px 12px rgba(0,0,0,0.08);
-  --shadow-glow-amber: 0 0 16px rgba(217,119,6,0.12);
+  --shadow-glow-amber: 0 0 16px rgba(245,158,11,0.12);
   --shadow-glow-cyan: 0 0 16px rgba(2,132,199,0.12);
   --border-subtle: rgba(100,116,139,0.10);
   --border-medium: rgba(100,116,139,0.20);
@@ -823,9 +823,9 @@ main {
     <div id="detail-content"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.8" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.8" style="margin: 0; padding: 12px; text-align: center; color: var(--text-dim); font: 11px/1.4 var(--font-mono); border-top: 1px solid var(--border-subtle); flex-shrink: 0;">
-    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.8
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.9" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.9" style="margin: 0; padding: 12px; text-align: center; color: var(--text-dim); font: 11px/1.4 var(--font-mono); border-top: 1px solid var(--border-subtle); flex-shrink: 0;">
+    &copy; 2026 Hank Marquardt &middot; ZeitCloud &middot; version 2026.05.15.9
   </footer>
 
   <div class="toast-container" id="toasts"></div>
@@ -1596,8 +1596,18 @@ function hideCloudTooltip() {
 }
 
 window.showTermDetail = async function(termId) {
-  const term = await state.db.terms.get(termId);
-  if (!term) return;
+  let term = state.terms.find(t => t.id === termId);
+  if (!term) {
+    const raw = await state.db.terms.get(termId);
+    if (!raw) return;
+    // Compute a display score on the fly if missing
+    let score = raw.totalScore || 0;
+    if (state.settings.decayOldTerms) {
+      const hoursOld = (Date.now() - (raw.lastSeen || Date.now())) / 3600000;
+      if (hoursOld > 24) score *= Math.pow(0.95, hoursOld / 24);
+    }
+    term = { ...raw, displayScore: score };
+  }
 
   const observations = await state.db.termObservations.where('termId').equals(termId).toArray();
   const relatedItems = [];
