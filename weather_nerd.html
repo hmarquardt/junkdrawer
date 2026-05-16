@@ -153,6 +153,18 @@
     }
     .theme-hc-dark #advisoryBanner.active { animation: none; border: 3px solid #ffffff !important; background: #7f1d1d !important; color: #ffffff !important; }
     .theme-hc-light #advisoryBanner.active { animation: none; border: 3px solid #000000 !important; background: #fef3c7 !important; color: #000000 !important; }
+
+    /* Warning alerts panel */
+    .warning-card { border: 1px solid rgba(239,68,68,.35); }
+    .warning-card .bg-slate-950 { background-color: #0f172a !important; }
+    .theme-light .warning-card .bg-slate-950 { background-color: #f1f5f9 !important; }
+    .theme-hc-dark .warning-card .bg-slate-950 { background-color: #111111 !important; }
+    .theme-hc-light .warning-card .bg-slate-950 { background-color: #f5f5f5 !important; }
+    .warning-emphasis { animation: warning-flash 3s ease-out; }
+    @keyframes warning-flash {
+      0% { box-shadow: 0 0 0 4px rgba(239,68,68,.6); }
+      100% { box-shadow: none; }
+    }
   </style>
 </head>
 <body class="theme-dark min-h-screen bg-slate-950 text-slate-100">
@@ -262,6 +274,20 @@
         <section class="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
           <h2 class="text-lg font-black">Nearby hits</h2>
           <div id="nearby" class="mt-3 max-h-80 overflow-auto text-sm"></div>
+        </section>
+        <section class="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-lg font-black">NWS Point Warnings</h2>
+            <button id="enableAudioAlerts" class="rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold hover:bg-slate-700">Enable Audio</button>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+            <label><input id="warningTone" type="checkbox" checked /> Warning tone</label>
+            <label><input id="speakWarnings" type="checkbox" checked /> Speak warnings</label>
+            <label><input id="monitorWarnings" type="checkbox" checked /> Monitor point</label>
+          </div>
+          <div id="warningAlertStatus" class="mt-1 h-4 text-xs text-amber-400" aria-live="polite">Warning audio not enabled.</div>
+          <div id="pointWarnings" class="mt-3 max-h-80 overflow-auto text-sm"></div>
+          <p class="mt-2 text-xs text-slate-500">Heads-up only. Do not rely on this instead of NOAA Weather Radio, Wireless Emergency Alerts, local sirens, or official NWS warnings.</p>
         </section>
       </aside>
     </main>
@@ -447,6 +473,136 @@ function localSummary(){
   };
   return `National: ${counts.outlook} outlook polygons, ${counts.md} active mesoscale discussions, ${counts.watches} active tornado/severe thunderstorm watch alert polygons, ${counts.reports} preliminary storm reports loaded.\n\nLocal radius: ${point().radius} mi around ${point().lat}, ${point().lon}. Intersections: ${localCounts.outlook} outlook areas, ${localCounts.md} mesoscale discussions, ${localCounts.watches} watches, ${localCounts.reports} reports.\n\nOperational note: zero active watches or mesoscale discussions is a normal state. For life safety, use official NWS/SPC products and local warnings, not this prototype.`;
 }
+/* ── Warning alerts ── */
+const WARNING_EVENTS = new Set([
+  "Tornado Warning",
+  "Severe Thunderstorm Warning",
+  "Flash Flood Warning",
+  "Extreme Wind Warning",
+  "Special Marine Warning"
+]);
+const announcedAlertIds = new Set(
+  JSON.parse(localStorage.getItem("weatherNerdAnnouncedWarningIds") || "[]")
+);
+let audioAlertsEnabled = false;
+let alertAudioCtx = null;
+
+async function enableAudioAlerts(){
+  try {
+    alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    await alertAudioCtx.resume();
+    audioAlertsEnabled = true;
+    if("speechSynthesis" in window){
+      const u = new SpeechSynthesisUtterance("Audio weather alerts enabled.");
+      u.volume = 0.75;
+      speechSynthesis.speak(u);
+    }
+    updateWarningAlertStatus("Audio weather alerts enabled.");
+  } catch(err) {
+    audioAlertsEnabled = false;
+    updateWarningAlertStatus("Audio alerts could not be enabled: " + err.message);
+  }
+}
+function playWarningTone(){
+  const toneEnabled = $('warningTone')?.checked;
+  if(!toneEnabled || !audioAlertsEnabled || !alertAudioCtx) return;
+  const osc = alertAudioCtx.createOscillator();
+  const gain = alertAudioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 880;
+  gain.gain.value = 0.001;
+  osc.connect(gain);
+  gain.connect(alertAudioCtx.destination);
+  const now = alertAudioCtx.currentTime;
+  gain.gain.exponentialRampToValueAtTime(0.25, now + 0.03);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+  osc.start(now);
+  osc.stop(now + 0.5);
+}
+function speakWarning(alertFeature){
+  const speakEnabled = $('speakWarnings')?.checked;
+  if(!speakEnabled || !audioAlertsEnabled || !("speechSynthesis" in window)) return;
+  const p = alertFeature.properties || {};
+  const text = [
+    "Weather warning for your selected location.",
+    p.event || "",
+    p.headline || "",
+    p.instruction || p.description || ""
+  ].join(" ");
+  speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text.slice(0, 900));
+  utterance.rate = 0.95;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+  speechSynthesis.speak(utterance);
+}
+async function checkPointWarnings(lat, lon){
+  const monitor = $('monitorWarnings')?.checked;
+  if(!monitor) return [];
+  const url = `https://api.weather.gov/alerts/active?point=${lat},${lon}`;
+  const res = await fetch(url, { headers: { "Accept": "application/geo+json" }});
+  if(!res.ok) throw new Error(`NWS alerts failed: ${res.status}`);
+  const data = await res.json();
+  const warnings = (data.features || []).filter(f => {
+    const event = f.properties?.event;
+    return WARNING_EVENTS.has(event);
+  });
+  renderPointWarnings(warnings);
+  for(const warning of warnings){
+    const id = warning.id || warning.properties?.id || warning.properties?.capId || `${warning.properties?.event}-${warning.properties?.effective}-${warning.properties?.expires}`;
+    if(!id || announcedAlertIds.has(id)) continue;
+    announcedAlertIds.add(id);
+    playWarningTone();
+    speakWarning(warning);
+    visuallyEmphasizeNewWarning(warning);
+    localStorage.setItem("weatherNerdAnnouncedWarningIds", JSON.stringify([...announcedAlertIds].slice(-100)));
+  }
+  if(warnings.length === 0){
+    updateWarningAlertStatus("No active warning-level alerts for selected point.");
+  } else {
+    updateWarningAlertStatus(`${warnings.length} active warning-level alert(s) for selected point.`);
+  }
+  return warnings;
+}
+function renderPointWarnings(warnings){
+  const el = $('pointWarnings');
+  if(!el) return;
+  if(!warnings.length){
+    el.innerHTML = '<div class="rounded-2xl bg-slate-950 p-3 text-slate-400">No active warning-level alerts for the selected point.</div>';
+    return;
+  }
+  el.innerHTML = warnings.map(f => {
+    const p = f.properties || {};
+    return `<div class="mb-3 rounded-2xl border border-red-400/40 bg-red-500/10 p-3 warning-card">
+        <div class="text-sm font-black text-red-200">${esc(p.event || "Warning")}</div>
+        <div class="mt-1 text-sm text-slate-100">${esc(p.headline || "")}</div>
+        <div class="mt-2 grid gap-1 text-xs text-slate-300">
+          <div><b>Severity:</b> ${esc(p.severity || "")}</div>
+          <div><b>Urgency:</b> ${esc(p.urgency || "")}</div>
+          <div><b>Certainty:</b> ${esc(p.certainty || "")}</div>
+          <div><b>Effective:</b> ${esc(formatAlertTime(p.effective))}</div>
+          <div><b>Expires:</b> ${esc(formatAlertTime(p.expires))}</div>
+          <div><b>Area:</b> ${esc(p.areaDesc || "")}</div>
+        </div>
+        ${p.instruction ? `<div class="mt-2 rounded-xl bg-slate-950 p-2 text-xs text-slate-200">${esc(p.instruction)}</div>` : ""}
+      </div>`;
+  }).join('');
+}
+function updateWarningAlertStatus(text){
+  const el = $('warningAlertStatus');
+  if(el) el.textContent = text;
+}
+function formatAlertTime(value){
+  if(!value) return "";
+  try { return new Date(value).toLocaleString(); } catch { return value; }
+}
+function visuallyEmphasizeNewWarning(warning){
+  const el = $('pointWarnings');
+  if(!el) return;
+  el.classList.add("warning-emphasis");
+  setTimeout(() => { el.classList.remove("warning-emphasis"); }, 5000);
+}
+
 function playCompletionChime(){
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -509,6 +665,10 @@ async function refresh(){
   ]);
   render();
   setBriefing(localSummary(), fmtBriefMeta('Local summary'));
+  const p = point();
+  if(Number.isFinite(p.lat) && Number.isFinite(p.lon)){
+    try { await checkPointWarnings(p.lat, p.lon); } catch(err) { updateWarningAlertStatus("Warning check failed: " + err.message); }
+  }
 }
 
 /* ── Theme switching ── */
@@ -636,6 +796,23 @@ $('useGeo').addEventListener('click', () => navigator.geolocation?.getCurrentPos
 }));
 $('geocodeBtn').addEventListener('click', geocodeCity);
 $('cityState').addEventListener('keydown', e => { if(e.key === 'Enter') geocodeCity(); });
+$('enableAudioAlerts').addEventListener('click', enableAudioAlerts);
+['warningTone','speakWarnings','monitorWarnings'].forEach(id => {
+  const el = $(id);
+  if(el){
+    const saved = localStorage.getItem('spcWarn_' + id);
+    if(saved !== null) el.checked = saved === 'true';
+    el.addEventListener('change', () => localStorage.setItem('spcWarn_' + id, el.checked));
+  }
+});
+
+/* ── Warning polling (independent of auto-refresh) ── */
+setInterval(() => {
+  const p = point();
+  if(Number.isFinite(p.lat) && Number.isFinite(p.lon)){
+    checkPointWarnings(p.lat, p.lon).catch(err => updateWarningAlertStatus("Warning check failed: " + err.message));
+  }
+}, 60_000);
 
 /* ── Init ── */
 restoreCoords();
@@ -654,9 +831,9 @@ loadModels();
   }
 })();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.10" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.10" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.10
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.11" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.11" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.11
 </footer>
 </body>
 </html>
