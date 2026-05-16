@@ -192,7 +192,10 @@
       <div class="lg:col-span-4">
         <label class="text-xs font-bold uppercase tracking-widest text-slate-400">AI briefing</label>
         <div class="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
-          <input id="openRouterKey" type="password" class="rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm" placeholder="OpenRouter key stored locally" />
+          <div class="relative">
+            <input id="openRouterKey" type="password" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm" placeholder="OpenRouter key stored locally" />
+            <span id="keyStatus" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-emerald-400 opacity-0 transition-opacity duration-300">Saved</span>
+          </div>
           <button id="saveKey" class="rounded-2xl bg-indigo-500 px-4 py-2 text-sm font-black text-white hover:bg-indigo-400">Save</button>
         </div>
         <div class="mt-2 flex gap-2">
@@ -229,6 +232,7 @@
         <section class="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
           <h2 class="text-lg font-black">AI / local summary</h2>
           <div id="briefing" class="mt-3 whitespace-pre-wrap rounded-2xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">Load data, then click Brief. Without an OpenRouter key, this panel gives a deterministic local summary.</div>
+          <div id="briefMeta" class="mt-2 text-xs text-slate-400 text-right" aria-live="polite"></div>
         </section>
         <section class="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
           <h2 class="text-lg font-black">Nearby hits</h2>
@@ -416,11 +420,19 @@ function playCompletionChime(){
     });
   } catch(e) { /* silent fail */ }
 }
+function setBriefing(text, meta){
+  $('briefing').textContent = text;
+  $('briefMeta').innerHTML = meta || '';
+}
+function fmtBriefMeta(model, ts){
+  const t = ts ? new Date(ts).toLocaleString() : new Date().toLocaleString();
+  return `<span class="opacity-75">${esc(model || 'Local summary')}</span> &middot; ${esc(t)}`;
+}
 async function aiBrief(){
   const key = localStorage.getItem('openrouterKey');
   const base = localSummary();
-  if(!key){ $('briefing').textContent = base; playCompletionChime(); return; }
-  $('briefing').textContent = 'Generating AI briefing...';
+  if(!key){ setBriefing(base, fmtBriefMeta('Local summary')); playCompletionChime(); return; }
+  setBriefing('Generating AI briefing...', fmtBriefMeta($('model').value));
   const sample = {
     counts: base,
     nearby: $('nearby').innerText.slice(0,4000)
@@ -434,7 +446,7 @@ async function aiBrief(){
   });
   if(!r.ok) throw new Error(await r.text());
   const data = await r.json();
-  $('briefing').textContent = data.choices?.[0]?.message?.content || base;
+  setBriefing(data.choices?.[0]?.message?.content || base, fmtBriefMeta($('model').value));
   playCompletionChime();
 }
 async function refresh(){
@@ -448,7 +460,7 @@ async function refresh(){
     {label:'Radar', text: state.visible.radar ? 'NOAA/NWS MRMS base reflectivity overlay on' : 'Radar overlay off'}
   ]);
   render();
-  $('briefing').textContent = localSummary();
+  setBriefing(localSummary(), fmtBriefMeta('Local summary'));
 }
 
 /* ── Theme switching ── */
@@ -498,37 +510,49 @@ async function loadModels(){
   } catch(e) {
     console.error('Model fetch failed', e);
     if(!cached && sel.options.length <= 3){
-      $('briefing').textContent = `Could not load models from OpenRouter. ${e.message}`;
+      setBriefing(`Could not load models from OpenRouter. ${e.message}`, fmtBriefMeta('System'));
     }
   }
 }
 function populateModels(models){
   const sel = $('model');
-  const current = sel.value;
+  const saved = localStorage.getItem('spcModel');
   sel.innerHTML = models.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
-  if(models.some(m => m.id === current)) sel.value = current;
+  if(saved && models.some(m => m.id === saved)) sel.value = saved;
+  else if(models.some(m => m.id === sel.value)) sel.value = sel.value;
 }
 
 /* ── Event wiring ── */
 document.querySelectorAll('.layerBtn').forEach(btn => btn.addEventListener('click', () => { state.visible[btn.dataset.layer] = !state.visible[btn.dataset.layer]; btn.classList.toggle('opacity-40', !state.visible[btn.dataset.layer]); render(); }));
 ['lat','lon','radius','today','yesterday','onlyLocal'].forEach(id => $(id).addEventListener('change', refresh));
 $('refresh').addEventListener('click', refresh);
-$('briefBtn').addEventListener('click', () => aiBrief().catch(e => $('briefing').textContent = `AI briefing failed. Local summary:\n\n${localSummary()}\n\nError: ${e.message}`));
+$('briefBtn').addEventListener('click', () => aiBrief().catch(e => setBriefing(`AI briefing failed. Local summary:\n\n${localSummary()}\n\nError: ${e.message}`, fmtBriefMeta('Local summary'))));
 $('saveKey').addEventListener('click', () => {
-  localStorage.setItem('openrouterKey', $('openRouterKey').value.trim());
+  const key = $('openRouterKey').value.trim();
+  if(!key) return;
+  localStorage.setItem('openrouterKey', key);
   $('openRouterKey').value = '';
-  $('briefing').textContent = 'OpenRouter key saved locally. Loading models...';
+  $('keyStatus').classList.remove('opacity-0');
+  setBriefing('OpenRouter key saved locally. Loading models...', fmtBriefMeta('System'));
   loadModels();
 });
+$('model').addEventListener('change', () => localStorage.setItem('spcModel', $('model').value));
 $('useGeo').addEventListener('click', () => navigator.geolocation?.getCurrentPosition(pos => { $('lat').value=pos.coords.latitude.toFixed(4); $('lon').value=pos.coords.longitude.toFixed(4); refresh(); }));
 
 /* ── Init ── */
+if(localStorage.getItem('openrouterKey')){
+  $('keyStatus').classList.remove('opacity-0');
+}
+const savedModel = localStorage.getItem('spcModel');
+if(savedModel && Array.from($('model').options).some(o => o.value === savedModel)){
+  $('model').value = savedModel;
+}
 loadModels();
 refresh();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.5
 </footer>
 </body>
 </html>
