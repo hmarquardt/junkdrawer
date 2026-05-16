@@ -333,7 +333,8 @@ const SOURCES = {
   alerts: 'https://api.weather.gov/alerts/active',
   reportsToday: 'https://www.spc.noaa.gov/climo/reports/today.csv',
   reportsYesterday: 'https://www.spc.noaa.gov/climo/reports/yesterday.csv',
-  radarWms: 'https://mapservices.weather.noaa.gov/eventdriven/services/radar/radar_base_reflectivity/MapServer/WMSServer'
+  radarWms: 'https://mapservices.weather.noaa.gov/eventdriven/services/radar/radar_base_reflectivity/MapServer/WMSServer',
+  spcWatchesGis: 'https://mesonet.agron.iastate.edu/cgi-bin/request/gis/spc_watch.py'
 };
 const OUTLOOK_LAYERS = [
   [1, 'Day 1 categorical'], [9, 'Day 2 categorical'], [17, 'Day 3 categorical'],
@@ -342,7 +343,7 @@ const OUTLOOK_LAYERS = [
 const DEFAULT_OUTLOOK_VISIBLE = { 'Day 1 categorical': true, 'Day 2 categorical': false, 'Day 3 categorical': false, 'Day 4 probability': false, 'Day 5 probability': false, 'Day 6 probability': false, 'Day 7 probability': false, 'Day 8 probability': false };
 const savedOutlookVis = JSON.parse(localStorage.getItem('spcOutlookVis') || 'null');
 const outlookVisible = savedOutlookVis || { ...DEFAULT_OUTLOOK_VISIBLE };
-const state = { raw: { outlook: [], md: [], watches: [], reports: [] }, geo: { outlook: [], md: null, watches: null, reports: null }, visible: { md:true, watches:true, reports:true, radar:true } };
+const state = { raw: { outlook: [], md: [], watches: [], reports: [] }, geo: { outlook: [], md: null, watches: null, spcWatches: null, reports: null }, visible: { md:true, watches:true, reports:true, radar:true } };
 const map = L.map('map', { preferCanvas: true }).setView([38.3553, -87.5675], 6);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
 const groups = { md: L.layerGroup().addTo(map), watches: L.layerGroup().addTo(map), reports: L.layerGroup().addTo(map), local: L.layerGroup().addTo(map) };
@@ -364,7 +365,10 @@ async function fetchText(url){ const r = await fetch(url); if(!r.ok) throw new E
 function geojsonUrl(layer){ return `${SOURCES.outlookBase}/${layer}/query?where=1%3D1&outFields=*&f=geojson`; }
 function styleFor(kind, props={}){
   if(kind==='md') return { color:'#d946ef', weight:3, fillOpacity:.12 };
-  if(kind==='watch') return { color: /tornado/i.test(props.event||'') ? '#ef4444' : '#38bdf8', weight:2, fillOpacity:.12 };
+  if(kind==='watch') {
+    const isTornado = /tornado/i.test(props.event||'') || props.TYPE === 'TOR';
+    return { color: isTornado ? '#ef4444' : '#38bdf8', weight: props.TYPE ? 3 : 2, fillOpacity:.12 };
+  }
   if(kind==='outlook') {
     const v = String(props.LABEL || props.label || props.CATEGORY || props.DN || '').toUpperCase();
     const colors = { TSTM:'#60a5fa', MRGL:'#22c55e', SLGT:'#eab308', ENH:'#f97316', MDT:'#ef4444', HIGH:'#ec4899' };
@@ -421,6 +425,39 @@ async function loadWatches(){
     return { count: allFeatures.length, mappable: mappable.length };
   } catch(e){ state.geo.watches = {type:'FeatureCollection',features:[]}; state.raw.watches = []; return { count:0, mappable:0, error:e.message }; }
 }
+function parseIEMTime(str){
+  if(!str || String(str).length !== 12) return null;
+  const s = String(str);
+  const yr = parseInt(s.slice(0,4), 10);
+  const mo = parseInt(s.slice(4,6), 10) - 1;
+  const dy = parseInt(s.slice(6,8), 10);
+  const hr = parseInt(s.slice(8,10), 10);
+  const mn = parseInt(s.slice(10,12), 10);
+  const d = new Date(Date.UTC(yr, mo, dy, hr, mn));
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+async function loadSPCWatches(){
+  try {
+    const now = new Date();
+    const yesterday = new Date(now); yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const tomorrow = new Date(now); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const fmt = d => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}T00:00:00Z`;
+    const url = `${SOURCES.spcWatchesGis}?sts=${encodeURIComponent(fmt(yesterday))}&ets=${encodeURIComponent(fmt(tomorrow))}&format=geojson`;
+    const fc = validFeatureCollection(await fetchJson(url));
+    const nowTime = Date.now();
+    const active = (fc.features || []).filter(f => {
+      if(!f.geometry) return false;
+      const issue = parseIEMTime(f.properties?.ISSUE);
+      const expire = parseIEMTime(f.properties?.EXPIRE);
+      return issue && expire && issue <= nowTime && expire >= nowTime;
+    });
+    state.geo.spcWatches = { type:'FeatureCollection', features: active };
+    return { count: active.length };
+  } catch(e){
+    state.geo.spcWatches = { type:'FeatureCollection', features: [] };
+    return { count: 0, error: e.message };
+  }
+}
 async function loadReports(){
   const wanted = [];
   if($('today').checked) wanted.push(['today', SOURCES.reportsToday]);
@@ -455,16 +492,22 @@ function pointInAdvisories(){
   const md = (state.geo.md?.features || []).filter(f => {
     try { return turf.booleanPointInPolygon(pt, f); } catch { return false; }
   });
-  const watches = (state.geo.watches?.features || []).filter(f => {
+  // Prefer actual SPC watch box polygons from IEM
+  const spcWatches = (state.geo.spcWatches?.features || []).filter(f => {
     try { return turf.booleanPointInPolygon(pt, f); } catch { return false; }
   });
-  // Fallback: include watches detected via NWS point query (handles geometry:null)
+  // Fallback to NWS alert polygons if any
+  const nwsWatches = (state.geo.watches?.features || []).filter(f => {
+    try { return turf.booleanPointInPolygon(pt, f); } catch { return false; }
+  });
+  // Final fallback: NWS point query watches (geometry:null zone-based)
   const pointWatches = (state.pointWatches || []).filter(f => {
     const id = f.id || f.properties?.id || f.properties?.capId;
     if(!id) return true;
-    return !watches.some(w => (w.id || w.properties?.id || w.properties?.capId) === id);
+    return !spcWatches.some(w => (w.id || w.properties?.id || w.properties?.capId) === id)
+        && !nwsWatches.some(w => (w.id || w.properties?.id || w.properties?.capId) === id);
   });
-  return { md, watches: [...watches, ...pointWatches] };
+  return { md, watches: [...spcWatches, ...nwsWatches, ...pointWatches] };
 }
 function syncLayerButtons(){
   document.querySelectorAll('.layerBtn').forEach(btn => {
@@ -502,7 +545,10 @@ function render(){
     }
   });
   if(state.visible.md) addPoly('md', state.geo.md?.features || [], groups.md);
-  if(state.visible.watches) addPoly('watch', state.geo.watches?.features || [], groups.watches);
+  if(state.visible.watches) {
+    addPoly('watch', state.geo.spcWatches?.features || [], groups.watches);
+    addPoly('watch', state.geo.watches?.features || [], groups.watches);
+  }
   if(state.visible.reports) (state.geo.reports?.features || []).filter(f => !only || intersectsLocal(f, circle)).forEach(f => {
     const p = f.properties || {};
     L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], styleFor('report')).bindPopup(popup(`Storm report (${p.source})`, p)).addTo(groups.reports);
@@ -528,15 +574,17 @@ function updateNearby(circle){
   const all = [
     ...state.geo.outlook.map(f=>['Outlook',f]),
     ...(state.geo.md?.features||[]).map(f=>['Mesoscale',f]),
-    ...(state.geo.watches?.features||[]).map(f=>['Watch',f]),
+    ...(state.geo.spcWatches?.features||[]).map(f=>['SPC Watch',f]),
+    ...(state.geo.watches?.features||[]).map(f=>['NWS Watch',f]),
     ...(state.geo.reports?.features||[]).map(f=>['Report',f])
   ].filter(([,f]) => intersectsLocal(f, circle));
-  $('nearby').innerHTML = all.length ? all.slice(0,80).map(([kind,f]) => `<div class="mb-2 rounded-2xl bg-slate-950 p-3"><b>${esc(kind)}</b><div class="text-slate-400">${esc((f.properties?._layer || f.properties?.event || f.properties?.Location || f.properties?.SUMMARY || f.properties?.summary || f.properties?.CONCERNING || 'Local intersection'))}</div></div>`).join('') : '<div class="rounded-2xl bg-slate-950 p-3 text-slate-400">No mapped products intersect the selected radius.</div>';
+  $('nearby').innerHTML = all.length ? all.slice(0,80).map(([kind,f]) => `<div class="mb-2 rounded-2xl bg-slate-950 p-3"><b>${esc(kind)}</b><div class="text-slate-400">${esc((f.properties?._layer || f.properties?.event || f.properties?.TYPE || f.properties?.Location || f.properties?.SUMMARY || f.properties?.summary || f.properties?.CONCERNING || 'Local intersection'))}</div></div>`).join('') : '<div class="rounded-2xl bg-slate-950 p-3 text-slate-400">No mapped products intersect the selected radius.</div>';
 }
 function localSummary(){
   const counts = {
     outlook: state.geo.outlook.length,
     md: state.geo.md?.features?.length || 0,
+    spcWatches: state.geo.spcWatches?.features?.length || 0,
     watches: state.geo.watches?.features?.length || 0,
     reports: state.geo.reports?.features?.length || 0
   };
@@ -544,10 +592,11 @@ function localSummary(){
   const localCounts = {
     outlook: state.geo.outlook.filter(f=>intersectsLocal(f,circle)).length,
     md: (state.geo.md?.features||[]).filter(f=>intersectsLocal(f,circle)).length,
+    spcWatches: (state.geo.spcWatches?.features||[]).filter(f=>intersectsLocal(f,circle)).length,
     watches: (state.geo.watches?.features||[]).filter(f=>intersectsLocal(f,circle)).length,
     reports: (state.geo.reports?.features||[]).filter(f=>intersectsLocal(f,circle)).length
   };
-  return `National: ${counts.outlook} outlook polygons, ${counts.md} active mesoscale discussions, ${counts.watches} active tornado/severe thunderstorm watch alert polygons, ${counts.reports} preliminary storm reports loaded.\n\nLocal radius: ${point().radius} mi around ${point().lat}, ${point().lon}. Intersections: ${localCounts.outlook} outlook areas, ${localCounts.md} mesoscale discussions, ${localCounts.watches} watches, ${localCounts.reports} reports.\n\nOperational note: zero active watches or mesoscale discussions is a normal state. For life safety, use official NWS/SPC products and local warnings, not this prototype.`;
+  return `National: ${counts.outlook} outlook polygons, ${counts.md} active mesoscale discussions, ${counts.spcWatches} SPC watch boxes, ${counts.watches} NWS watch alert polygons, ${counts.reports} preliminary storm reports loaded.\n\nLocal radius: ${point().radius} mi around ${point().lat}, ${point().lon}. Intersections: ${localCounts.outlook} outlook areas, ${localCounts.md} mesoscale discussions, ${localCounts.spcWatches} SPC watch boxes, ${localCounts.watches} NWS watches, ${localCounts.reports} reports.\n\nOperational note: zero active watches or mesoscale discussions is a normal state. For life safety, use official NWS/SPC products and local warnings, not this prototype.`;
 }
 /* ── Warning alerts ── */
 const WARNING_EVENTS = new Set([
@@ -563,6 +612,9 @@ const WATCH_EVENTS = new Set([
 ]);
 const announcedAlertIds = new Set(
   JSON.parse(localStorage.getItem("weatherNerdAnnouncedWarningIds") || "[]")
+);
+const announcedWatchIds = new Set(
+  JSON.parse(localStorage.getItem("weatherNerdAnnouncedWatchIds") || "[]")
 );
 let audioAlertsEnabled = false;
 let alertAudioCtx = null;
@@ -593,6 +645,43 @@ function playWarningTone(){
   gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
   osc.start(now);
   osc.stop(now + 0.5);
+}
+function playWatchTone(){
+  const toneEnabled = $('warningTone')?.checked;
+  if(!toneEnabled || !audioAlertsEnabled || !alertAudioCtx) return;
+  const now = alertAudioCtx.currentTime;
+  [523.25, 659.25].forEach((freq, i) => {
+    const osc = alertAudioCtx.createOscillator();
+    const gain = alertAudioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.001, now + i * 0.3);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + i * 0.3 + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.3 + 0.25);
+    osc.connect(gain);
+    gain.connect(alertAudioCtx.destination);
+    osc.start(now + i * 0.3);
+    osc.stop(now + i * 0.3 + 0.25);
+  });
+}
+function checkNewSPCWatches(lat, lon){
+  if(!audioAlertsEnabled || !state.geo.spcWatches?.features?.length) return;
+  const pt = turf.point([lon, lat]);
+  const inside = state.geo.spcWatches.features.filter(f => {
+    try { return turf.booleanPointInPolygon(pt, f); } catch { return false; }
+  });
+  let newCount = 0;
+  for(const w of inside){
+    const id = `spc-${w.properties?.TYPE}-${w.properties?.NUM}-${w.properties?.ISSUE}`;
+    if(!id || announcedWatchIds.has(id)) continue;
+    announcedWatchIds.add(id);
+    newCount++;
+  }
+  if(newCount > 0){
+    playWatchTone();
+    localStorage.setItem("weatherNerdAnnouncedWatchIds", JSON.stringify([...announcedWatchIds].slice(-100)));
+    updateWarningAlertStatus(`${newCount} new SPC watch${newCount>1?'es':''} affecting your location.`);
+  }
 }
 async function checkPointWarnings(lat, lon){
   const monitor = $('monitorWarnings')?.checked;
@@ -715,37 +804,75 @@ async function openFeatureModal(kind, props){
     body.innerHTML = html || '<div class="text-slate-400">No detail fields available.</div>';
 
   } else if(kind === 'Watch Alert'){
-    const event = getProp(p, 'event', 'EVENT', 'Event');
-    title.textContent = event || 'Watch Alert';
-    let link = '';
-    const idVal = getProp(p, 'id', 'ID', '@id');
-    if(idVal && String(idVal).startsWith('https://')) link = idVal;
-    else if(idVal) link = `https://api.weather.gov/alerts/${esc(String(idVal))}`;
+    const type = getProp(p, 'TYPE', 'type');
+    if(type){ // IEM SPC watch polygon
+      const watchType = type === 'TOR' ? 'Tornado Watch' : 'Severe Thunderstorm Watch';
+      const num = getProp(p, 'NUM', 'num');
+      title.textContent = `${watchType} ${num ? '#' + num : ''}`;
+      const issue = parseIEMTime(getProp(p, 'ISSUE', 'issue'));
+      const expire = parseIEMTime(getProp(p, 'EXPIRE', 'expire'));
+      const sel = getProp(p, 'SEL', 'sel');
+      const isPds = p.IS_PDS || p.is_pds;
 
-    const headline = getProp(p, 'headline', 'HEADLINE', 'Headline');
-    const areaDesc = getProp(p, 'areaDesc', 'areadesc', 'AREA_DESC', 'area_desc');
-    const description = getProp(p, 'description', 'DESCRIPTION', 'Description');
-    const instruction = getProp(p, 'instruction', 'INSTRUCTION', 'Instruction');
-    const severity = getProp(p, 'severity', 'SEVERITY', 'Severity');
-    const urgency = getProp(p, 'urgency', 'URGENCY', 'Urgency');
-    const certainty = getProp(p, 'certainty', 'CERTAINTY', 'Certainty');
-    const effective = getProp(p, 'effective', 'EFFECTIVE', 'Effective');
-    const expires = getProp(p, 'expires', 'EXPIRES', 'Expires');
+      let probs = [];
+      const pWind = getProp(p, 'P_WIND65', 'p_wind65');
+      const pHail = getProp(p, 'P_HAIL2I', 'p_hail2i');
+      const pTor = getProp(p, 'P_TOREF2', 'p_toref2');
+      if(pWind) probs.push(`Significant wind (65+ kt): ${pWind}%`);
+      if(pHail) probs.push(`Significant hail (2+ in): ${pHail}%`);
+      if(pTor) probs.push(`Significant tornado (EF2+): ${pTor}%`);
 
-    let html = [
-      headline ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(headline)}</div>` : '',
-      areaDesc ? `<div class="mb-4 text-sm"><b class="text-slate-300">Area:</b> <span class="text-slate-200">${fmtBlock(areaDesc)}</span></div>` : '',
-      description ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Description</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(description)}</div></div>` : '',
-      instruction ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Instructions</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(instruction)}</div></div>` : '',
-      (severity || urgency || certainty) ? `<div class="mb-4 flex flex-wrap gap-3 text-xs text-slate-400">${severity?`<span><b>Severity:</b> ${esc(severity)}</span>`:''}${urgency?`<span><b>Urgency:</b> ${esc(urgency)}</span>`:''}${certainty?`<span><b>Certainty:</b> ${esc(certainty)}</span>`:''}</div>` : '',
-      (effective || expires) ? `<div class="text-xs text-slate-500">${effective?`<span><b>Effective:</b> ${formatAlertTime(effective)}</span> `:''}${expires?`<span><b>Expires:</b> ${formatAlertTime(expires)}</span>`:''}</div>` : ''
-    ].join('');
+      let html = [
+        `<div class="mb-4 text-base font-bold ${type==='TOR'?'text-red-300':'text-sky-300'}">${esc(watchType)}${num ? ` #${esc(num)}` : ''}${isPds ? ' (PDS)' : ''}${sel ? ` — ${esc(sel)}` : ''}</div>`,
+        issue || expire ? `<div class="mb-4 text-sm text-slate-300">${issue?`<span><b>Issued:</b> ${formatAlertTime(issue)}</span> `:''}${expire?`<span><b>Expires:</b> ${formatAlertTime(expire)}</span>`:''}</div>` : '',
+        probs.length ? `<div class="mb-4 rounded-xl bg-slate-950 p-3 text-xs text-slate-300"><div class="mb-1 font-bold uppercase tracking-wider text-slate-400">Key Probabilities</div>${probs.map(s => `<div>${esc(s)}</div>`).join('')}</div>` : '',
+      ].join('');
 
-    if(!html) html = allPropsHtml(p);
-    if(link){
-      html += `<div class="mt-6 border-t border-slate-700 pt-3 text-right"><a href="${link}" target="_blank" class="inline-block rounded-xl bg-cyan-500/20 px-4 py-2 text-sm font-bold text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/30">View Official NWS Product →</a></div>`;
+      const maxHail = getProp(p, 'MAX_HAIL', 'max_hail');
+      const maxGust = getProp(p, 'MAX_GUST', 'max_gust');
+      const mvDrct = getProp(p, 'MV_DRCT', 'mv_drct');
+      const mvSknt = getProp(p, 'MV_SKNT', 'mv_sknt');
+      if(maxHail || maxGust || mvDrct || mvSknt){
+        html += `<div class="mb-4 flex flex-wrap gap-3 text-xs text-slate-400">${maxHail?`<span><b>Max hail:</b> ${esc(maxHail)}"</span>`:''}${maxGust?`<span><b>Max gust:</b> ${esc(maxGust)} kt</span>`:''}${mvDrct?`<span><b>Motion:</b> ${esc(mvDrct)}°</span>`:''}${mvSknt?`<span><b>Speed:</b> ${esc(mvSknt)} kt</span>`:''}</div>`;
+      }
+
+      html += `<div class="mb-4"><a href="https://www.spc.noaa.gov/products/watch/" target="_blank" class="inline-block rounded-xl bg-cyan-500/20 px-4 py-2 text-sm font-bold text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/30">View SPC Watch Page →</a></div>`;
+      html += `<div class="mt-4 border-t border-slate-700 pt-2">${allPropsHtml(p)}</div>`;
+      body.innerHTML = html;
+
+    } else { // NWS alert watch
+      const event = getProp(p, 'event', 'EVENT', 'Event');
+      title.textContent = event || 'Watch Alert';
+      let link = '';
+      const idVal = getProp(p, 'id', 'ID', '@id');
+      if(idVal && String(idVal).startsWith('https://')) link = idVal;
+      else if(idVal) link = `https://api.weather.gov/alerts/${esc(String(idVal))}`;
+
+      const headline = getProp(p, 'headline', 'HEADLINE', 'Headline');
+      const areaDesc = getProp(p, 'areaDesc', 'areadesc', 'AREA_DESC', 'area_desc');
+      const description = getProp(p, 'description', 'DESCRIPTION', 'Description');
+      const instruction = getProp(p, 'instruction', 'INSTRUCTION', 'Instruction');
+      const severity = getProp(p, 'severity', 'SEVERITY', 'Severity');
+      const urgency = getProp(p, 'urgency', 'URGENCY', 'Urgency');
+      const certainty = getProp(p, 'certainty', 'CERTAINTY', 'Certainty');
+      const effective = getProp(p, 'effective', 'EFFECTIVE', 'Effective');
+      const expires = getProp(p, 'expires', 'EXPIRES', 'Expires');
+
+      let html = [
+        headline ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(headline)}</div>` : '',
+        areaDesc ? `<div class="mb-4 text-sm"><b class="text-slate-300">Area:</b> <span class="text-slate-200">${fmtBlock(areaDesc)}</span></div>` : '',
+        description ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Description</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(description)}</div></div>` : '',
+        instruction ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Instructions</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(instruction)}</div></div>` : '',
+        (severity || urgency || certainty) ? `<div class="mb-4 flex flex-wrap gap-3 text-xs text-slate-400">${severity?`<span><b>Severity:</b> ${esc(severity)}</span>`:''}${urgency?`<span><b>Urgency:</b> ${esc(urgency)}</span>`:''}${certainty?`<span><b>Certainty:</b> ${esc(certainty)}</span>`:''}</div>` : '',
+        (effective || expires) ? `<div class="text-xs text-slate-500">${effective?`<span><b>Effective:</b> ${formatAlertTime(effective)}</span> `:''}${expires?`<span><b>Expires:</b> ${formatAlertTime(expires)}</span>`:''}</div>` : ''
+      ].join('');
+
+      if(!html) html = allPropsHtml(p);
+      if(link){
+        html += `<div class="mt-6 border-t border-slate-700 pt-3 text-right"><a href="${link}" target="_blank" class="inline-block rounded-xl bg-cyan-500/20 px-4 py-2 text-sm font-bold text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/30">View Official NWS Product →</a></div>`;
+      }
+      body.innerHTML = html || '<div class="text-slate-400">No detail fields available.</div>';
     }
-    body.innerHTML = html || '<div class="text-slate-400">No detail fields available.</div>';
 
   } else {
     title.textContent = kind;
@@ -816,11 +943,12 @@ async function aiBrief(){
 }
 async function refresh(){
   setStatus([{label:'Loading', text:'Fetching SPC/NWS layers...'}]);
-  const [outlook, md, watches, reports] = await Promise.all([loadOutlooks(), loadMD(), loadWatches(), loadReports()]);
+  const [outlook, md, watches, reports, spcWatches] = await Promise.all([loadOutlooks(), loadMD(), loadWatches(), loadReports(), loadSPCWatches()]);
   setStatus([
     {label:'Convective outlooks', text:`${outlook.count} polygons loaded${outlook.errors?.length ? '; some layers failed' : ''}`},
     {label:'Mesoscale discussions', text: md.count ? `${md.count} active` : `None active${md.error ? ` (${md.error})` : ''}`},
-    {label:'Watches', text: watches.count ? `${watches.count} active${watches.mappable !== watches.count ? ` (${watches.mappable} mappable)` : ''}` : `No active tornado/severe thunderstorm watch polygons${watches.error ? ` (${watches.error})` : ''}`},
+    {label:'SPC watch boxes', text: spcWatches.count ? `${spcWatches.count} active` : `None active${spcWatches.error ? ` (${spcWatches.error})` : ''}`},
+    {label:'NWS watch alerts', text: watches.count ? `${watches.count} active${watches.mappable !== watches.count ? ` (${watches.mappable} mappable)` : ''}` : `No active NWS tornado/severe thunderstorm watches${watches.error ? ` (${watches.error})` : ''}`},
     {label:'Storm reports', text: `${reports.count} reports loaded${reports.errors?.length ? `; ${reports.errors.join('; ')}` : ''}`},
     {label:'Radar', text: state.visible.radar ? 'NOAA/NWS MRMS base reflectivity overlay on' : 'Radar overlay off'}
   ]);
@@ -829,6 +957,7 @@ async function refresh(){
   const p = point();
   if(Number.isFinite(p.lat) && Number.isFinite(p.lon)){
     try { await checkPointWarnings(p.lat, p.lon); } catch(err) { updateWarningAlertStatus("Warning check failed: " + err.message); }
+    checkNewSPCWatches(p.lat, p.lon);
   }
   if(localStorage.getItem('openrouterKey')){
     await aiBrief().catch(() => {});
@@ -1009,6 +1138,7 @@ setInterval(() => {
   const p = point();
   if(Number.isFinite(p.lat) && Number.isFinite(p.lon)){
     checkPointWarnings(p.lat, p.lon).catch(err => updateWarningAlertStatus("Warning check failed: " + err.message));
+    checkNewSPCWatches(p.lat, p.lon);
   }
 }, 60_000);
 
@@ -1024,9 +1154,9 @@ if(savedModel && Array.from($('model').options).some(o => o.value === savedModel
 loadModels();
 refresh().catch(() => {});
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.25" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.25" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.25
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.26" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.26" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.26
 </footer>
 </body>
 </html>
