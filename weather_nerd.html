@@ -284,6 +284,11 @@ function popup(kind, props){
   return `<b>${esc(kind)}</b><br>` + pairs.map(([k,v]) => `<b>${esc(k)}:</b> ${esc(v)}`).join('<br>');
 }
 function validFeatureCollection(fc){ return fc && Array.isArray(fc.features) ? fc : { type:'FeatureCollection', features:[] }; }
+function isRealFeature(f){
+  if(!f || !f.geometry) return false;
+  const keys = Object.keys(f.properties || {}).filter(k => !/^Shape|OBJECTID|GlobalID|FID/i.test(k));
+  return keys.length > 0;
+}
 function csvParse(text, source){
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   if(!lines.length || /No reports received/i.test(text)) return [];
@@ -300,7 +305,7 @@ function csvParse(text, source){
 }
 async function loadOutlooks(){
   const chunks = await Promise.all(OUTLOOK_LAYERS.map(async ([id,label]) => {
-    try { const fc = validFeatureCollection(await fetchJson(geojsonUrl(id))); fc.features.forEach(f => f.properties = {...f.properties, _layer:label}); return fc.features; }
+    try { const fc = validFeatureCollection(await fetchJson(geojsonUrl(id))); const feats = fc.features.filter(isRealFeature); feats.forEach(f => f.properties = {...f.properties, _layer:label}); return feats; }
     catch(e){ return [{error:true, label, message:e.message}]; }
   }));
   const errors = chunks.flat().filter(x=>x.error);
@@ -308,14 +313,14 @@ async function loadOutlooks(){
   return { count: state.geo.outlook.length, errors };
 }
 async function loadMD(){
-  try { state.geo.md = validFeatureCollection(await fetchJson(SOURCES.md)); return { count: state.geo.md.features.length }; }
+  try { const fc = validFeatureCollection(await fetchJson(SOURCES.md)); const features = (fc.features || []).filter(isRealFeature); state.geo.md = {type:'FeatureCollection', features}; return { count: features.length }; }
   catch(e){ state.geo.md = {type:'FeatureCollection',features:[]}; return { count:0, error:e.message }; }
 }
 async function loadWatches(){
   try {
     const urls = ['Tornado Watch','Severe Thunderstorm Watch'].map(e => `${SOURCES.alerts}?event=${encodeURIComponent(e)}`);
     const both = await Promise.all(urls.map(fetchJson));
-    const features = both.flatMap(fc => validFeatureCollection(fc).features || []).filter(f => f.geometry);
+    const features = both.flatMap(fc => validFeatureCollection(fc).features || []).filter(isRealFeature);
     state.geo.watches = { type:'FeatureCollection', features };
     return { count: features.length };
   } catch(e){ state.geo.watches = {type:'FeatureCollection',features:[]}; return { count:0, error:e.message }; }
@@ -521,9 +526,9 @@ $('useGeo').addEventListener('click', () => navigator.geolocation?.getCurrentPos
 loadModels();
 refresh();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.3" bump="Update this version whenever this file changes in a commit." -->
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.4" bump="Update this version whenever this file changes in a commit." -->
 <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.3
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.4
 </footer>
 </body>
 </html>
