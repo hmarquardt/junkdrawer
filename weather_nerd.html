@@ -136,6 +136,23 @@
 
     /* Map filters for high-contrast modes */
     .theme-hc-dark #map, .theme-hc-light #map { filter: contrast(1.15) saturate(1.2); }
+
+    /* Advisory banner */
+    #advisoryBanner { transition: all 0.3s ease; }
+    #advisoryBanner.active { animation: pulse-border 2s infinite; }
+    @keyframes pulse-border {
+      0% { border-color: #f59e0b; box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+      50% { border-color: #ef4444; box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+      100% { border-color: #f59e0b; box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    }
+    .theme-light #advisoryBanner.active { animation: pulse-border-light 2s infinite; }
+    @keyframes pulse-border-light {
+      0% { border-color: #d97706; box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.4); }
+      50% { border-color: #dc2626; box-shadow: 0 0 0 8px rgba(217, 119, 6, 0); }
+      100% { border-color: #d97706; box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
+    }
+    .theme-hc-dark #advisoryBanner.active { animation: none; border: 3px solid #ffffff !important; background: #7f1d1d !important; color: #ffffff !important; }
+    .theme-hc-light #advisoryBanner.active { animation: none; border: 3px solid #000000 !important; background: #fef3c7 !important; color: #000000 !important; }
   </style>
 </head>
 <body class="theme-dark min-h-screen bg-slate-950 text-slate-100">
@@ -213,6 +230,8 @@
         </div>
       </div>
     </section>
+
+    <div id="advisoryBanner" class="mb-4 hidden rounded-2xl border-2 border-amber-500 bg-amber-500/10 p-3 text-center text-sm font-bold text-amber-100" role="alert" aria-live="polite"></div>
 
     <main class="grid gap-4 lg:grid-cols-[1fr_390px]">
       <section class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl">
@@ -361,6 +380,18 @@ function intersectsLocal(feature, circle){
   if(!circle) return true;
   try { return turf.booleanIntersects(feature, circle); } catch { return false; }
 }
+function pointInAdvisories(){
+  const p = point();
+  if(!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return { md: [], watches: [] };
+  const pt = turf.point([p.lon, p.lat]);
+  const md = (state.geo.md?.features || []).filter(f => {
+    try { return turf.booleanPointInPolygon(pt, f); } catch { return false; }
+  });
+  const watches = (state.geo.watches?.features || []).filter(f => {
+    try { return turf.booleanPointInPolygon(pt, f); } catch { return false; }
+  });
+  return { md, watches };
+}
 function render(){
   if(state.visible.radar && !map.hasLayer(radarLayer)) radarLayer.addTo(map);
   if(!state.visible.radar && map.hasLayer(radarLayer)) map.removeLayer(radarLayer);
@@ -378,6 +409,17 @@ function render(){
     L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], styleFor('report')).bindPopup(popup(`Storm report (${p.source})`, p)).addTo(groups.reports);
   });
   updateNearby(circle);
+  const { md, watches } = pointInAdvisories();
+  const b = $('advisoryBanner');
+  if(!md.length && !watches.length){
+    b.classList.add('hidden'); b.classList.remove('active');
+  } else {
+    const parts = [];
+    if(md.length) parts.push(`${md.length} active mesoscale discussion${md.length>1?'s':''}`);
+    if(watches.length) parts.push(`${watches.length} active watch${watches.length>1?'es':''}`);
+    b.textContent = `⚠️ Your location is inside ${parts.join(' and ')}`;
+    b.classList.remove('hidden'); b.classList.add('active');
+  }
 }
 function updateNearby(circle){
   const all = [
@@ -606,9 +648,9 @@ if(savedModel && Array.from($('model').options).some(o => o.value === savedModel
 loadModels();
 refresh();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.7" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.7
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.8" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.8" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.8
 </footer>
 </body>
 </html>
