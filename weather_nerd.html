@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SPC Storm Radar — Watches, Mesoscale Discussions, Reports</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌩️</text></svg>" />
+  <style>
+    html, body { height: 100%; }
+    #map { height: 58vh; min-height: 420px; }
+    .glass { background: rgba(15, 23, 42, .78); backdrop-filter: blur(14px); }
+    .leaflet-popup-content { color: #111827; }
+    .pill { border: 1px solid rgba(148,163,184,.35); }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div class="mx-auto max-w-7xl px-4 py-5">
+    <header class="mb-4 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+      <div>
+        <div class="mb-2 inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-cyan-200">SPC + AI local storm dashboard</div>
+        <h1 class="text-3xl font-black tracking-tight sm:text-5xl">Storm Radar One-Pager</h1>
+        <p class="mt-2 max-w-3xl text-sm text-slate-300 sm:text-base">Pull current SPC/NWS products, map them, localize them to a point/radius, and generate a plain-English AI briefing. Empty watches and mesoscale discussions are treated as normal, not failure.</p>
+      </div>
+      <div class="flex flex-wrap gap-2 text-xs text-slate-300">
+        <a class="pill rounded-full px-3 py-2 hover:bg-slate-800" href="https://www.spc.noaa.gov/products/outlook/" target="_blank">SPC Outlooks</a>
+        <a class="pill rounded-full px-3 py-2 hover:bg-slate-800" href="https://www.spc.noaa.gov/products/md/" target="_blank">Mesoscale Discussions</a>
+        <a class="pill rounded-full px-3 py-2 hover:bg-slate-800" href="https://www.spc.noaa.gov/products/watch/" target="_blank">Watches</a>
+        <a class="pill rounded-full px-3 py-2 hover:bg-slate-800" href="https://www.spc.noaa.gov/climo/" target="_blank">Storm Reports</a>
+      </div>
+    </header>
+
+    <section class="mb-4 grid gap-3 rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-2xl lg:grid-cols-12">
+      <div class="lg:col-span-3">
+        <label class="text-xs font-bold uppercase tracking-widest text-slate-400">Local geography</label>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <input id="lat" class="rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm" value="38.3553" placeholder="Latitude" />
+          <input id="lon" class="rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm" value="-87.5675" placeholder="Longitude" />
+        </div>
+        <div class="mt-2 flex gap-2">
+          <input id="radius" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm" value="100" placeholder="Radius miles" />
+          <button id="useGeo" class="rounded-2xl bg-slate-800 px-3 py-2 text-sm font-bold hover:bg-slate-700">GPS</button>
+        </div>
+      </div>
+
+      <div class="lg:col-span-5">
+        <label class="text-xs font-bold uppercase tracking-widest text-slate-400">Layers</label>
+        <div class="mt-2 flex flex-wrap gap-2 text-sm">
+          <button data-layer="outlook" class="layerBtn rounded-2xl bg-emerald-500/20 px-3 py-2 font-bold text-emerald-100 ring-1 ring-emerald-300/30">Outlooks</button>
+          <button data-layer="md" class="layerBtn rounded-2xl bg-fuchsia-500/20 px-3 py-2 font-bold text-fuchsia-100 ring-1 ring-fuchsia-300/30">Mesoscale</button>
+          <button data-layer="watches" class="layerBtn rounded-2xl bg-sky-500/20 px-3 py-2 font-bold text-sky-100 ring-1 ring-sky-300/30">Watches</button>
+          <button data-layer="reports" class="layerBtn rounded-2xl bg-amber-500/20 px-3 py-2 font-bold text-amber-100 ring-1 ring-amber-300/30">Reports</button>
+          <button data-layer="radar" class="layerBtn rounded-2xl bg-red-500/20 px-3 py-2 font-bold text-red-100 ring-1 ring-red-300/30">Radar</button>
+        </div>
+        <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+          <label><input id="today" type="checkbox" checked /> Today reports</label>
+          <label><input id="yesterday" type="checkbox" checked /> Yesterday reports</label>
+          <label><input id="onlyLocal" type="checkbox" /> Show only radius hits</label>
+        </div>
+      </div>
+
+      <div class="lg:col-span-4">
+        <label class="text-xs font-bold uppercase tracking-widest text-slate-400">AI briefing</label>
+        <div class="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+          <input id="openRouterKey" type="password" class="rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm" placeholder="OpenRouter key stored locally" />
+          <button id="saveKey" class="rounded-2xl bg-indigo-500 px-4 py-2 text-sm font-black text-white hover:bg-indigo-400">Save</button>
+        </div>
+        <div class="mt-2 flex gap-2">
+          <select id="model" class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+            <option value="openai/gpt-4.1-mini">openai/gpt-4.1-mini</option>
+            <option value="google/gemini-2.5-flash">google/gemini-2.5-flash</option>
+            <option value="anthropic/claude-3.5-haiku">anthropic/claude-3.5-haiku</option>
+          </select>
+          <button id="briefBtn" class="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-black text-slate-950 hover:bg-cyan-300">Brief</button>
+        </div>
+      </div>
+    </section>
+
+    <main class="grid gap-4 lg:grid-cols-[1fr_390px]">
+      <section class="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl">
+        <div id="map"></div>
+      </section>
+      <aside class="grid gap-4">
+        <section class="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-lg font-black">Live status</h2>
+            <button id="refresh" class="rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold hover:bg-slate-700">Refresh</button>
+          </div>
+          <div id="status" class="mt-3 grid gap-2 text-sm"></div>
+        </section>
+        <section class="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
+          <h2 class="text-lg font-black">AI / local summary</h2>
+          <div id="briefing" class="mt-3 whitespace-pre-wrap rounded-2xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">Load data, then click Brief. Without an OpenRouter key, this panel gives a deterministic local summary.</div>
+        </section>
+        <section class="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
+          <h2 class="text-lg font-black">Nearby hits</h2>
+          <div id="nearby" class="mt-3 max-h-80 overflow-auto text-sm"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+<script>
+const SOURCES = {
+  outlookBase: 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer',
+  md: 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query?where=1%3D1&outFields=*&f=geojson',
+  alerts: 'https://api.weather.gov/alerts/active',
+  reportsToday: 'https://www.spc.noaa.gov/climo/reports/today.csv',
+  reportsYesterday: 'https://www.spc.noaa.gov/climo/reports/yesterday.csv',
+  radarWms: 'https://mapservices.weather.noaa.gov/eventdriven/services/radar/radar_base_reflectivity/MapServer/WMSServer'
+};
+const OUTLOOK_LAYERS = [
+  [1, 'Day 1 categorical'], [9, 'Day 2 categorical'], [17, 'Day 3 categorical'],
+  [21, 'Day 4 probability'], [22, 'Day 5 probability'], [23, 'Day 6 probability'], [24, 'Day 7 probability'], [25, 'Day 8 probability']
+];
+const state = { raw: { outlook: [], md: [], watches: [], reports: [] }, geo: { outlook: [], md: null, watches: null, reports: null }, visible: { outlook:true, md:true, watches:true, reports:true, radar:true } };
+const map = L.map('map', { preferCanvas: true }).setView([38.3553, -87.5675], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+const groups = { outlook: L.layerGroup().addTo(map), md: L.layerGroup().addTo(map), watches: L.layerGroup().addTo(map), reports: L.layerGroup().addTo(map), local: L.layerGroup().addTo(map) };
+const radarLayer = L.tileLayer.wms(SOURCES.radarWms, {
+  layers: '0',
+  format: 'image/png',
+  transparent: true,
+  opacity: 0.55,
+  attribution: 'NOAA/NWS MRMS Radar'
+}).addTo(map);
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function point(){ return { lat: parseFloat($('lat').value), lon: parseFloat($('lon').value), radius: parseFloat($('radius').value || 100) }; }
+function setStatus(items){ $('status').innerHTML = items.map(x => `<div class="rounded-2xl bg-slate-950 p-3"><b>${esc(x.label)}</b><div class="text-slate-400">${esc(x.text)}</div></div>`).join(''); }
+async function fetchJson(url){ const r = await fetch(url, { headers: { 'Accept': 'application/geo+json, application/json' }}); if(!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); }
+async function fetchText(url){ const r = await fetch(url); if(!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text(); }
+function geojsonUrl(layer){ return `${SOURCES.outlookBase}/${layer}/query?where=1%3D1&outFields=*&f=geojson`; }
+function styleFor(kind, props={}){
+  if(kind==='md') return { color:'#d946ef', weight:3, fillOpacity:.12 };
+  if(kind==='watch') return { color: /tornado/i.test(props.event||'') ? '#ef4444' : '#38bdf8', weight:2, fillOpacity:.12 };
+  if(kind==='outlook') {
+    const v = String(props.LABEL || props.label || props.CATEGORY || props.DN || '').toUpperCase();
+    const colors = { TSTM:'#60a5fa', MRGL:'#22c55e', SLGT:'#eab308', ENH:'#f97316', MDT:'#ef4444', HIGH:'#ec4899' };
+    return { color: colors[v] || '#94a3b8', weight:2, fillOpacity:.10 };
+  }
+  return { color:'#f59e0b', radius:6, fillOpacity:.85 };
+}
+function popup(kind, props){
+  const pairs = Object.entries(props || {}).filter(([k,v]) => v && !/^Shape|OBJECTID/i.test(k)).slice(0,12);
+  return `<b>${esc(kind)}</b><br>` + pairs.map(([k,v]) => `<b>${esc(k)}:</b> ${esc(v)}`).join('<br>');
+}
+function validFeatureCollection(fc){ return fc && Array.isArray(fc.features) ? fc : { type:'FeatureCollection', features:[] }; }
+function csvParse(text, source){
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if(!lines.length || /No reports received/i.test(text)) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''));
+  return lines.slice(1).map(line => {
+    const cols = line.match(/("[^"]*"|[^,]+)/g) || [];
+    const row = Object.fromEntries(headers.map((h,i)=>[h, (cols[i]||'').replace(/^"|"$/g,'').trim()]));
+    const lat = parseFloat(row.Lat || row.LAT || row.lat);
+    const lonRaw = parseFloat(row.Lon || row.LON || row.lon);
+    const lon = lonRaw > 0 ? -lonRaw : lonRaw;
+    if(Number.isNaN(lat) || Number.isNaN(lon)) return null;
+    return { type:'Feature', geometry:{type:'Point', coordinates:[lon, lat]}, properties:{...row, source} };
+  }).filter(Boolean);
+}
+async function loadOutlooks(){
+  const chunks = await Promise.all(OUTLOOK_LAYERS.map(async ([id,label]) => {
+    try { const fc = validFeatureCollection(await fetchJson(geojsonUrl(id))); fc.features.forEach(f => f.properties = {...f.properties, _layer:label}); return fc.features; }
+    catch(e){ return [{error:true, label, message:e.message}]; }
+  }));
+  const errors = chunks.flat().filter(x=>x.error);
+  state.geo.outlook = chunks.flat().filter(x=>!x.error);
+  return { count: state.geo.outlook.length, errors };
+}
+async function loadMD(){
+  try { state.geo.md = validFeatureCollection(await fetchJson(SOURCES.md)); return { count: state.geo.md.features.length }; }
+  catch(e){ state.geo.md = {type:'FeatureCollection',features:[]}; return { count:0, error:e.message }; }
+}
+async function loadWatches(){
+  try {
+    const urls = ['Tornado Watch','Severe Thunderstorm Watch'].map(e => `${SOURCES.alerts}?event=${encodeURIComponent(e)}`);
+    const both = await Promise.all(urls.map(fetchJson));
+    const features = both.flatMap(fc => validFeatureCollection(fc).features || []).filter(f => f.geometry);
+    state.geo.watches = { type:'FeatureCollection', features };
+    return { count: features.length };
+  } catch(e){ state.geo.watches = {type:'FeatureCollection',features:[]}; return { count:0, error:e.message }; }
+}
+async function loadReports(){
+  const wanted = [];
+  if($('today').checked) wanted.push(['today', SOURCES.reportsToday]);
+  if($('yesterday').checked) wanted.push(['yesterday', SOURCES.reportsYesterday]);
+  const all = [];
+  const errors = [];
+  for(const [name,url] of wanted){
+    try { all.push(...csvParse(await fetchText(url), name)); }
+    catch(e){ errors.push(`${name}: ${e.message}`); }
+  }
+  state.geo.reports = { type:'FeatureCollection', features: all };
+  return { count: all.length, errors };
+}
+function localBuffer(){
+  const p = point();
+  groups.local.clearLayers();
+  if(!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return null;
+  const center = turf.point([p.lon, p.lat]);
+  const circle = turf.circle(center, p.radius, { steps:80, units:'miles' });
+  L.geoJSON(circle, { style:{ color:'#22d3ee', dashArray:'5 8', weight:2, fillOpacity:.03 } }).addTo(groups.local);
+  L.marker([p.lat,p.lon]).addTo(groups.local).bindPopup('Local center');
+  return circle;
+}
+function intersectsLocal(feature, circle){
+  if(!circle) return true;
+  try { return turf.booleanIntersects(feature, circle); } catch { return false; }
+}
+function render(){
+  if(state.visible.radar && !map.hasLayer(radarLayer)) radarLayer.addTo(map);
+  if(!state.visible.radar && map.hasLayer(radarLayer)) map.removeLayer(radarLayer);
+  Object.values(groups).forEach(g => g !== groups.local && g.clearLayers());
+  const circle = localBuffer();
+  const only = $('onlyLocal').checked;
+  const addPoly = (kind, features, group) => {
+    features.filter(f => !only || intersectsLocal(f, circle)).forEach(f => L.geoJSON(f, { style: styleFor(kind, f.properties), onEachFeature:(feat, layer)=>layer.bindPopup(popup(kind, feat.properties)) }).addTo(group));
+  };
+  if(state.visible.outlook) addPoly('outlook', state.geo.outlook, groups.outlook);
+  if(state.visible.md) addPoly('md', state.geo.md?.features || [], groups.md);
+  if(state.visible.watches) addPoly('watch', state.geo.watches?.features || [], groups.watches);
+  if(state.visible.reports) (state.geo.reports?.features || []).filter(f => !only || intersectsLocal(f, circle)).forEach(f => {
+    const p = f.properties || {};
+    L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], styleFor('report')).bindPopup(popup(`Storm report (${p.source})`, p)).addTo(groups.reports);
+  });
+  updateNearby(circle);
+}
+function updateNearby(circle){
+  const all = [
+    ...state.geo.outlook.map(f=>['Outlook',f]),
+    ...(state.geo.md?.features||[]).map(f=>['Mesoscale',f]),
+    ...(state.geo.watches?.features||[]).map(f=>['Watch',f]),
+    ...(state.geo.reports?.features||[]).map(f=>['Report',f])
+  ].filter(([,f]) => intersectsLocal(f, circle));
+  $('nearby').innerHTML = all.length ? all.slice(0,80).map(([kind,f]) => `<div class="mb-2 rounded-2xl bg-slate-950 p-3"><b>${esc(kind)}</b><div class="text-slate-400">${esc((f.properties?._layer || f.properties?.event || f.properties?.Location || f.properties?.SUMMARY || f.properties?.summary || f.properties?.CONCERNING || 'Local intersection'))}</div></div>`).join('') : '<div class="rounded-2xl bg-slate-950 p-3 text-slate-400">No mapped products intersect the selected radius.</div>';
+}
+function localSummary(){
+  const counts = {
+    outlook: state.geo.outlook.length,
+    md: state.geo.md?.features?.length || 0,
+    watches: state.geo.watches?.features?.length || 0,
+    reports: state.geo.reports?.features?.length || 0
+  };
+  const circle = localBuffer();
+  const localCounts = {
+    outlook: state.geo.outlook.filter(f=>intersectsLocal(f,circle)).length,
+    md: (state.geo.md?.features||[]).filter(f=>intersectsLocal(f,circle)).length,
+    watches: (state.geo.watches?.features||[]).filter(f=>intersectsLocal(f,circle)).length,
+    reports: (state.geo.reports?.features||[]).filter(f=>intersectsLocal(f,circle)).length
+  };
+  return `National: ${counts.outlook} outlook polygons, ${counts.md} active mesoscale discussions, ${counts.watches} active tornado/severe thunderstorm watch alert polygons, ${counts.reports} preliminary storm reports loaded.\n\nLocal radius: ${point().radius} mi around ${point().lat}, ${point().lon}. Intersections: ${localCounts.outlook} outlook areas, ${localCounts.md} mesoscale discussions, ${localCounts.watches} watches, ${localCounts.reports} reports.\n\nOperational note: zero active watches or mesoscale discussions is a normal state. For life safety, use official NWS/SPC products and local warnings, not this prototype.`;
+}
+async function aiBrief(){
+  const key = localStorage.getItem('openrouterKey');
+  const base = localSummary();
+  if(!key){ $('briefing').textContent = base; return; }
+  $('briefing').textContent = 'Generating AI briefing...';
+  const sample = {
+    counts: base,
+    nearby: $('nearby').innerText.slice(0,4000)
+  };
+  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method:'POST', headers:{ 'Authorization':`Bearer ${key}`, 'Content-Type':'application/json' },
+    body: JSON.stringify({ model:$('model').value, messages:[
+      {role:'system', content:'You summarize official SPC/NWS severe weather products in plain English. Be careful, non-alarmist, and explicitly say this is not a warning product.'},
+      {role:'user', content:`Create a concise local severe weather briefing from this dashboard data. Mention empty active products as normal when applicable.\n${JSON.stringify(sample)}`}
+    ]})
+  });
+  if(!r.ok) throw new Error(await r.text());
+  const data = await r.json();
+  $('briefing').textContent = data.choices?.[0]?.message?.content || base;
+}
+async function refresh(){
+  setStatus([{label:'Loading', text:'Fetching SPC/NWS layers...'}]);
+  const [outlook, md, watches, reports] = await Promise.all([loadOutlooks(), loadMD(), loadWatches(), loadReports()]);
+  setStatus([
+    {label:'Convective outlooks', text:`${outlook.count} polygons loaded${outlook.errors?.length ? '; some layers failed' : ''}`},
+    {label:'Mesoscale discussions', text: md.count ? `${md.count} active` : `None active${md.error ? ` (${md.error})` : ''}`},
+    {label:'Watches', text: watches.count ? `${watches.count} active NWS alert polygons` : `No active tornado/severe thunderstorm watch polygons${watches.error ? ` (${watches.error})` : ''}`},
+    {label:'Storm reports', text: `${reports.count} reports loaded${reports.errors?.length ? `; ${reports.errors.join('; ')}` : ''}`},
+    {label:'Radar', text: state.visible.radar ? 'NOAA/NWS MRMS base reflectivity overlay on' : 'Radar overlay off'}
+  ]);
+  render();
+  $('briefing').textContent = localSummary();
+}
+document.querySelectorAll('.layerBtn').forEach(btn => btn.addEventListener('click', () => { state.visible[btn.dataset.layer] = !state.visible[btn.dataset.layer]; btn.classList.toggle('opacity-40', !state.visible[btn.dataset.layer]); render(); }));
+['lat','lon','radius','today','yesterday','onlyLocal'].forEach(id => $(id).addEventListener('change', refresh));
+$('refresh').addEventListener('click', refresh);
+$('briefBtn').addEventListener('click', () => aiBrief().catch(e => $('briefing').textContent = `AI briefing failed. Local summary:\n\n${localSummary()}\n\nError: ${e.message}`));
+$('saveKey').addEventListener('click', () => { localStorage.setItem('openrouterKey', $('openRouterKey').value.trim()); $('openRouterKey').value=''; $('briefing').textContent='OpenRouter key saved locally in this browser.'; });
+$('useGeo').addEventListener('click', () => navigator.geolocation?.getCurrentPosition(pos => { $('lat').value=pos.coords.latitude.toFixed(4); $('lon').value=pos.coords.longitude.toFixed(4); refresh(); }));
+refresh();
+</script>
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.1
+</footer>
+</body>
+</html>
+
