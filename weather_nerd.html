@@ -216,8 +216,23 @@
 
       <div class="lg:col-span-5">
         <label class="text-xs font-bold uppercase tracking-widest text-slate-400">Layers</label>
-        <div class="mt-2 flex flex-wrap gap-2 text-sm">
-          <button data-layer="outlook" class="layerBtn rounded-2xl bg-emerald-500/20 px-3 py-2 font-bold text-emerald-100 ring-1 ring-emerald-300/30">Outlooks</button>
+        <div class="mt-2 flex flex-wrap gap-2 text-sm items-center">
+          <div class="relative inline-block">
+            <button id="outlookToggleBtn" class="rounded-2xl bg-emerald-500/20 px-3 py-2 font-bold text-emerald-100 ring-1 ring-emerald-300/30">Outlooks</button>
+            <div id="outlookPopover" class="absolute z-50 mt-1 hidden w-56 rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl">
+              <div class="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Convective outlooks</div>
+              <div class="space-y-1.5 text-xs">
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 1 categorical" checked /> Day 1</label>
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 2 categorical" /> Day 2</label>
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 3 categorical" /> Day 3</label>
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 4 probability" /> Day 4</label>
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 5 probability" /> Day 5</label>
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 6 probability" /> Day 6</label>
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 7 probability" /> Day 7</label>
+                <label class="flex items-center gap-2"><input type="checkbox" data-ol="Day 8 probability" /> Day 8</label>
+              </div>
+            </div>
+          </div>
           <button data-layer="md" class="layerBtn rounded-2xl bg-fuchsia-500/20 px-3 py-2 font-bold text-fuchsia-100 ring-1 ring-fuchsia-300/30">Mesoscale</button>
           <button data-layer="watches" class="layerBtn rounded-2xl bg-sky-500/20 px-3 py-2 font-bold text-sky-100 ring-1 ring-sky-300/30">Watches</button>
           <button data-layer="reports" class="layerBtn rounded-2xl bg-amber-500/20 px-3 py-2 font-bold text-amber-100 ring-1 ring-amber-300/30">Reports</button>
@@ -289,7 +304,6 @@
           </div>
           <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
             <label><input id="warningTone" type="checkbox" checked /> Warning tone</label>
-            <label><input id="speakWarnings" type="checkbox" checked /> Speak warnings</label>
             <label><input id="monitorWarnings" type="checkbox" checked /> Monitor point</label>
           </div>
           <div id="warningAlertStatus" class="mt-1 h-4 text-xs text-amber-400" aria-live="polite">Warning audio not enabled.</div>
@@ -324,10 +338,15 @@ const OUTLOOK_LAYERS = [
   [1, 'Day 1 categorical'], [9, 'Day 2 categorical'], [17, 'Day 3 categorical'],
   [21, 'Day 4 probability'], [22, 'Day 5 probability'], [23, 'Day 6 probability'], [24, 'Day 7 probability'], [25, 'Day 8 probability']
 ];
-const state = { raw: { outlook: [], md: [], watches: [], reports: [] }, geo: { outlook: [], md: null, watches: null, reports: null }, visible: { outlook:true, md:true, watches:true, reports:true, radar:true } };
+const DEFAULT_OUTLOOK_VISIBLE = { 'Day 1 categorical': true, 'Day 2 categorical': false, 'Day 3 categorical': false, 'Day 4 probability': false, 'Day 5 probability': false, 'Day 6 probability': false, 'Day 7 probability': false, 'Day 8 probability': false };
+const savedOutlookVis = JSON.parse(localStorage.getItem('spcOutlookVis') || 'null');
+const outlookVisible = savedOutlookVis || { ...DEFAULT_OUTLOOK_VISIBLE };
+const state = { raw: { outlook: [], md: [], watches: [], reports: [] }, geo: { outlook: [], md: null, watches: null, reports: null }, visible: { md:true, watches:true, reports:true, radar:true } };
 const map = L.map('map', { preferCanvas: true }).setView([38.3553, -87.5675], 6);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
-const groups = { outlook: L.layerGroup().addTo(map), md: L.layerGroup().addTo(map), watches: L.layerGroup().addTo(map), reports: L.layerGroup().addTo(map), local: L.layerGroup().addTo(map) };
+const groups = { md: L.layerGroup().addTo(map), watches: L.layerGroup().addTo(map), reports: L.layerGroup().addTo(map), local: L.layerGroup().addTo(map) };
+const outlookGroups = {};
+OUTLOOK_LAYERS.forEach(([,label]) => { outlookGroups[label] = L.layerGroup().addTo(map); });
 const radarLayer = L.tileLayer.wms(SOURCES.radarWms, {
   layers: '0',
   format: 'image/png',
@@ -378,11 +397,12 @@ function csvParse(text, source){
 }
 async function loadOutlooks(){
   const chunks = await Promise.all(OUTLOOK_LAYERS.map(async ([id,label]) => {
-    try { const fc = validFeatureCollection(await fetchJson(geojsonUrl(id))); const feats = fc.features.filter(isRealFeature); feats.forEach(f => f.properties = {...f.properties, _layer:label}); return feats; }
-    catch(e){ return [{error:true, label, message:e.message}]; }
+    try { const fc = validFeatureCollection(await fetchJson(geojsonUrl(id))); const feats = fc.features.filter(isRealFeature); feats.forEach(f => f.properties = {...f.properties, _layer:label}); return { label, feats }; }
+    catch(e){ return { error:true, label, message:e.message }; }
   }));
-  const errors = chunks.flat().filter(x=>x.error);
-  state.geo.outlook = chunks.flat().filter(x=>!x.error);
+  const errors = chunks.filter(x=>x.error);
+  state.geo.outlook = [];
+  chunks.filter(x=>!x.error).forEach(c => { state.geo.outlook.push(...c.feats); });
   return { count: state.geo.outlook.length, errors };
 }
 async function loadMD(){
@@ -441,6 +461,7 @@ function render(){
   if(state.visible.radar && !map.hasLayer(radarLayer)) radarLayer.addTo(map);
   if(!state.visible.radar && map.hasLayer(radarLayer)) map.removeLayer(radarLayer);
   Object.values(groups).forEach(g => g !== groups.local && g.clearLayers());
+  Object.values(outlookGroups).forEach(g => g.clearLayers());
   const circle = localBuffer();
   const only = $('onlyLocal').checked;
   const addPoly = (kind, features, group) => {
@@ -457,7 +478,12 @@ function render(){
       }).addTo(group);
     });
   };
-  if(state.visible.outlook) addPoly('outlook', state.geo.outlook, groups.outlook);
+  OUTLOOK_LAYERS.forEach(([id,label]) => {
+    if(outlookVisible[label]){
+      const feats = state.geo.outlook.filter(f => f.properties?._layer === label);
+      addPoly('outlook', feats, outlookGroups[label]);
+    }
+  });
   if(state.visible.md) addPoly('md', state.geo.md?.features || [], groups.md);
   if(state.visible.watches) addPoly('watch', state.geo.watches?.features || [], groups.watches);
   if(state.visible.reports) (state.geo.reports?.features || []).filter(f => !only || intersectsLocal(f, circle)).forEach(f => {
@@ -521,11 +547,6 @@ async function enableAudioAlerts(){
     alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
     await alertAudioCtx.resume();
     audioAlertsEnabled = true;
-    if("speechSynthesis" in window){
-      const u = new SpeechSynthesisUtterance("Audio weather alerts enabled.");
-      u.volume = 0.75;
-      speechSynthesis.speak(u);
-    }
     updateWarningAlertStatus("Audio weather alerts enabled.");
   } catch(err) {
     audioAlertsEnabled = false;
@@ -548,31 +569,6 @@ function playWarningTone(){
   osc.start(now);
   osc.stop(now + 0.5);
 }
-function speakWarning(alertFeature){
-  const speakEnabled = $('speakWarnings')?.checked;
-  if(!speakEnabled || !audioAlertsEnabled || !("speechSynthesis" in window)) return;
-  const p = alertFeature.properties || {};
-  const parts = [
-    "Weather warning for your selected location.",
-    p.event ? `A ${p.event} is in effect.` : "",
-    p.headline || "",
-    p.areaDesc ? `Area affected: ${p.areaDesc}.` : "",
-    p.description ? `Description: ${p.description}` : "",
-    p.instruction ? `Instructions: ${p.instruction}` : "",
-    p.severity ? `Severity: ${p.severity}.` : "",
-    p.urgency ? `Urgency: ${p.urgency}.` : "",
-    p.certainty ? `Certainty: ${p.certainty}.` : "",
-    p.effective ? `Effective ${new Date(p.effective).toLocaleString()}.` : "",
-    p.expires ? `Expires ${new Date(p.expires).toLocaleString()}.` : ""
-  ];
-  const text = parts.filter(Boolean).join(" ");
-  speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text.slice(0, 2000));
-  utterance.rate = 0.95;
-  utterance.pitch = 1.0;
-  utterance.volume = 1.0;
-  speechSynthesis.speak(utterance);
-}
 async function checkPointWarnings(lat, lon){
   const monitor = $('monitorWarnings')?.checked;
   if(!monitor) return [];
@@ -590,7 +586,6 @@ async function checkPointWarnings(lat, lon){
     if(!id || announcedAlertIds.has(id)) continue;
     announcedAlertIds.add(id);
     playWarningTone();
-    speakWarning(warning);
     visuallyEmphasizeNewWarning(warning);
     localStorage.setItem("weatherNerdAnnouncedWarningIds", JSON.stringify([...announcedAlertIds].slice(-100)));
   }
@@ -684,10 +679,6 @@ async function openFeatureModal(kind, props){
 
     if(link){
       html += `<div class="mb-4"><a href="${link}" target="_blank" class="inline-block rounded-xl bg-cyan-500/20 px-4 py-2 text-sm font-bold text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/30">View Official SPC Product →</a></div>`;
-      html += `<div class="rounded-xl border border-slate-700 overflow-hidden" style="height:50vh; min-height:300px;">
-        <iframe id="mdIframe" src="${link}" sandbox="allow-scripts" style="width:100%;height:100%;border:0;" title="SPC Product"></iframe>
-      </div>
-      <div class="mt-2 text-xs text-amber-400">If the box above is blank, the SPC website blocks embedding (X-Frame-Options). Use the link above instead.</div>`;
     } else {
       html += `<div class="mb-2 text-xs text-slate-500">No official product link available from cached data.</div>`;
     }
@@ -723,7 +714,7 @@ async function openFeatureModal(kind, props){
 
     if(!html) html = allPropsHtml(p);
     if(link){
-      html += `<div class="mt-6 border-t border-slate-700 pt-3 text-right"><a href="${link}" target="_blank" class="text-xs font-bold text-cyan-400 hover:text-cyan-300 underline">View official product →</a></div>`;
+      html += `<div class="mt-6 border-t border-slate-700 pt-3 text-right"><a href="${link}" target="_blank" class="inline-block rounded-xl bg-cyan-500/20 px-4 py-2 text-sm font-bold text-cyan-200 ring-1 ring-cyan-400/30 hover:bg-cyan-500/30">View Official NWS Product →</a></div>`;
     }
     body.innerHTML = html || '<div class="text-slate-400">No detail fields available.</div>';
 
@@ -914,6 +905,32 @@ async function geocodeCity(){
   }
 }
 
+/* ── Outlook popover ── */
+const outlookPopover = $('outlookPopover');
+const outlookToggleBtn = $('outlookToggleBtn');
+if(outlookToggleBtn && outlookPopover){
+  // sync checkboxes with state
+  outlookPopover.querySelectorAll('input[data-ol]').forEach(cb => {
+    cb.checked = !!outlookVisible[cb.dataset.ol];
+    cb.addEventListener('change', () => {
+      outlookVisible[cb.dataset.ol] = cb.checked;
+      localStorage.setItem('spcOutlookVis', JSON.stringify(outlookVisible));
+      render();
+    });
+  });
+  // toggle popover
+  outlookToggleBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    outlookPopover.classList.toggle('hidden');
+  });
+  // close when clicking outside
+  document.addEventListener('click', e => {
+    if(!outlookPopover.classList.contains('hidden') && !outlookPopover.contains(e.target) && e.target !== outlookToggleBtn){
+      outlookPopover.classList.add('hidden');
+    }
+  });
+}
+
 /* ── Event wiring ── */
 document.querySelectorAll('.layerBtn').forEach(btn => btn.addEventListener('click', () => { state.visible[btn.dataset.layer] = !state.visible[btn.dataset.layer]; btn.classList.toggle('opacity-40', !state.visible[btn.dataset.layer]); render(); }));
 ['lat','lon','radius','today','yesterday','onlyLocal'].forEach(id => $(id).addEventListener('change', () => { saveCoords(); refresh(); }));
@@ -938,7 +955,7 @@ $('useGeo').addEventListener('click', () => navigator.geolocation?.getCurrentPos
 $('geocodeBtn').addEventListener('click', geocodeCity);
 $('cityState').addEventListener('keydown', e => { if(e.key === 'Enter') geocodeCity(); });
 $('enableAudioAlerts').addEventListener('click', enableAudioAlerts);
-['warningTone','speakWarnings','monitorWarnings'].forEach(id => {
+['warningTone','monitorWarnings'].forEach(id => {
   const el = $(id);
   if(el){
     const saved = localStorage.getItem('spcWarn_' + id);
@@ -972,9 +989,9 @@ loadModels();
   }
 })();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.18" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.18" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.18
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.19" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.19" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.19
 </footer>
 </body>
 </html>
