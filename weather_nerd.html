@@ -165,6 +165,13 @@
       0% { box-shadow: 0 0 0 4px rgba(239,68,68,.6); }
       100% { box-shadow: none; }
     }
+
+    /* Feature detail modal */
+    #featureModal { display: none; }
+    #featureModal.open { display: flex; }
+    .theme-light #featureModal .bg-slate-900 { background-color: #ffffff !important; }
+    .theme-hc-dark #featureModal .bg-slate-900 { background-color: #000000 !important; }
+    .theme-hc-light #featureModal .bg-slate-900 { background-color: #ffffff !important; }
   </style>
 </head>
 <body class="theme-dark min-h-screen bg-slate-950 text-slate-100">
@@ -291,6 +298,17 @@
         </section>
       </aside>
     </main>
+  </div>
+
+  <!-- Feature detail modal -->
+  <div id="featureModal" class="fixed inset-0 z-[9999] items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+    <div class="mx-auto max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 id="modalTitle" class="text-xl font-black">Feature</h2>
+        <button id="closeModal" class="rounded-xl bg-slate-800 px-3 py-1 text-xs font-bold hover:bg-slate-700">Close</button>
+      </div>
+      <div id="modalBody" class="text-sm leading-relaxed"></div>
+    </div>
   </div>
 
 <script>
@@ -426,7 +444,16 @@ function render(){
   const circle = localBuffer();
   const only = $('onlyLocal').checked;
   const addPoly = (kind, features, group) => {
-    features.filter(f => !only || intersectsLocal(f, circle)).forEach(f => L.geoJSON(f, { style: styleFor(kind, f.properties), onEachFeature:(feat, layer)=>layer.bindPopup(popup(kind, feat.properties)) }).addTo(group));
+    features.filter(f => !only || intersectsLocal(f, circle)).forEach(f => {
+      const layer = L.geoJSON(f, { style: styleFor(kind, f.properties) });
+      if(kind === 'md' || kind === 'watch'){
+        layer.on('click', () => openFeatureModal(kind === 'md' ? 'Mesoscale Discussion' : 'Watch Alert', f.properties));
+        layer.bindTooltip(popup(kind, f.properties));
+      } else {
+        layer.bindPopup(popup(kind, f.properties));
+      }
+      layer.addTo(group);
+    });
   };
   if(state.visible.outlook) addPoly('outlook', state.geo.outlook, groups.outlook);
   if(state.visible.md) addPoly('md', state.geo.md?.features || [], groups.md);
@@ -596,6 +623,23 @@ function formatAlertTime(value){
   if(!value) return "";
   try { return new Date(value).toLocaleString(); } catch { return value; }
 }
+function openFeatureModal(kind, props){
+  const modal = $('featureModal');
+  const title = $('modalTitle');
+  const body = $('modalBody');
+  title.textContent = kind;
+  const entries = Object.entries(props || {}).filter(([k,v]) => v != null && v !== '' && !/^Shape|OBJECTID|GlobalID|FID|geometry$/i.test(k));
+  const html = entries.length
+    ? entries.map(([k,v]) => `<div class="mb-2"><b class="text-slate-300">${esc(k)}:</b> <span class="text-slate-200">${typeof v === 'object' ? esc(JSON.stringify(v)) : esc(String(v)).replace(/\n/g, '<br>')}</span></div>`).join('')
+    : '<div class="text-slate-400">No detail fields available.</div>';
+  body.innerHTML = html;
+  modal.classList.add('open');
+}
+function closeFeatureModal(){ $('featureModal').classList.remove('open'); }
+$('closeModal')?.addEventListener('click', closeFeatureModal);
+$('featureModal')?.addEventListener('click', e => { if(e.target === $('featureModal')) closeFeatureModal(); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeFeatureModal(); });
+
 function visuallyEmphasizeNewWarning(warning){
   const el = $('pointWarnings');
   if(!el) return;
@@ -831,9 +875,9 @@ loadModels();
   }
 })();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.11" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.11" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.11
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.12" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.12" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.12
 </footer>
 </body>
 </html>
