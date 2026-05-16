@@ -623,16 +623,58 @@ function formatAlertTime(value){
   if(!value) return "";
   try { return new Date(value).toLocaleString(); } catch { return value; }
 }
+function fmtBlock(text){
+  if(!text) return '';
+  return esc(String(text)).replace(/\n/g, '<br>');
+}
 function openFeatureModal(kind, props){
   const modal = $('featureModal');
   const title = $('modalTitle');
   const body = $('modalBody');
   title.textContent = kind;
-  const entries = Object.entries(props || {}).filter(([k,v]) => v != null && v !== '' && !/^Shape|OBJECTID|GlobalID|FID|geometry$/i.test(k));
-  const html = entries.length
-    ? entries.map(([k,v]) => `<div class="mb-2"><b class="text-slate-300">${esc(k)}:</b> <span class="text-slate-200">${typeof v === 'object' ? esc(JSON.stringify(v)) : esc(String(v)).replace(/\n/g, '<br>')}</span></div>`).join('')
-    : '<div class="text-slate-400">No detail fields available.</div>';
-  body.innerHTML = html;
+  const p = props || {};
+  let html = '';
+  let link = '';
+
+  if(kind === 'Mesoscale Discussion'){
+    const mdNum = p.MDNUMBER || p.mdnumber || '';
+    title.textContent = mdNum ? `Mesoscale Discussion ${mdNum}` : 'Mesoscale Discussion';
+    if(mdNum){
+      const yr = new Date().getFullYear();
+      const padded = String(mdNum).padStart(4,'0');
+      link = `https://www.spc.noaa.gov/products/md/${yr}/md${padded}.html`;
+    }
+    html = [
+      p.SUMMARY ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(p.SUMMARY)}</div>` : '',
+      p.AREAS ? `<div class="mb-4 text-sm"><b class="text-slate-300">Areas affected:</b> <span class="text-slate-200">${fmtBlock(p.AREAS)}</span></div>` : '',
+      p.CONCERNING ? `<div class="mb-4 text-sm"><b class="text-slate-300">Concerning:</b> <span class="text-slate-200">${fmtBlock(p.CONCERNING)}</span></div>` : '',
+      p.DISCUSSION ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Discussion</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(p.DISCUSSION)}</div></div>` : '',
+      p.MDNUMBER ? `<div class="text-xs text-slate-500">MD Number: ${esc(p.MDNUMBER)}</div>` : ''
+    ].join('');
+  } else if(kind === 'Watch Alert'){
+    title.textContent = p.event || 'Watch Alert';
+    if(p.id && String(p.id).startsWith('https://')) link = p.id;
+    else if(p.id) link = `https://api.weather.gov/alerts/${esc(String(p.id))}`;
+    html = [
+      p.headline ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(p.headline)}</div>` : '',
+      p.areaDesc ? `<div class="mb-4 text-sm"><b class="text-slate-300">Area:</b> <span class="text-slate-200">${fmtBlock(p.areaDesc)}</span></div>` : '',
+      p.description ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Description</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(p.description)}</div></div>` : '',
+      p.instruction ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Instructions</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(p.instruction)}</div></div>` : '',
+      (p.severity || p.urgency || p.certainty) ? `<div class="mb-4 flex flex-wrap gap-3 text-xs text-slate-400">${p.severity?`<span><b>Severity:</b> ${esc(p.severity)}</span>`:''}${p.urgency?`<span><b>Urgency:</b> ${esc(p.urgency)}</span>`:''}${p.certainty?`<span><b>Certainty:</b> ${esc(p.certainty)}</span>`:''}</div>` : '',
+      (p.effective || p.expires) ? `<div class="text-xs text-slate-500">${p.effective?`<span><b>Effective:</b> ${formatAlertTime(p.effective)}</span> `:''}${p.expires?`<span><b>Expires:</b> ${formatAlertTime(p.expires)}</span>`:''}</div>` : ''
+    ].join('');
+  } else {
+    const entries = Object.entries(p).filter(([k,v]) => v != null && v !== '' && !/^Shape|OBJECTID|GlobalID|FID|geometry$/i.test(k));
+    html = entries.length
+      ? entries.map(([k,v]) => `<div class="mb-2"><b class="text-slate-300">${esc(k)}:</b> <span class="text-slate-200">${typeof v === 'object' ? esc(JSON.stringify(v)) : fmtBlock(v)}</span></div>`).join('')
+      : '<div class="text-slate-400">No detail fields available.</div>';
+  }
+
+  if(link){
+    html += `<div class="mt-6 border-t border-slate-700 pt-3 text-right"><a href="${link}" target="_blank" class="text-xs font-bold text-cyan-400 hover:text-cyan-300 underline">View official product →</a></div>`;
+  }
+
+  body.innerHTML = html || '<div class="text-slate-400">No detail fields available.</div>';
   modal.classList.add('open');
 }
 function closeFeatureModal(){ $('featureModal').classList.remove('open'); }
@@ -875,9 +917,9 @@ loadModels();
   }
 })();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.12" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.12" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.12
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.13" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.13" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.13
 </footer>
 </body>
 </html>
