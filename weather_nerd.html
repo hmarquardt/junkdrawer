@@ -445,14 +445,17 @@ function render(){
   const only = $('onlyLocal').checked;
   const addPoly = (kind, features, group) => {
     features.filter(f => !only || intersectsLocal(f, circle)).forEach(f => {
-      const layer = L.geoJSON(f, { style: styleFor(kind, f.properties) });
-      if(kind === 'md' || kind === 'watch'){
-        layer.on('click', () => openFeatureModal(kind === 'md' ? 'Mesoscale Discussion' : 'Watch Alert', f.properties).catch(()=>{}));
-        layer.bindTooltip(popup(kind, f.properties));
-      } else {
-        layer.bindPopup(popup(kind, f.properties));
-      }
-      layer.addTo(group);
+      L.geoJSON(f, {
+        style: styleFor(kind, f.properties),
+        onEachFeature: (feature, layer) => {
+          if(kind === 'md' || kind === 'watch'){
+            layer.on('click', () => openFeatureModal(kind === 'md' ? 'Mesoscale Discussion' : 'Watch Alert', feature.properties).catch(e => console.error('Modal error', e)));
+            layer.bindTooltip(popup(kind, feature.properties));
+          } else {
+            layer.bindPopup(popup(kind, feature.properties));
+          }
+        }
+      }).addTo(group);
     });
   };
   if(state.visible.outlook) addPoly('outlook', state.geo.outlook, groups.outlook);
@@ -635,7 +638,24 @@ function fmtBlock(text){
   if(!text) return '';
   return esc(String(text)).replace(/\n/g, '<br>');
 }
+function getProp(props, ...names){
+  for(const n of names){
+    if(n in props && props[n] != null && props[n] !== '') return props[n];
+    const lowerN = n.toLowerCase();
+    const key = Object.keys(props).find(k => k.toLowerCase() === lowerN);
+    if(key && props[key] != null && props[key] !== '') return props[key];
+  }
+  return '';
+}
+function allPropsHtml(props, exclude = /^Shape|OBJECTID|GlobalID|FID|geometry$/i){
+  const entries = Object.entries(props || {}).filter(([k,v]) => v != null && v !== '' && !exclude.test(k));
+  return entries.length
+    ? '<div class="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">All available fields</div>' +
+      entries.map(([k,v]) => `<div class="mb-1 text-xs"><b class="text-slate-300">${esc(k)}:</b> <span class="text-slate-400">${typeof v === 'object' ? esc(JSON.stringify(v)) : fmtBlock(v)}</span></div>`).join('')
+    : '';
+}
 async function openFeatureModal(kind, props){
+  console.log('[Modal] kind:', kind, 'props:', props);
   const modal = $('featureModal');
   const title = $('modalTitle');
   const body = $('modalBody');
@@ -644,7 +664,7 @@ async function openFeatureModal(kind, props){
   body.innerHTML = '<div class="text-slate-400">Loading product text...</div>';
 
   if(kind === 'Mesoscale Discussion'){
-    const mdNum = p.MDNUMBER || p.mdnumber || '';
+    const mdNum = getProp(p, 'MDNUMBER', 'mdnumber', 'mdNumber');
     title.textContent = mdNum ? `Mesoscale Discussion ${mdNum}` : 'Mesoscale Discussion';
     const yr = new Date().getFullYear();
     const padded = mdNum ? String(mdNum).padStart(4,'0') : '';
@@ -652,45 +672,73 @@ async function openFeatureModal(kind, props){
     const txtUrl = padded ? `https://www.spc.noaa.gov/products/md/md${padded}.txt` : '';
 
     let mdText = '';
+    let fetchErr = '';
     if(txtUrl){
+      console.log('[Modal] Fetching MD text from', txtUrl);
       try {
         const r = await fetch(txtUrl);
+        console.log('[Modal] MD fetch status:', r.status, r.ok);
         if(r.ok) mdText = await r.text();
-      } catch(e) { console.error('MD text fetch failed', e); }
+        else fetchErr = `Server returned ${r.status}`;
+      } catch(e) {
+        console.error('[Modal] MD text fetch failed', e);
+        fetchErr = e.name === 'TypeError' ? 'CORS blocked (expected for spc.noaa.gov)' : e.message;
+      }
     }
 
+    const summary = getProp(p, 'SUMMARY', 'summary', 'Summary');
+    const areas = getProp(p, 'AREAS', 'areas', 'Areas');
+    const concerning = getProp(p, 'CONCERNING', 'concerning', 'Concerning');
+    const discussion = getProp(p, 'DISCUSSION', 'discussion', 'Discussion');
+
     let html = [
-      p.SUMMARY ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(p.SUMMARY)}</div>` : '',
-      p.AREAS ? `<div class="mb-4 text-sm"><b class="text-slate-300">Areas affected:</b> <span class="text-slate-200">${fmtBlock(p.AREAS)}</span></div>` : '',
-      p.CONCERNING ? `<div class="mb-4 text-sm"><b class="text-slate-300">Concerning:</b> <span class="text-slate-200">${fmtBlock(p.CONCERNING)}</span></div>` : ''
+      summary ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(summary)}</div>` : '',
+      areas ? `<div class="mb-4 text-sm"><b class="text-slate-300">Areas affected:</b> <span class="text-slate-200">${fmtBlock(areas)}</span></div>` : '',
+      concerning ? `<div class="mb-4 text-sm"><b class="text-slate-300">Concerning:</b> <span class="text-slate-200">${fmtBlock(concerning)}</span></div>` : ''
     ].join('');
 
     if(mdText){
       html += `<div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Discussion Text</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200" style="white-space:pre-wrap;">${fmtBlock(mdText)}</div>`;
-    } else if(p.DISCUSSION){
-      html += `<div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Discussion</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(p.DISCUSSION)}</div>`;
+    } else if(discussion){
+      html += `<div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Discussion</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(discussion)}</div>`;
+    } else if(fetchErr){
+      html += `<div class="mb-4 text-xs text-amber-400">Could not load full text: ${esc(fetchErr)}. SPC does not allow cross-origin fetching of text products from browsers.</div>`;
     }
 
+    if(!html) html = allPropsHtml(p);
     if(link){
       html += `<div class="mt-6 border-t border-slate-700 pt-3 text-right"><a href="${link}" target="_blank" class="text-xs font-bold text-cyan-400 hover:text-cyan-300 underline">View official product →</a></div>`;
     }
     body.innerHTML = html || '<div class="text-slate-400">No detail fields available.</div>';
 
   } else if(kind === 'Watch Alert'){
-    title.textContent = p.event || 'Watch Alert';
+    const event = getProp(p, 'event', 'EVENT', 'Event');
+    title.textContent = event || 'Watch Alert';
     let link = '';
-    if(p.id && String(p.id).startsWith('https://')) link = p.id;
-    else if(p.id) link = `https://api.weather.gov/alerts/${esc(String(p.id))}`;
+    const idVal = getProp(p, 'id', 'ID', '@id');
+    if(idVal && String(idVal).startsWith('https://')) link = idVal;
+    else if(idVal) link = `https://api.weather.gov/alerts/${esc(String(idVal))}`;
+
+    const headline = getProp(p, 'headline', 'HEADLINE', 'Headline');
+    const areaDesc = getProp(p, 'areaDesc', 'areadesc', 'AREA_DESC', 'area_desc');
+    const description = getProp(p, 'description', 'DESCRIPTION', 'Description');
+    const instruction = getProp(p, 'instruction', 'INSTRUCTION', 'Instruction');
+    const severity = getProp(p, 'severity', 'SEVERITY', 'Severity');
+    const urgency = getProp(p, 'urgency', 'URGENCY', 'Urgency');
+    const certainty = getProp(p, 'certainty', 'CERTAINTY', 'Certainty');
+    const effective = getProp(p, 'effective', 'EFFECTIVE', 'Effective');
+    const expires = getProp(p, 'expires', 'EXPIRES', 'Expires');
 
     let html = [
-      p.headline ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(p.headline)}</div>` : '',
-      p.areaDesc ? `<div class="mb-4 text-sm"><b class="text-slate-300">Area:</b> <span class="text-slate-200">${fmtBlock(p.areaDesc)}</span></div>` : '',
-      p.description ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Description</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(p.description)}</div></div>` : '',
-      p.instruction ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Instructions</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(p.instruction)}</div></div>` : '',
-      (p.severity || p.urgency || p.certainty) ? `<div class="mb-4 flex flex-wrap gap-3 text-xs text-slate-400">${p.severity?`<span><b>Severity:</b> ${esc(p.severity)}</span>`:''}${p.urgency?`<span><b>Urgency:</b> ${esc(p.urgency)}</span>`:''}${p.certainty?`<span><b>Certainty:</b> ${esc(p.certainty)}</span>`:''}</div>` : '',
-      (p.effective || p.expires) ? `<div class="text-xs text-slate-500">${p.effective?`<span><b>Effective:</b> ${formatAlertTime(p.effective)}</span> `:''}${p.expires?`<span><b>Expires:</b> ${formatAlertTime(p.expires)}</span>`:''}</div>` : ''
+      headline ? `<div class="mb-4 text-base font-bold text-cyan-200">${fmtBlock(headline)}</div>` : '',
+      areaDesc ? `<div class="mb-4 text-sm"><b class="text-slate-300">Area:</b> <span class="text-slate-200">${fmtBlock(areaDesc)}</span></div>` : '',
+      description ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Description</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(description)}</div></div>` : '',
+      instruction ? `<div class="mb-4"><div class="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Instructions</div><div class="rounded-xl bg-slate-950 p-3 text-sm leading-relaxed text-slate-200">${fmtBlock(instruction)}</div></div>` : '',
+      (severity || urgency || certainty) ? `<div class="mb-4 flex flex-wrap gap-3 text-xs text-slate-400">${severity?`<span><b>Severity:</b> ${esc(severity)}</span>`:''}${urgency?`<span><b>Urgency:</b> ${esc(urgency)}</span>`:''}${certainty?`<span><b>Certainty:</b> ${esc(certainty)}</span>`:''}</div>` : '',
+      (effective || expires) ? `<div class="text-xs text-slate-500">${effective?`<span><b>Effective:</b> ${formatAlertTime(effective)}</span> `:''}${expires?`<span><b>Expires:</b> ${formatAlertTime(expires)}</span>`:''}</div>` : ''
     ].join('');
 
+    if(!html) html = allPropsHtml(p);
     if(link){
       html += `<div class="mt-6 border-t border-slate-700 pt-3 text-right"><a href="${link}" target="_blank" class="text-xs font-bold text-cyan-400 hover:text-cyan-300 underline">View official product →</a></div>`;
     }
@@ -698,11 +746,7 @@ async function openFeatureModal(kind, props){
 
   } else {
     title.textContent = kind;
-    const entries = Object.entries(p).filter(([k,v]) => v != null && v !== '' && !/^Shape|OBJECTID|GlobalID|FID|geometry$/i.test(k));
-    const html = entries.length
-      ? entries.map(([k,v]) => `<div class="mb-2"><b class="text-slate-300">${esc(k)}:</b> <span class="text-slate-200">${typeof v === 'object' ? esc(JSON.stringify(v)) : fmtBlock(v)}</span></div>`).join('')
-      : '<div class="text-slate-400">No detail fields available.</div>';
-    body.innerHTML = html;
+    body.innerHTML = allPropsHtml(p) || '<div class="text-slate-400">No detail fields available.</div>';
   }
 }
 function closeFeatureModal(){ $('featureModal').classList.remove('open'); }
@@ -945,9 +989,9 @@ loadModels();
   }
 })();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.15" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.15" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.15
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.16.16" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.16.16" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; SPC Storm Radar &middot; version 2026.05.16.16
 </footer>
 </body>
 </html>
