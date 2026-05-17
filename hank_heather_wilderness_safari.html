@@ -946,9 +946,9 @@ footer {
   <img class="lightbox-img" id="lightboxImg" src="" alt="Full size" />
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.17.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.17.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Hank &amp; Heather's Wilderness Safari · version 2026.05.17.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.17.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.17.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Hank &amp; Heather's Wilderness Safari · version 2026.05.17.5
 </footer>
 
 </div><!-- /#app -->
@@ -1072,6 +1072,26 @@ async function loadObservations() {
   }
 }
 
+// WMO weather code → plain-English condition
+const WMO_CODES = {
+  0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+  45: 'Fog', 48: 'Depositing rime fog',
+  51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle',
+  56: 'Light freezing drizzle', 57: 'Dense freezing drizzle',
+  61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
+  66: 'Light freezing rain', 67: 'Heavy freezing rain',
+  71: 'Slight snow', 73: 'Moderate snow', 75: 'Heavy snow',
+  77: 'Snow grains',
+  80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers',
+  85: 'Slight snow showers', 86: 'Heavy snow showers',
+  95: 'Thunderstorm',
+  96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail'
+};
+
+function wmoToText(code) {
+  return WMO_CODES[code] || '';
+}
+
 function normalizeRecords(records) {
   return (Array.isArray(records) ? records : []).map((rec, idx) => {
     const d = rec.data || rec || {};
@@ -1097,6 +1117,43 @@ function normalizeRecords(records) {
     const scientificName = d.subjectScientificName || '';
     const category = d.category || 'unknown';
 
+    // Pull weather from nested weatherRaw.current (Open-Meteo format)
+    const wr = d.weatherRaw || {};
+    const cur = wr.current || {};
+    const units = wr.current_units || {};
+    const tempUnit = (units.temperature_2m || '').toUpperCase();
+    const windUnit = (units.wind_speed_10m || '').toLowerCase();
+    const pressureUnit = (units.pressure_msl || '').toLowerCase();
+
+    let temperatureF = null;
+    let temperatureC = null;
+    if (cur.temperature_2m != null) {
+      if (tempUnit.includes('F')) temperatureF = cur.temperature_2m;
+      else temperatureC = cur.temperature_2m;
+    }
+
+    let windSpeedMph = null;
+    if (cur.wind_speed_10m != null) {
+      windSpeedMph = windUnit.includes('mp/h') || windUnit.includes('mph')
+        ? cur.wind_speed_10m
+        : cur.wind_speed_10m * 0.621371;
+    }
+
+    let pressureHpa = null;
+    let pressureInHg = null;
+    if (cur.pressure_msl != null) {
+      if (pressureUnit.includes('hpa') || pressureUnit.includes('h_pa')) {
+        pressureHpa = cur.pressure_msl;
+        pressureInHg = +(cur.pressure_msl * 0.02953).toFixed(2);
+      } else if (pressureUnit.includes('inhg')) {
+        pressureInHg = cur.pressure_msl;
+        pressureHpa = +(cur.pressure_msl / 0.02953).toFixed(1);
+      } else {
+        pressureHpa = cur.pressure_msl;
+        pressureInHg = +(cur.pressure_msl * 0.02953).toFixed(2);
+      }
+    }
+
     return {
       id: rec.id || `rec-${idx}`,
       createdAt: created,
@@ -1115,14 +1172,14 @@ function normalizeRecords(records) {
       count: d.count != null ? d.count : null,
       tags: Array.isArray(d.tags) ? d.tags.filter(Boolean) : [],
       weather: {
-        condition: d.weatherCondition || '',
-        temperatureF: d.temperatureF != null ? d.temperatureF : null,
-        temperatureC: d.temperatureC != null ? d.temperatureC : null,
-        humidityPercent: d.humidityPercent != null ? d.humidityPercent : null,
-        windSpeedMph: d.windSpeedMph != null ? d.windSpeedMph : null,
+        condition: wmoToText(cur.weather_code),
+        temperatureF,
+        temperatureC,
+        humidityPercent: cur.relative_humidity_2m != null ? cur.relative_humidity_2m : null,
+        windSpeedMph,
         windDirection: d.windDirection || '',
-        pressureHpa: d.barometricPressureHpa != null ? d.barometricPressureHpa : null,
-        pressureInHg: d.barometricPressureInHg != null ? d.barometricPressureInHg : null,
+        pressureHpa,
+        pressureInHg,
         fetchedAt: d.weatherFetchedAt || ''
       },
       files,
