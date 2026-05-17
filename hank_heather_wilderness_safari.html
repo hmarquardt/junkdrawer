@@ -1,0 +1,1547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#fff8e8">
+<title>Hank &amp; Heather's Wilderness Safari</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦁</text></svg>" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+:root {
+  --cream: #fff8e8;
+  --paper: #fffdf6;
+  --sage: #8da77b;
+  --deep-sage: #3f5d46;
+  --moss: #5f7f4f;
+  --sky: #b9d9e8;
+  --river: #5ca6c7;
+  --sun: #f2b84b;
+  --clay: #c7754d;
+  --ink: #243027;
+  --muted: #6b756b;
+  --line: rgba(36, 48, 39, 0.14);
+  --shadow-soft: 0 8px 30px rgba(36, 48, 39, 0.08);
+  --shadow-medium: 0 12px 40px rgba(36, 48, 39, 0.12);
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --font-display: 'Crimson Pro', Georgia, serif;
+  --font-body: 'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: var(--cream);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Subtle topo-like background texture */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.035;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(circle at 20% 30%, var(--sage) 0px, transparent 2px),
+    radial-gradient(circle at 60% 70%, var(--sky) 0px, transparent 2px),
+    radial-gradient(circle at 80% 20%, var(--sun) 0px, transparent 2px);
+  background-size: 120px 120px, 180px 180px, 240px 240px;
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== HERO ===== */
+.hero {
+  background: linear-gradient(135deg, var(--paper) 0%, #f5f0e4 50%, var(--cream) 100%);
+  border-bottom: 1px solid var(--line);
+  padding: 2.5rem 1.5rem 2rem;
+  position: relative;
+  overflow: hidden;
+}
+.hero::after {
+  content: '';
+  position: absolute;
+  top: -40%;
+  right: -10%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(141,167,123,0.15) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  bottom: -30%;
+  left: -5%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(92,166,199,0.12) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hero-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.hero-eyebrow {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--moss);
+  margin-bottom: 0.5rem;
+}
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.hero h1 em {
+  font-style: italic;
+  color: var(--deep-sage);
+}
+.hero-subtitle {
+  font-size: clamp(0.95rem, 1.8vw, 1.15rem);
+  color: var(--muted);
+  max-width: 680px;
+  line-height: 1.5;
+  margin: 0 0 1.5rem;
+}
+
+.stats-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.stat-chip {
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(36,48,39,0.04);
+}
+.stat-chip .stat-num {
+  font-weight: 700;
+  color: var(--deep-sage);
+}
+.stat-chip .stat-label {
+  color: var(--muted);
+}
+
+/* ===== TABS ===== */
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 1.5rem 0;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+.tab-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 0.85rem 1.25rem;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: var(--deep-sage); }
+.tab-btn.active {
+  color: var(--deep-sage);
+  border-bottom-color: var(--sage);
+}
+
+/* ===== MAIN / TABS ===== */
+main { flex: 1; padding: 1.25rem 1.5rem 2rem; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ===== FILTERS ===== */
+.filter-bar {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+.filter-group label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.filter-group input,
+.filter-group select {
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.filter-group input:focus,
+.filter-group select:focus {
+  border-color: var(--sage);
+  box-shadow: 0 0 0 3px rgba(141,167,123,0.18);
+}
+.filter-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.btn {
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+}
+.btn:hover { background: var(--cream); border-color: var(--sage); }
+.btn:active { transform: scale(0.98); }
+.btn-primary {
+  background: var(--deep-sage);
+  color: #fff;
+  border-color: var(--deep-sage);
+}
+.btn-primary:hover { background: var(--moss); border-color: var(--moss); }
+.btn-small { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
+
+/* ===== MAP LAYOUT ===== */
+.map-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 1.25rem;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .map-layout { grid-template-columns: 1fr; }
+}
+
+.map-wrap {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-medium);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,0.6);
+}
+.map-toolbar .results-count {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+#map {
+  width: 100%;
+  height: 520px;
+  background: #e8e4dc;
+}
+@media (max-width: 640px) {
+  #map { height: 380px; }
+}
+
+/* Leaflet customizations */
+.leaflet-container { font-family: var(--font-body); }
+.leaflet-popup-content-wrapper {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-medium);
+  border: 1px solid var(--line);
+}
+.leaflet-popup-content { margin: 0.75rem 1rem; font-size: 0.9rem; }
+
+/* Custom marker */
+.custom-marker {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  transition: transform 0.15s;
+  cursor: pointer;
+}
+.custom-marker:hover { transform: scale(1.15); z-index: 1000 !important; }
+
+/* Marker legend */
+.map-legend {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 1rem;
+  background: rgba(255,255,255,0.6);
+  border-top: 1px solid var(--line);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+/* ===== SIDE PANEL / DETAIL ===== */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.detail-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  padding: 1.25rem;
+  overflow-y: auto;
+  max-height: 680px;
+}
+.detail-card h3 {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  margin: 0 0 0.3rem;
+  color: var(--ink);
+}
+.detail-scientific {
+  font-style: italic;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+.detail-meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.badge.category {
+  background: var(--deep-sage);
+  color: #fff;
+  border-color: var(--deep-sage);
+}
+.badge.no-gps {
+  background: #fff3cd;
+  color: #856404;
+  border-color: #ffeaa7;
+}
+
+.weather-card {
+  background: linear-gradient(135deg, #eef6fa 0%, #f5f0e4 100%);
+  border: 1px solid rgba(92,166,199,0.25);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  margin: 0.75rem 0;
+}
+.weather-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--river);
+  margin-bottom: 0.4rem;
+}
+.weather-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.4rem;
+}
+.weather-item {
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+.weather-item span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.transcript-block {
+  background: var(--cream);
+  border-left: 3px solid var(--sage);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.transcript-block .label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+
+.detail-section {
+  margin: 0.75rem 0;
+}
+.detail-section h4 {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 0.4rem;
+}
+.detail-section p {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0;
+  color: var(--ink);
+}
+
+.tags-row {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.tag {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.resource-links {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+.resource-links a {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--deep-sage);
+  text-decoration: none;
+  font-weight: 600;
+  transition: background 0.15s, border-color 0.15s;
+}
+.resource-links a:hover {
+  background: var(--cream);
+  border-color: var(--sage);
+}
+
+/* ===== IMAGE GALLERY ===== */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.gallery-thumb {
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  background: var(--cream);
+}
+.gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s;
+}
+.gallery-thumb:hover img { transform: scale(1.08); }
+
+/* ===== LIGHTBOX ===== */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(36, 48, 39, 0.92);
+  z-index: 5000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.lightbox-overlay.active { display: flex; }
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 85vh;
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+.lightbox-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: #fff;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+}
+
+/* ===== OBSERVATIONS TAB ===== */
+.obs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.obs-header h2 {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  margin: 0;
+}
+.sort-select {
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--ink);
+}
+
+.obs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.obs-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.obs-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-medium);
+}
+.obs-card-color {
+  height: 5px;
+  flex-shrink: 0;
+}
+.obs-card-body {
+  padding: 1rem 1.15rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.obs-card-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0 0 0.15rem;
+  color: var(--ink);
+}
+.obs-card-scientific {
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+.obs-card-meta {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.obs-card-summary {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.obs-card-weather {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+.obs-card-thumb {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--line);
+  background: var(--cream);
+}
+.obs-card-actions {
+  margin-top: auto;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ===== ABOUT TAB ===== */
+.about-hero {
+  max-width: 760px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 2rem 1rem 1.5rem;
+}
+.about-hero h2 {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  margin-bottom: 0.75rem;
+}
+.about-hero p {
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.about-content {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 1rem 2rem;
+}
+.about-block {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+.about-block h3 {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  margin: 0 0 0.6rem;
+  color: var(--deep-sage);
+}
+.about-block p {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0 0 0.6rem;
+}
+.about-block p:last-child { margin-bottom: 0; }
+
+/* ===== STATES ===== */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--muted);
+}
+.empty-state-icon {
+  font-size: 3rem;
+  margin-bottom: 0.75rem;
+  opacity: 0.6;
+}
+.empty-state h3 {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  color: var(--ink);
+  margin-bottom: 0.4rem;
+}
+.empty-state p {
+  font-size: 0.95rem;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.error-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--ink);
+}
+.error-state h3 {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  color: var(--clay);
+  margin-bottom: 0.5rem;
+}
+.error-state p {
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+/* ===== LOADING ===== */
+.loading-wrap {
+  text-align: center;
+  padding: 4rem 1rem;
+}
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--line);
+  border-top-color: var(--sage);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 1rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== FOOTER ===== */
+footer {
+  margin: 2rem auto 1rem;
+  padding: 1rem;
+  text-align: center;
+  color: rgba(148, 163, 184, 0.88);
+  font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 640px) {
+  .hero { padding: 1.5rem 1rem 1.25rem; }
+  .filter-bar { padding: 0.75rem; }
+  .filter-group { flex: 1 1 100%; }
+  .obs-grid { grid-template-columns: 1fr; }
+  main { padding: 1rem; }
+  .detail-card { max-height: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- Hero -->
+<header class="hero">
+  <div class="hero-inner">
+    <div class="hero-eyebrow">Field Journal</div>
+    <h1>Hank &amp; Heather's <em>Wilderness Safari</em></h1>
+    <p class="hero-subtitle">A living map of the birds, beasts, reptiles, bugs, oddities, and glorious “what the hell was that?” moments we’ve found along the way.</p>
+    <div class="stats-row" id="statsRow">
+      <div class="stat-chip"><span class="stat-num" id="statTotal">—</span><span class="stat-label">observations</span></div>
+      <div class="stat-chip"><span class="stat-num" id="statMapped">—</span><span class="stat-label">mapped</span></div>
+      <div class="stat-chip"><span class="stat-num" id="statSpecies">—</span><span class="stat-label">species</span></div>
+      <div class="stat-chip"><span class="stat-num" id="statCategories">—</span><span class="stat-label">categories</span></div>
+      <div class="stat-chip"><span class="stat-num" id="statRange">—</span><span class="stat-label">date range</span></div>
+    </div>
+  </div>
+</header>
+
+<!-- Tabs -->
+<nav class="tab-bar" role="tablist" aria-label="Safari sections">
+  <button class="tab-btn active" role="tab" aria-selected="true" data-tab="map" onclick="switchTab('map')">🗺️ Safari Map</button>
+  <button class="tab-btn" role="tab" aria-selected="false" data-tab="observations" onclick="switchTab('observations')">📓 Observations</button>
+  <button class="tab-btn" role="tab" aria-selected="false" data-tab="about" onclick="switchTab('about')">🌿 About</button>
+</nav>
+
+<main>
+  <!-- Safari Map Tab -->
+  <section id="tab-map" class="tab-panel active" role="tabpanel" aria-label="Safari Map">
+    <div class="filter-bar" id="mapFilters">
+      <div class="filter-group">
+        <label for="filterDate">Date</label>
+        <select id="filterDate"><option value="">All dates</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="filterCategory">Animal Type</label>
+        <select id="filterCategory"><option value="">All animal types</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="filterSpecies">Species</label>
+        <select id="filterSpecies"><option value="">All species</option></select>
+      </div>
+      <div class="filter-group" style="flex: 2 1 220px;">
+        <label for="filterSearch">Search</label>
+        <input type="text" id="filterSearch" placeholder="Name, transcript, behavior, habitat, tags..." />
+      </div>
+      <div class="filter-actions">
+        <button class="btn btn-primary" onclick="resetFilters()">Reset</button>
+      </div>
+    </div>
+
+    <div class="map-layout">
+      <div class="map-wrap">
+        <div class="map-toolbar">
+          <span class="results-count" id="mapResultsCount">Loading observations...</span>
+          <button class="btn btn-small" onclick="fitToVisible()">Fit visible points</button>
+        </div>
+        <div id="map"></div>
+        <div class="map-legend" id="mapLegend"></div>
+      </div>
+      <div class="side-panel" id="sidePanel">
+        <div class="detail-card" id="detailCard">
+          <div class="empty-state">
+            <div class="empty-state-icon">🗺️</div>
+            <h3>Welcome to the Safari</h3>
+            <p>Click any marker on the map to see the full story of that sighting.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Observations Tab -->
+  <section id="tab-observations" class="tab-panel" role="tabpanel" aria-label="Observations">
+    <div class="filter-bar" id="obsFilters">
+      <div class="filter-group">
+        <label for="obsFilterDate">Date</label>
+        <select id="obsFilterDate"><option value="">All dates</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="obsFilterCategory">Animal Type</label>
+        <select id="obsFilterCategory"><option value="">All animal types</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="obsFilterSpecies">Species</label>
+        <select id="obsFilterSpecies"><option value="">All species</option></select>
+      </div>
+      <div class="filter-group" style="flex: 2 1 220px;">
+        <label for="obsFilterSearch">Search</label>
+        <input type="text" id="obsFilterSearch" placeholder="Name, transcript, behavior, habitat, tags..." />
+      </div>
+      <div class="filter-actions">
+        <button class="btn btn-primary" onclick="resetFilters()">Reset</button>
+      </div>
+    </div>
+
+    <div class="obs-header">
+      <h2>Observation Journal</h2>
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <label for="obsSort" style="font-size:0.8rem;color:var(--muted);">Sort:</label>
+        <select id="obsSort" class="sort-select" onchange="renderObservations()">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="species">Species A-Z</option>
+          <option value="category">Category</option>
+        </select>
+      </div>
+    </div>
+    <div id="observationsList"></div>
+  </section>
+
+  <!-- About Tab -->
+  <section id="tab-about" class="tab-panel" role="tabpanel" aria-label="About">
+    <div class="about-hero">
+      <h2>About the Safari</h2>
+      <p>A living field journal built from the road, the trail, the lake edge, and the quiet moments when something wild appears.</p>
+    </div>
+    <div class="about-content">
+      <div class="about-block">
+        <h3>What is this?</h3>
+        <p>Hank &amp; Heather's Wilderness Safari is our living field journal — a map of the places we’ve wandered, driven, hiked, paused, squinted into the brush, and said, “Wait… what was that?”</p>
+        <p>Some of these sightings are close to home. Some come from trips farther out. Together they tell the story of two curious people following birdsong, turtle crossings, muddy tracks, strange calls, roadside surprises, lake edges, river bottoms, and the small wild moments that usually vanish unless you stop long enough to notice them.</p>
+        <p>This page ignores the formal trip structure and focuses on the animals themselves: what we saw, where we saw it, what we said into the recorder, what the weather was doing, and any photos we captured along the way. It is part map, part scrapbook, part nature log, and part excuse to keep going outside.</p>
+      </div>
+      <div class="about-block">
+        <h3>What counts as Safari?</h3>
+        <p>Birds count. Turtles count. Snakes absolutely count. Weird bugs count. Mystery noises count provisionally. Anything that makes us stop the car, grab the camera, or argue lovingly about identification probably counts.</p>
+      </div>
+      <div class="about-block">
+        <h3>Privacy &amp; Data</h3>
+        <p>This page is read-only and public-facing. It displays observation records from the wildlife field recorder, but does not allow edits, uploads, deletes, or administrative changes.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Lightbox -->
+<div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox(event)">×</button>
+  <img class="lightbox-img" id="lightboxImg" src="" alt="Full size" />
+</div>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.17.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.17.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Hank &amp; Heather's Wilderness Safari · version 2026.05.17.3
+</footer>
+
+</div><!-- /#app -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+/* ================================================================
+   HANK & HEATHER'S WILDERNESS SAFARI
+   Public read-only wildlife observation map
+   ================================================================ */
+
+const API_BASE = 'https://lab.aismallbizguru.com/api';
+const APP_ID = 'wildlife-field-recorder';
+const READONLY_TOKEN = '-xtFBTyS4DUcWXongsYDLOo2Ul74WoPIjIQNFFHAZBI';
+
+// --- Category styles ---
+const CATEGORY_STYLES = {
+  bird:        { color: '#2f80ed', icon: '🐦', label: 'Birds' },
+  mammal:      { color: '#8b5e34', icon: '🦌', label: 'Mammals' },
+  reptile:     { color: '#4f8f45', icon: '🐢', label: 'Reptiles' },
+  amphibian:   { color: '#2a9d8f', icon: '🐸', label: 'Amphibians' },
+  insect:      { color: '#f2a900', icon: '🦋', label: 'Insects' },
+  arachnid:    { color: '#7b3f98', icon: '🕷️', label: 'Arachnids' },
+  fish:        { color: '#168aad', icon: '🐟', label: 'Fish' },
+  plant:       { color: '#6a994e', icon: '🌿', label: 'Plants' },
+  unknown:     { color: '#6c757d', icon: '❓', label: 'Unknown' },
+  other:       { color: '#c7754d', icon: '✦', label: 'Other' }
+};
+
+function getCategoryStyle(cat) {
+  const key = (cat || '').toString().toLowerCase().trim();
+  return CATEGORY_STYLES[key] || CATEGORY_STYLES.unknown;
+}
+
+// --- State ---
+let allObservations = [];
+let filteredObservations = [];
+let map = null;
+let markerClusterGroup = null;
+let selectedId = null;
+let searchDebounce = null;
+
+// --- Init ---
+document.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  loadObservations();
+  wireFilters();
+  buildLegend();
+});
+
+// --- Map ---
+function initMap() {
+  // Default to southern Indiana if no data
+  map = L.map('map', { zoomControl: false });
+  L.control.zoom({ position: 'topright' }).addTo(map);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  map.setView([38.3, -87.0], 7);
+
+  markerClusterGroup = L.markerClusterGroup({
+    maxClusterRadius: 50,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    iconCreateFunction: cluster => {
+      const count = cluster.getChildCount();
+      let size = 36;
+      let fontSize = '14px';
+      if (count > 100) { size = 48; fontSize = '16px'; }
+      else if (count > 20) { size = 42; fontSize = '15px'; }
+      return L.divIcon({
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:var(--deep-sage);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:${fontSize};border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,0.22);">${count}</div>`,
+        className: '',
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2]
+      });
+    }
+  });
+  map.addLayer(markerClusterGroup);
+}
+
+// --- Data Loading ---
+async function loadObservations() {
+  const listEl = document.getElementById('observationsList');
+  listEl.innerHTML = `<div class="loading-wrap"><div class="spinner"></div><p>Loading safari data...</p></div>`;
+
+  try {
+    const response = await fetch(`${API_BASE}/${APP_ID}/observations`, {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + READONLY_TOKEN }
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    const records = payload.records || payload.data || payload || [];
+    allObservations = normalizeRecords(records);
+    filteredObservations = allObservations.slice();
+    populateFilters();
+    updateStats();
+    renderMarkers();
+    renderObservations();
+    updateResultsCount();
+  } catch (err) {
+    console.error(err);
+    const errorHtml = `
+      <div class="error-state">
+        <h3>🌿 Safari data could not be loaded right now.</h3>
+        <p>${err.message ? `Status: ${err.message}` : 'Please check your connection and try again.'}</p>
+        <button class="btn btn-primary" onclick="loadObservations()">Retry</button>
+      </div>`;
+    listEl.innerHTML = errorHtml;
+    document.getElementById('mapResultsCount').textContent = 'Failed to load data';
+    document.getElementById('detailCard').innerHTML = errorHtml;
+  }
+}
+
+function normalizeRecords(records) {
+  return (Array.isArray(records) ? records : []).map((rec, idx) => {
+    const d = rec.data || rec || {};
+    const files = rec.files || [];
+    const photos = [];
+    const audio = [];
+    (files || []).forEach(f => {
+      const mime = (f.content_type || f.mimeType || f.type || '').toLowerCase();
+      if (mime.startsWith('image/')) photos.push(f);
+      else if (mime.startsWith('audio/')) audio.push(f);
+    });
+    // If data.photo_url exists, push as synthetic photo
+    if (d.photo_url) {
+      photos.push({ url: d.photo_url, mimeType: 'image/jpeg', name: 'photo' });
+    }
+
+    const lat = parseFloat(d.latitude);
+    const lng = parseFloat(d.longitude);
+    const hasGPS = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+    const created = d.createdAt ? new Date(d.createdAt) : new Date();
+
+    const commonName = d.subjectCommonName || '';
+    const scientificName = d.subjectScientificName || '';
+    const category = d.category || 'unknown';
+
+    return {
+      id: rec.id || `rec-${idx}`,
+      createdAt: created,
+      dateKey: fmtDateKey(created),
+      dateDisplay: fmtDateDisplay(created),
+      lat: hasGPS ? lat : null,
+      lng: hasGPS ? lng : null,
+      hasGPS,
+      commonName: commonName || scientificName || 'Unknown species',
+      scientificName: scientificName || '',
+      category,
+      transcript: d.transcript || '',
+      summary: d.summary || '',
+      behavior: d.behavior || '',
+      habitat: d.habitat || '',
+      count: d.count != null ? d.count : null,
+      tags: Array.isArray(d.tags) ? d.tags.filter(Boolean) : [],
+      weather: {
+        condition: d.weatherCondition || '',
+        temperatureF: d.temperatureF != null ? d.temperatureF : null,
+        temperatureC: d.temperatureC != null ? d.temperatureC : null,
+        humidityPercent: d.humidityPercent != null ? d.humidityPercent : null,
+        windSpeedMph: d.windSpeedMph != null ? d.windSpeedMph : null,
+        windDirection: d.windDirection || '',
+        pressureHpa: d.barometricPressureHpa != null ? d.barometricPressureHpa : null,
+        pressureInHg: d.barometricPressureInHg != null ? d.barometricPressureInHg : null,
+        fetchedAt: d.weatherFetchedAt || ''
+      },
+      files,
+      photos,
+      audio,
+      resourceLinks: []
+    };
+  }).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function fmtDateKey(d) {
+  if (!d || isNaN(d)) return '';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+function fmtDateDisplay(d) {
+  if (!d || isNaN(d)) return '';
+  return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// --- Filters ---
+function populateFilters() {
+  const dates = [...new Set(allObservations.map(o => o.dateKey).filter(Boolean))].sort();
+  const categories = [...new Set(allObservations.map(o => o.category).filter(Boolean))].sort();
+  const species = [...new Set(allObservations.map(o => o.commonName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+  const setOpts = (selId, items) => {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = `<option value="">${sel.options[0]?.text || 'All'}</option>`;
+    items.forEach(item => {
+      const opt = document.createElement('option');
+      opt.value = item;
+      opt.textContent = item;
+      sel.appendChild(opt);
+    });
+    sel.value = current;
+  };
+
+  setOpts('filterDate', dates);
+  setOpts('filterCategory', categories);
+  setOpts('filterSpecies', species);
+  setOpts('obsFilterDate', dates);
+  setOpts('obsFilterCategory', categories);
+  setOpts('obsFilterSpecies', species);
+}
+
+function wireFilters() {
+  const ids = ['filterDate','filterCategory','filterSpecies','filterSearch','obsFilterDate','obsFilterCategory','obsFilterSpecies','obsFilterSearch'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      if (searchDebounce) clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        syncFiltersFrom(id);
+        applyFilters();
+      }, id.includes('Search') ? 250 : 0);
+    });
+    el.addEventListener('change', () => {
+      syncFiltersFrom(id);
+      applyFilters();
+    });
+  });
+}
+
+function syncFiltersFrom(changedId) {
+  const mapToObs = {
+    filterDate: 'obsFilterDate',
+    filterCategory: 'obsFilterCategory',
+    filterSpecies: 'obsFilterSpecies',
+    filterSearch: 'obsFilterSearch'
+  };
+  const obsToMap = {
+    obsFilterDate: 'filterDate',
+    obsFilterCategory: 'filterCategory',
+    obsFilterSpecies: 'filterSpecies',
+    obsFilterSearch: 'filterSearch'
+  };
+  const targetId = mapToObs[changedId] || obsToMap[changedId];
+  if (targetId) {
+    document.getElementById(targetId).value = document.getElementById(changedId).value;
+  }
+}
+
+function applyFilters() {
+  const date = document.getElementById('filterDate').value;
+  const category = document.getElementById('filterCategory').value;
+  const species = document.getElementById('filterSpecies').value;
+  const search = document.getElementById('filterSearch').value.trim().toLowerCase();
+
+  filteredObservations = allObservations.filter(o => {
+    if (date && o.dateKey !== date) return false;
+    if (category && o.category !== category) return false;
+    if (species && o.commonName !== species) return false;
+    if (search) {
+      const hay = [
+        o.commonName,
+        o.scientificName,
+        o.transcript,
+        o.summary,
+        o.behavior,
+        o.habitat,
+        ...(o.tags || [])
+      ].join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  updateStats();
+  renderMarkers();
+  renderObservations();
+  updateResultsCount();
+}
+
+function resetFilters() {
+  ['filterDate','filterCategory','filterSpecies','filterSearch','obsFilterDate','obsFilterCategory','obsFilterSpecies','obsFilterSearch'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  applyFilters();
+}
+
+function updateResultsCount() {
+  const count = filteredObservations.length;
+  const total = allObservations.length;
+  const mapped = filteredObservations.filter(o => o.hasGPS).length;
+  document.getElementById('mapResultsCount').textContent =
+    total === 0 ? 'Loading observations...' : `${count} visible · ${mapped} on map · ${total} total`;
+}
+
+// --- Stats ---
+function updateStats() {
+  const obs = filteredObservations;
+  const total = obs.length;
+  const mapped = obs.filter(o => o.hasGPS).length;
+  const speciesSet = new Set(obs.map(o => o.commonName).filter(Boolean));
+  const catSet = new Set(obs.map(o => o.category).filter(Boolean));
+  const dates = obs.map(o => o.createdAt).filter(d => d && !isNaN(d));
+  const first = dates.length ? new Date(Math.min(...dates)) : null;
+  const latest = dates.length ? new Date(Math.max(...dates)) : null;
+
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statMapped').textContent = mapped;
+  document.getElementById('statSpecies').textContent = speciesSet.size;
+  document.getElementById('statCategories').textContent = catSet.size;
+  document.getElementById('statRange').textContent = (first && latest)
+    ? `${fmtDateKey(first)} – ${fmtDateKey(latest)}`
+    : '—';
+}
+
+// --- Map Markers ---
+function renderMarkers() {
+  markerClusterGroup.clearLayers();
+  const mappable = filteredObservations.filter(o => o.hasGPS);
+
+  if (mappable.length === 0) return;
+
+  mappable.forEach(obs => {
+    const style = getCategoryStyle(obs.category);
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="custom-marker" style="background:${style.color};" title="${escapeHtml(obs.commonName)}">${style.icon}</div>`,
+      iconSize: [36, 36],
+      iconAnchor: [18, 18]
+    });
+    const marker = L.marker([obs.lat, obs.lng], { icon });
+    marker.on('click', () => selectObservation(obs.id));
+    marker.obsId = obs.id;
+    markerClusterGroup.addLayer(marker);
+  });
+
+  // Fit bounds unless user just clicked something
+  if (!selectedId) {
+    fitToVisible();
+  }
+}
+
+function fitToVisible() {
+  const mappable = filteredObservations.filter(o => o.hasGPS);
+  if (mappable.length === 0) {
+    map.setView([38.3, -87.0], 7);
+    return;
+  }
+  if (mappable.length === 1) {
+    map.setView([mappable[0].lat, mappable[0].lng], 14);
+    return;
+  }
+  const group = new L.featureGroup();
+  mappable.forEach(o => group.addLayer(L.marker([o.lat, o.lng])));
+  map.fitBounds(group.getBounds().pad(0.15));
+}
+
+function selectObservation(id) {
+  selectedId = id;
+  const obs = filteredObservations.find(o => o.id === id) || allObservations.find(o => o.id === id);
+  if (!obs) return;
+  renderDetail(obs);
+  if (obs.hasGPS) {
+    map.setView([obs.lat, obs.lng], 15);
+  }
+}
+
+function renderDetail(obs) {
+  const style = getCategoryStyle(obs.category);
+  const weatherHtml = buildWeatherHtml(obs.weather);
+  const transcriptHtml = obs.transcript
+    ? `<div class="transcript-block"><div class="label">Transcript</div>${escapeHtml(obs.transcript)}</div>`
+    : '';
+  const summaryHtml = obs.summary
+    ? `<div class="detail-section"><h4>Summary</h4><p>${escapeHtml(obs.summary)}</p></div>`
+    : '';
+  const noteHtml = obs.userNoteText
+    ? `<div class="detail-section"><h4>Field Note</h4><p>${escapeHtml(obs.userNoteText)}</p></div>`
+    : '';
+  const behaviorHtml = obs.behavior
+    ? `<div class="detail-section"><h4>Behavior</h4><p>${escapeHtml(obs.behavior)}</p></div>`
+    : '';
+  const habitatHtml = obs.habitat
+    ? `<div class="detail-section"><h4>Habitat</h4><p>${escapeHtml(obs.habitat)}</p></div>`
+    : '';
+  const countHtml = obs.count != null
+    ? `<span class="badge">Count: ${obs.count}</span>`
+    : '';
+  const gpsBadge = obs.hasGPS
+    ? ''
+    : `<span class="badge no-gps">No GPS</span>`;
+
+  const galleryHtml = buildGalleryHtml(obs.photos);
+  const tagsHtml = obs.tags.length
+    ? `<div class="tags-row">${obs.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>`
+    : '';
+
+  const queryName = encodeURIComponent(obs.scientificName || obs.commonName);
+  const linksHtml = `
+    <div class="resource-links">
+      <a href="https://en.wikipedia.org/wiki/Special:Search?search=${queryName}" target="_blank" rel="noopener noreferrer">Wikipedia</a>
+      <a href="https://www.inaturalist.org/search?q=${queryName}" target="_blank" rel="noopener noreferrer">iNaturalist</a>
+      <a href="https://www.gbif.org/species/search?q=${queryName}" target="_blank" rel="noopener noreferrer">GBIF</a>
+      ${obs.category === 'bird' ? `<a href="https://ebird.org/species?search=${queryName}" target="_blank" rel="noopener noreferrer">eBird</a>` : ''}
+      <a href="https://www.google.com/search?tbm=isch&q=${queryName}" target="_blank" rel="noopener noreferrer">Images</a>
+    </div>
+  `;
+
+  document.getElementById('detailCard').innerHTML = `
+    <h3>${escapeHtml(obs.commonName)}</h3>
+    ${obs.scientificName ? `<div class="detail-scientific">${escapeHtml(obs.scientificName)}</div>` : ''}
+    <div class="detail-meta">
+      <span class="badge category" style="background:${style.color};border-color:${style.color};">${style.icon} ${style.label}</span>
+      <span class="badge">${obs.dateDisplay}</span>
+      ${countHtml}
+      ${gpsBadge}
+    </div>
+    ${weatherHtml}
+    ${summaryHtml}
+    ${transcriptHtml}
+    ${noteHtml}
+    ${behaviorHtml}
+    ${habitatHtml}
+    ${tagsHtml}
+    ${galleryHtml}
+    ${linksHtml}
+  `;
+}
+
+function buildWeatherHtml(w) {
+  const hasAny = w.condition || w.temperatureF != null || w.temperatureC != null || w.humidityPercent != null || w.windSpeedMph != null || w.windDirection || w.pressureInHg != null || w.pressureHpa != null;
+  if (!hasAny) {
+    return `<div class="weather-card" style="background:#f8f6f0;border-color:var(--line);"><div class="weather-title">Weather</div><p style="margin:0;font-size:0.85rem;color:var(--muted);">Weather not recorded</p></div>`;
+  }
+  const temp = w.temperatureF != null ? `${w.temperatureF}°F` : (w.temperatureC != null ? `${w.temperatureC}°C` : null);
+  const humidity = w.humidityPercent != null ? `${w.humidityPercent}% humidity` : null;
+  const wind = w.windSpeedMph != null ? `Wind: ${w.windSpeedMph} mph${w.windDirection ? ' ' + w.windDirection : ''}` : null;
+  const pressure = w.pressureInHg != null ? `Pressure: ${w.pressureInHg} inHg` : (w.pressureHpa != null ? `Pressure: ${w.pressureHpa} hPa` : null);
+
+  const items = [
+    w.condition ? { label: 'Conditions', val: w.condition, icon: '🌤' } : null,
+    temp ? { label: 'Temperature', val: temp, icon: '🌡' } : null,
+    humidity ? { label: 'Humidity', val: humidity, icon: '💧' } : null,
+    wind ? { label: 'Wind', val: wind, icon: '🌬' } : null,
+    pressure ? { label: 'Pressure', val: pressure, icon: '📈' } : null
+  ].filter(Boolean);
+
+  const grid = items.map(it => `<div class="weather-item">${it.icon} ${it.val}<br/><span>${it.label}</span></div>`).join('');
+  return `<div class="weather-card"><div class="weather-title">Weather at sighting</div><div class="weather-grid">${grid}</div></div>`;
+}
+
+function buildGalleryHtml(photos) {
+  if (!photos || photos.length === 0) return '';
+  const thumbs = photos.map((p, i) => {
+    const url = p.url || p.previewUrl || p.thumbnailUrl || '';
+    if (!url) return '';
+    return `<div class="gallery-thumb" onclick="openLightbox('${escapeHtml(url)}')"><img src="${escapeHtml(url)}" alt="Photo ${i+1}" loading="lazy" /></div>`;
+  }).filter(Boolean).join('');
+  return `<div class="detail-section"><h4>Photos</h4><div class="gallery">${thumbs}</div></div>`;
+}
+
+function openLightbox(url) {
+  const lb = document.getElementById('lightbox');
+  document.getElementById('lightboxImg').src = url;
+  lb.classList.add('active');
+}
+function closeLightbox(e) {
+  if (e) e.stopPropagation();
+  document.getElementById('lightbox').classList.remove('active');
+}
+
+// --- Observations List ---
+function renderObservations() {
+  const container = document.getElementById('observationsList');
+  const sort = document.getElementById('obsSort').value;
+  let list = filteredObservations.slice();
+
+  if (sort === 'newest') list.sort((a, b) => b.createdAt - a.createdAt);
+  else if (sort === 'oldest') list.sort((a, b) => a.createdAt - b.createdAt);
+  else if (sort === 'species') list.sort((a, b) => a.commonName.localeCompare(b.commonName));
+  else if (sort === 'category') list.sort((a, b) => a.category.localeCompare(b.category));
+
+  if (list.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">🍃</div>
+        <h3>No observations match</h3>
+        <p>Try adjusting your filters to see more results.</p>
+      </div>`;
+    return;
+  }
+
+  const cards = list.map(obs => {
+    const style = getCategoryStyle(obs.category);
+    const summary = obs.summary || obs.transcript || '';
+    const excerpt = summary.length > 160 ? summary.slice(0, 160) + '…' : summary;
+    const weatherText = buildObsWeatherLine(obs.weather);
+    const thumb = obs.photos && obs.photos[0]
+      ? `<img class="obs-card-thumb" src="${escapeHtml(obs.photos[0].url || obs.photos[0].previewUrl || obs.photos[0].thumbnailUrl || '')}" alt="" loading="lazy" />`
+      : '';
+    const tagsHtml = obs.tags.length
+      ? `<div class="tags-row">${obs.tags.slice(0, 4).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${obs.tags.length > 4 ? '<span class="tag">+' + (obs.tags.length - 4) + '</span>' : ''}</div>`
+      : '';
+    const gpsBadge = obs.hasGPS ? '' : '<span class="badge no-gps">No GPS</span>';
+
+    return `
+      <div class="obs-card">
+        <div class="obs-card-color" style="background:${style.color};"></div>
+        <div class="obs-card-body">
+          ${thumb}
+          <div class="obs-card-title">${escapeHtml(obs.commonName)}</div>
+          ${obs.scientificName ? `<div class="obs-card-scientific">${escapeHtml(obs.scientificName)}</div>` : ''}
+          <div class="obs-card-meta">
+            <span class="badge category" style="background:${style.color};border-color:${style.color};">${style.icon} ${style.label}</span>
+            <span class="badge">${obs.dateDisplay}</span>
+            ${gpsBadge}
+          </div>
+          ${excerpt ? `<div class="obs-card-summary">${escapeHtml(excerpt)}</div>` : ''}
+          ${weatherText ? `<div class="obs-card-weather">${weatherText}</div>` : ''}
+          ${tagsHtml}
+          <div class="obs-card-actions">
+            <button class="btn btn-primary btn-small" onclick="showOnMap('${obs.id}')">Show on map</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = `<div class="obs-grid">${cards}</div>`;
+}
+
+function buildObsWeatherLine(w) {
+  const parts = [];
+  if (w.condition) parts.push(w.condition);
+  if (w.temperatureF != null) parts.push(`${w.temperatureF}°F`);
+  else if (w.temperatureC != null) parts.push(`${w.temperatureC}°C`);
+  if (w.humidityPercent != null) parts.push(`${w.humidityPercent}% humidity`);
+  if (parts.length === 0) return '';
+  return '🌤 ' + parts.join(' · ');
+}
+
+function showOnMap(id) {
+  switchTab('map');
+  // Ensure the observation is in current filtered set; if not, reset filters
+  const inFiltered = filteredObservations.some(o => o.id === id);
+  if (!inFiltered) {
+    resetFilters();
+  }
+  selectObservation(id);
+}
+
+// --- Legend ---
+function buildLegend() {
+  const items = Object.entries(CATEGORY_STYLES).map(([key, st]) => `
+    <div class="legend-item">
+      <span class="legend-dot" style="background:${st.color};"></span>
+      <span>${st.icon} ${st.label}</span>
+    </div>
+  `).join('');
+  document.getElementById('mapLegend').innerHTML = items;
+}
+
+// --- Tabs ---
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === name);
+    b.setAttribute('aria-selected', b.dataset.tab === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.toggle('active', p.id === 'tab-' + name);
+  });
+  if (name === 'map' && map) {
+    setTimeout(() => map.invalidateSize(), 200);
+  }
+}
+
+// --- Utilities ---
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>
