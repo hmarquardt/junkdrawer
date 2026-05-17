@@ -946,9 +946,9 @@ footer {
   <img class="lightbox-img" id="lightboxImg" src="" alt="Full size" />
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.17.3" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.17.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Hank &amp; Heather's Wilderness Safari · version 2026.05.17.3
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.17.4" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.17.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Hank &amp; Heather's Wilderness Safari · version 2026.05.17.4
 </footer>
 
 </div><!-- /#app -->
@@ -991,6 +991,8 @@ let map = null;
 let markerClusterGroup = null;
 let selectedId = null;
 let searchDebounce = null;
+const markersById = {};
+const imageCache = new Map();
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -1276,6 +1278,7 @@ function updateStats() {
 // --- Map Markers ---
 function renderMarkers() {
   markerClusterGroup.clearLayers();
+  Object.keys(markersById).forEach(k => delete markersById[k]);
   const mappable = filteredObservations.filter(o => o.hasGPS);
 
   if (mappable.length === 0) return;
@@ -1289,8 +1292,14 @@ function renderMarkers() {
       iconAnchor: [18, 18]
     });
     const marker = L.marker([obs.lat, obs.lng], { icon });
+    marker.bindPopup(buildMarkerPopup(obs), {
+      closeButton: true,
+      className: 'obs-popup',
+      offset: [0, -10]
+    });
     marker.on('click', () => selectObservation(obs.id));
     marker.obsId = obs.id;
+    markersById[obs.id] = marker;
     markerClusterGroup.addLayer(marker);
   });
 
@@ -1298,6 +1307,25 @@ function renderMarkers() {
   if (!selectedId) {
     fitToVisible();
   }
+}
+
+function buildMarkerPopup(obs) {
+  const style = getCategoryStyle(obs.category);
+  const excerpt = obs.summary
+    ? (obs.summary.length > 100 ? obs.summary.slice(0, 100) + '…' : obs.summary)
+    : (obs.transcript ? (obs.transcript.length > 100 ? obs.transcript.slice(0, 100) + '…' : obs.transcript) : '');
+  return `
+    <div style="min-width:200px;max-width:280px;font-family:var(--font-body);">
+      <div style="font-family:var(--font-display);font-size:1.05rem;font-weight:700;margin-bottom:0.2rem;color:var(--ink);">${escapeHtml(obs.commonName)}</div>
+      ${obs.scientificName ? `<div style="font-style:italic;color:var(--muted);font-size:0.82rem;margin-bottom:0.4rem;">${escapeHtml(obs.scientificName)}</div>` : ''}
+      <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.5rem;">
+        <span style="font-size:0.72rem;padding:0.2rem 0.55rem;border-radius:999px;background:${style.color};color:#fff;font-weight:600;">${style.icon} ${style.label}</span>
+        <span style="font-size:0.72rem;padding:0.2rem 0.55rem;border-radius:999px;background:var(--cream);border:1px solid var(--line);color:var(--muted);">${obs.dateDisplay}</span>
+      </div>
+      ${excerpt ? `<div style="font-size:0.85rem;color:var(--ink);line-height:1.4;margin-bottom:0.5rem;">${escapeHtml(excerpt)}</div>` : ''}
+      <div style="font-size:0.8rem;color:var(--river);font-weight:700;cursor:pointer;text-align:right;">Click for full details →</div>
+    </div>
+  `;
 }
 
 function fitToVisible() {
@@ -1321,7 +1349,17 @@ function selectObservation(id) {
   if (!obs) return;
   renderDetail(obs);
   if (obs.hasGPS) {
-    map.setView([obs.lat, obs.lng], 15);
+    const marker = markersById[id];
+    if (marker && markerClusterGroup.hasLayer(marker)) {
+      markerClusterGroup.zoomToShowLayer(marker, () => {
+        marker.openPopup();
+      });
+    } else if (marker) {
+      map.setView([obs.lat, obs.lng], 15);
+      marker.openPopup();
+    } else {
+      map.setView([obs.lat, obs.lng], 15);
+    }
   }
 }
 
@@ -1409,20 +1447,64 @@ function buildWeatherHtml(w) {
   return `<div class="weather-card"><div class="weather-title">Weather at sighting</div><div class="weather-grid">${grid}</div></div>`;
 }
 
+async function fetchImageWithToken(url) {
+  if (imageCache.has(url)) return imageCache.get(url);
+  try {
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + READONLY_TOKEN } });
+    if (!res.ok) throw new Error('Image fetch failed: ' + res.status);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    imageCache.set(url, blobUrl);
+    return blobUrl;
+  } catch (e) {
+    console.warn('Failed to load image:', url, e);
+    return url;
+  }
+}
+
 function buildGalleryHtml(photos) {
   if (!photos || photos.length === 0) return '';
+  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const thumbs = photos.map((p, i) => {
-    const url = p.url || p.previewUrl || p.thumbnailUrl || '';
+    const url = p.url || p.download_url || p.previewUrl || p.thumbnailUrl || '';
     if (!url) return '';
-    return `<div class="gallery-thumb" onclick="openLightbox('${escapeHtml(url)}')"><img src="${escapeHtml(url)}" alt="Photo ${i+1}" loading="lazy" /></div>`;
+    return `<div class="gallery-thumb" data-img-url="${escapeHtml(url)}" onclick="openLightbox('${escapeHtml(url)}')"><img src="${placeholder}" alt="Photo ${i+1}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" /></div>`;
   }).filter(Boolean).join('');
+  if (!thumbs) return '';
+  setTimeout(() => loadGalleryImages(), 0);
   return `<div class="detail-section"><h4>Photos</h4><div class="gallery">${thumbs}</div></div>`;
+}
+
+function loadGalleryImages() {
+  document.querySelectorAll('.gallery-thumb[data-img-url]').forEach(el => {
+    const url = el.dataset.imgUrl;
+    fetchImageWithToken(url).then(blobUrl => {
+      const img = el.querySelector('img');
+      if (img) img.src = blobUrl;
+    });
+  });
+}
+
+function loadCardImages() {
+  document.querySelectorAll('.obs-card-thumb[data-img-url]').forEach(el => {
+    const url = el.dataset.imgUrl;
+    fetchImageWithToken(url).then(blobUrl => {
+      el.src = blobUrl;
+    });
+  });
 }
 
 function openLightbox(url) {
   const lb = document.getElementById('lightbox');
-  document.getElementById('lightboxImg').src = url;
-  lb.classList.add('active');
+  if (imageCache.has(url)) {
+    document.getElementById('lightboxImg').src = imageCache.get(url);
+    lb.classList.add('active');
+  } else {
+    fetchImageWithToken(url).then(blobUrl => {
+      document.getElementById('lightboxImg').src = blobUrl;
+      lb.classList.add('active');
+    });
+  }
 }
 function closeLightbox(e) {
   if (e) e.stopPropagation();
@@ -1450,13 +1532,17 @@ function renderObservations() {
     return;
   }
 
+  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const cards = list.map(obs => {
     const style = getCategoryStyle(obs.category);
     const summary = obs.summary || obs.transcript || '';
     const excerpt = summary.length > 160 ? summary.slice(0, 160) + '…' : summary;
     const weatherText = buildObsWeatherLine(obs.weather);
-    const thumb = obs.photos && obs.photos[0]
-      ? `<img class="obs-card-thumb" src="${escapeHtml(obs.photos[0].url || obs.photos[0].previewUrl || obs.photos[0].thumbnailUrl || '')}" alt="" loading="lazy" />`
+    const photoUrl = obs.photos && obs.photos[0]
+      ? (obs.photos[0].url || obs.photos[0].download_url || obs.photos[0].previewUrl || obs.photos[0].thumbnailUrl || '')
+      : '';
+    const thumb = photoUrl
+      ? `<img class="obs-card-thumb" data-img-url="${escapeHtml(photoUrl)}" src="${placeholder}" alt="" loading="lazy" />`
       : '';
     const tagsHtml = obs.tags.length
       ? `<div class="tags-row">${obs.tags.slice(0, 4).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${obs.tags.length > 4 ? '<span class="tag">+' + (obs.tags.length - 4) + '</span>' : ''}</div>`
@@ -1486,6 +1572,7 @@ function renderObservations() {
   }).join('');
 
   container.innerHTML = `<div class="obs-grid">${cards}</div>`;
+  setTimeout(() => loadCardImages(), 0);
 }
 
 function buildObsWeatherLine(w) {
