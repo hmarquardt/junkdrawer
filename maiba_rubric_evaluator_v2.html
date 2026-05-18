@@ -428,9 +428,9 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.13.8" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.13.8" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator v2 · version 2026.05.13.8
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.18.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.18.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator v2 · version 2026.05.18.1
   </footer>
 </div>
 
@@ -933,8 +933,9 @@ function displayQ1ToQ8(plainText) {
     }
     const val = plainText.slice(valStart, valEnd).trim();
     const btn = copyable[key] ? `<button class="copy-btn" data-copy-field="${key}" title="Copy ${key} to clipboard">📋</button>` : '';
+    const stripBtn = key === 'Q6' ? `<button class="copy-btn" data-strip-field="${key}" title="Strip dimension labels and create single paragraph">📝</button>` : '';
     sections.push(`<div class="output-section" data-section="${key}">
-  <h4>${escapeHtml(label)}${btn}</h4>
+  <h4>${escapeHtml(label)}${btn}${stripBtn}</h4>
   <pre>${escapeHtml(val)}</pre>
 </div>`);
   }
@@ -1374,10 +1375,28 @@ $('#btnCopyOutput').addEventListener('click', async () => {
 });
 
 /* Copy individual Q2/Q4/Q6 sections */
+function stripQ6Labels(text) {
+  const prefixes = [
+    '- Understands User Intent:',
+    '- Actionability:',
+    '- Personalization:',
+    '- Clarity:',
+    '- Saftey:',
+    '- Safety:',
+    '- Accuracy:'
+  ];
+  const escaped = prefixes.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp('^[\\s]*(?:' + escaped.join('|') + ')[\\s]*', 'gm');
+  let cleaned = text.replace(regex, '');
+  cleaned = cleaned.replace(/^[ \t]*[-*•][ \t]*/gm, '');
+  cleaned = cleaned.split(/\n+/).map(s => s.trim()).filter(s => s).join(' ');
+  return cleaned;
+}
+
 function attachCopyHandler(container) {
   container.addEventListener('click', async (e) => {
     const btn = e.target.closest('.copy-btn');
-    if (!btn) return;
+    if (!btn || btn.dataset.stripField) return;
     const section = btn.closest('.output-section');
     const pre = section?.querySelector('pre');
     if (!pre) return;
@@ -1392,6 +1411,26 @@ function attachCopyHandler(container) {
 }
 attachCopyHandler($('#evaluationOutput'));
 attachCopyHandler($('#verificationDiff'));
+
+function attachStripHandler(container) {
+  container.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-strip-field]');
+    if (!btn) return;
+    const section = btn.closest('.output-section');
+    const pre = section?.querySelector('pre');
+    if (!pre) return;
+    let text = pre.textContent;
+    text = stripQ6Labels(text);
+    try {
+      await navigator.clipboard.writeText(text);
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = orig, 1200);
+    } catch(e){}
+  });
+}
+attachStripHandler($('#evaluationOutput'));
+attachStripHandler($('#verificationDiff'));
 
 $('#btnSaveHistory').addEventListener('click', async () => {
   if (!currentRecord) return;
