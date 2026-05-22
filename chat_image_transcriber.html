@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chat Screenshot &rarr; Transcript</title>
-  <meta name="description" content="Browser-only chat screenshot OCR tool.">
+  <meta name="description" content="Extract chat transcripts from screenshots using AI vision models via OpenRouter.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>" />
   <style>
     /* =========================================
@@ -128,6 +128,39 @@
     }
 
     /* =========================================
+       FORM ELEMENTS
+       ========================================= */
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; }
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 13px;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .form-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
+    .form-input::placeholder { color: var(--text-secondary); opacity: 0.5; }
+    select.form-input { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8fa8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; }
+    .input-row { display: flex; gap: 8px; }
+    .input-row .form-input { flex: 1; }
+    .input-row .btn { flex-shrink: 0; }
+
+    .api-key-wrapper { position: relative; }
+    .api-key-wrapper .form-input { padding-right: 40px; }
+    .toggle-visibility {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: var(--text-secondary); cursor: pointer;
+      padding: 4px; display: grid; place-items: center;
+    }
+    .toggle-visibility:hover { color: var(--text-primary); }
+    .toggle-visibility svg { width: 16px; height: 16px; }
+
+    /* =========================================
        DROP ZONE
        ========================================= */
     .drop-zone {
@@ -155,7 +188,7 @@
        ========================================= */
     .image-list {
       display: flex; flex-direction: column; gap: 10px;
-      max-height: 420px; overflow-y: auto; padding-right: 4px;
+      max-height: 320px; overflow-y: auto; padding-right: 4px;
     }
     .image-list:empty::before {
       content: "No images yet. Drag files above or click to browse.";
@@ -195,20 +228,41 @@
       font-size: 18px; line-height: 1;
     }
     .remove-btn:hover { background: rgba(239,68,68,0.12); color: var(--error); border-color: var(--error); }
-    .image-progress {
-      width: 100%; height: 3px; background: var(--bg-primary); border-radius: 2px; overflow: hidden; margin-top: 8px;
+
+    /* =========================================
+       HISTORY LIST
+       ========================================= */
+    .history-list {
+      display: flex; flex-direction: column; gap: 8px;
+      max-height: 220px; overflow-y: auto; padding-right: 4px;
     }
-    .image-progress-fill {
-      height: 100%; width: 0%; background: var(--accent); border-radius: 2px;
-      transition: width .25s ease;
+    .history-list:empty::before {
+      content: "No saved sessions yet.";
+      display: block; text-align: center; color: var(--text-secondary);
+      font-size: 13px; padding: 16px 8px;
     }
-    .raw-ocr {
-      margin-top: 8px; padding: 10px; background: var(--bg-primary); border-radius: var(--radius-xs);
-      border: 1px solid var(--border); font-family: var(--mono); font-size: 12px; line-height: 1.5;
-      white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
-      color: var(--text-secondary); display: none;
+    .history-item {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      padding: 10px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
     }
-    .raw-ocr summary { cursor: pointer; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
+    .history-item:hover { background: var(--accent-muted); border-color: var(--accent); }
+    .history-item.active { border-color: var(--accent); background: var(--accent-muted); }
+    .history-info { flex: 1; min-width: 0; }
+    .history-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+    .history-date { font-size: 11px; color: var(--text-secondary); }
+    .history-actions { display: flex; gap: 4px; }
+    .history-actions button {
+      background: none; border: none; color: var(--text-secondary); cursor: pointer;
+      padding: 4px; display: grid; place-items: center; border-radius: 4px;
+    }
+    .history-actions button:hover { background: rgba(239,68,68,0.12); color: var(--error); }
+    .history-actions button svg { width: 14px; height: 14px; }
 
     /* =========================================
        OPTIONS
@@ -241,6 +295,7 @@
     .btn-danger { background: rgba(239,68,68,0.12); color: var(--error); border: 1px solid rgba(239,68,68,0.2); }
     .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.2); }
     .btn svg { width: 16px; height: 16px; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
     .btn-lg { padding: 12px 22px; font-size: 15px; }
 
     .actions-row { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -289,6 +344,15 @@
     }
     .help-note strong { color: var(--text-primary); }
 
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     /* =========================================
        TOASTS
        ========================================= */
@@ -325,6 +389,16 @@
     [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
     ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
     [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+
+    /* =========================================
+       COLLAPSIBLE SECTIONS
+       ========================================= */
+    details.settings-group { border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg-elevated); }
+    details.settings-group summary { padding: 12px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-primary); user-select: none; list-style: none; display: flex; align-items: center; justify-content: space-between; }
+    details.settings-group summary::-webkit-details-marker { display: none; }
+    details.settings-group summary::after { content: '▸'; color: var(--text-secondary); transition: transform .2s; }
+    details[open].settings-group summary::after { transform: rotate(90deg); }
+    details.settings-group .panel-body { padding: 0 14px 14px; border: none; background: transparent; box-shadow: none; gap: 12px; }
   </style>
 </head>
 <body>
@@ -334,7 +408,7 @@
     <div class="brand-icon">T</div>
     <div>
       <h1>Chat Screenshot &rarr; Transcript</h1>
-      <p>Upload chat screenshots, OCR them locally, clean the transcript, copy it.</p>
+      <p>Upload chat screenshots, extract transcripts with AI vision models.</p>
     </div>
   </div>
   <div class="header-actions">
@@ -352,6 +426,32 @@
       <h2 class="panel-title">Images &amp; Options</h2>
     </div>
     <div class="panel-body">
+
+      <!-- API Key -->
+      <div class="form-group">
+        <label class="form-label" for="api-key">OpenRouter API Key</label>
+        <div class="api-key-wrapper">
+          <input type="password" class="form-input" id="api-key" placeholder="sk-or-v1-..." autocomplete="off">
+          <button class="toggle-visibility" id="toggle-key-visibility" type="button" aria-label="Toggle visibility">
+            <svg id="eye-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg id="eye-off-icon" style="display:none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Model -->
+      <div class="form-group">
+        <label class="form-label" for="model-select">Vision Model</label>
+        <div class="input-row">
+          <select class="form-input" id="model-select"></select>
+          <button class="btn btn-secondary btn-sm" id="fetch-models-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh
+          </button>
+        </div>
+        <span id="model-status" style="font-size:12px;color:var(--text-secondary);"></span>
+      </div>
+
       <!-- Upload -->
       <div class="drop-zone" id="drop-zone">
         <input type="file" id="file-input" accept="image/*" multiple aria-label="Upload screenshots">
@@ -366,12 +466,8 @@
       <!-- Options -->
       <div class="options">
         <div class="option-row">
-          <input type="checkbox" id="high-contrast" checked>
-          <label for="high-contrast">High contrast OCR mode (thresholding)</label>
-        </div>
-        <div class="option-row">
-          <input type="checkbox" id="keep-raw">
-          <label for="keep-raw">Keep raw OCR output per image</label>
+          <input type="checkbox" id="save-key" checked>
+          <label for="save-key">Save API key in browser (localStorage)</label>
         </div>
       </div>
 
@@ -390,15 +486,22 @@
       <!-- Status -->
       <div class="status-bar" id="status-bar" aria-live="polite">
         <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Ready. Upload images to begin.</span>
+        <span id="status-text">Ready. Enter your API key and upload images.</span>
       </div>
+
+      <!-- History -->
+      <details class="settings-group" open>
+        <summary>Session History</summary>
+        <div class="panel-body" style="padding:0 14px 14px;">
+          <div class="history-list" id="history-list" aria-label="Session history"></div>
+        </div>
+      </details>
 
       <!-- Help -->
       <div class="help-note">
-        <strong>Note:</strong> OCR is done entirely in your browser using Tesseract.js.
-        Results may contain light errors&mdash;review the transcript before using it.
-        Speaker detection uses bubble colors (blue = user, gray = assistant) when possible,
-        otherwise it falls back to text labels like <em>USER:</em> or <em>ASSISTANT:</em>.
+        <strong>Note:</strong> Your API key is sent directly to OpenRouter from your browser.
+        Images are converted to base64 and sent to the selected vision model.
+        Transcripts and settings are saved locally in your browser only.
       </div>
     </div>
   </section>
@@ -416,6 +519,10 @@
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Download .txt
         </button>
+        <button class="btn btn-secondary" id="save-session-btn" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Session
+        </button>
       </div>
     </div>
     <div class="panel-body" style="padding-top:0;">
@@ -427,63 +534,69 @@
 <!-- TOAST CONTAINER -->
 <div class="toast-container" id="toast-container" aria-live="assertive"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-  // ========================================================================
-  // STATE
-  // ========================================================================
-  let images = []; // { id, file, thumbUrl, status, progress, rawOcr, messages }
-  let isProcessing = false;
-  let currentTheme = localStorage.getItem('chat-transcriber-theme') || 'dark';
-  let tesseractAvailable = false;
+  // =======================================================================
+  // CONSTANTS
+  // =======================================================================
+  const LS_KEY = 'chatTranscriber';
+  const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+  const DEFAULT_VISION_MODELS = [
+    { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o' },
+    { id: 'openai/gpt-4o-mini', name: 'OpenAI GPT-4o Mini' },
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
+    { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku' },
+    { id: 'google/gemini-flash-1.5', name: 'Gemini 1.5 Flash' },
+    { id: 'google/gemini-pro-1.5', name: 'Gemini 1.5 Pro' }
+  ];
 
-  // ========================================================================
+  // =======================================================================
+  // STATE
+  // =======================================================================
+  let images = []; // { id, file, thumbUrl, status }
+  let isProcessing = false;
+  let currentTheme = 'dark';
+  let sessionHistory = [];
+
+  // =======================================================================
   // DOM REFS
-  // ========================================================================
+  // =======================================================================
   const dropZone = document.getElementById('drop-zone');
   const fileInput = document.getElementById('file-input');
   const imageList = document.getElementById('image-list');
   const processBtn = document.getElementById('process-btn');
   const clearBtn = document.getElementById('clear-btn');
-  const highContrastCheck = document.getElementById('high-contrast');
-  const keepRawCheck = document.getElementById('keep-raw');
+  const apiKeyInput = document.getElementById('api-key');
+  const toggleKeyVisibility = document.getElementById('toggle-key-visibility');
+  const eyeIcon = document.getElementById('eye-icon');
+  const eyeOffIcon = document.getElementById('eye-off-icon');
+  const modelSelect = document.getElementById('model-select');
+  const fetchModelsBtn = document.getElementById('fetch-models-btn');
+  const modelStatus = document.getElementById('model-status');
+  const saveKeyCheck = document.getElementById('save-key');
   const transcriptEditor = document.getElementById('transcript-editor');
   const copyBtn = document.getElementById('copy-btn');
   const downloadBtn = document.getElementById('download-btn');
+  const saveSessionBtn = document.getElementById('save-session-btn');
   const statusDot = document.getElementById('status-dot');
   const statusText = document.getElementById('status-text');
   const toastContainer = document.getElementById('toast-container');
   const themeToggle = document.getElementById('theme-toggle');
   const iconSun = document.getElementById('icon-sun');
   const iconMoon = document.getElementById('icon-moon');
+  const historyList = document.getElementById('history-list');
 
-  // ========================================================================
+  // =======================================================================
   // INIT
-  // ========================================================================
+  // =======================================================================
   function init() {
+    loadSettings();
     document.documentElement.setAttribute('data-theme', currentTheme);
     updateThemeIcon();
-    checkTesseract();
     bindEvents();
     renderImageList();
     updateActionButtons();
-  }
-
-  function checkTesseract() {
-    if (typeof window.Tesseract === 'undefined') {
-      // Wait a moment in case the script is still loading
-      setTimeout(() => {
-        if (typeof window.Tesseract === 'undefined') {
-          tesseractAvailable = false;
-          updateStatus('Tesseract.js failed to load. Check your internet connection and refresh.', 'error');
-        } else {
-          tesseractAvailable = true;
-        }
-        updateActionButtons();
-      }, 2000);
-    } else {
-      tesseractAvailable = true;
-    }
+    populateModelSelect();
+    renderHistory();
   }
 
   function bindEvents() {
@@ -498,16 +611,85 @@
     clearBtn.addEventListener('click', clearAll);
     copyBtn.addEventListener('click', copyToClipboard);
     downloadBtn.addEventListener('click', downloadTranscript);
+    saveSessionBtn.addEventListener('click', saveCurrentSession);
     themeToggle.addEventListener('click', toggleTheme);
+    fetchModelsBtn.addEventListener('click', fetchModelsFromOpenRouter);
+
+    // API Key visibility
+    toggleKeyVisibility.addEventListener('click', () => {
+      const isPassword = apiKeyInput.type === 'password';
+      apiKeyInput.type = isPassword ? 'text' : 'password';
+      eyeIcon.style.display = isPassword ? 'none' : 'block';
+      eyeOffIcon.style.display = isPassword ? 'block' : 'none';
+    });
+
+    // Save key on change if checkbox is checked
+    apiKeyInput.addEventListener('change', () => {
+      if (saveKeyCheck.checked) saveSettings();
+    });
+    modelSelect.addEventListener('change', saveSettings);
+    saveKeyCheck.addEventListener('change', saveSettings);
   }
 
-  // ========================================================================
+  // =======================================================================
+  // SETTINGS / LOCALSTORAGE
+  // =======================================================================
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.apiKey) apiKeyInput.value = s.apiKey;
+        if (s.model) modelSelect.value = s.model;
+        if (s.theme) currentTheme = s.theme;
+        if (s.saveKey !== undefined) saveKeyCheck.checked = s.saveKey;
+        if (s.history) sessionHistory = s.history;
+      }
+    } catch (e) {
+      console.error('Failed to load settings', e);
+    }
+    // Restore saved model if it exists in the select
+    const savedModel = getSettings().model;
+    if (savedModel) {
+      setTimeout(() => {
+        const opt = Array.from(modelSelect.options).find(o => o.value === savedModel);
+        if (opt) modelSelect.value = savedModel;
+      }, 0);
+    }
+  }
+
+  function getSettings() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveSettings() {
+    const s = {
+      apiKey: saveKeyCheck.checked ? apiKeyInput.value : '',
+      model: modelSelect.value,
+      theme: currentTheme,
+      saveKey: saveKeyCheck.checked,
+      history: sessionHistory
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
+  }
+
+  function saveHistory() {
+    saveSettings();
+    renderHistory();
+  }
+
+  // =======================================================================
   // THEME
-  // ========================================================================
+  // =======================================================================
   function toggleTheme() {
     currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', currentTheme);
-    localStorage.setItem('chat-transcriber-theme', currentTheme);
+    saveSettings();
     updateThemeIcon();
   }
   function updateThemeIcon() {
@@ -516,9 +698,60 @@
     iconMoon.style.display = isDark ? 'none' : 'block';
   }
 
-  // ========================================================================
+  // =======================================================================
+  // MODEL SELECTOR
+  // =======================================================================
+  function populateModelSelect(models) {
+    const list = models || DEFAULT_VISION_MODELS;
+    const currentVal = modelSelect.value;
+    modelSelect.innerHTML = '';
+    list.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name || m.id;
+      modelSelect.appendChild(opt);
+    });
+    // Try to restore previous selection
+    if (currentVal && list.some(m => m.id === currentVal)) {
+      modelSelect.value = currentVal;
+    } else {
+      const saved = getSettings().model;
+      if (saved && list.some(m => m.id === saved)) modelSelect.value = saved;
+    }
+  }
+
+  async function fetchModelsFromOpenRouter() {
+    const key = apiKeyInput.value.trim();
+    if (!key) {
+      showToast('Enter an API key first.', 'warning');
+      return;
+    }
+    modelStatus.textContent = 'Fetching models...';
+    try {
+      const res = await fetch(`${OPENROUTER_BASE}/models`, {
+        headers: { 'Authorization': `Bearer ${key}`, 'HTTP-Referer': location.origin, 'X-Title': 'ChatScreenshotTranscriber' }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      // Filter for vision-capable models
+      const allModels = (data.data || []).map(m => ({ id: m.id, name: m.name || m.id }));
+      // Heuristic: models with "vision" in id or known vision providers
+      const visionKeywords = ['vision', 'gpt-4o', 'claude-3', 'gemini', 'llava', 'qwen-vl', 'pixtral'];
+      const visionModels = allModels.filter(m => visionKeywords.some(kw => m.id.toLowerCase().includes(kw)));
+      populateModelSelect(visionModels.length > 0 ? visionModels : allModels.slice(0, 50));
+      modelStatus.textContent = `${visionModels.length} vision models loaded.`;
+      showToast('Models refreshed from OpenRouter.', 'success');
+      saveSettings();
+    } catch (err) {
+      console.error(err);
+      modelStatus.textContent = 'Failed: ' + err.message;
+      showToast('Model fetch failed: ' + err.message, 'error');
+    }
+  }
+
+  // =======================================================================
   // UPLOAD & IMAGE LIST
-  // ========================================================================
+  // =======================================================================
   function handleFiles(fileList) {
     if (isProcessing) return;
     const accepted = Array.from(fileList).filter(f => f.type.startsWith('image/'));
@@ -530,7 +763,7 @@
     const id = 'img_' + Math.random().toString(36).slice(2, 10);
     const reader = new FileReader();
     reader.onload = (e) => {
-      const imgObj = { id, file, thumbUrl: e.target.result, status: 'pending', progress: 0, rawOcr: '', messages: [] };
+      const imgObj = { id, file, thumbUrl: e.target.result, status: 'pending' };
       images.push(imgObj);
       renderImageList();
       updateStatus(`${images.length} image${images.length > 1 ? 's' : ''} ready.`, 'ready');
@@ -544,7 +777,7 @@
     images = images.filter(img => img.id !== id);
     renderImageList();
     updateActionButtons();
-    if (images.length === 0) updateStatus('Ready. Upload images to begin.', 'ready');
+    if (images.length === 0) updateStatus('Ready. Enter your API key and upload images.', 'ready');
   }
 
   function renderImageList() {
@@ -564,17 +797,13 @@
           <span class="image-status ${img.status}" id="status-${img.id}">${capitalize(img.status)}</span>
         </div>
         <button class="remove-btn" aria-label="Remove ${escapeHtml(img.file.name)}" data-id="${img.id}">&times;</button>
-        <div class="image-progress"><div class="image-progress-fill" id="progress-${img.id}"></div></div>
-        <div class="raw-ocr" id="raw-${img.id}" style="display:none;"><details><summary>Raw OCR</summary><pre>${escapeHtml(img.rawOcr || '(not yet processed)')}</pre></details></div>
       `;
 
-      // Remove button
       card.querySelector('.remove-btn').addEventListener('click', (e) => {
         e.stopPropagation();
         removeImage(img.id);
       });
 
-      // Drag events
       if (!isProcessing) {
         card.addEventListener('dragstart', handleDragStart);
         card.addEventListener('dragend', handleDragEnd);
@@ -586,9 +815,9 @@
     });
   }
 
-  // ========================================================================
+  // =======================================================================
   // DRAG & DROP REORDERING
-  // ========================================================================
+  // =======================================================================
   let dragSrcId = null;
 
   function handleDragStart(e) {
@@ -600,11 +829,9 @@
   function handleDragEnd() {
     this.classList.remove('dragging');
     dragSrcId = null;
-    // Rebuild array order from DOM
     const ids = Array.from(imageList.children).map(c => c.dataset.id);
     const orderMap = new Map(ids.map((id, i) => [id, i]));
     images.sort((a, b) => orderMap.get(a.id) - orderMap.get(b.id));
-    // Refresh dataset.index
     Array.from(imageList.children).forEach((c, i) => { c.dataset.index = i; });
   }
   function handleDragOver(e) {
@@ -623,481 +850,182 @@
     e.preventDefault();
   }
 
-  // ========================================================================
+  // =======================================================================
   // STATUS
-  // ========================================================================
+  // =======================================================================
   function updateStatus(text, type) {
     statusText.textContent = text;
     statusDot.className = 'status-dot';
     if (type) statusDot.classList.add(type);
   }
 
-  // ========================================================================
+  // =======================================================================
   // ACTIONS ENABLE/DISABLE
-  // ========================================================================
+  // =======================================================================
   function updateActionButtons() {
     const hasImages = images.length > 0;
+    const hasKey = apiKeyInput.value.trim().length > 0;
     const hasTranscript = transcriptEditor.value.trim().length > 0;
-    processBtn.disabled = isProcessing || !hasImages || !tesseractAvailable;
+    processBtn.disabled = isProcessing || !hasImages || !hasKey;
     clearBtn.disabled = isProcessing;
     copyBtn.disabled = !hasTranscript;
     downloadBtn.disabled = !hasTranscript;
+    saveSessionBtn.disabled = !hasTranscript && images.length === 0;
   }
 
-  // ========================================================================
-  // MAIN OCR PIPELINE
-  // ========================================================================
+  // =======================================================================
+  // MAIN AI PIPELINE (OpenRouter)
+  // =======================================================================
   async function processAllImages() {
     if (isProcessing || images.length === 0) return;
-    if (!tesseractAvailable || typeof window.Tesseract === 'undefined') {
-      showToast('OCR engine not available. Please check your connection and refresh.', 'error');
-      return;
-    }
+    const key = apiKeyInput.value.trim();
+    const model = modelSelect.value;
+    if (!key) { showToast('Enter your OpenRouter API key.', 'warning'); return; }
+    if (!model) { showToast('Select a vision model.', 'warning'); return; }
 
     isProcessing = true;
     updateActionButtons();
     transcriptEditor.value = '';
-    updateStatus('Initializing OCR worker...', 'processing');
+    updateStatus('Sending images to AI...', 'processing');
 
-    let worker = null;
+    // Mark all as processing
+    images.forEach(img => setImageStatus(img.id, 'processing'));
+
     try {
-      worker = await Tesseract.createWorker('eng', 1, {
-        logger: (m) => { /* progress is handled per-image below */ }
+      // Build content array with images in order
+      const content = [];
+      content.push({
+        type: 'text',
+        text: `Extract the complete chat transcript from the provided screenshot${images.length > 1 ? 's, in order' : ''}. Preserve the conversation flow, identify speakers clearly (e.g., "USER:", "ASSISTANT:"), and format the output as clean plain text. Do not summarize — transcribe everything verbatim. If a message appears truncated at the edge of a screenshot, mark it with [cropped].`
       });
 
-      let allMessages = [];
-      const highContrast = highContrastCheck.checked;
-      const keepRaw = keepRawCheck.checked;
+      images.forEach(img => {
+        content.push({
+          type: 'image_url',
+          image_url: { url: img.thumbUrl, detail: 'high' }
+        });
+      });
 
-      for (let i = 0; i < images.length; i++) {
-        const imgObj = images[i];
-        updateStatus(`Processing image ${i + 1} of ${images.length}...`, 'processing');
-        setImageStatus(imgObj.id, 'processing');
-        setImageProgress(imgObj.id, 10);
+      const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`,
+          'HTTP-Referer': location.origin,
+          'X-Title': 'ChatScreenshotTranscriber'
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: 'You are a precise chat transcript extraction assistant. You read screenshots of chat conversations and output clean, verbatim transcripts with speaker labels.' },
+            { role: 'user', content: content }
+          ],
+          temperature: 0.2,
+          max_tokens: 4000
+        })
+      });
 
-        // 1. Load image to canvas
-        const baseCanvas = await fileToCanvas(imgObj.file);
-        setImageProgress(imgObj.id, 30);
-
-        // 2. Detect chat bubbles by color
-        const bubbles = detectBubbles(baseCanvas);
-        setImageProgress(imgObj.id, 50);
-
-        let imageMessages = [];
-        let rawTexts = [];
-
-        if (bubbles.length > 0) {
-          // 3a. OCR each bubble separately
-          for (let b = 0; b < bubbles.length; b++) {
-            const bubble = bubbles[b];
-            const cropCanvas = cropCanvasRegion(baseCanvas, bubble.x, bubble.y, bubble.width, bubble.height);
-            preprocessCanvas(cropCanvas, highContrast);
-            const { data: { text } } = await worker.recognize(cropCanvas);
-            rawTexts.push(`[${bubble.speaker} bubble]\n${text}`);
-            const cleaned = cleanOcrText(text);
-            if (cleaned) {
-              imageMessages.push({ speaker: bubble.speaker, text: cleaned });
-            }
-            setImageProgress(imgObj.id, 50 + Math.round((b + 1) / bubbles.length * 40));
-          }
-        } else {
-          // 3b. Fall back to whole-image OCR + text-based speaker inference
-          const ocrCanvas = cloneCanvas(baseCanvas);
-          preprocessCanvas(ocrCanvas, highContrast);
-          const { data: { text } } = await worker.recognize(ocrCanvas);
-          rawTexts.push(text);
-          imageMessages = inferSpeakersFromText(text);
-          setImageProgress(imgObj.id, 90);
-        }
-
-        // Mark possible cropped last message
-        if (imageMessages.length > 0) {
-          const last = imageMessages[imageMessages.length - 1];
-          if (looksCropped(last.text)) last.text += ' [cropped]';
-        }
-
-        // Deduplicate against previous images
-        const deduped = removeOverlap(allMessages, imageMessages);
-        allMessages = allMessages.concat(deduped);
-
-        // Merge consecutive same-speaker messages
-        const merged = mergeConsecutiveMessages(allMessages);
-        allMessages = merged;
-
-        // Update transcript
-        transcriptEditor.value = formatMessages(allMessages);
-
-        // Store raw OCR
-        imgObj.rawOcr = rawTexts.join('\n\n---\n\n');
-        imgObj.messages = imageMessages;
-        setImageStatus(imgObj.id, 'done');
-        setImageProgress(imgObj.id, 100);
-
-        // Show raw OCR if requested
-        if (keepRaw) {
-          const rawEl = document.getElementById(`raw-${imgObj.id}`);
-          if (rawEl) {
-            rawEl.style.display = 'block';
-            rawEl.querySelector('pre').textContent = imgObj.rawOcr;
-          }
-        }
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`OpenRouter ${res.status}: ${errText}`);
       }
 
-      updateStatus('OCR complete.', 'done');
-      showToast('All images processed.', 'success');
+      const data = await res.json();
+      const transcript = data.choices?.[0]?.message?.content || '';
+      transcriptEditor.value = transcript.trim();
+
+      images.forEach(img => setImageStatus(img.id, 'done'));
+      updateStatus('Transcript ready.', 'done');
+      showToast('Transcript extracted successfully.', 'success');
+      updateActionButtons();
     } catch (err) {
       console.error(err);
-      updateStatus('Error during OCR: ' + (err.message || 'Unknown error'), 'error');
-      showToast('OCR failed. See status for details.', 'error');
+      images.forEach(img => setImageStatus(img.id, 'error'));
+      updateStatus('Error: ' + err.message, 'error');
+      showToast('Processing failed: ' + err.message, 'error');
     } finally {
-      if (worker) {
-        try { await worker.terminate(); } catch (_) {}
-      }
       isProcessing = false;
       updateActionButtons();
-      renderImageList(); // Re-render to remove draggability changes
+      renderImageList();
     }
   }
 
-  // ========================================================================
-  // IMAGE LOADING
-  // ========================================================================
-  function fileToCanvas(file) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        // Upscale small images for better OCR
-        const minWidth = 1000;
-        const scale = img.width < minWidth ? minWidth / img.width : 1;
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas);
-      };
-      img.onerror = reject;
-      img.src = url;
+  // =======================================================================
+  // SESSION HISTORY
+  // =======================================================================
+  function saveCurrentSession() {
+    if (images.length === 0 && !transcriptEditor.value.trim()) return;
+    const session = {
+      id: 'sess_' + Date.now().toString(36),
+      date: new Date().toISOString(),
+      title: images.length > 0 ? images[0].file.name.replace(/\.[^.]+$/, '') + (images.length > 1 ? ` +${images.length - 1}` : '') : 'Transcript',
+      imageCount: images.length,
+      transcript: transcriptEditor.value,
+      imageThumbs: images.slice(0, 3).map(img => img.thumbUrl)
+    };
+    sessionHistory.unshift(session);
+    // Keep last 50 sessions
+    if (sessionHistory.length > 50) sessionHistory = sessionHistory.slice(0, 50);
+    saveHistory();
+    showToast('Session saved.', 'success');
+  }
+
+  function restoreSession(id) {
+    const session = sessionHistory.find(s => s.id === id);
+    if (!session) return;
+    if (images.length > 0 || transcriptEditor.value.trim()) {
+      if (!confirm('Restore this session? Current work will be replaced.')) return;
+    }
+    transcriptEditor.value = session.transcript || '';
+    // Images aren't restored (files can't be recreated), just the transcript
+    images = [];
+    renderImageList();
+    updateActionButtons();
+    updateStatus('Session restored from history.', 'ready');
+    showToast('Session restored.', 'success');
+  }
+
+  function deleteSession(id) {
+    sessionHistory = sessionHistory.filter(s => s.id !== id);
+    saveHistory();
+  }
+
+  function renderHistory() {
+    historyList.innerHTML = '';
+    if (sessionHistory.length === 0) return;
+
+    sessionHistory.forEach(sess => {
+      const item = document.createElement('div');
+      item.className = 'history-item';
+      item.dataset.id = sess.id;
+
+      const dateStr = new Date(sess.date).toLocaleString();
+      item.innerHTML = `
+        <div class="history-info">
+          <span class="history-title">${escapeHtml(sess.title)}</span>
+          <span class="history-date">${escapeHtml(dateStr)} · ${sess.imageCount} image${sess.imageCount !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="history-actions">
+          <button class="restore-btn" title="Restore transcript" aria-label="Restore">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+          </button>
+          <button class="delete-btn" title="Delete session" aria-label="Delete">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      `;
+
+      item.querySelector('.restore-btn').addEventListener('click', (e) => { e.stopPropagation(); restoreSession(sess.id); });
+      item.querySelector('.delete-btn').addEventListener('click', (e) => { e.stopPropagation(); deleteSession(sess.id); });
+      item.addEventListener('click', () => restoreSession(sess.id));
+
+      historyList.appendChild(item);
     });
   }
 
-  function cloneCanvas(source) {
-    const c = document.createElement('canvas');
-    c.width = source.width;
-    c.height = source.height;
-    c.getContext('2d').drawImage(source, 0, 0);
-    return c;
-  }
-
-  function cropCanvasRegion(source, x, y, w, h) {
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    c.getContext('2d').drawImage(source, x, y, w, h, 0, 0, w, h);
-    return c;
-  }
-
-  // ========================================================================
-  // PREPROCESSING (before OCR)
-  // ========================================================================
-  function preprocessCanvas(canvas, highContrast) {
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      let r = data[i], g = data[i + 1], b = data[i + 2];
-
-      // Grayscale
-      let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-      // Increase contrast
-      gray = ((gray - 128) * 1.4) + 128;
-      gray = Math.max(0, Math.min(255, gray));
-
-      if (highContrast) {
-        // Simple thresholding to improve text clarity
-        gray = gray > 175 ? 255 : (gray < 105 ? 0 : gray);
-      }
-
-      data[i] = data[i + 1] = data[i + 2] = gray;
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-  }
-
-  // ========================================================================
-  // BUBBLE DETECTION (color-based, no ML)
-  // ========================================================================
-  /*
-    Strategy:
-    1. Downsample the image for fast scanning.
-    2. Blur it so text inside bubbles smears into the bubble background.
-    3. Classify each pixel as background, user (blue-ish), or assistant (gray-ish).
-    4. Detect contiguous horizontal runs row-by-row and merge vertically.
-    5. Filter by size and aspect ratio to keep likely chat bubbles.
-    6. Return bounding boxes with speaker labels.
-  */
-  function detectBubbles(sourceCanvas) {
-    const analysisWidth = 200;
-    const analysisHeight = Math.round(sourceCanvas.height * (analysisWidth / sourceCanvas.width));
-    const scaleX = sourceCanvas.width / analysisWidth;
-    const scaleY = sourceCanvas.height / analysisHeight;
-
-    // Blurred downsample for blob cohesion
-    const blurCanvas = document.createElement('canvas');
-    blurCanvas.width = analysisWidth;
-    blurCanvas.height = analysisHeight;
-    const blurCtx = blurCanvas.getContext('2d');
-    if (blurCtx.filter !== undefined) {
-      blurCtx.filter = 'blur(8px)';
-    }
-    blurCtx.drawImage(sourceCanvas, 0, 0, analysisWidth, analysisHeight);
-    blurCtx.filter = 'none';
-
-    const imageData = blurCtx.getImageData(0, 0, analysisWidth, analysisHeight);
-    const d = imageData.data;
-    const labels = new Uint8Array(analysisWidth * analysisHeight); // 0=bg, 1=user, 2=assistant
-
-    // Pixel classification
-    for (let y = 0; y < analysisHeight; y++) {
-      for (let x = 0; x < analysisWidth; x++) {
-        const i = (y * analysisWidth + x) * 4;
-        const [h, s, l] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
-
-        if (l > 0.93 && s < 0.08) {
-          labels[y * analysisWidth + x] = 0; // near-white background
-        } else if (h >= 190 && h <= 260 && s > 0.12 && l > 0.30 && l < 0.88) {
-          labels[y * analysisWidth + x] = 1; // blue -> user
-        } else if (s < 0.10 && l > 0.72 && l < 0.95) {
-          labels[y * analysisWidth + x] = 2; // gray -> assistant
-        } else {
-          labels[y * analysisWidth + x] = 0;
-        }
-      }
-    }
-
-    // Row-based region tracking
-    const regions = [];
-    for (let y = 0; y < analysisHeight; y++) {
-      let activeRegions = regions.filter(r => r.lastY === y - 1);
-      let rowRuns = [];
-      let curRun = null;
-
-      for (let x = 0; x < analysisWidth; x++) {
-        const label = labels[y * analysisWidth + x];
-        if (label !== 0) {
-          if (!curRun || curRun.label !== label) {
-            curRun = { startX: x, endX: x, label, y };
-            rowRuns.push(curRun);
-          } else {
-            curRun.endX = x;
-          }
-        } else {
-          curRun = null;
-        }
-      }
-
-      for (const run of rowRuns) {
-        let best = null;
-        let bestOverlap = 0;
-        for (const reg of activeRegions) {
-          if (reg.label !== run.label) continue;
-          const overlap = Math.max(0, Math.min(reg.lastEndX, run.endX) - Math.max(reg.lastStartX, run.startX));
-          if (overlap > bestOverlap) {
-            bestOverlap = overlap;
-            best = reg;
-          }
-        }
-        if (best && bestOverlap > 1) {
-          best.lastY = y;
-          best.lastStartX = run.startX;
-          best.lastEndX = run.endX;
-          best.minX = Math.min(best.minX, run.startX);
-          best.maxX = Math.max(best.maxX, run.endX);
-          best.minY = Math.min(best.minY, y);
-          best.maxY = Math.max(best.maxY, y);
-          best.pixels += (run.endX - run.startX + 1);
-        } else {
-          regions.push({
-            label: run.label,
-            lastY: y,
-            lastStartX: run.startX,
-            lastEndX: run.endX,
-            minX: run.startX,
-            maxX: run.endX,
-            minY: y,
-            maxY: y,
-            pixels: (run.endX - run.startX + 1)
-          });
-        }
-      }
-    }
-
-    // Filter and map back to original coordinates
-    return regions
-      .map(r => ({
-        speaker: r.label === 1 ? 'USER' : 'ASSISTANT',
-        x: Math.round(r.minX * scaleX),
-        y: Math.round(r.minY * scaleY),
-        width: Math.round((r.maxX - r.minX + 1) * scaleX),
-        height: Math.round((r.maxY - r.minY + 1) * scaleY),
-        pixels: r.pixels
-      }))
-      .filter(r => {
-        const area = r.width * r.height;
-        const aspect = r.width / Math.max(r.height, 1);
-        // Reject tiny or non-rectangular blobs
-        return area > 6000 && aspect > 1.2 && aspect < 20 && r.height > 30 && r.pixels > 120;
-      })
-      .sort((a, b) => a.y - b.y); // top-to-bottom reading order
-  }
-
-  function rgbToHsl(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    let h = 0, s = 0, l = (max + min) / 2;
-    if (max !== min) {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch (max) {
-        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-        case g: h = (b - r) / d + 2; break;
-        case b: h = (r - g) / d + 4; break;
-      }
-      h /= 6;
-    }
-    return [h * 360, s, l];
-  }
-
-  // ========================================================================
-  // TRANSCRIPT CLEANUP & PARSING
-  // ========================================================================
-  function cleanOcrText(text) {
-    if (!text) return '';
-    // Normalize line endings
-    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    // Remove excessive blank lines
-    text = text.replace(/\n{3,}/g, '\n\n');
-    // Trim each line
-    text = text.split('\n').map(l => l.trimEnd()).join('\n');
-    // Fix common OCR speaker errors
-    text = text.replace(/^\s*USFR\s*[:\-]?\s*/gim, 'USER: ');
-    text = text.replace(/^\s*ASSISTANT\s*[I1l|]\s*[:\-]?\s*/gim, 'ASSISTANT: ');
-    text = text.replace(/^\s*ASSISTANT\s*[:\-]?\s*/gim, 'ASSISTANT: ');
-    text = text.replace(/^\s*USER\s*[:\-]?\s*/gim, 'USER: ');
-    // Normalize curly quotes to straight quotes (preserves meaning)
-    text = text.replace(/[\u2018\u2019]/g, "'");
-    text = text.replace(/[\u201C\u201D]/g, '"');
-    // Remove spaces before punctuation
-    text = text.replace(/\s+([.,;:!?])\s*/g, '$1 ');
-    // Fix broken words across lines
-    text = text.replace(/(\w)-\s*\n\s*(\w)/g, '$1$2');
-    text = text.replace(/(\w)\n(\w)/g, '$1 $2');
-    // Collapse multiple spaces
-    text = text.replace(/[ \t]+/g, ' ');
-    // Trim
-    return text.trim();
-  }
-
-  function inferSpeakersFromText(text) {
-    const lines = text.split('\n');
-    const messages = [];
-    let currentSpeaker = 'SYSTEM/OTHER';
-    let currentText = [];
-
-    for (let line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      // Detect explicit speaker labels
-      const m = trimmed.match(/^(USER|ASSISTANT|SYSTEM|You|Human|AI|ChatGPT|Bot)[\s:\-\|]+(.*)$/i);
-      if (m) {
-        if (currentText.length > 0) {
-          messages.push({ speaker: currentSpeaker, text: currentText.join('\n') });
-          currentText = [];
-        }
-        let sp = m[1].toUpperCase();
-        if (sp === 'YOU' || sp === 'HUMAN') sp = 'USER';
-        else if (['AI', 'CHATGPT', 'BOT'].includes(sp)) sp = 'ASSISTANT';
-        currentSpeaker = sp;
-        currentText.push(m[2].trim());
-      } else {
-        currentText.push(trimmed);
-      }
-    }
-
-    if (currentText.length > 0) {
-      messages.push({ speaker: currentSpeaker, text: currentText.join('\n') });
-    }
-
-    return messages;
-  }
-
-  function looksCropped(text) {
-    const t = text.trim();
-    if (t.length < 20) return false;
-    return !/[.!?]\s*$/.test(t);
-  }
-
-  function mergeConsecutiveMessages(messages) {
-    const out = [];
-    for (const msg of messages) {
-      if (out.length > 0 && out[out.length - 1].speaker === msg.speaker) {
-        out[out.length - 1].text += '\n' + msg.text;
-      } else {
-        out.push({ speaker: msg.speaker, text: msg.text });
-      }
-    }
-    return out;
-  }
-
-  function removeOverlap(prevMessages, nextMessages) {
-    if (prevMessages.length === 0 || nextMessages.length === 0) return nextMessages;
-
-    // Try to detect if the first N messages of nextMessages overlap with the end of prevMessages
-    let overlapCount = 0;
-    const lastPrev = prevMessages[prevMessages.length - 1].text.trim();
-
-    for (let i = 0; i < Math.min(nextMessages.length, 3); i++) {
-      const candidate = nextMessages[i].text.trim();
-      if (
-        lastPrev.includes(candidate) ||
-        candidate.includes(lastPrev) ||
-        similarity(lastPrev, candidate) > 0.85
-      ) {
-        overlapCount = i + 1;
-      } else if (overlapCount > 0) {
-        // Stop if chain breaks
-        break;
-      }
-    }
-
-    return nextMessages.slice(overlapCount);
-  }
-
-  function similarity(a, b) {
-    if (!a || !b) return 0;
-    const longer = a.length > b.length ? a : b;
-    const shorter = a.length > b.length ? b : a;
-    if (longer.length === 0) return 1.0;
-    return longer.includes(shorter) ? shorter.length / longer.length : 0;
-  }
-
-  function formatMessages(messages) {
-    if (messages.length === 0) return '';
-    return messages.map(m => m.speaker + ':\n' + m.text).join('\n\n');
-  }
-
-  // ========================================================================
+  // =======================================================================
   // UI HELPERS
-  // ========================================================================
+  // =======================================================================
   function setImageStatus(id, status) {
     const el = document.getElementById('status-' + id);
     if (!el) return;
@@ -1105,11 +1033,6 @@
     if (img) img.status = status;
     el.textContent = capitalize(status);
     el.className = 'image-status ' + status;
-  }
-
-  function setImageProgress(id, pct) {
-    const el = document.getElementById('progress-' + id);
-    if (el) el.style.width = pct + '%';
   }
 
   function capitalize(s) {
@@ -1125,9 +1048,9 @@
       .replace(/"/g, '&quot;');
   }
 
-  // ========================================================================
+  // =======================================================================
   // COPY / DOWNLOAD / CLEAR
-  // ========================================================================
+  // =======================================================================
   async function copyToClipboard() {
     const text = transcriptEditor.value;
     if (!text) return;
@@ -1160,13 +1083,13 @@
     transcriptEditor.value = '';
     renderImageList();
     updateActionButtons();
-    updateStatus('Ready. Upload images to begin.', 'ready');
+    updateStatus('Ready. Enter your API key and upload images.', 'ready');
     showToast('Cleared all images and transcript.', 'success');
   }
 
-  // ========================================================================
+  // =======================================================================
   // TOAST NOTIFICATIONS
-  // ========================================================================
+  // =======================================================================
   function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = 'toast ' + type;
@@ -1182,14 +1105,14 @@
     setTimeout(() => { toast.remove(); }, 3000);
   }
 
-  // ========================================================================
+  // =======================================================================
   // START
-  // ========================================================================
+  // =======================================================================
   init();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.22.3" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.22.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Chat Screenshot Transcriber · version 2026.05.22.3
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.22.4" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.22.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Chat Screenshot Transcriber · version 2026.05.22.4
 </footer>
 </body>
 </html>
