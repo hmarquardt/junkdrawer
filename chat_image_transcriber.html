@@ -399,6 +399,87 @@
     details.settings-group summary::after { content: '▸'; color: var(--text-secondary); transition: transform .2s; }
     details[open].settings-group summary::after { transform: rotate(90deg); }
     details.settings-group .panel-body { padding: 0 14px 14px; border: none; background: transparent; box-shadow: none; gap: 12px; }
+
+    /* =========================================
+       CAMERA MODE
+       ========================================= */
+    .camera-launch-row { display: flex; justify-content: center; }
+    .camera-launch-row .btn { width: 100%; }
+
+    #camera-overlay {
+      position: fixed; inset: 0; z-index: 150; background: #000;
+      display: none; flex-direction: column;
+    }
+    .camera-header {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+      padding: 16px max(16px, env(safe-area-inset-right)) 40px max(16px, env(safe-area-inset-left));
+      display: flex; align-items: center; justify-content: space-between;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+      pointer-events: none;
+    }
+    .camera-header > * { pointer-events: auto; }
+    .camera-header .btn-icon {
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);
+      color: #fff; backdrop-filter: blur(4px);
+    }
+    .camera-header .btn-icon:hover { background: rgba(255,255,255,0.3); color: #fff; }
+    #camera-counter {
+      color: #fff; font-size: 13px; font-weight: 600;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8); pointer-events: none;
+    }
+    #camera-video {
+      flex: 1; width: 100%; object-fit: cover; display: block; background: #000;
+    }
+    .camera-controls {
+      padding: 16px max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+      background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+    }
+    .camera-strip {
+      display: flex; gap: 10px; overflow-x: auto; width: 100%;
+      padding-bottom: 4px; scrollbar-width: none;
+    }
+    .camera-strip::-webkit-scrollbar { display: none; }
+    .camera-strip-item {
+      position: relative; flex-shrink: 0; width: 64px; height: 64px;
+      border-radius: 8px; overflow: hidden; border: 2px solid rgba(255,255,255,0.3);
+      cursor: pointer; transition: transform .15s, border-color .15s;
+    }
+    .camera-strip-item:hover, .camera-strip-item:active {
+      transform: scale(1.05); border-color: #fff;
+    }
+    .camera-strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .camera-strip-delete {
+      position: absolute; top: 2px; right: 2px;
+      width: 20px; height: 20px; border-radius: 50%; border: none;
+      background: rgba(239,68,68,0.9); color: #fff; font-size: 14px; line-height: 1;
+      display: grid; place-items: center; cursor: pointer; padding: 0;
+      opacity: 0; transition: opacity .15s;
+    }
+    .camera-strip-item:hover .camera-strip-delete,
+    .camera-strip-delete:active { opacity: 1; }
+    @media (pointer: coarse) {
+      .camera-strip-delete { opacity: 1; }
+    }
+    .shutter-btn {
+      width: 72px; height: 72px; border-radius: 50%;
+      border: 4px solid #fff; background: rgba(255,255,255,0.35);
+      cursor: pointer; transition: transform .1s, background .2s;
+      flex-shrink: 0;
+    }
+    .shutter-btn:active {
+      transform: scale(0.92); background: rgba(255,255,255,0.8);
+    }
+    #camera-lightbox {
+      position: fixed; inset: 0; z-index: 160; background: rgba(0,0,0,0.92);
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      padding: 20px; gap: 16px;
+    }
+    #camera-lightbox img {
+      max-width: 100%; max-height: 70vh;
+      border-radius: var(--radius-sm); object-fit: contain;
+    }
+    .lightbox-actions { display: flex; gap: 12px; }
   </style>
 </head>
 <body>
@@ -458,6 +539,14 @@
         <svg class="drop-zone-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         <h3>Drop screenshots here</h3>
         <p>or click to browse. Supports JPG, PNG, WebP.</p>
+      </div>
+
+      <!-- Camera Launch -->
+      <div class="camera-launch-row">
+        <button class="btn btn-secondary" id="open-camera-btn" style="width:100%">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          Open Camera
+        </button>
       </div>
 
       <!-- Image list -->
@@ -531,6 +620,31 @@
   </section>
 </main>
 
+<!-- CAMERA OVERLAY -->
+<div id="camera-overlay">
+  <div class="camera-header">
+    <button class="btn-icon" id="camera-close" aria-label="Close camera">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <span id="camera-counter">0 photos</span>
+    <button class="btn btn-primary btn-sm" id="camera-done">Done</button>
+  </div>
+  <video id="camera-video" autoplay playsinline muted></video>
+  <div class="camera-controls">
+    <div class="camera-strip" id="camera-strip"></div>
+    <button id="camera-shutter" class="shutter-btn" aria-label="Take photo"></button>
+  </div>
+</div>
+
+<!-- CAMERA LIGHTBOX -->
+<div id="camera-lightbox">
+  <img id="camera-lightbox-img" src="" alt="Captured photo preview">
+  <div class="lightbox-actions">
+    <button class="btn btn-danger" id="camera-lightbox-remove">Remove Photo</button>
+    <button class="btn btn-secondary" id="camera-lightbox-close">Close</button>
+  </div>
+</div>
+
 <!-- TOAST CONTAINER -->
 <div class="toast-container" id="toast-container" aria-live="assertive"></div>
 
@@ -556,6 +670,9 @@
   let isProcessing = false;
   let currentTheme = 'dark';
   let sessionHistory = [];
+  let cameraStream = null;
+  let cameraImages = [];
+  let lightboxImageId = null;
 
   // =======================================================================
   // DOM REFS
@@ -585,6 +702,20 @@
   const iconMoon = document.getElementById('icon-moon');
   const historyList = document.getElementById('history-list');
 
+  // Camera refs
+  const openCameraBtn = document.getElementById('open-camera-btn');
+  const cameraOverlay = document.getElementById('camera-overlay');
+  const cameraVideo = document.getElementById('camera-video');
+  const cameraShutter = document.getElementById('camera-shutter');
+  const cameraClose = document.getElementById('camera-close');
+  const cameraDone = document.getElementById('camera-done');
+  const cameraStrip = document.getElementById('camera-strip');
+  const cameraCounter = document.getElementById('camera-counter');
+  const cameraLightbox = document.getElementById('camera-lightbox');
+  const cameraLightboxImg = document.getElementById('camera-lightbox-img');
+  const cameraLightboxClose = document.getElementById('camera-lightbox-close');
+  const cameraLightboxRemove = document.getElementById('camera-lightbox-remove');
+
   // =======================================================================
   // INIT
   // =======================================================================
@@ -595,7 +726,8 @@
     bindEvents();
     renderImageList();
     updateActionButtons();
-    populateModelSelect();
+    const s = getSettings();
+    populateModelSelect(s.lastModelList || DEFAULT_VISION_MODELS);
     renderHistory();
   }
 
@@ -614,6 +746,14 @@
     saveSessionBtn.addEventListener('click', saveCurrentSession);
     themeToggle.addEventListener('click', toggleTheme);
     fetchModelsBtn.addEventListener('click', fetchModelsFromOpenRouter);
+
+    // Camera
+    openCameraBtn.addEventListener('click', openCamera);
+    cameraShutter.addEventListener('click', takePhoto);
+    cameraClose.addEventListener('click', () => closeCamera(false));
+    cameraDone.addEventListener('click', () => closeCamera(true));
+    cameraLightboxClose.addEventListener('click', hideCameraLightbox);
+    cameraLightboxRemove.addEventListener('click', removeLightboxImage);
 
     // API Key visibility
     toggleKeyVisibility.addEventListener('click', () => {
@@ -648,14 +788,6 @@
     } catch (e) {
       console.error('Failed to load settings', e);
     }
-    // Restore saved model if it exists in the select
-    const savedModel = getSettings().model;
-    if (savedModel) {
-      setTimeout(() => {
-        const opt = Array.from(modelSelect.options).find(o => o.value === savedModel);
-        if (opt) modelSelect.value = savedModel;
-      }, 0);
-    }
   }
 
   function getSettings() {
@@ -668,12 +800,14 @@
   }
 
   function saveSettings() {
+    const lastModelList = Array.from(modelSelect.options).map(o => ({ id: o.value, name: o.textContent }));
     const s = {
       apiKey: saveKeyCheck.checked ? apiKeyInput.value : '',
       model: modelSelect.value,
       theme: currentTheme,
       saveKey: saveKeyCheck.checked,
-      history: sessionHistory
+      history: sessionHistory,
+      lastModelList: lastModelList.length > 0 ? lastModelList : undefined
     };
     localStorage.setItem(LS_KEY, JSON.stringify(s));
   }
@@ -789,14 +923,15 @@
       card.dataset.id = img.id;
       card.dataset.index = index;
 
+      const imgName = img.file ? img.file.name : (img.name || 'Image');
       card.innerHTML = `
         <div class="drag-handle" aria-label="Drag to reorder">&#x2630;</div>
-        <img class="thumb" src="${escapeHtml(img.thumbUrl)}" alt="${escapeHtml(img.file.name)}">
+        <img class="thumb" src="${escapeHtml(img.thumbUrl)}" alt="${escapeHtml(imgName)}">
         <div class="image-meta">
-          <span class="image-name">${escapeHtml(img.file.name)}</span>
+          <span class="image-name">${escapeHtml(imgName)}</span>
           <span class="image-status ${img.status}" id="status-${img.id}">${capitalize(img.status)}</span>
         </div>
-        <button class="remove-btn" aria-label="Remove ${escapeHtml(img.file.name)}" data-id="${img.id}">&times;</button>
+        <button class="remove-btn" aria-label="Remove ${escapeHtml(imgName)}" data-id="${img.id}">&times;</button>
       `;
 
       card.querySelector('.remove-btn').addEventListener('click', (e) => {
@@ -958,7 +1093,7 @@
     const session = {
       id: 'sess_' + Date.now().toString(36),
       date: new Date().toISOString(),
-      title: images.length > 0 ? images[0].file.name.replace(/\.[^.]+$/, '') + (images.length > 1 ? ` +${images.length - 1}` : '') : 'Transcript',
+      title: images.length > 0 ? ((images[0].file ? images[0].file.name : (images[0].name || 'Image')).replace(/\.[^.]+$/, '')) + (images.length > 1 ? ` +${images.length - 1}` : '') : 'Transcript',
       imageCount: images.length,
       transcript: transcriptEditor.value,
       imageThumbs: images.slice(0, 3).map(img => img.thumbUrl)
@@ -1021,6 +1156,113 @@
 
       historyList.appendChild(item);
     });
+  }
+
+  // =======================================================================
+  // CAMERA MODE
+  // =======================================================================
+  async function openCamera() {
+    cameraImages = [];
+    renderCameraStrip();
+    cameraOverlay.style.display = 'flex';
+    try {
+      const constraints = {
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false
+      };
+      cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+      cameraVideo.srcObject = cameraStream;
+      await cameraVideo.play();
+    } catch (err) {
+      console.error(err);
+      showToast('Camera failed: ' + err.message, 'error');
+      closeCamera(false);
+    }
+  }
+
+  function closeCamera(confirmSession) {
+    if (!confirmSession && cameraImages.length > 0) {
+      if (!confirm(`Discard ${cameraImages.length} photo${cameraImages.length !== 1 ? 's' : ''}?`)) return;
+    }
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+    cameraVideo.srcObject = null;
+    cameraOverlay.style.display = 'none';
+    hideCameraLightbox();
+
+    if (confirmSession && cameraImages.length > 0) {
+      images.push(...cameraImages.map(i => ({ ...i, status: 'pending' })));
+      const added = cameraImages.length;
+      cameraImages = [];
+      renderImageList();
+      updateStatus(`${images.length} image${images.length > 1 ? 's' : ''} ready.`, 'ready');
+      updateActionButtons();
+      showToast(`${added} camera photo${added > 1 ? 's' : ''} added.`, 'success');
+    } else {
+      cameraImages = [];
+    }
+  }
+
+  function takePhoto() {
+    if (!cameraVideo.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = cameraVideo.videoWidth;
+    canvas.height = cameraVideo.videoHeight;
+    canvas.getContext('2d').drawImage(cameraVideo, 0, 0);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const id = 'cam_' + Math.random().toString(36).slice(2, 10);
+    const name = `Camera_${String(cameraImages.length + 1).padStart(3, '0')}.jpg`;
+    cameraImages.push({ id, name, thumbUrl: dataUrl, status: 'pending' });
+    renderCameraStrip();
+    if (navigator.vibrate) navigator.vibrate(40);
+  }
+
+  function renderCameraStrip() {
+    cameraStrip.innerHTML = '';
+    cameraCounter.textContent = `${cameraImages.length} photo${cameraImages.length !== 1 ? 's' : ''}`;
+    cameraImages.forEach(img => {
+      const item = document.createElement('div');
+      item.className = 'camera-strip-item';
+      item.innerHTML = `
+        <img src="${escapeHtml(img.thumbUrl)}" alt="${escapeHtml(img.name)}">
+        <button class="camera-strip-delete" data-id="${img.id}" aria-label="Delete ${escapeHtml(img.name)}">&times;</button>
+      `;
+      item.querySelector('img').addEventListener('click', () => showCameraLightbox(img.id));
+      item.querySelector('.camera-strip-delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeCameraImage(img.id);
+      });
+      cameraStrip.appendChild(item);
+    });
+    cameraStrip.scrollLeft = cameraStrip.scrollWidth;
+  }
+
+  function removeCameraImage(id) {
+    cameraImages = cameraImages.filter(i => i.id !== id);
+    renderCameraStrip();
+    if (lightboxImageId === id) hideCameraLightbox();
+  }
+
+  function showCameraLightbox(id) {
+    const img = cameraImages.find(i => i.id === id);
+    if (!img) return;
+    lightboxImageId = id;
+    cameraLightboxImg.src = img.thumbUrl;
+    cameraLightbox.style.display = 'flex';
+  }
+
+  function hideCameraLightbox() {
+    cameraLightbox.style.display = 'none';
+    lightboxImageId = null;
+  }
+
+  function removeLightboxImage() {
+    if (lightboxImageId) {
+      removeCameraImage(lightboxImageId);
+      hideCameraLightbox();
+    }
   }
 
   // =======================================================================
@@ -1110,9 +1352,9 @@
   // =======================================================================
   init();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.22.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.22.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Chat Screenshot Transcriber · version 2026.05.22.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.22.6" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.22.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Chat Screenshot Transcriber · version 2026.05.22.6
 </footer>
 </body>
 </html>
