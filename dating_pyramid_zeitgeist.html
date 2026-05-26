@@ -406,7 +406,10 @@
           </div>
           <div style="flex:1; min-width:160px;">
             <label style="display:block; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">Model</label>
-            <input type="text" id="or-model" value="openai/gpt-4o-mini" style="width:100%;">
+            <select id="or-model" style="width:100%;">
+              <option value="openai/gpt-4o-mini">openai/gpt-4o-mini</option>
+            </select>
+            <div id="or-model-status" style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.25rem; min-height:1em;"></div>
           </div>
           <div style="flex:1; min-width:200px;">
             <label style="display:block; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">CORS Proxy Base URL (optional)</label>
@@ -570,10 +573,10 @@
 <div class="snack" id="snack"></div>
 
 <!-- Footer -->
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
   <div style="margin-bottom:0.5rem;">Part of Hank's Junk Drawer</div>
-  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.2</div>
+  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.3</div>
 </footer>
 
 <script>
@@ -765,9 +768,15 @@ function loadState() {
   const orModel = localStorage.getItem(LS_PREFIX + 'or_model') || 'openai/gpt-4o-mini';
   const proxyUrl = localStorage.getItem(LS_PREFIX + 'proxy_url') || '';
   document.getElementById('or-key').value = orKey;
-  document.getElementById('or-model').value = orModel;
   document.getElementById('proxy-url').value = proxyUrl;
   document.getElementById('btn-explain').disabled = !orKey;
+  if (orKey) {
+    fetchModels(orKey, orModel);
+  } else {
+    const sel = document.getElementById('or-model');
+    sel.innerHTML = '<option value="openai/gpt-4o-mini">openai/gpt-4o-mini</option>';
+    sel.value = orModel;
+  }
 }
 
 function saveState() {
@@ -784,13 +793,90 @@ function saveSources() {
 }
 function saveOR() {
   const key = document.getElementById('or-key').value.trim();
-  const model = document.getElementById('or-model').value.trim() || 'openai/gpt-4o-mini';
+  const model = document.getElementById('or-model').value || 'openai/gpt-4o-mini';
   const proxy = document.getElementById('proxy-url').value.trim();
   localStorage.setItem(LS_PREFIX + 'or_key', key);
   localStorage.setItem(LS_PREFIX + 'or_model', model);
   localStorage.setItem(LS_PREFIX + 'proxy_url', proxy);
   document.getElementById('btn-explain').disabled = !key;
+  if (key) {
+    fetchModels(key, model);
+  }
   snack('OpenRouter config saved');
+}
+
+async function fetchModels(key, currentModel) {
+  const sel = document.getElementById('or-model');
+  const status = document.getElementById('or-model-status');
+  status.textContent = 'Loading models...';
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models', {
+      headers: key ? { 'Authorization': 'Bearer ' + key } : {}
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const models = (data.data || []).sort((a, b) => {
+      // Sort by pricing (cheaper first), then name
+      const ap = parseFloat(a.pricing?.prompt || '0') + parseFloat(a.pricing?.completion || '0');
+      const bp = parseFloat(b.pricing?.prompt || '0') + parseFloat(b.pricing?.completion || '0');
+      if (ap !== bp) return ap - bp;
+      return (a.name || a.id).localeCompare(b.name || b.id);
+    });
+    const preferred = new Set([
+      'openai/gpt-4o-mini','openai/gpt-4o','anthropic/claude-3.5-haiku',
+      'anthropic/claude-3.5-sonnet','google/gemini-2.0-flash-exp:free',
+      'meta-llama/llama-3.1-8b-instruct','microsoft/wizardlm-2-8x22b',
+      'nous/hermes-3-llama-3.1-405b:free','qwen/qwen-2.5-7b-instruct'
+    ]);
+    const frag = document.createDocumentFragment();
+    const seen = new Set();
+    // First, show preferred models if available
+    for (const m of models) {
+      if (preferred.has(m.id) && !seen.has(m.id)) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = (m.name || m.id) + ' — $' + (parseFloat(m.pricing?.prompt || '0')*1e6).toFixed(2) + '/M tok';
+        frag.appendChild(opt);
+        seen.add(m.id);
+      }
+    }
+    // Then the rest
+    for (const m of models) {
+      if (!seen.has(m.id)) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = (m.name || m.id) + ' — $' + (parseFloat(m.pricing?.prompt || '0')*1e6).toFixed(2) + '/M tok';
+        frag.appendChild(opt);
+        seen.add(m.id);
+      }
+    }
+    sel.innerHTML = '';
+    sel.appendChild(frag);
+    // Restore selection
+    if (currentModel && seen.has(currentModel)) {
+      sel.value = currentModel;
+    } else if (seen.has('openai/gpt-4o-mini')) {
+      sel.value = 'openai/gpt-4o-mini';
+    } else {
+      sel.selectedIndex = 0;
+    }
+    status.textContent = models.length + ' models loaded';
+  } catch (e) {
+    // Fallback to static default
+    sel.innerHTML = '<option value="openai/gpt-4o-mini">openai/gpt-4o-mini</option>' +
+      '<option value="openai/gpt-4o">openai/gpt-4o</option>' +
+      '<option value="anthropic/claude-3.5-haiku">anthropic/claude-3.5-haiku</option>' +
+      '<option value="anthropic/claude-3.5-sonnet">anthropic/claude-3.5-sonnet</option>' +
+      '<option value="google/gemini-2.0-flash-exp:free">google/gemini-2.0-flash-exp:free</option>';
+    if (currentModel) {
+      const opt = document.createElement('option');
+      opt.value = currentModel;
+      opt.textContent = currentModel;
+      sel.appendChild(opt);
+      sel.value = currentModel;
+    }
+    status.textContent = 'Could not load models (' + e.message + ')';
+  }
 }
 
 /* ================================================================
