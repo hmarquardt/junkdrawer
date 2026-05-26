@@ -442,8 +442,14 @@
             <div id="or-model-status" style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.25rem; min-height:1em;"></div>
           </div>
           <div style="flex:1; min-width:200px;">
-            <label style="display:block; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">CORS Proxy Base URL (optional)</label>
-            <input type="text" id="proxy-url" placeholder="https://api.allorigins.win/raw?url=" style="width:100%;">
+            <label style="display:block; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.25rem;">CORS Proxy (optional)</label>
+            <select id="proxy-url" style="width:100%;">
+              <option value="">None</option>
+              <option value="https://api.allorigins.win/raw?url=">allorigins.win /raw</option>
+              <option value="https://api.allorigins.win/get?url=">allorigins.win /get</option>
+              <option value="https://corsproxy.io/?url=">corsproxy.io</option>
+              <option value="https://www.cors-anywhere.com/">cors-anywhere.com</option>
+            </select>
           </div>
           <button class="btn btn-sm" id="btn-save-or">Save</button>
         </div>
@@ -616,8 +622,8 @@
 </div>
 
 <!-- Footer -->
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
   <div style="margin-bottom:0.5rem; display:flex; align-items:center; justify-content:center; gap:0.75rem;">
     <span>Part of Hank's Junk Drawer</span>
     <button id="btn-bug" class="btn btn-sm" style="padding:0.3rem 0.5rem;" aria-label="Activity log" title="Activity log">
@@ -628,7 +634,7 @@
       </svg>
     </button>
   </div>
-  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.4</div>
+  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.5</div>
 </footer>
 
 <script>
@@ -930,39 +936,96 @@ async function fetchModels(key, currentModel) {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const models = (data.data || []).sort((a, b) => {
-      const ap = parseFloat(a.pricing?.prompt || '0') + parseFloat(a.pricing?.completion || '0');
-      const bp = parseFloat(b.pricing?.prompt || '0') + parseFloat(b.pricing?.completion || '0');
-      if (ap !== bp) return ap - bp;
-      return (a.name || a.id).localeCompare(b.name || b.id);
-    });
-    logEvent('info', 'OpenRouter models loaded', { count: models.length });
-    const preferred = new Set([
+    const all = data.data || [];
+    logEvent('info', 'OpenRouter models loaded', { count: all.length });
+
+    // Extract provider from model id: "provider/model-name"
+    function getProvider(m) {
+      return (m.id || '').split('/')[0] || 'Other';
+    }
+
+    // Preferred / curated quick-pick set
+    const preferredIds = new Set([
       'openai/gpt-4o-mini','openai/gpt-4o','anthropic/claude-3.5-haiku',
       'anthropic/claude-3.5-sonnet','google/gemini-2.0-flash-exp:free',
       'meta-llama/llama-3.1-8b-instruct','microsoft/wizardlm-2-8x22b',
       'nous/hermes-3-llama-3.1-405b:free','qwen/qwen-2.5-7b-instruct'
     ]);
+
+    // Build per-provider lists, sorted by price asc then name asc
+    const byProvider = {};
+    for (const m of all) {
+      if (!m.id) continue;
+      const p = getProvider(m);
+      if (!byProvider[p]) byProvider[p] = [];
+      byProvider[p].push(m);
+    }
+    for (const p of Object.keys(byProvider)) {
+      byProvider[p].sort((a, b) => {
+        const ap = parseFloat(a.pricing?.prompt || '0') + parseFloat(a.pricing?.completion || '0');
+        const bp = parseFloat(b.pricing?.prompt || '0') + parseFloat(b.pricing?.completion || '0');
+        if (ap !== bp) return ap - bp;
+        return (a.name || a.id).localeCompare(b.name || b.id);
+      });
+    }
+
+    // Provider display order (well-known first)
+    const providerOrder = [
+      'openai','anthropic','google','meta-llama','mistralai','cohere',
+      'microsoft','nous','qwen','deepseek','perplexity','together'
+    ];
+    const sortedProviders = Object.keys(byProvider).sort((a, b) => {
+      const ia = providerOrder.indexOf(a);
+      const ib = providerOrder.indexOf(b);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
     const frag = document.createDocumentFragment();
     const seen = new Set();
-    for (const m of models) {
-      if (preferred.has(m.id) && !seen.has(m.id)) {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = (m.name || m.id) + ' — $' + (parseFloat(m.pricing?.prompt || '0')*1e6).toFixed(2) + '/M tok';
-        frag.appendChild(opt);
-        seen.add(m.id);
+
+    // Preferred quick-pick group at the very top
+    const preferredModels = [];
+    for (const p of sortedProviders) {
+      for (const m of byProvider[p]) {
+        if (preferredIds.has(m.id) && !seen.has(m.id)) {
+          preferredModels.push(m);
+          seen.add(m.id);
+        }
       }
     }
-    for (const m of models) {
-      if (!seen.has(m.id)) {
+    if (preferredModels.length) {
+      const og = document.createElement('optgroup');
+      og.label = 'Quick picks';
+      for (const m of preferredModels) {
         const opt = document.createElement('option');
         opt.value = m.id;
-        opt.textContent = (m.name || m.id) + ' — $' + (parseFloat(m.pricing?.prompt || '0')*1e6).toFixed(2) + '/M tok';
-        frag.appendChild(opt);
-        seen.add(m.id);
+        const cost = (parseFloat(m.pricing?.prompt || '0')*1e6).toFixed(2);
+        opt.textContent = (m.name || m.id) + ' — $' + cost + '/M';
+        og.appendChild(opt);
       }
+      frag.appendChild(og);
     }
+
+    // One optgroup per provider
+    for (const p of sortedProviders) {
+      const list = byProvider[p].filter(m => !seen.has(m.id));
+      if (!list.length) continue;
+      const og = document.createElement('optgroup');
+      og.label = p;
+      for (const m of list) {
+        seen.add(m.id);
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        const cost = (parseFloat(m.pricing?.prompt || '0')*1e6).toFixed(2);
+        opt.textContent = (m.name || m.id) + ' — $' + cost + '/M';
+        og.appendChild(opt);
+      }
+      frag.appendChild(og);
+    }
+
     sel.innerHTML = '';
     sel.appendChild(frag);
     if (currentModel && seen.has(currentModel)) {
@@ -972,21 +1035,28 @@ async function fetchModels(key, currentModel) {
     } else {
       sel.selectedIndex = 0;
     }
-    status.textContent = models.length + ' models loaded';
+    status.textContent = all.length + ' models loaded';
   } catch (e) {
     logEvent('error', 'Failed to load OpenRouter models', { error: e.message });
-    sel.innerHTML = '<option value="openai/gpt-4o-mini">openai/gpt-4o-mini</option>' +
-      '<option value="openai/gpt-4o">openai/gpt-4o</option>' +
-      '<option value="anthropic/claude-3.5-haiku">anthropic/claude-3.5-haiku</option>' +
-      '<option value="anthropic/claude-3.5-sonnet">anthropic/claude-3.5-sonnet</option>' +
-      '<option value="google/gemini-2.0-flash-exp:free">google/gemini-2.0-flash-exp:free</option>';
-    if (currentModel) {
+    const fallback = document.createDocumentFragment();
+    const og = document.createElement('optgroup');
+    og.label = 'Fallback';
+    ['openai/gpt-4o-mini','openai/gpt-4o','anthropic/claude-3.5-haiku','anthropic/claude-3.5-sonnet','google/gemini-2.0-flash-exp:free'].forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id;
+      og.appendChild(opt);
+    });
+    if (currentModel && !['openai/gpt-4o-mini','openai/gpt-4o','anthropic/claude-3.5-haiku','anthropic/claude-3.5-sonnet','google/gemini-2.0-flash-exp:free'].includes(currentModel)) {
       const opt = document.createElement('option');
       opt.value = currentModel;
       opt.textContent = currentModel;
-      sel.appendChild(opt);
-      sel.value = currentModel;
+      og.appendChild(opt);
     }
+    fallback.appendChild(og);
+    sel.innerHTML = '';
+    sel.appendChild(fallback);
+    if (currentModel) sel.value = currentModel;
     status.textContent = 'Could not load models (' + e.message + ')';
   }
 }
