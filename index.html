@@ -276,7 +276,7 @@
     .card {
       position: relative;
       display: grid;
-      grid-template-columns: 56px minmax(0, 1fr) auto;
+      grid-template-columns: 56px minmax(0, 1fr) auto auto;
       gap: 14px;
       align-items: center;
       min-height: 86px;
@@ -375,6 +375,49 @@
       padding-left: 8px;
     }
 
+    .fav-btn {
+      position: relative;
+      z-index: 2;
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 10px;
+      background: rgba(255,255,255,.09);
+      color: rgba(247,243,255,.55);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      transition: transform .16s ease, background .16s ease, color .16s ease, border-color .16s ease;
+      padding: 0;
+    }
+    .fav-btn:hover {
+      transform: scale(1.08);
+      background: rgba(255,255,255,.15);
+      border-color: rgba(255,255,255,.28);
+    }
+    .fav-btn.favorited {
+      color: #ffbd4a;
+      border-color: rgba(255, 189, 74, .35);
+      background: rgba(255, 189, 74, .12);
+    }
+    .fav-btn.favorited:hover {
+      color: #ffd47a;
+      border-color: rgba(255, 189, 74, .5);
+      background: rgba(255, 189, 74, .18);
+    }
+
+    .section-header {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 10px 6px 6px;
+    }
+    .section-header:first-child { padding-top: 0; }
+
     .status {
       margin-top: 24px;
       padding: 18px 20px;
@@ -439,7 +482,7 @@
       .hero { padding: 26px; }
       .toolbar { grid-template-columns: 1fr; }
       .select, .button { width: 100%; }
-      .card { grid-template-columns: 48px minmax(0, 1fr); }
+      .card { grid-template-columns: 48px minmax(0, 1fr) auto; }
       .icon { width: 44px; height: 44px; font-size: 23px; border-radius: 14px; }
       .open-indicator { display: none; }
     }
@@ -486,9 +529,9 @@
     <div id="status" class="status">Looking through the drawer...</div>
     <section class="grid" id="grid" aria-live="polite"></section>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.15.1" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.15.1">
-      &copy; 2026 Hank Marquardt &middot; Junk Drawer Index &middot; version 2026.05.15.1
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.1">
+      &copy; 2026 Hank Marquardt &middot; Junk Drawer Index &middot; version 2026.05.26.1
     </footer>
   </main>
 
@@ -522,6 +565,7 @@
 
     const PRIVATE_HASH = "7891bf445994c20082d7797cb15084864b9f3a76da9b01b76c04eb8393de65dd";
     const UNLOCK_KEY = "junkDrawer:privateUnlocked";
+    const FAVORITES_KEY = "junkDrawer:favorites";
 
     const state = {
       pages: [],
@@ -582,6 +626,14 @@
       unlockBtn.addEventListener("click", verifyPassword);
       cancelBtn.addEventListener("click", hidePasswordModal);
 
+      grid.addEventListener("click", (e) => {
+        const btn = e.target.closest(".fav-btn");
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFavorite(btn.dataset.path);
+      });
+
       passwordInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") verifyPassword();
         if (e.key === "Escape") hidePasswordModal();
@@ -611,6 +663,31 @@
         lockBtn.title = "Unlock private entries";
         lockBtn.textContent = "🔒";
       }
+    }
+
+    function getFavorites() {
+      try {
+        const raw = localStorage.getItem(FAVORITES_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function toggleFavorite(path) {
+      const favs = getFavorites();
+      const idx = favs.indexOf(path);
+      if (idx >= 0) {
+        favs.splice(idx, 1);
+      } else {
+        favs.push(path);
+      }
+      try {
+        localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+      } catch {}
+      render();
     }
 
     function togglePrivateMode() {
@@ -822,12 +899,33 @@
         <span class="pill">Branch: <code>${escapeHtml(CONFIG.branch)}</code></span>
       `;
 
-      if (!pages.length) {
+      const favPaths = getFavorites();
+      const favorites = [];
+      const others = [];
+      for (const page of pages) {
+        if (favPaths.includes(page.path)) favorites.push(page);
+        else others.push(page);
+      }
+
+      if (!favorites.length && !others.length) {
         grid.innerHTML = `<div class="empty">Nothing matched. The junk drawer is offended, but understanding.</div>`;
         return;
       }
 
-      grid.innerHTML = pages.map(page => `
+      let html = "";
+      if (favorites.length) {
+        if (!state.query) html += `<div class="section-header">⭐ Favorites</div>`;
+        html += favorites.map(page => cardHtml(page, true)).join("");
+      }
+      if (others.length) {
+        if (favorites.length && !state.query) html += `<div class="section-header">📁 All Pages</div>`;
+        html += others.map(page => cardHtml(page, false)).join("");
+      }
+      grid.innerHTML = html;
+    }
+
+    function cardHtml(page, isFav) {
+      return `
         <a class="card${page.isPrivate ? ' private' : ''}" href="${page.url}" style="--accent:${escapeAttr(page.accent)}">
           <div class="icon" aria-hidden="true">${escapeHtml(page.emoji)}</div>
           <div class="card-main">
@@ -839,9 +937,12 @@
               ${page.isPrivate ? `<span class="private-badge">Private</span>` : ""}
             </div>
           </div>
+          <button class="fav-btn ${isFav ? 'favorited' : ''}" type="button" data-path="${escapeAttr(page.path)}" aria-label="${isFav ? 'Remove from favorites' : 'Add to favorites'}" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">
+            ${isFav ? '★' : '☆'}
+          </button>
           <div class="open-indicator" aria-hidden="true">›</div>
         </a>
-      `).join("");
+      `;
     }
 
     function contentsUrl(path) {
