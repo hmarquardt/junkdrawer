@@ -622,8 +622,8 @@
 </div>
 
 <!-- Footer -->
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.5" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.6" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
   <div style="margin-bottom:0.5rem; display:flex; align-items:center; justify-content:center; gap:0.75rem;">
     <span>Part of Hank's Junk Drawer</span>
     <button id="btn-bug" class="btn btn-sm" style="padding:0.3rem 0.5rem;" aria-label="Activity log" title="Activity log">
@@ -634,7 +634,7 @@
       </svg>
     </button>
   </div>
-  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.5</div>
+  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.6</div>
 </footer>
 
 <script>
@@ -1780,10 +1780,52 @@ Tone: ${tone}. Keep it under 180 words total. Do not use markdown headers. Use p
         max_tokens: 400
       })
     });
-    if (!res.ok) throw new Error('OpenRouter error: ' + res.status);
+    const status = res.status;
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || 'No response.';
-    logEvent('info', 'Explain pyramid success', { model, tokens: data.usage?.total_tokens });
+
+    // Log what we got back before deciding success/failure
+    const hasError = !!data.error;
+    const hasChoices = Array.isArray(data.choices) && data.choices.length > 0;
+    const hasContent = hasChoices && typeof data.choices[0]?.message?.content === 'string';
+    const contentPreview = hasContent ? data.choices[0].message.content.slice(0, 120) : '(none)';
+    const usage = data.usage || {};
+
+    if (!res.ok || hasError) {
+      const errMsg = data.error?.message || data.error?.code || ('HTTP ' + status);
+      logEvent('error', 'OpenRouter returned error', {
+        model, status, error: errMsg, code: data.error?.code, type: data.error?.type,
+        usage: { prompt: usage.prompt_tokens, completion: usage.completion_tokens, total: usage.total_tokens }
+      });
+      document.getElementById('ai-readout').textContent = 'OpenRouter error: ' + errMsg;
+      return;
+    }
+
+    if (!hasChoices) {
+      logEvent('warn', 'OpenRouter response missing choices', {
+        model, status, keys: Object.keys(data).slice(0,10),
+        usage: { prompt: usage.prompt_tokens, completion: usage.completion_tokens, total: usage.total_tokens }
+      });
+      document.getElementById('ai-readout').textContent = 'No response content returned. The model produced an empty reply.';
+      return;
+    }
+
+    if (!hasContent) {
+      const finish = data.choices[0]?.finish_reason || 'unknown';
+      logEvent('warn', 'OpenRouter response missing content', {
+        model, status, finish_reason: finish,
+        choiceKeys: Object.keys(data.choices[0] || {}),
+        usage: { prompt: usage.prompt_tokens, completion: usage.completion_tokens, total: usage.total_tokens }
+      });
+      document.getElementById('ai-readout').textContent = 'Model stopped early (' + finish + '). No usable text was returned.';
+      return;
+    }
+
+    const text = data.choices[0].message.content;
+    logEvent('info', 'Explain pyramid success', {
+      model, status, tokens: usage.total_tokens,
+      promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens,
+      preview: contentPreview
+    });
     document.getElementById('ai-readout').innerHTML = text.replace(/\n/g,'<br>').replace(/\*\s+/g,'&bull; ');
   } catch (e) {
     logEvent('error', 'Explain pyramid failed', { error: e.message, model });
