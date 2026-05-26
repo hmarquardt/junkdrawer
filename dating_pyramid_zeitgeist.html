@@ -623,8 +623,8 @@
 </div>
 
 <!-- Footer -->
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.8" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.8" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.26.9" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.26.9" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
   <div style="margin-bottom:0.5rem; display:flex; align-items:center; justify-content:center; gap:0.75rem;">
     <span>Part of Hank's Junk Drawer</span>
     <button id="btn-bug" class="btn btn-sm" style="padding:0.3rem 0.5rem;" aria-label="Activity log" title="Activity log">
@@ -635,7 +635,7 @@
       </svg>
     </button>
   </div>
-  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.8</div>
+  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.05.26.9</div>
 </footer>
 
 <script>
@@ -2035,12 +2035,12 @@ function exportPNG() {
   const svg = document.getElementById('pyramid-svg');
   const serializer = new XMLSerializer();
   let source = serializer.serializeToString(svg);
+  // Use system fonts only for export — external @import taints canvas and breaks toDataURL
   const styleBlock = `
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
-    text { font-family: 'DM Sans', system-ui, sans-serif; }
-    text.tier-label-text { font-family: 'Playfair Display', Georgia, serif; }
-    text.tier-desc-text { font-family: 'DM Sans', system-ui, sans-serif; }
-    text.word-text { font-family: 'DM Sans', system-ui, sans-serif; }
+    text { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    text.tier-label-text { font-family: Georgia, 'Times New Roman', serif; }
+    text.tier-desc-text { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    text.word-text { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   `;
   source = source.replace('</defs>', `<style>${styleBlock}</style></defs>`);
   const svgBlob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
@@ -2051,18 +2051,30 @@ function exportPNG() {
   canvas.height = 2000;
   const ctx = canvas.getContext('2d');
   img.onload = () => {
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg').trim();
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(img, 0, 0, 2400, 2000);
-    const png = canvas.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = png;
-    a.download = 'dating-pyramid-' + STATE.mode + '.png';
-    a.click();
-    URL.revokeObjectURL(url);
-    snack('PNG exported');
+    try {
+      let bg = getComputedStyle(document.body).getPropertyValue('--bg').trim();
+      if (!bg) bg = STATE.mode === 'romance' ? '#FFFBF5' : '#FFFAF0';
+      ctx.fillStyle = bg;
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img, 0, 0, 2400, 2000);
+      const png = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = png;
+      a.download = 'dating-pyramid-' + STATE.mode + '.png';
+      a.click();
+      URL.revokeObjectURL(url);
+      snack('PNG exported');
+    } catch (e) {
+      logEvent('error', 'PNG export failed', { error: e.message });
+      snack('Export failed: ' + e.message);
+      URL.revokeObjectURL(url);
+    }
   };
-  img.onerror = () => { snack('Export failed'); URL.revokeObjectURL(url); };
+  img.onerror = (e) => {
+    logEvent('error', 'PNG image load failed', { error: e?.message || 'unknown' });
+    snack('Export failed: could not render SVG');
+    URL.revokeObjectURL(url);
+  };
   img.src = url;
 }
 
