@@ -179,6 +179,7 @@
     .primary { background: linear-gradient(135deg, #0284c7, #16a34a); }
     .warning { background: rgba(245,158,11,.18); color: #fde68a; }
     .danger { background: rgba(239,68,68,.18); color: #fecaca; }
+    .small { padding: 8px 12px; font-size: .9rem; border-radius: 12px; }
 
     .schedule-title {
       margin: 0 0 16px;
@@ -212,9 +213,35 @@
       opacity: .55;
     }
 
+    .block.disabled {
+      opacity: .35;
+      text-decoration: line-through;
+      border-style: dashed;
+    }
+
     .block-name {
       font-weight: 800;
       margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      font-size: .72rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(245,158,11,.18);
+      color: #fde68a;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .badge.manual {
+      background: rgba(56,189,248,.18);
+      color: #bae6fd;
     }
 
     .block-duration {
@@ -248,6 +275,7 @@
       width: 18px;
       height: 18px;
       accent-color: var(--accent);
+      cursor: pointer;
     }
 
     .hint {
@@ -259,6 +287,48 @@
 
     .complete {
       color: #bbf7d0;
+    }
+
+    .edit-section { margin-top: 12px; }
+    .edit-row {
+      display: grid;
+      grid-template-columns: auto 1fr 80px auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .edit-row:last-child { border-bottom: none; }
+    .edit-row input[type="text"] {
+      background: rgba(15,23,42,.6);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: .95rem;
+    }
+    .edit-row input[type="number"] {
+      background: rgba(15,23,42,.6);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: .95rem;
+      width: 100%;
+    }
+    .edit-row label {
+      font-size: .85rem;
+      white-space: nowrap;
+    }
+    .edit-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .secondary-btn {
+      background: rgba(255,255,255,.06);
+      color: var(--text);
     }
   </style>
 </head>
@@ -297,35 +367,65 @@
 
       <aside class="schedule-card">
         <h2 class="schedule-title">Schedule</h2>
-        <div class="block-list" id="blockList"></div>
 
-        <div class="settings">
-          <label>
-            <input type="checkbox" id="repeatCheckbox" />
-            Repeat from the beginning after the final block
-          </label>
-          <label>
-            <input type="checkbox" id="voiceCheckbox" checked />
-            Speak next block name after the cue
-          </label>
-          <p class="hint">Tip: keep this browser tab open. Most browsers require you to press Start before audio is allowed.</p>
+        <div id="viewPanel">
+          <div class="block-list" id="blockList"></div>
+
+          <div class="settings">
+            <label>
+              <input type="checkbox" id="repeatCheckbox" />
+              Repeat from the beginning after the final block
+            </label>
+            <label>
+              <input type="checkbox" id="voiceCheckbox" checked />
+              Speak next block name after the cue
+            </label>
+            <p class="hint">Tip: keep this browser tab open. Most browsers require you to press Start before audio is allowed.</p>
+            <button class="secondary-btn small" id="editScheduleBtn">Edit Schedule</button>
+          </div>
+        </div>
+
+        <div id="editPanel" style="display:none;">
+          <div id="editRows"></div>
+          <div class="edit-actions">
+            <button class="primary small" id="addBlockBtn">+ Add Block</button>
+            <button class="warning small" id="resetDefaultsBtn">Reset Defaults</button>
+            <button class="secondary-btn small" id="doneEditBtn">Done</button>
+          </div>
         </div>
       </aside>
     </main>
   </div>
 
   <script>
-    const blocks = [
-      { name: "Meetings", minutes: 60 },
-      { name: "Wellbeing", minutes: 22.5 },
-      { name: "Coaching", minutes: 37.5 },
-      { name: "FB Learning / Non FB Learning", minutes: 45 }
+    const defaultBlocks = [
+      { name: "Meetings", minutes: 60, enabled: true, manual: false },
+      { name: "Wellbeing", minutes: 22.5, enabled: true, manual: false },
+      { name: "Coaching", minutes: 37.5, enabled: true, manual: false },
+      { name: "FB Learning / Non FB Learning", minutes: 45, enabled: true, manual: false }
     ];
 
+    function loadBlocks() {
+      try {
+        const saved = localStorage.getItem('rwsBlocks');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length) return parsed;
+        }
+      } catch (e) { /* ignore */ }
+      return JSON.parse(JSON.stringify(defaultBlocks));
+    }
+
+    function saveBlocks() {
+      try { localStorage.setItem('rwsBlocks', JSON.stringify(blocks)); } catch (e) { /* ignore */ }
+    }
+
+    let blocks = loadBlocks();
     let currentIndex = 0;
-    let remainingSeconds = Math.round(blocks[0].minutes * 60);
+    let remainingSeconds = 0;
     let timerId = null;
     let running = false;
+    let waitingManual = false;
     let audioContext = null;
 
     const currentLabel = document.getElementById("currentLabel");
@@ -342,6 +442,45 @@
     const totalTime = document.getElementById("totalTime");
     const repeatCheckbox = document.getElementById("repeatCheckbox");
     const voiceCheckbox = document.getElementById("voiceCheckbox");
+    const viewPanel = document.getElementById("viewPanel");
+    const editPanel = document.getElementById("editPanel");
+    const editRows = document.getElementById("editRows");
+    const editScheduleBtn = document.getElementById("editScheduleBtn");
+    const addBlockBtn = document.getElementById("addBlockBtn");
+    const resetDefaultsBtn = document.getElementById("resetDefaultsBtn");
+    const doneEditBtn = document.getElementById("doneEditBtn");
+
+    function getTotalEnabled() {
+      return blocks.filter(b => b.enabled).length;
+    }
+
+    function getFirstEnabledIndex() {
+      for (let i = 0; i < blocks.length; i++) if (blocks[i].enabled) return i;
+      return -1;
+    }
+
+    function getNextEnabledIndex(startIndex) {
+      for (let i = startIndex + 1; i < blocks.length; i++) if (blocks[i].enabled) return i;
+      return -1;
+    }
+
+    function getEnabledPosition(globalIndex) {
+      let count = 0;
+      for (let i = 0; i <= globalIndex; i++) if (blocks[i].enabled) count++;
+      return count;
+    }
+
+    function resetToFirstEnabled() {
+      const first = getFirstEnabledIndex();
+      if (first !== -1) {
+        currentIndex = first;
+        remainingSeconds = Math.round(blocks[first].minutes * 60);
+      } else {
+        currentIndex = blocks.length;
+        remainingSeconds = 0;
+      }
+      waitingManual = false;
+    }
 
     function formatTime(totalSeconds) {
       const minutes = Math.floor(totalSeconds / 60);
@@ -361,9 +500,13 @@
     function getTotalRemainingSeconds() {
       let total = remainingSeconds;
       for (let i = currentIndex + 1; i < blocks.length; i++) {
-        total += Math.round(blocks[i].minutes * 60);
+        if (blocks[i].enabled) total += Math.round(blocks[i].minutes * 60);
       }
       return total;
+    }
+
+    function getTotalEnabledMinutes() {
+      return blocks.filter(b => b.enabled).reduce((sum, b) => sum + b.minutes, 0);
     }
 
     function renderSchedule() {
@@ -371,15 +514,17 @@
       blocks.forEach((block, index) => {
         const el = document.createElement("div");
         el.className = "block";
-        if (index === currentIndex && currentIndex < blocks.length) el.classList.add("active");
-        if (index < currentIndex) el.classList.add("done");
+        if (!block.enabled) el.classList.add("disabled");
+        else if (index === currentIndex && index < blocks.length) el.classList.add("active");
+        if (index < currentIndex && block.enabled) el.classList.add("done");
 
-        const status = index < currentIndex ? "Done" : index === currentIndex ? "Current" : "Upcoming";
+        const status = !block.enabled ? "Off" : index < currentIndex ? "Done" : index === currentIndex ? "Current" : "Upcoming";
+        const manualBadge = block.manual ? `<span class="badge manual">Manual</span>` : "";
 
         el.innerHTML = `
           <div>
-            <div class="block-name">${block.name}</div>
-            <div class="block-duration">${formatDuration(block.minutes)} (${block.minutes * 60} seconds)</div>
+            <div class="block-name">${block.name}${manualBadge}</div>
+            <div class="block-duration">${formatDuration(block.minutes)} (${Math.round(block.minutes * 60)} seconds)</div>
           </div>
           <div class="block-status">${status}</div>
         `;
@@ -388,35 +533,49 @@
     }
 
     function render() {
-      const isComplete = currentIndex >= blocks.length;
+      const enabledCount = getTotalEnabled();
+      const isComplete = currentIndex >= blocks.length || enabledCount === 0;
 
       if (isComplete) {
         currentLabel.textContent = "Complete";
-        currentName.textContent = "All blocks finished";
+        currentName.textContent = enabledCount === 0 ? "No blocks enabled" : "All blocks finished";
         currentName.classList.add("complete");
         countdown.textContent = "00:00";
         progressBar.style.width = "100%";
-        blockCounter.textContent = `Block ${blocks.length} of ${blocks.length}`;
+        const totalBlocks = blocks.filter(b => b.enabled).length;
+        blockCounter.textContent = `Block ${totalBlocks} of ${totalBlocks}`;
         remainingTotal.textContent = "Remaining total: 0m";
         startPauseBtn.textContent = "Start";
+        totalTime.textContent = `Total: ${formatDuration(getTotalEnabledMinutes())}`;
         renderSchedule();
         return;
       }
 
       const block = blocks[currentIndex];
+      if (!block || !block.enabled) {
+        resetToFirstEnabled();
+        render();
+        return;
+      }
+
       const blockSeconds = Math.round(block.minutes * 60);
       const elapsed = blockSeconds - remainingSeconds;
       const progress = Math.max(0, Math.min(100, (elapsed / blockSeconds) * 100));
 
       currentName.classList.remove("complete");
-      currentLabel.textContent = running ? "Current block" : "Paused / ready";
+      if (waitingManual) {
+        currentLabel.textContent = "Manual — waiting for you";
+        startPauseBtn.textContent = "Next Block";
+      } else {
+        currentLabel.textContent = running ? "Current block" : "Paused / ready";
+        startPauseBtn.textContent = running ? "Pause" : "Start";
+      }
       currentName.textContent = block.name;
       countdown.textContent = formatTime(remainingSeconds);
       progressBar.style.width = `${progress}%`;
-      blockCounter.textContent = `Block ${currentIndex + 1} of ${blocks.length}`;
+      blockCounter.textContent = `Block ${getEnabledPosition(currentIndex)} of ${enabledCount}`;
       remainingTotal.textContent = `Remaining total: ${formatDuration(getTotalRemainingSeconds() / 60)}`;
-      startPauseBtn.textContent = running ? "Pause" : "Start";
-      totalTime.textContent = `Total: ${formatDuration(blocks.reduce((sum, b) => sum + b.minutes, 0))}`;
+      totalTime.textContent = `Total: ${formatDuration(getTotalEnabledMinutes())}`;
       renderSchedule();
     }
 
@@ -461,13 +620,26 @@
     }
 
     function startTimer() {
-      if (running || currentIndex >= blocks.length) return;
+      if (running) return;
+      if (waitingManual) {
+        waitingManual = false;
+        advanceBlock();
+        return;
+      }
+      if (currentIndex >= blocks.length) return;
       ensureAudioContext();
       running = true;
       render();
       timerId = setInterval(() => {
         remainingSeconds--;
         if (remainingSeconds <= 0) {
+          if (blocks[currentIndex]?.manual) {
+            pauseTimer();
+            waitingManual = true;
+            speak("Manual block complete. Waiting for your go.");
+            render();
+            return;
+          }
           advanceBlock();
         } else {
           render();
@@ -484,26 +656,27 @@
 
     function advanceBlock() {
       playCue();
-      currentIndex++;
-
-      if (currentIndex >= blocks.length) {
+      const nextIndex = getNextEnabledIndex(currentIndex);
+      if (nextIndex === -1) {
+        if (repeatCheckbox.checked) {
+          const firstIndex = getFirstEnabledIndex();
+          if (firstIndex !== -1) {
+            currentIndex = firstIndex;
+            remainingSeconds = Math.round(blocks[currentIndex].minutes * 60);
+            speak(`Starting ${blocks[currentIndex].name}`);
+            startTimer();
+            return;
+          }
+        }
         clearInterval(timerId);
         timerId = null;
         running = false;
-
-        if (repeatCheckbox.checked) {
-          currentIndex = 0;
-          remainingSeconds = Math.round(blocks[0].minutes * 60);
-          speak(`Starting ${blocks[0].name}`);
-          startTimer();
-          return;
-        }
-
+        currentIndex = blocks.length;
         speak("All timesheet blocks are complete.");
         render();
         return;
       }
-
+      currentIndex = nextIndex;
       remainingSeconds = Math.round(blocks[currentIndex].minutes * 60);
       speak(`Switch to ${blocks[currentIndex].name}`);
       render();
@@ -511,19 +684,27 @@
 
     function resetTimer() {
       pauseTimer();
-      currentIndex = 0;
-      remainingSeconds = Math.round(blocks[0].minutes * 60);
+      waitingManual = false;
+      resetToFirstEnabled();
       window.speechSynthesis?.cancel?.();
       render();
     }
 
     function skipBlock() {
       if (currentIndex >= blocks.length) return;
+      waitingManual = false;
       advanceBlock();
     }
 
     startPauseBtn.addEventListener("click", () => {
-      running ? pauseTimer() : startTimer();
+      if (waitingManual) {
+        waitingManual = false;
+        advanceBlock();
+      } else if (running) {
+        pauseTimer();
+      } else {
+        startTimer();
+      }
     });
 
     skipBtn.addEventListener("click", skipBlock);
@@ -533,11 +714,97 @@
       speak("Sound test. Next block cue enabled.");
     });
 
+    /* ---------- Edit schedule UI ---------- */
+    function openEdit() {
+      editRows.innerHTML = "";
+      blocks.forEach((block, index) => {
+        const row = document.createElement("div");
+        row.className = "edit-row";
+        row.dataset.index = index;
+        row.innerHTML = `
+          <input type="checkbox" class="enabled-check" title="Enabled" ${block.enabled ? 'checked' : ''} />
+          <input type="text" class="name-input" value="${block.name.replace(/"/g, '&quot;')}" placeholder="Block name" />
+          <input type="number" class="min-input" value="${block.minutes}" step="0.1" min="0.1" placeholder="min" />
+          <label><input type="checkbox" class="manual-check" ${block.manual ? 'checked' : ''} /> Manual</label>
+          <button class="danger small remove-btn" title="Remove">×</button>
+        `;
+        editRows.appendChild(row);
+      });
+      viewPanel.style.display = "none";
+      editPanel.style.display = "block";
+    }
+
+    function closeEdit() {
+      const rows = editRows.querySelectorAll(".edit-row");
+      const newBlocks = [];
+      rows.forEach(row => {
+        const enabled = row.querySelector(".enabled-check").checked;
+        const name = row.querySelector(".name-input").value.trim() || "Untitled";
+        const minutes = parseFloat(row.querySelector(".min-input").value) || 1;
+        const manual = row.querySelector(".manual-check").checked;
+        newBlocks.push({ name, minutes: Math.max(0.1, minutes), enabled, manual });
+      });
+      blocks = newBlocks;
+      saveBlocks();
+
+      // If current block was disabled or removed, reset
+      if (currentIndex >= blocks.length || !blocks[currentIndex]?.enabled) {
+        resetToFirstEnabled();
+      } else {
+        // If not running, reset remaining to new duration for current block
+        if (!running && !waitingManual) {
+          remainingSeconds = Math.round(blocks[currentIndex].minutes * 60);
+        }
+      }
+      viewPanel.style.display = "block";
+      editPanel.style.display = "none";
+      render();
+    }
+
+    editScheduleBtn.addEventListener("click", () => {
+      pauseTimer();
+      openEdit();
+    });
+
+    doneEditBtn.addEventListener("click", closeEdit);
+
+    addBlockBtn.addEventListener("click", () => {
+      const row = document.createElement("div");
+      row.className = "edit-row";
+      row.innerHTML = `
+        <input type="checkbox" class="enabled-check" title="Enabled" checked />
+        <input type="text" class="name-input" value="New Block" placeholder="Block name" />
+        <input type="number" class="min-input" value="15" step="0.1" min="0.1" placeholder="min" />
+        <label><input type="checkbox" class="manual-check" /> Manual</label>
+        <button class="danger small remove-btn" title="Remove">×</button>
+      `;
+      editRows.appendChild(row);
+    });
+
+    editRows.addEventListener("click", (e) => {
+      if (e.target.classList.contains("remove-btn")) {
+        const row = e.target.closest(".edit-row");
+        if (row) row.remove();
+      }
+    });
+
+    resetDefaultsBtn.addEventListener("click", () => {
+      if (!confirm("Reset schedule to defaults? This will overwrite your custom blocks.")) return;
+      blocks = JSON.parse(JSON.stringify(defaultBlocks));
+      saveBlocks();
+      resetToFirstEnabled();
+      viewPanel.style.display = "block";
+      editPanel.style.display = "none";
+      render();
+    });
+
+    // Initialize
+    resetToFirstEnabled();
     render();
   </script>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.11.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.11.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; Hank Marquardt 2026 &middot; Version 2026.05.11.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.29.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.29.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt &middot; RWS Timesheet Block Timer &middot; version 2026.05.29.1
   </footer>
 </body>
 </html>
