@@ -79,6 +79,10 @@ window.JunkStats.config;
 
 The automatic pageview is sent once per page load. Manual calls are available for future instrumentation.
 
+## Junk Drawer Coverage
+
+Most public user-facing Junk Drawer pages include `analytics-lite.js`. `analytics-dashboard.html` is intentionally excluded so dashboard refreshes do not pollute analytics, and hidden/private/test pages are not tracked by default.
+
 ## Privacy Notes
 
 The library does not use cookies, collect form fields, read localStorage except for `junkstats.visitor_id`, collect exact GPS, or require a token. It captures page URL/path/title, referrer URL/domain, UTM parameters, browser language, timezone, screen and viewport dimensions, user agent, and basic navigation timing when available.

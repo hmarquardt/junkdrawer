@@ -37,7 +37,22 @@ Before the closing `</body>` tag, add:
 
 Replace `YYYY.MM.DD.1` with the current date and `1` (use today's date, increment starts at 1). Replace `Tool Name` with the display name of the tool.
 
-### 4. Add Entry to junk-drawer.json
+### 4. Add Analytics Lite
+
+For public user-facing pages, add the Analytics Lite / JunkStats tracker near the end of `<head>`:
+
+```html
+<script
+  src="analytics-lite.js"
+  data-site-id="junkdrawer"
+  data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+  defer>
+</script>
+```
+
+Skip this for hidden/private/test pages, `analytics-dashboard.html`, generated/vendor/example files, or pages that already include `analytics-lite.js` or an equivalent custom `window.JunkStatsConfig`.
+
+### 5. Add Entry to junk-drawer.json
 
 Open `junk-drawer.json` and add a new entry under `pages`:
 
@@ -52,13 +67,14 @@ Open `junk-drawer.json` and add a new entry under `pages`:
 
 Match the version from step 3. Use a single emoji for `emoji`.
 
-### 5. Verify
+### 6. Verify
 
 - Confirm the HTML file has no syntax errors
 - Confirm `junk-drawer.json` is valid JSON
 - Confirm favicon, footer comment, footer element, and JSON entry all match and use the same version
+- Confirm public user-facing pages include exactly one `analytics-lite.js` script tag, and hidden/private/dashboard pages do not
 
-### 6. Commit and Push
+### 7. Commit and Push
 
 Commit with a brief message (e.g., "Add [tool name]") and push to remote.
 

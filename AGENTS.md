@@ -67,6 +67,21 @@ Every HTML file must include a machine-discoverable footer using the `JUNKDRAWER
 
 When you update a file's footer version, also update the corresponding entry in `junk-drawer.json` to match.
 
+### 5. Analytics Lite
+
+Public user-facing pages should include the local Analytics Lite / JunkStats tracker. Add this script tag near the end of `<head>` when the page has a normal head section, or before `</body>` if the structure is unusual:
+
+```html
+<script
+  src="analytics-lite.js"
+  data-site-id="junkdrawer"
+  data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+  defer>
+</script>
+```
+
+Do not add analytics to `analytics-dashboard.html`, hidden/private/test pages, generated/vendor/example files, or pages that already include `analytics-lite.js` or define their own equivalent `window.JunkStatsConfig`.
+
 ## General Principles
 
 - Prefer single-file HTML tools with no build step
@@ -82,6 +97,7 @@ When you update a file's footer version, also update the corresponding entry in 
 - [ ] Create the HTML file
 - [ ] Add emoji favicon to `<head>`
 - [ ] Add `JUNKDRAWER_DEPLOY_FOOTER` comment and footer with inline styles
+- [ ] Add Analytics Lite script for public user-facing pages
 - [ ] Add entry to `junk-drawer.json` with title, description, emoji, and version
 - [ ] Commit with a brief, descriptive message
 - [ ] Push to remote
