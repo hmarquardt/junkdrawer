@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>JunkStats Dashboard</title>
-  <meta name="description" content="Lightweight analytics dashboard for Junk Drawer page visits." />
+  <meta name="description" content="Lightweight analytics dashboard for Hank's static sites." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <style>
@@ -189,6 +189,7 @@
     .status-pill.ready .dot { background: var(--ok); color: var(--ok); }
     .status-pill.loading .dot { background: var(--warn); color: var(--warn); }
     .status-pill.error .dot { background: var(--danger); color: var(--danger); }
+    .dot.ready { background: var(--ok); color: var(--ok); }
 
     .last-loaded {
       margin-top: 10px;
@@ -312,6 +313,39 @@
       margin: 14px 0 0;
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .site-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-top: 14px;
+      padding: 13px 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--mini-bg);
+    }
+
+    .site-summary-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .site-summary-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .site-summary-url {
+      color: var(--accent-2);
+      overflow-wrap: anywhere;
     }
 
     .message {
@@ -566,6 +600,11 @@
       .token-row {
         flex-direction: column;
       }
+
+      .site-summary {
+        align-items: stretch;
+        flex-direction: column;
+      }
     }
 
     @media (max-width: 460px) {
@@ -580,7 +619,7 @@
     <header class="topbar">
       <div>
         <h1>JunkStats Dashboard</h1>
-        <p class="subtitle">Tiny analytics for Hank's pile of useful nonsense.</p>
+        <p class="subtitle">Tiny analytics for Hank's useful nonsense, now with multiple habitats.</p>
       </div>
       <aside class="status-card" aria-live="polite">
         <div class="status-line">
@@ -610,8 +649,8 @@
           </span>
         </label>
         <label>
-          Site ID
-          <input id="siteIdInput" type="text" autocomplete="off" spellcheck="false" />
+          Site
+          <select id="siteIdInput"></select>
         </label>
         <label>
           Date Range
@@ -624,6 +663,13 @@
           </select>
         </label>
         <button class="btn" id="loadBtn" type="button">Load</button>
+      </div>
+      <div class="site-summary" aria-live="polite">
+        <div>
+          <p class="site-summary-title"><span class="status-pill"><span class="dot ready"></span><span id="selectedSiteLabel">Junk Drawer</span></span></p>
+          <p class="site-summary-copy"><span id="selectedSiteDescription">Random SPAs and static browser experiments</span> <span class="faint">&middot;</span> <span class="site-summary-url" id="selectedSiteUrl">https://hmarquardt.github.io/junkdrawer/</span></p>
+        </div>
+        <a class="btn secondary" id="selectedSiteOpen" href="https://hmarquardt.github.io/junkdrawer/" target="_blank" rel="noopener noreferrer">Open site</a>
       </div>
       <div class="range-custom" id="customRange">
         <label>
@@ -712,9 +758,9 @@
       <div class="table-wrap" id="recentTableWrap"></div>
     </section>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.2" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.2">
-      &copy; 2026 Hank Marquardt &middot; JunkStats Dashboard &middot; version 2026.06.01.2
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.3" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.3">
+      &copy; 2026 Hank Marquardt &middot; JunkStats Dashboard &middot; version 2026.06.01.3
     </footer>
   </main>
 
@@ -723,6 +769,23 @@
       "use strict";
 
       var DEFAULT_API_BASE = "https://lab.aismallbizguru.com/api";
+      var DEFAULT_SITE_ID = "junkdrawer";
+      var SITES = [
+        {
+          id: "junkdrawer",
+          label: "Junk Drawer",
+          shortLabel: "Junk Drawer",
+          baseUrl: "https://hmarquardt.github.io/junkdrawer/",
+          description: "Random SPAs and static browser experiments"
+        },
+        {
+          id: "top-hat-ferals",
+          label: "Top Hat Ferals",
+          shortLabel: "Top Hat",
+          baseUrl: "https://tophatferals.com/",
+          description: "Neighborhood feral cat colony updates"
+        }
+      ];
       var STORAGE = {
         apiBase: "junkstats.dashboard.api_base",
         siteId: "junkstats.dashboard.site_id",
@@ -767,6 +830,10 @@
         referrersStatus: document.getElementById("referrersStatus"),
         recentStatus: document.getElementById("recentStatus"),
         breakdownStatus: document.getElementById("breakdownStatus"),
+        selectedSiteLabel: document.getElementById("selectedSiteLabel"),
+        selectedSiteDescription: document.getElementById("selectedSiteDescription"),
+        selectedSiteUrl: document.getElementById("selectedSiteUrl"),
+        selectedSiteOpen: document.getElementById("selectedSiteOpen"),
         pageSearch: document.getElementById("pageSearchInput"),
         pagesTable: document.getElementById("pagesTableWrap"),
         referrersTable: document.getElementById("referrersTableWrap"),
@@ -791,7 +858,8 @@
       function init() {
         var today = dateToInput(new Date());
         els.apiBase.value = storageGet(STORAGE.apiBase) || DEFAULT_API_BASE;
-        els.siteId.value = storageGet(STORAGE.siteId) || "junkdrawer";
+        populateSiteOptions();
+        setSelectedSite(getInitialSiteId(), true);
         els.range.value = storageGet(STORAGE.range) || "last7";
         els.from.value = storageGet(STORAGE.from) || today;
         els.to.value = storageGet(STORAGE.to) || today;
@@ -815,8 +883,19 @@
           updateCustomRange();
           persistSettings();
         });
-        [els.apiBase, els.siteId, els.from, els.to].forEach(function (input) {
+        [els.apiBase, els.from, els.to].forEach(function (input) {
           input.addEventListener("change", persistSettings);
+        });
+        els.siteId.addEventListener("change", function () {
+          setSelectedSite(els.siteId.value, false);
+          clearData();
+          renderAll([]);
+          if (els.token.value.trim()) {
+            loadDashboard();
+          } else {
+            updateConnection("idle", "Site changed");
+            showMessage("Selected " + getSelectedSite().label + ". Enter the dashboard token to load analytics.", false);
+          }
         });
         els.token.addEventListener("input", function () {
           state.token = els.token.value.trim();
@@ -847,7 +926,7 @@
 
       function persistSettings() {
         storageSet(STORAGE.apiBase, normalizeApiBase(els.apiBase.value));
-        storageSet(STORAGE.siteId, els.siteId.value.trim() || "junkdrawer");
+        storageSet(STORAGE.siteId, getSelectedSite().id);
         storageSet(STORAGE.range, els.range.value);
         storageSet(STORAGE.from, els.from.value);
         storageSet(STORAGE.to, els.to.value);
@@ -885,9 +964,10 @@
           }
 
           var settings = getSettings();
+          clearData();
           state.loading = true;
           updateConnection("loading", "Loading");
-          showMessage("Loading JunkStats panels...", false);
+          showMessage("Loading " + settings.site.label + " JunkStats panels...", false);
           setPanelStatuses("Loading...");
 
           Promise.all([
@@ -910,9 +990,11 @@
 
       function getSettings() {
         var range = getDateRange();
+        var site = getSelectedSite();
         return {
           apiBase: normalizeApiBase(els.apiBase.value || DEFAULT_API_BASE),
-          siteId: els.siteId.value.trim() || "junkdrawer",
+          site: site,
+          siteId: site.id,
           from: range.from,
           to: range.to,
           bucket: shouldUseHourBucket(range.from, range.to) ? "hour" : "day"
@@ -1014,7 +1096,7 @@
 
         if (failures.length === 0) {
           updateConnection("ready", "Connected");
-          showMessage("Dashboard loaded. No secrets were put in URLs.", false);
+          showMessage(getSelectedSite().label + " dashboard loaded. No secrets were put in URLs.", false);
         } else if (failures.some(function (failure) { return failure.status === 401; })) {
           updateConnection("error", "Token rejected");
           showMessage("Token rejected or missing. Check the dashboard token from the VPS.", true);
@@ -1154,6 +1236,7 @@
       }
 
       function renderPagesTable(error) {
+        var site = getSelectedSite();
         if (error) {
           els.pagesTable.innerHTML = emptyHtml(error);
           return;
@@ -1164,7 +1247,7 @@
           return !query || haystack.indexOf(query) !== -1;
         });
         if (!rows.length) {
-          els.pagesTable.innerHTML = emptyHtml(query ? "No pages match that filter." : "No page traffic in this range yet.");
+          els.pagesTable.innerHTML = emptyHtml(query ? "No pages match that filter for " + site.label + "." : "No pageviews found for " + site.label + " in this date range yet. Try Today, Last 7 days, or visit the site once to seed analytics.");
           return;
         }
         els.pagesTable.innerHTML = "<table><thead><tr><th>Page</th><th>Title</th><th class='num'>Pageviews</th><th class='num'>Visitors</th><th class='num'>Sessions</th><th class='num'>Bounce</th></tr></thead><tbody>" +
@@ -1184,13 +1267,14 @@
       }
 
       function renderReferrersTable(error) {
+        var site = getSelectedSite();
         if (error) {
           els.referrersTable.innerHTML = emptyHtml(error);
           return;
         }
         var rows = state.referrers;
         if (!rows.length) {
-          els.referrersTable.innerHTML = emptyHtml("No referrers in this range yet.");
+          els.referrersTable.innerHTML = emptyHtml("No referrers found for " + site.label + " in this date range yet.");
           return;
         }
         els.referrersTable.innerHTML = "<table><thead><tr><th>Referrer domain</th><th class='num'>Pageviews</th><th class='num'>Visitors</th></tr></thead><tbody>" +
@@ -1208,13 +1292,14 @@
       }
 
       function renderRecentTable(error) {
+        var site = getSelectedSite();
         if (error) {
           els.recentTable.innerHTML = emptyHtml(error);
           return;
         }
         var rows = state.recent;
         if (!rows.length) {
-          els.recentTable.innerHTML = emptyHtml("No recent visits yet. The drawer is quiet.");
+          els.recentTable.innerHTML = emptyHtml("No recent visits found for " + site.label + " yet. Try Today, Last 7 days, or visit the site once to seed analytics.");
           return;
         }
         els.recentTable.innerHTML = "<table><thead><tr><th>Time</th><th>Page</th><th>Referrer</th><th>Browser</th><th>OS</th><th>Device</th><th>Bot?</th></tr></thead><tbody>" +
@@ -1316,17 +1401,65 @@
         }
       }
 
+      function populateSiteOptions() {
+        els.siteId.innerHTML = SITES.map(function (site) {
+          return "<option value='" + escapeAttr(site.id) + "'>" + escapeHtml(site.label) + "</option>";
+        }).join("");
+      }
+
+      function getInitialSiteId() {
+        var params = new URLSearchParams(window.location.search);
+        var querySiteId = params.get("site_id");
+        if (getSiteById(querySiteId)) return querySiteId;
+        var storedSiteId = storageGet(STORAGE.siteId);
+        if (getSiteById(storedSiteId)) return storedSiteId;
+        return DEFAULT_SITE_ID;
+      }
+
+      function getSelectedSite() {
+        return getSiteById(els.siteId.value) || getSiteById(DEFAULT_SITE_ID);
+      }
+
+      function getSiteById(siteId) {
+        return SITES.find(function (site) { return site.id === siteId; }) || null;
+      }
+
+      function setSelectedSite(siteId, shouldPersistQuery) {
+        var site = getSiteById(siteId) || getSiteById(DEFAULT_SITE_ID);
+        els.siteId.value = site.id;
+        storageSet(STORAGE.siteId, site.id);
+        updateSiteSummary(site);
+        if (!shouldPersistQuery) updateSiteQueryParam(site.id);
+      }
+
+      function updateSiteSummary(site) {
+        els.selectedSiteLabel.textContent = site.label;
+        els.selectedSiteDescription.textContent = site.description;
+        els.selectedSiteUrl.textContent = site.baseUrl;
+        els.selectedSiteOpen.href = site.baseUrl;
+      }
+
+      function updateSiteQueryParam(siteId) {
+        if (!window.history || !window.history.replaceState) return;
+        var url = new URL(window.location.href);
+        url.searchParams.set("site_id", siteId);
+        window.history.replaceState({}, "", url.toString());
+      }
+
       function pageLink(path) {
         var clean = cleanPath(path);
         if (!clean) return "<span class='faint'>Unknown</span>";
-        var href = pageHref(path);
+        var href = buildPageUrl(getSelectedSite(), path);
         return "<a class='path-link' href='" + escapeAttr(href) + "' target='_blank' rel='noopener noreferrer'>" + escapeHtml(clean) + "</a>";
       }
 
-      function pageHref(path) {
-        if (/^https?:\/\//i.test(path)) return path;
-        var clean = String(path || "").replace(/^\/junkdrawer\//, "").replace(/^\//, "");
-        return clean || "index.html";
+      function buildPageUrl(site, pagePath) {
+        var base = site && site.baseUrl ? site.baseUrl : "";
+        try {
+          return new URL(pagePath || "/", base).toString();
+        } catch (error) {
+          return base || pagePath || "#";
+        }
       }
 
       function cleanPath(path) {
@@ -1408,6 +1541,18 @@
         els.pagesStatus.textContent = text;
         els.referrersStatus.textContent = text;
         els.recentStatus.textContent = text;
+      }
+
+      function clearData() {
+        state.summary = null;
+        state.timeseries = [];
+        state.pages = [];
+        state.referrers = [];
+        state.recent = [];
+        if (state.chart) {
+          state.chart.destroy();
+          state.chart = null;
+        }
       }
 
       function updateConnection(kind, text) {

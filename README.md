@@ -137,7 +137,7 @@ Important limitations:
 
 See [`docs/analytics-lite-js.md`](docs/analytics-lite-js.md) for usage and configuration.
 
-The hidden [`analytics-dashboard.html`](analytics-dashboard.html) page provides a token-protected JunkStats dashboard for pageviews, visitors, sessions, pages, referrers, and recent visits. See [`docs/analytics-dashboard.md`](docs/analytics-dashboard.md) for usage and token handling.
+The hidden [`analytics-dashboard.html`](analytics-dashboard.html) page provides a token-protected multi-site JunkStats dashboard for pageviews, visitors, sessions, pages, referrers, and recent visits. See [`docs/analytics-dashboard.md`](docs/analytics-dashboard.md) for usage and token handling.
 
 ## GitHub Pages
 
