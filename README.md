@@ -131,6 +131,14 @@ Important limitations:
 - WebSocket market feeds can fail because of region, network, VPN, firewall, or browser policy.
 - OpenAI API keys used in the browser are visible to that browser session and should be treated carefully.
 
+## Analytics Lite
+
+`analytics-lite.js` is the optional JunkStats browser tracking helper for standalone pages. It sends privacy-conscious pageview payloads to `https://lab.aismallbizguru.com/api/analytics/collect` without cookies, tokens, build tooling, or external dependencies.
+
+See [`docs/analytics-lite-js.md`](docs/analytics-lite-js.md) for usage and configuration.
+
+The hidden [`analytics-dashboard.html`](analytics-dashboard.html) page provides a token-protected JunkStats dashboard for pageviews, visitors, sessions, pages, referrers, and recent visits. See [`docs/analytics-dashboard.md`](docs/analytics-dashboard.md) for usage and token handling.
+
 ## GitHub Pages
 
 This repo is intended to be deployed directly through GitHub Pages from `main`.

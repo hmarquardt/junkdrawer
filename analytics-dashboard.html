@@ -1,0 +1,1423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JunkStats Dashboard</title>
+  <meta name="description" content="Lightweight analytics dashboard for Junk Drawer page visits." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071017;
+      --bg-panel: rgba(14, 27, 38, 0.88);
+      --bg-panel-2: rgba(20, 39, 52, 0.72);
+      --border: rgba(132, 229, 255, 0.18);
+      --border-strong: rgba(132, 229, 255, 0.34);
+      --text: #eef8ff;
+      --muted: #9fb4c3;
+      --faint: #6f8492;
+      --accent: #47e6b1;
+      --accent-2: #6fd3ff;
+      --accent-3: #f6c85f;
+      --danger: #ff7a90;
+      --warn: #ffd166;
+      --ok: #78f2a8;
+      --shadow: 0 22px 70px rgba(0, 0, 0, 0.36);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 8%, rgba(71, 230, 177, 0.22), transparent 28rem),
+        radial-gradient(circle at 85% 12%, rgba(111, 211, 255, 0.18), transparent 30rem),
+        linear-gradient(145deg, #071017 0%, #101829 52%, #0a161d 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.13;
+      background-image:
+        linear-gradient(rgba(132, 229, 255, 0.28) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(132, 229, 255, 0.28) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, black, transparent 82%);
+    }
+
+    a { color: inherit; }
+
+    .shell {
+      position: relative;
+      width: min(1440px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 18px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 18px;
+      align-items: start;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 5vw, 64px);
+      line-height: 0.96;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: clamp(16px, 2vw, 19px);
+    }
+
+    .status-card {
+      min-width: 280px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(8, 21, 30, 0.82);
+      box-shadow: var(--shadow);
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.055);
+      color: var(--text);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--faint);
+      box-shadow: 0 0 16px currentColor;
+    }
+
+    .status-pill.ready .dot { background: var(--ok); color: var(--ok); }
+    .status-pill.loading .dot { background: var(--warn); color: var(--warn); }
+    .status-pill.error .dot { background: var(--danger); color: var(--danger); }
+
+    .last-loaded {
+      margin-top: 10px;
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: linear-gradient(145deg, var(--bg-panel), rgba(11, 26, 34, 0.76));
+      box-shadow: var(--shadow);
+    }
+
+    .settings {
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: minmax(210px, 1.15fr) minmax(220px, 1fr) minmax(150px, 0.65fr) minmax(160px, 0.65fr) auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    label {
+      display: grid;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    input, select, button {
+      font: inherit;
+    }
+
+    input, select {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(3, 12, 18, 0.74);
+      color: var(--text);
+      padding: 0 12px;
+      outline: none;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--accent-2);
+      box-shadow: 0 0 0 3px rgba(111, 211, 255, 0.14);
+    }
+
+    .range-custom {
+      display: none;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .range-custom.show { display: grid; }
+
+    .token-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .token-row input { min-width: 0; }
+
+    .remember {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 650;
+    }
+
+    .remember input {
+      width: 16px;
+      min-height: 16px;
+      accent-color: var(--accent);
+    }
+
+    .btn {
+      min-height: 42px;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: rgba(71, 230, 177, 0.14);
+      color: var(--text);
+      padding: 0 14px;
+      font-weight: 850;
+      cursor: pointer;
+      transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(71, 230, 177, 0.68);
+      background: rgba(71, 230, 177, 0.2);
+    }
+
+    .btn.secondary {
+      background: rgba(255, 255, 255, 0.055);
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
+    .privacy-note {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .message {
+      margin: 0 0 18px;
+      padding: 13px 15px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(111, 211, 255, 0.08);
+      color: var(--muted);
+    }
+
+    .message.error {
+      border-color: rgba(255, 122, 144, 0.35);
+      background: rgba(255, 122, 144, 0.1);
+      color: #ffc2cd;
+    }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .kpi {
+      padding: 16px;
+      min-height: 126px;
+      overflow: hidden;
+    }
+
+    .kpi .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .kpi .value {
+      margin-top: 12px;
+      font-size: clamp(24px, 3vw, 36px);
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .kpi .sub {
+      margin-top: 9px;
+      color: var(--faint);
+      font-size: 13px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px 0;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .panel-status {
+      color: var(--faint);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .chart-wrap {
+      height: 360px;
+      padding: 12px 16px 18px;
+    }
+
+    .tables-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .table-tools {
+      padding: 14px 18px 0;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      padding: 12px 18px 18px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 620px;
+    }
+
+    th, td {
+      padding: 11px 10px;
+      border-bottom: 1px solid rgba(132, 229, 255, 0.1);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 900;
+    }
+
+    td.num, th.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    tr.bot-row {
+      opacity: 0.62;
+      background: rgba(255, 209, 102, 0.035);
+    }
+
+    .path-link {
+      color: var(--accent-2);
+      text-decoration: none;
+      font-weight: 800;
+    }
+
+    .path-link:hover { text-decoration: underline; }
+
+    .muted { color: var(--muted); }
+    .faint { color: var(--faint); }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.045);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .direct-tag {
+      border-color: rgba(71, 230, 177, 0.28);
+      color: #a7f8d9;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px 18px 18px;
+    }
+
+    .mini-card {
+      border: 1px solid rgba(132, 229, 255, 0.12);
+      border-radius: 14px;
+      background: rgba(3, 12, 18, 0.36);
+      padding: 12px;
+    }
+
+    .mini-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 10px;
+    }
+
+    .breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 0;
+      border-top: 1px solid rgba(132, 229, 255, 0.08);
+      font-size: 13px;
+    }
+
+    .breakdown-row:first-of-type { border-top: 0; }
+
+    .empty {
+      padding: 30px 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    footer {
+      margin: 2rem auto 1rem;
+      padding: 1rem;
+      text-align: center;
+      color: rgba(159, 180, 195, 0.88);
+      font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    @media (max-width: 1180px) {
+      .settings-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .kpis {
+        grid-template-columns: repeat(4, minmax(140px, 1fr));
+      }
+
+      .main-grid, .tables-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100% - 20px, 1440px);
+        padding-top: 18px;
+      }
+
+      .topbar, .settings-grid, .range-custom, .summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .status-card { min-width: 0; }
+
+      .kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .kpi {
+        min-height: 116px;
+      }
+
+      .chart-wrap {
+        height: 300px;
+      }
+
+      .token-row {
+        flex-direction: column;
+      }
+    }
+
+    @media (max-width: 460px) {
+      .kpis {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>JunkStats Dashboard</h1>
+        <p class="subtitle">Tiny analytics for Hank's pile of useful nonsense.</p>
+      </div>
+      <aside class="status-card" aria-live="polite">
+        <div class="status-line">
+          <span class="status-pill" id="connectionPill"><span class="dot"></span><span id="connectionText">Not loaded</span></span>
+          <button class="btn" id="refreshBtn" type="button">Refresh</button>
+        </div>
+        <div class="last-loaded" id="lastLoaded">Last loaded: never</div>
+      </aside>
+    </header>
+
+    <section class="settings panel" aria-label="Dashboard settings">
+      <div class="settings-grid">
+        <label>
+          API Base URL
+          <input id="apiBaseInput" type="url" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          Dashboard Token
+          <span class="token-row">
+            <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" />
+            <button class="btn secondary" id="clearTokenBtn" type="button">Clear</button>
+          </span>
+          <span class="remember">
+            <input id="rememberTokenInput" type="checkbox" />
+            Remember token in this browser
+          </span>
+        </label>
+        <label>
+          Site ID
+          <input id="siteIdInput" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          Date Range
+          <select id="rangeInput">
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="last7">Last 7 days</option>
+            <option value="last30">Last 30 days</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <button class="btn" id="loadBtn" type="button">Load</button>
+      </div>
+      <div class="range-custom" id="customRange">
+        <label>
+          From
+          <input id="fromInput" type="date" />
+        </label>
+        <label>
+          To
+          <input id="toInput" type="date" />
+        </label>
+      </div>
+      <p class="privacy-note">This dashboard uses anonymous pageview analytics. It does not use cookies or collect form fields.</p>
+    </section>
+
+    <div class="message" id="globalMessage">Enter the dashboard token from the VPS, then load the dashboard.</div>
+
+    <section class="kpis" aria-label="Key metrics">
+      <article class="kpi panel"><div class="label">Pageviews</div><div class="value" id="kpiPageviews">--</div><div class="sub" id="kpiPageviewsSub">Waiting for data</div></article>
+      <article class="kpi panel"><div class="label">Unique Visitors</div><div class="value" id="kpiVisitors">--</div><div class="sub">Anonymous visitor IDs</div></article>
+      <article class="kpi panel"><div class="label">Sessions</div><div class="value" id="kpiSessions">--</div><div class="sub">Tab-scoped sessions</div></article>
+      <article class="kpi panel"><div class="label">Avg Views / Session</div><div class="value" id="kpiAvg">--</div><div class="sub">Pageviews divided by sessions</div></article>
+      <article class="kpi panel"><div class="label">Bounce Rate</div><div class="value" id="kpiBounce">--</div><div class="sub">Single-view sessions</div></article>
+      <article class="kpi panel"><div class="label">Top Page</div><div class="value" id="kpiTopPage">--</div><div class="sub" id="kpiTopPageSub">No page yet</div></article>
+      <article class="kpi panel"><div class="label">Top Referrer</div><div class="value" id="kpiTopReferrer">--</div><div class="sub" id="kpiTopReferrerSub">No referrer yet</div></article>
+    </section>
+
+    <section class="main-grid">
+      <article class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Visits Over Time</h2>
+          <div class="panel-status" id="chartStatus">Not loaded</div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="timeseriesChart" aria-label="Pageviews, visitors, and sessions over time"></canvas>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Browser / Device Mix</h2>
+          <div class="panel-status" id="breakdownStatus">Derived from recent visits</div>
+        </div>
+        <div class="summary-grid">
+          <div class="mini-card">
+            <div class="mini-title">Browsers</div>
+            <div id="browserBreakdown" class="muted">No data</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-title">Devices</div>
+            <div id="deviceBreakdown" class="muted">No data</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-title">OS</div>
+            <div id="osBreakdown" class="muted">No data</div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="tables-grid">
+      <article class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Top Pages</h2>
+          <div class="panel-status" id="pagesStatus">Not loaded</div>
+        </div>
+        <div class="table-tools">
+          <input id="pageSearchInput" type="search" placeholder="Filter pages..." autocomplete="off" />
+        </div>
+        <div class="table-wrap" id="pagesTableWrap"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Referrers</h2>
+          <div class="panel-status" id="referrersStatus">Not loaded</div>
+        </div>
+        <div class="table-wrap" id="referrersTableWrap"></div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Recent Visits</h2>
+        <div class="panel-status" id="recentStatus">Not loaded</div>
+      </div>
+      <div class="table-wrap" id="recentTableWrap"></div>
+    </section>
+
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1">
+      &copy; 2026 Hank Marquardt &middot; JunkStats Dashboard &middot; version 2026.06.01.1
+    </footer>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var DEFAULT_API_BASE = "https://lab.aismallbizguru.com/api";
+      var STORAGE = {
+        apiBase: "junkstats.dashboard.api_base",
+        siteId: "junkstats.dashboard.site_id",
+        range: "junkstats.dashboard.range",
+        from: "junkstats.dashboard.from",
+        to: "junkstats.dashboard.to",
+        rememberToken: "junkstats.dashboard.remember_token",
+        token: "junkstats.dashboard.token"
+      };
+
+      var state = {
+        summary: null,
+        timeseries: [],
+        pages: [],
+        referrers: [],
+        recent: [],
+        token: "",
+        chart: null,
+        loading: false
+      };
+
+      var els = {
+        apiBase: document.getElementById("apiBaseInput"),
+        token: document.getElementById("tokenInput"),
+        rememberToken: document.getElementById("rememberTokenInput"),
+        clearToken: document.getElementById("clearTokenBtn"),
+        siteId: document.getElementById("siteIdInput"),
+        range: document.getElementById("rangeInput"),
+        customRange: document.getElementById("customRange"),
+        from: document.getElementById("fromInput"),
+        to: document.getElementById("toInput"),
+        load: document.getElementById("loadBtn"),
+        refresh: document.getElementById("refreshBtn"),
+        connectionPill: document.getElementById("connectionPill"),
+        connectionText: document.getElementById("connectionText"),
+        lastLoaded: document.getElementById("lastLoaded"),
+        globalMessage: document.getElementById("globalMessage"),
+        chartStatus: document.getElementById("chartStatus"),
+        pagesStatus: document.getElementById("pagesStatus"),
+        referrersStatus: document.getElementById("referrersStatus"),
+        recentStatus: document.getElementById("recentStatus"),
+        breakdownStatus: document.getElementById("breakdownStatus"),
+        pageSearch: document.getElementById("pageSearchInput"),
+        pagesTable: document.getElementById("pagesTableWrap"),
+        referrersTable: document.getElementById("referrersTableWrap"),
+        recentTable: document.getElementById("recentTableWrap"),
+        browserBreakdown: document.getElementById("browserBreakdown"),
+        deviceBreakdown: document.getElementById("deviceBreakdown"),
+        osBreakdown: document.getElementById("osBreakdown"),
+        kpiPageviews: document.getElementById("kpiPageviews"),
+        kpiPageviewsSub: document.getElementById("kpiPageviewsSub"),
+        kpiVisitors: document.getElementById("kpiVisitors"),
+        kpiSessions: document.getElementById("kpiSessions"),
+        kpiAvg: document.getElementById("kpiAvg"),
+        kpiBounce: document.getElementById("kpiBounce"),
+        kpiTopPage: document.getElementById("kpiTopPage"),
+        kpiTopPageSub: document.getElementById("kpiTopPageSub"),
+        kpiTopReferrer: document.getElementById("kpiTopReferrer"),
+        kpiTopReferrerSub: document.getElementById("kpiTopReferrerSub")
+      };
+
+      init();
+
+      function init() {
+        var today = dateToInput(new Date());
+        els.apiBase.value = storageGet(STORAGE.apiBase) || DEFAULT_API_BASE;
+        els.siteId.value = storageGet(STORAGE.siteId) || "junkdrawer";
+        els.range.value = storageGet(STORAGE.range) || "last7";
+        els.from.value = storageGet(STORAGE.from) || today;
+        els.to.value = storageGet(STORAGE.to) || today;
+        els.rememberToken.checked = storageGet(STORAGE.rememberToken) === "true";
+        if (els.rememberToken.checked) {
+          state.token = storageGet(STORAGE.token) || "";
+          els.token.value = state.token;
+        }
+        updateCustomRange();
+        bindEvents();
+        updateConnection("idle", "Not loaded");
+      }
+
+      function bindEvents() {
+        els.load.addEventListener("click", loadDashboard);
+        els.refresh.addEventListener("click", loadDashboard);
+        els.clearToken.addEventListener("click", clearToken);
+        els.range.addEventListener("change", function () {
+          updateCustomRange();
+          persistSettings();
+        });
+        [els.apiBase, els.siteId, els.from, els.to].forEach(function (input) {
+          input.addEventListener("change", persistSettings);
+        });
+        els.token.addEventListener("input", function () {
+          state.token = els.token.value.trim();
+          persistToken();
+        });
+        els.rememberToken.addEventListener("change", function () {
+          persistSettings();
+          persistToken();
+        });
+        els.pageSearch.addEventListener("input", function () {
+          renderPagesTable();
+        });
+      }
+
+      function persistSettings() {
+        storageSet(STORAGE.apiBase, normalizeApiBase(els.apiBase.value));
+        storageSet(STORAGE.siteId, els.siteId.value.trim() || "junkdrawer");
+        storageSet(STORAGE.range, els.range.value);
+        storageSet(STORAGE.from, els.from.value);
+        storageSet(STORAGE.to, els.to.value);
+        storageSet(STORAGE.rememberToken, els.rememberToken.checked ? "true" : "false");
+      }
+
+      function persistToken() {
+        state.token = els.token.value.trim();
+        if (els.rememberToken.checked && state.token) {
+          storageSet(STORAGE.token, state.token);
+        } else {
+          storageRemove(STORAGE.token);
+        }
+      }
+
+      function clearToken() {
+        state.token = "";
+        els.token.value = "";
+        els.rememberToken.checked = false;
+        storageSet(STORAGE.rememberToken, "false");
+        storageRemove(STORAGE.token);
+        showMessage("Dashboard token cleared. Enter a token to load private analytics endpoints.", false);
+      }
+
+      function loadDashboard() {
+        try {
+          persistSettings();
+          persistToken();
+
+          var token = els.token.value.trim();
+          if (!token) {
+            updateConnection("error", "Missing token");
+            showMessage("Missing token. Enter the dashboard token from the VPS to load analytics.", true);
+            return;
+          }
+
+          var settings = getSettings();
+          state.loading = true;
+          updateConnection("loading", "Loading");
+          showMessage("Loading JunkStats panels...", false);
+          setPanelStatuses("Loading...");
+
+          Promise.all([
+            loadPanel("summary", buildUrl(settings, "/analytics/summary"), token),
+            loadPanel("timeseries", buildUrl(settings, "/analytics/timeseries", { bucket: settings.bucket }), token),
+            loadPanel("pages", buildUrl(settings, "/analytics/pages", { limit: 50 }), token),
+            loadPanel("referrers", buildUrl(settings, "/analytics/referrers", { limit: 50 }), token),
+            loadPanel("recent", buildUrl(settings, "/analytics/recent", { limit: 100 }), token)
+          ]).then(function (results) {
+            state.loading = false;
+            applyResults(results);
+          });
+        } catch (error) {
+          state.loading = false;
+          updateConnection("error", "Settings issue");
+          showMessage("Check the API base URL and date settings, then try again.", true);
+          setPanelStatuses("Not loaded");
+        }
+      }
+
+      function getSettings() {
+        var range = getDateRange();
+        return {
+          apiBase: normalizeApiBase(els.apiBase.value || DEFAULT_API_BASE),
+          siteId: els.siteId.value.trim() || "junkdrawer",
+          from: range.from,
+          to: range.to,
+          bucket: shouldUseHourBucket(range.from, range.to) ? "hour" : "day"
+        };
+      }
+
+      function getDateRange() {
+        var now = new Date();
+        var today = startOfDay(now);
+        var from = new Date(today);
+        var to = new Date(today);
+        if (els.range.value === "yesterday") {
+          from.setDate(from.getDate() - 1);
+          to.setDate(to.getDate() - 1);
+        } else if (els.range.value === "last30") {
+          from.setDate(from.getDate() - 29);
+        } else if (els.range.value === "custom") {
+          return {
+            from: els.from.value || dateToInput(today),
+            to: els.to.value || dateToInput(today)
+          };
+        } else if (els.range.value !== "today") {
+          from.setDate(from.getDate() - 6);
+        }
+        els.from.value = dateToInput(from);
+        els.to.value = dateToInput(to);
+        storageSet(STORAGE.from, els.from.value);
+        storageSet(STORAGE.to, els.to.value);
+        return { from: dateToInput(from), to: dateToInput(to) };
+      }
+
+      function shouldUseHourBucket(from, to) {
+        var start = parseDateInput(from);
+        var end = parseDateInput(to);
+        if (!start || !end) return false;
+        return Math.round((end - start) / 86400000) <= 1;
+      }
+
+      function buildUrl(settings, path, extras) {
+        var url = new URL(settings.apiBase + path);
+        url.searchParams.set("site_id", settings.siteId);
+        url.searchParams.set("from", settings.from);
+        url.searchParams.set("to", settings.to);
+        Object.keys(extras || {}).forEach(function (key) {
+          if (extras[key] !== undefined && extras[key] !== null && extras[key] !== "") {
+            url.searchParams.set(key, extras[key]);
+          }
+        });
+        return url.toString();
+      }
+
+      function loadPanel(name, url, token) {
+        return fetch(url, {
+          method: "GET",
+          headers: {
+            "Accept": "application/json",
+            "Authorization": "Bearer " + token
+          },
+          mode: "cors"
+        }).then(function (response) {
+          if (response.status === 401) {
+            throw panelError("Token rejected or missing.", 401);
+          }
+          if (!response.ok) {
+            throw panelError("Request failed with HTTP " + response.status + ".", response.status);
+          }
+          return response.json();
+        }).then(function (data) {
+          return { name: name, ok: true, data: data };
+        }).catch(function (error) {
+          var message = error && error.message ? error.message : "Could not reach analytics backend.";
+          if (!error || !error.status) {
+            message = "Could not reach analytics backend.";
+          }
+          return { name: name, ok: false, error: message, status: error && error.status };
+        });
+      }
+
+      function panelError(message, status) {
+        var error = new Error(message);
+        error.status = status;
+        return error;
+      }
+
+      function applyResults(results) {
+        var failures = results.filter(function (result) { return !result.ok; });
+        results.forEach(function (result) {
+          if (!result.ok) return;
+          if (result.name === "summary") state.summary = extractFirstObject(result.data);
+          if (result.name === "timeseries") state.timeseries = extractRows(result.data);
+          if (result.name === "pages") state.pages = extractRows(result.data).sort(descBy("pageviews"));
+          if (result.name === "referrers") state.referrers = extractRows(result.data).sort(descBy("pageviews"));
+          if (result.name === "recent") state.recent = extractRows(result.data).sort(function (a, b) {
+            return new Date(getField(b, ["occurred_at", "time", "timestamp", "created_at"]) || 0) - new Date(getField(a, ["occurred_at", "time", "timestamp", "created_at"]) || 0);
+          });
+        });
+
+        renderAll(failures);
+
+        if (failures.length === 0) {
+          updateConnection("ready", "Connected");
+          showMessage("Dashboard loaded. No secrets were put in URLs.", false);
+        } else if (failures.some(function (failure) { return failure.status === 401; })) {
+          updateConnection("error", "Token rejected");
+          showMessage("Token rejected or missing. Check the dashboard token from the VPS.", true);
+        } else if (failures.length === results.length) {
+          updateConnection("error", "Backend unavailable");
+          showMessage("Could not reach analytics backend. Check CORS, network access, or backend status.", true);
+        } else {
+          updateConnection("error", "Partial data");
+          showMessage("Some panels failed to load, but the dashboard kept the data it could read.", true);
+        }
+        els.lastLoaded.textContent = "Last loaded: " + new Date().toLocaleString();
+      }
+
+      function renderAll(failures) {
+        var failureMap = {};
+        failures.forEach(function (failure) { failureMap[failure.name] = failure.error; });
+        renderKpis();
+        renderChart(failureMap.timeseries);
+        renderPagesTable(failureMap.pages);
+        renderReferrersTable(failureMap.referrers);
+        renderRecentTable(failureMap.recent);
+        renderBreakdowns();
+        els.pagesStatus.textContent = failureMap.pages || countLabel(state.pages.length, "row");
+        els.referrersStatus.textContent = failureMap.referrers || countLabel(state.referrers.length, "row");
+        els.recentStatus.textContent = failureMap.recent || countLabel(state.recent.length, "visit");
+      }
+
+      function renderKpis() {
+        var summary = state.summary || {};
+        var pageviews = numberFrom(summary, ["pageviews", "page_views", "views", "total_pageviews"], sumRows(state.timeseries, ["pageviews", "page_views", "views"]));
+        var visitors = numberFrom(summary, ["unique_visitors", "visitors", "visitor_count"], sumRows(state.timeseries, ["visitors", "unique_visitors", "visitor_count"]));
+        var sessions = numberFrom(summary, ["sessions", "session_count"], sumRows(state.timeseries, ["sessions", "session_count"]));
+        var avg = numberFrom(summary, ["avg_pageviews_per_session", "pageviews_per_session"], sessions ? pageviews / sessions : 0);
+        var bounce = numberFrom(summary, ["bounce_rate", "bounceRate"], null);
+        var topPage = state.pages[0] || null;
+        var topReferrer = state.referrers[0] || null;
+
+        els.kpiPageviews.textContent = formatNumber(pageviews);
+        els.kpiPageviewsSub.textContent = getRangeLabel();
+        els.kpiVisitors.textContent = formatNumber(visitors);
+        els.kpiSessions.textContent = formatNumber(sessions);
+        els.kpiAvg.textContent = Number.isFinite(avg) && avg > 0 ? avg.toFixed(2) : "--";
+        els.kpiBounce.textContent = bounce === null || bounce === undefined ? "--" : formatPercent(bounce);
+        els.kpiTopPage.textContent = topPage ? truncate(cleanPath(rowPagePath(topPage)), 18) : "--";
+        els.kpiTopPageSub.textContent = topPage ? formatNumber(numberFrom(topPage, ["pageviews", "page_views", "views"], 0)) + " pageviews" : "No page yet";
+        els.kpiTopReferrer.textContent = topReferrer ? truncate(referrerLabel(rowReferrerDomain(topReferrer)), 18) : "--";
+        els.kpiTopReferrerSub.textContent = topReferrer ? formatNumber(numberFrom(topReferrer, ["pageviews", "page_views", "views"], 0)) + " pageviews" : "No referrer yet";
+      }
+
+      function renderChart(error) {
+        els.chartStatus.textContent = error || countLabel(state.timeseries.length, "point");
+        var canvas = document.getElementById("timeseriesChart");
+        if (!window.Chart) {
+          els.chartStatus.textContent = "Chart.js did not load";
+          return;
+        }
+        var rows = state.timeseries;
+        if (!rows.length) {
+          if (state.chart) state.chart.destroy();
+          state.chart = null;
+          els.chartStatus.textContent = error || "No timeseries data";
+          return;
+        }
+        var labels = rows.map(function (row) {
+          return formatBucket(getField(row, ["bucket", "date", "hour", "period", "time", "occurred_at"]));
+        });
+        var data = {
+          labels: labels,
+          datasets: [
+            {
+              label: "Pageviews",
+              data: rows.map(function (row) { return numberFrom(row, ["pageviews", "page_views", "views"], 0); }),
+              borderColor: "#47e6b1",
+              backgroundColor: "rgba(71, 230, 177, 0.12)",
+              tension: 0.34,
+              fill: true
+            },
+            {
+              label: "Visitors",
+              data: rows.map(function (row) { return numberFrom(row, ["visitors", "unique_visitors", "visitor_count"], 0); }),
+              borderColor: "#6fd3ff",
+              backgroundColor: "rgba(111, 211, 255, 0.06)",
+              tension: 0.34
+            },
+            {
+              label: "Sessions",
+              data: rows.map(function (row) { return numberFrom(row, ["sessions", "session_count"], 0); }),
+              borderColor: "#f6c85f",
+              backgroundColor: "rgba(246, 200, 95, 0.06)",
+              tension: 0.34
+            }
+          ]
+        };
+        try {
+          if (state.chart) state.chart.destroy();
+          state.chart = new Chart(canvas, {
+            type: "line",
+            data: data,
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: "index", intersect: false },
+              plugins: {
+                legend: { labels: { color: "#cfe7f5", boxWidth: 12, usePointStyle: true } },
+                tooltip: { backgroundColor: "rgba(3, 12, 18, 0.94)", borderColor: "rgba(132, 229, 255, 0.28)", borderWidth: 1 }
+              },
+              scales: {
+                x: { ticks: { color: "#9fb4c3", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(132, 229, 255, 0.08)" } },
+                y: { beginAtZero: true, ticks: { color: "#9fb4c3", precision: 0 }, grid: { color: "rgba(132, 229, 255, 0.08)" } }
+              }
+            }
+          });
+        } catch (chartError) {
+          els.chartStatus.textContent = "Chart render failed";
+        }
+      }
+
+      function renderPagesTable(error) {
+        if (error) {
+          els.pagesTable.innerHTML = emptyHtml(error);
+          return;
+        }
+        var query = els.pageSearch.value.trim().toLowerCase();
+        var rows = state.pages.filter(function (row) {
+          var haystack = [rowPagePath(row), getField(row, ["title", "page_title"])].join(" ").toLowerCase();
+          return !query || haystack.indexOf(query) !== -1;
+        });
+        if (!rows.length) {
+          els.pagesTable.innerHTML = emptyHtml(query ? "No pages match that filter." : "No page traffic in this range yet.");
+          return;
+        }
+        els.pagesTable.innerHTML = "<table><thead><tr><th>Page</th><th>Title</th><th class='num'>Pageviews</th><th class='num'>Visitors</th><th class='num'>Sessions</th><th class='num'>Bounce</th></tr></thead><tbody>" +
+          rows.map(function (row) {
+            var path = rowPagePath(row);
+            var title = getField(row, ["title", "page_title"]) || "";
+            return "<tr>" +
+              "<td>" + pageLink(path) + "</td>" +
+              "<td class='muted'>" + escapeHtml(title || "Untitled") + "</td>" +
+              "<td class='num'>" + formatNumber(numberFrom(row, ["pageviews", "page_views", "views"], 0)) + "</td>" +
+              "<td class='num'>" + formatNumber(numberFrom(row, ["visitors", "unique_visitors", "visitor_count"], 0)) + "</td>" +
+              "<td class='num'>" + formatNumber(numberFrom(row, ["sessions", "session_count"], 0)) + "</td>" +
+              "<td class='num'>" + formatPercentMaybe(numberFrom(row, ["bounce_rate", "bounceRate"], null)) + "</td>" +
+            "</tr>";
+          }).join("") +
+          "</tbody></table>";
+      }
+
+      function renderReferrersTable(error) {
+        if (error) {
+          els.referrersTable.innerHTML = emptyHtml(error);
+          return;
+        }
+        var rows = state.referrers;
+        if (!rows.length) {
+          els.referrersTable.innerHTML = emptyHtml("No referrers in this range yet.");
+          return;
+        }
+        els.referrersTable.innerHTML = "<table><thead><tr><th>Referrer domain</th><th class='num'>Pageviews</th><th class='num'>Visitors</th></tr></thead><tbody>" +
+          rows.map(function (row) {
+            var domain = rowReferrerDomain(row);
+            var label = referrerLabel(domain);
+            var tagClass = label === "Direct" ? "tag direct-tag" : "tag";
+            return "<tr>" +
+              "<td><span class='" + tagClass + "'>" + escapeHtml(label) + "</span></td>" +
+              "<td class='num'>" + formatNumber(numberFrom(row, ["pageviews", "page_views", "views"], 0)) + "</td>" +
+              "<td class='num'>" + formatNumber(numberFrom(row, ["visitors", "unique_visitors", "visitor_count"], 0)) + "</td>" +
+            "</tr>";
+          }).join("") +
+          "</tbody></table>";
+      }
+
+      function renderRecentTable(error) {
+        if (error) {
+          els.recentTable.innerHTML = emptyHtml(error);
+          return;
+        }
+        var rows = state.recent;
+        if (!rows.length) {
+          els.recentTable.innerHTML = emptyHtml("No recent visits yet. The drawer is quiet.");
+          return;
+        }
+        els.recentTable.innerHTML = "<table><thead><tr><th>Time</th><th>Page</th><th>Referrer</th><th>Browser</th><th>OS</th><th>Device</th><th>Bot?</th></tr></thead><tbody>" +
+          rows.map(function (row) {
+            var isBot = boolFrom(row, ["is_bot", "bot"]);
+            return "<tr" + (isBot ? " class='bot-row'" : "") + ">" +
+              "<td>" + escapeHtml(formatTime(getField(row, ["occurred_at", "time", "timestamp", "created_at"]))) + "</td>" +
+              "<td>" + pageLink(rowPagePath(row)) + "</td>" +
+              "<td class='muted'>" + escapeHtml(referrerLabel(rowReferrerDomain(row))) + "</td>" +
+              "<td>" + escapeHtml(detectBrowser(row)) + "</td>" +
+              "<td>" + escapeHtml(detectOs(row)) + "</td>" +
+              "<td>" + escapeHtml(detectDevice(row)) + "</td>" +
+              "<td>" + (isBot ? "<span class='tag'>bot-ish</span>" : "<span class='faint'>No</span>") + "</td>" +
+            "</tr>";
+          }).join("") +
+          "</tbody></table>";
+      }
+
+      function renderBreakdowns() {
+        if (!state.recent.length) {
+          els.browserBreakdown.textContent = "No data";
+          els.deviceBreakdown.textContent = "No data";
+          els.osBreakdown.textContent = "No data";
+          return;
+        }
+        els.browserBreakdown.innerHTML = breakdownHtml(countBy(state.recent, detectBrowser));
+        els.deviceBreakdown.innerHTML = breakdownHtml(countBy(state.recent, detectDevice));
+        els.osBreakdown.innerHTML = breakdownHtml(countBy(state.recent, detectOs));
+      }
+
+      function extractRows(data) {
+        if (Array.isArray(data)) return data;
+        if (!data || typeof data !== "object") return [];
+        var keys = ["rows", "data", "items", "results", "recent", "pages", "referrers", "timeseries", "series"];
+        for (var i = 0; i < keys.length; i += 1) {
+          if (Array.isArray(data[keys[i]])) return data[keys[i]];
+        }
+        return [];
+      }
+
+      function extractFirstObject(data) {
+        if (Array.isArray(data)) return data[0] || {};
+        if (!data || typeof data !== "object") return {};
+        if (data.summary && typeof data.summary === "object") return data.summary;
+        return data;
+      }
+
+      function getField(row, keys) {
+        row = row || {};
+        for (var i = 0; i < keys.length; i += 1) {
+          var key = keys[i];
+          if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+          if (row.page && row.page[key] !== undefined && row.page[key] !== null && row.page[key] !== "") return row.page[key];
+          if (row.referrer && row.referrer[key] !== undefined && row.referrer[key] !== null && row.referrer[key] !== "") return row.referrer[key];
+          if (row.client && row.client[key] !== undefined && row.client[key] !== null && row.client[key] !== "") return row.client[key];
+        }
+        return "";
+      }
+
+      function numberFrom(row, keys, fallback) {
+        var value = getField(row, keys);
+        if (value === "") return fallback;
+        var parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      }
+
+      function boolFrom(row, keys) {
+        var value = getField(row, keys);
+        return value === true || value === "true" || value === 1 || value === "1";
+      }
+
+      function sumRows(rows, keys) {
+        return rows.reduce(function (sum, row) {
+          return sum + numberFrom(row, keys, 0);
+        }, 0);
+      }
+
+      function rowPagePath(row) {
+        var path = getField(row, ["path", "page_path", "pathname"]);
+        if (path) return String(path);
+        var url = getField(row, ["url", "page_url"]);
+        if (!url) return "";
+        try {
+          return new URL(url).pathname;
+        } catch (error) {
+          return String(url);
+        }
+      }
+
+      function rowReferrerDomain(row) {
+        var domain = getField(row, ["domain", "referrer_domain", "host"]);
+        if (domain) return String(domain).replace(/^www\./i, "");
+        var url = getField(row, ["referrer_url", "url"]);
+        if (!url) return "";
+        try {
+          return new URL(url).hostname.replace(/^www\./i, "");
+        } catch (error) {
+          return String(url);
+        }
+      }
+
+      function pageLink(path) {
+        var clean = cleanPath(path);
+        if (!clean) return "<span class='faint'>Unknown</span>";
+        var href = pageHref(path);
+        return "<a class='path-link' href='" + escapeAttr(href) + "' target='_blank' rel='noopener noreferrer'>" + escapeHtml(clean) + "</a>";
+      }
+
+      function pageHref(path) {
+        if (/^https?:\/\//i.test(path)) return path;
+        var clean = String(path || "").replace(/^\/junkdrawer\//, "").replace(/^\//, "");
+        return clean || "index.html";
+      }
+
+      function cleanPath(path) {
+        var value = String(path || "");
+        value = value.replace(/^https?:\/\/[^/]+/i, "");
+        value = value.replace(/^\/junkdrawer\//, "");
+        value = value.replace(/^\//, "");
+        return value || "index";
+      }
+
+      function referrerLabel(domain) {
+        return domain ? String(domain).replace(/^www\./i, "") : "Direct";
+      }
+
+      function detectBrowser(row) {
+        var browser = getField(row, ["browser", "browser_name"]);
+        if (browser) return String(browser);
+        var ua = String(getField(row, ["user_agent", "ua"]) || "");
+        if (/Edg\//.test(ua)) return "Edge";
+        if (/Chrome\//.test(ua) && !/Chromium/.test(ua)) return "Chrome";
+        if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) return "Safari";
+        if (/Firefox\//.test(ua)) return "Firefox";
+        if (/bot|crawler|spider/i.test(ua)) return "Bot";
+        return "Unknown";
+      }
+
+      function detectOs(row) {
+        var os = getField(row, ["os", "os_name"]);
+        if (os) return String(os);
+        var ua = String(getField(row, ["user_agent", "ua"]) || "");
+        if (/Windows/i.test(ua)) return "Windows";
+        if (/iPhone|iPad|iPod/i.test(ua)) return "iOS";
+        if (/Android/i.test(ua)) return "Android";
+        if (/Mac OS X|Macintosh/i.test(ua)) return "macOS";
+        if (/Linux/i.test(ua)) return "Linux";
+        return "Unknown";
+      }
+
+      function detectDevice(row) {
+        var device = getField(row, ["device", "device_type"]);
+        if (device) return String(device);
+        var ua = String(getField(row, ["user_agent", "ua"]) || "");
+        if (/bot|crawler|spider/i.test(ua)) return "Bot";
+        if (/Mobi|Android|iPhone|iPod/i.test(ua)) return "Mobile";
+        if (/iPad|Tablet/i.test(ua)) return "Tablet";
+        return "Desktop";
+      }
+
+      function countBy(rows, getter) {
+        var counts = {};
+        rows.forEach(function (row) {
+          var key = getter(row) || "Unknown";
+          counts[key] = (counts[key] || 0) + 1;
+        });
+        return Object.keys(counts).map(function (key) {
+          return { label: key, count: counts[key] };
+        }).sort(function (a, b) { return b.count - a.count; }).slice(0, 5);
+      }
+
+      function breakdownHtml(rows) {
+        if (!rows.length) return "No data";
+        return rows.map(function (row) {
+          return "<div class='breakdown-row'><span>" + escapeHtml(row.label) + "</span><strong>" + formatNumber(row.count) + "</strong></div>";
+        }).join("");
+      }
+
+      function descBy(key) {
+        return function (a, b) {
+          return numberFrom(b, [key, "page_views", "views"], 0) - numberFrom(a, [key, "page_views", "views"], 0);
+        };
+      }
+
+      function updateCustomRange() {
+        els.customRange.classList.toggle("show", els.range.value === "custom");
+      }
+
+      function setPanelStatuses(text) {
+        els.chartStatus.textContent = text;
+        els.pagesStatus.textContent = text;
+        els.referrersStatus.textContent = text;
+        els.recentStatus.textContent = text;
+      }
+
+      function updateConnection(kind, text) {
+        els.connectionPill.className = "status-pill " + (kind === "idle" ? "" : kind);
+        els.connectionText.textContent = text;
+      }
+
+      function showMessage(message, isError) {
+        els.globalMessage.textContent = message;
+        els.globalMessage.className = "message" + (isError ? " error" : "");
+      }
+
+      function normalizeApiBase(value) {
+        return String(value || DEFAULT_API_BASE).trim().replace(/\/+$/, "");
+      }
+
+      function startOfDay(date) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      }
+
+      function dateToInput(date) {
+        var year = date.getFullYear();
+        var month = String(date.getMonth() + 1).padStart(2, "0");
+        var day = String(date.getDate()).padStart(2, "0");
+        return year + "-" + month + "-" + day;
+      }
+
+      function parseDateInput(value) {
+        if (!value) return null;
+        var parts = value.split("-").map(Number);
+        if (parts.length !== 3) return null;
+        return new Date(parts[0], parts[1] - 1, parts[2]);
+      }
+
+      function getRangeLabel() {
+        var settings = getSettings();
+        return settings.from + " to " + settings.to;
+      }
+
+      function formatNumber(value) {
+        var number = Number(value);
+        if (!Number.isFinite(number)) return "--";
+        return new Intl.NumberFormat().format(number);
+      }
+
+      function formatPercent(value) {
+        var number = Number(value);
+        if (!Number.isFinite(number)) return "--";
+        if (number <= 1) number = number * 100;
+        return number.toFixed(number % 1 === 0 ? 0 : 1) + "%";
+      }
+
+      function formatPercentMaybe(value) {
+        return value === null || value === undefined ? "--" : formatPercent(value);
+      }
+
+      function formatTime(value) {
+        if (!value) return "Unknown";
+        var date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleString();
+      }
+
+      function formatBucket(value) {
+        if (!value) return "";
+        var date = new Date(value);
+        if (!Number.isNaN(date.getTime())) {
+          var settings = getSettings();
+          return settings.bucket === "hour"
+            ? date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric" })
+            : date.toLocaleDateString([], { month: "short", day: "numeric" });
+        }
+        return String(value);
+      }
+
+      function countLabel(count, noun) {
+        return formatNumber(count) + " " + noun + (count === 1 ? "" : "s");
+      }
+
+      function truncate(value, max) {
+        value = String(value || "");
+        return value.length > max ? value.slice(0, Math.max(0, max - 1)) + "..." : value;
+      }
+
+      function emptyHtml(message) {
+        return "<div class='empty'>" + escapeHtml(message) + "</div>";
+      }
+
+      function storageGet(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function storageSet(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch (error) {}
+      }
+
+      function storageRemove(key) {
+        try {
+          localStorage.removeItem(key);
+        } catch (error) {}
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function escapeAttr(value) {
+        return escapeHtml(value).replaceAll("`", "&#096;");
+      }
+    }());
+  </script>
+</body>
+</html>
