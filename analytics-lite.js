@@ -300,7 +300,8 @@
           headers: { "Content-Type": "application/json" },
           body: json,
           keepalive: true,
-          mode: "cors"
+          mode: "cors",
+          credentials: "omit"
         }).then(function () {
           debugLog("Sent event with fetch.", payload);
         }).catch(function (error) {
