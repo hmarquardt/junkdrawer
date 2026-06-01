@@ -270,6 +270,14 @@
     return "";
   }
 
+  function isCrossOriginEndpoint(url) {
+    try {
+      return new URL(url, window.location.href).origin !== window.location.origin;
+    } catch (error) {
+      return true;
+    }
+  }
+
   function sendPayload(payload) {
     if (trackingDisabled()) return false;
     var json;
@@ -280,17 +288,22 @@
       return false;
     }
 
-    try {
-      if (navigator.sendBeacon && window.Blob) {
-        var blob = new Blob([json], { type: "application/json" });
-        if (navigator.sendBeacon(config.endpoint, blob)) {
-          debugLog("Sent event with sendBeacon.", payload);
-          return true;
+    if (isCrossOriginEndpoint(config.endpoint)) {
+      debugLog("Cross-origin endpoint detected; using fetch with credentials omitted.");
+    } else {
+      debugLog("Same-origin endpoint; trying sendBeacon.");
+      try {
+        if (navigator.sendBeacon && window.Blob) {
+          var blob = new Blob([json], { type: "application/json" });
+          if (navigator.sendBeacon(config.endpoint, blob)) {
+            debugLog("Sent event with sendBeacon.", payload);
+            return true;
+          }
+          debugWarn("sendBeacon returned false; falling back to fetch.");
         }
-        debugWarn("sendBeacon returned false; falling back to fetch.");
+      } catch (error) {
+        debugWarn("sendBeacon failed; falling back to fetch.", error);
       }
-    } catch (error) {
-      debugWarn("sendBeacon failed; falling back to fetch.", error);
     }
 
     try {

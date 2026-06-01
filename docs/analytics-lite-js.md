@@ -83,6 +83,12 @@ The automatic pageview is sent once per page load. Manual calls are available fo
 
 Most public user-facing Junk Drawer pages include `analytics-lite.js`. `analytics-dashboard.html` is intentionally excluded so dashboard refreshes do not pollute analytics, and hidden/private/test pages are not tracked by default.
 
+## Cross-Origin Sending
+
+Cross-origin analytics submissions intentionally use `fetch` with credentials omitted. `sendBeacon` is only used for same-origin endpoints, which avoids credentialed CORS requirements for the public collector.
+
+When verifying a deployment, remember that GitHub Pages or the browser may keep an older `analytics-lite.js` cached. Check the loaded script in DevTools Sources or Network. If needed, temporarily add a query string such as `analytics-lite.js?v=2026.06.01.2` to script tags, or bump the existing deploy/version pattern.
+
 ## Privacy Notes
 
 The library does not use cookies, collect form fields, read localStorage except for `junkstats.visitor_id`, collect exact GPS, or require a token. It captures page URL/path/title, referrer URL/domain, UTM parameters, browser language, timezone, screen and viewport dimensions, user agent, and basic navigation timing when available.
