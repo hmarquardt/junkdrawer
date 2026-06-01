@@ -758,9 +758,9 @@
       <div class="table-wrap" id="recentTableWrap"></div>
     </section>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.3" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.3">
-      &copy; 2026 Hank Marquardt &middot; JunkStats Dashboard &middot; version 2026.06.01.3
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.4" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.4">
+      &copy; 2026 Hank Marquardt &middot; JunkStats Dashboard &middot; version 2026.06.01.4
     </footer>
   </main>
 
@@ -770,6 +770,7 @@
 
       var DEFAULT_API_BASE = "https://lab.aismallbizguru.com/api";
       var DEFAULT_SITE_ID = "junkdrawer";
+      var DEBUG = new URLSearchParams(window.location.search).get("debug") === "1";
       var SITES = [
         {
           id: "junkdrawer",
@@ -1063,6 +1064,7 @@
           }
           return response.json();
         }).then(function (data) {
+          debugLog(name + " loaded", data);
           return { name: name, ok: true, data: data };
         }).catch(function (error) {
           var message = error && error.message ? error.message : "Could not reach analytics backend.";
@@ -1084,12 +1086,13 @@
         results.forEach(function (result) {
           if (!result.ok) return;
           if (result.name === "summary") state.summary = extractFirstObject(result.data);
-          if (result.name === "timeseries") state.timeseries = extractRows(result.data);
-          if (result.name === "pages") state.pages = extractRows(result.data).sort(descBy("pageviews"));
-          if (result.name === "referrers") state.referrers = extractRows(result.data).sort(descBy("pageviews"));
-          if (result.name === "recent") state.recent = extractRows(result.data).sort(function (a, b) {
+          if (result.name === "timeseries") state.timeseries = extractPanelRows(result.data, ["points", "timeseries", "series", "rows", "data"]);
+          if (result.name === "pages") state.pages = extractPanelRows(result.data, ["pages", "rows", "data"]).sort(descBy("pageviews"));
+          if (result.name === "referrers") state.referrers = extractPanelRows(result.data, ["referrers", "rows", "data"]).sort(descBy("pageviews"));
+          if (result.name === "recent") state.recent = extractPanelRows(result.data, ["visits", "recent", "rows", "data"]).sort(function (a, b) {
             return new Date(getField(b, ["occurred_at", "time", "timestamp", "created_at"]) || 0) - new Date(getField(a, ["occurred_at", "time", "timestamp", "created_at"]) || 0);
           });
+          debugPanelRows(result.name);
         });
 
         renderAll(failures);
@@ -1331,9 +1334,12 @@
       }
 
       function extractRows(data) {
+        return extractPanelRows(data, ["rows", "data", "items", "results", "points", "visits", "recent", "pages", "referrers", "timeseries", "series"]);
+      }
+
+      function extractPanelRows(data, keys) {
         if (Array.isArray(data)) return data;
         if (!data || typeof data !== "object") return [];
-        var keys = ["rows", "data", "items", "results", "recent", "pages", "referrers", "timeseries", "series"];
         for (var i = 0; i < keys.length; i += 1) {
           if (Array.isArray(data[keys[i]])) return data[keys[i]];
         }
@@ -1355,6 +1361,15 @@
           if (row.page && row.page[key] !== undefined && row.page[key] !== null && row.page[key] !== "") return row.page[key];
           if (row.referrer && row.referrer[key] !== undefined && row.referrer[key] !== null && row.referrer[key] !== "") return row.referrer[key];
           if (row.client && row.client[key] !== undefined && row.client[key] !== null && row.client[key] !== "") return row.client[key];
+        }
+        return "";
+      }
+
+      function getDirectField(row, keys) {
+        row = row || {};
+        for (var i = 0; i < keys.length; i += 1) {
+          var key = keys[i];
+          if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
         }
         return "";
       }
@@ -1475,7 +1490,7 @@
       }
 
       function detectBrowser(row) {
-        var browser = getField(row, ["browser", "browser_name"]);
+        var browser = getDirectField(row, ["browser_name", "browser"]) || getField(row, ["browser_name", "browser"]);
         if (browser) return String(browser);
         var ua = String(getField(row, ["user_agent", "ua"]) || "");
         if (/Edg\//.test(ua)) return "Edge";
@@ -1487,7 +1502,7 @@
       }
 
       function detectOs(row) {
-        var os = getField(row, ["os", "os_name"]);
+        var os = getDirectField(row, ["os_name", "os"]) || getField(row, ["os_name", "os"]);
         if (os) return String(os);
         var ua = String(getField(row, ["user_agent", "ua"]) || "");
         if (/Windows/i.test(ua)) return "Windows";
@@ -1499,7 +1514,7 @@
       }
 
       function detectDevice(row) {
-        var device = getField(row, ["device", "device_type"]);
+        var device = getDirectField(row, ["device_type", "device"]) || getField(row, ["device_type", "device"]);
         if (device) return String(device);
         var ua = String(getField(row, ["user_agent", "ua"]) || "");
         if (/bot|crawler|spider/i.test(ua)) return "Bot";
@@ -1618,6 +1633,10 @@
 
       function formatBucket(value) {
         if (!value) return "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+          var parts = String(value).split("-").map(Number);
+          return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString([], { month: "short", day: "numeric" });
+        }
         var date = new Date(value);
         if (!Number.isNaN(date.getTime())) {
           var settings = getSettings();
@@ -1639,6 +1658,29 @@
 
       function emptyHtml(message) {
         return "<div class='empty'>" + escapeHtml(message) + "</div>";
+      }
+
+      function debugLog(message, data) {
+        if (!DEBUG || !window.console || !console.log) return;
+        if (data === undefined) {
+          console.log("[JunkStats Dashboard] " + message);
+        } else {
+          console.log("[JunkStats Dashboard] " + message, data);
+        }
+      }
+
+      function debugPanelRows(name) {
+        if (name === "summary") {
+          debugLog("summary loaded");
+        } else if (name === "timeseries") {
+          debugLog("timeseries rows: " + state.timeseries.length);
+        } else if (name === "pages") {
+          debugLog("pages rows: " + state.pages.length);
+        } else if (name === "referrers") {
+          debugLog("referrers rows: " + state.referrers.length);
+        } else if (name === "recent") {
+          debugLog("recent visits rows: " + state.recent.length);
+        }
       }
 
       function storageGet(key) {

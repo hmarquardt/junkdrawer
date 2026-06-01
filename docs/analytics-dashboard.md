@@ -78,6 +78,10 @@ This dashboard displays anonymous pageview analytics. The tracking library does 
 
 Empty tables or cards can be normal for quiet date ranges. Try Today, Last 7 days, or Last 30 days, verify the selected site, and confirm `analytics-lite.js` is installed on the page you expect to track. The dashboard itself does not include `analytics-lite.js`.
 
+### Blank panels after 200 responses
+
+If panels are blank but DevTools Network shows 200 responses, inspect the response wrappers. The dashboard recognizes wrapper keys such as `points` for timeseries and `visits` for recent visits. Add `debug=1` to the dashboard URL to log raw panel responses and extracted row counts without logging the dashboard token.
+
 ### Token not saved
 
 The token is only saved when “Remember token in this browser” is checked. Clearing the checkbox or using Clear removes `junkstats.dashboard.token` from `localStorage`.
