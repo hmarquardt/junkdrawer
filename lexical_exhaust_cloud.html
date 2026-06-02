@@ -699,6 +699,51 @@
       gap: 14px;
     }
 
+    .phrase-cloud {
+      min-height: 300px;
+      padding: 14px;
+      overflow: hidden;
+    }
+
+    .phrase-cloud-stage {
+      position: relative;
+      min-height: 240px;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(ellipse at 25% 45%, rgba(104, 225, 253, 0.11), transparent 34%),
+        radial-gradient(ellipse at 74% 56%, rgba(255, 107, 157, 0.1), transparent 32%),
+        rgba(255, 255, 255, 0.035);
+      overflow: hidden;
+    }
+
+    .phrase-btn {
+      position: absolute;
+      min-height: 32px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.055);
+      color: var(--phrase-color, var(--cool));
+      padding: 3px 7px;
+      cursor: pointer;
+      font-weight: 950;
+      line-height: 1;
+      transform: translate(-50%, -50%) rotate(var(--phrase-rotate, 0deg));
+      text-shadow: 0 0 14px color-mix(in srgb, var(--phrase-color, var(--cool)) 34%, transparent);
+      white-space: nowrap;
+    }
+
+    .phrase-btn:hover,
+    .phrase-btn.selected {
+      background: rgba(255, 255, 255, 0.11);
+      outline: 1px solid var(--line-strong);
+    }
+
+    body[data-theme="light"] .phrase-btn {
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+
     .ai-family {
       padding: 14px;
       min-height: 260px;
@@ -974,6 +1019,10 @@
       .ai-family-grid, .ai-controls {
         grid-template-columns: 1fr;
       }
+
+      .phrase-cloud-stage {
+        min-height: 300px;
+      }
     }
   </style>
 </head>
@@ -1104,9 +1153,9 @@
           <p class="disclaimer">This is not an AI detection tool. It tracks public writing patterns that have become more common in the LLM era. Individual human writers may naturally use any of these patterns.</p>
           <div class="ai-controls">
             <label class="field">
-              Historical phase
-              <input id="aiTimeRangeInput" type="range" min="0" max="6" step="1" value="6" />
-              <span class="range-labels"><span>2020</span><span>2021</span><span>2022</span><span>2023</span><span>2024</span><span>2025</span><span>2026</span></span>
+              Time range
+              <input id="aiTimeRangeInput" type="range" min="0" max="4" step="1" value="1" />
+              <span class="range-labels"><span>Today</span><span>7d</span><span>30d</span><span>90d</span><span>2020+</span></span>
             </label>
             <div>
               <h3 class="section-title">Sources</h3>
@@ -1124,6 +1173,17 @@
               </div>
             </div>
           </div>
+        </section>
+
+        <section class="phrase-cloud panel" aria-label="AI writing exhaust phrase cloud">
+          <div class="ai-family-head">
+            <div>
+              <h3 class="ai-family-title">Phrase Cloud</h3>
+              <p class="copy" id="aiRangeCopy">Current exhaust, with seeded history standing in for live timelines.</p>
+            </div>
+            <span class="chip">multi-word signals welcome</span>
+          </div>
+          <div class="phrase-cloud-stage" id="aiPhraseCloud"></div>
         </section>
 
         <div class="ai-layout">
@@ -1220,9 +1280,9 @@
       </div>
     </section>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.02.5" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.02.5">
-      &copy; 2026 Hank Marquardt &middot; Lexical Exhaust Cloud &middot; version 2026.06.02.5
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.02.6" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.02.6">
+      &copy; 2026 Hank Marquardt &middot; Lexical Exhaust Cloud &middot; version 2026.06.02.6
     </footer>
   </main>
 
@@ -1230,7 +1290,7 @@
     (function () {
       "use strict";
 
-      var VERSION = "2026.06.02.5";
+      var VERSION = "2026.06.02.6";
       var STORAGE_KEY = "lexical_exhaust_cloud.settings";
       var CACHE_KEY = "lexical_exhaust_cloud.cache";
       var TIME_RANGES = [
@@ -1257,6 +1317,13 @@
         "User Watchlist"
       ];
       var AI_YEARS = ["2020", "2021", "2022", "2023", "2024", "2025", "2026"];
+      var AI_RANGES = [
+        { id: "today", label: "Today", window: 1, description: "Current exhaust only: the freshest synthetic prose fumes." },
+        { id: "7d", label: "Last 7 days", window: 2, description: "Current exhaust plus the latest nearby drift." },
+        { id: "30d", label: "Last 30 days", window: 3, description: "A wider recent window over post-LLM phrase habits." },
+        { id: "90d", label: "Last 90 days", window: 4, description: "Recent mutation plus the surrounding adaptation period." },
+        { id: "2020", label: "2020 baseline to today", window: 7, description: "Full seeded history from the pre-LLM baseline through current exhaust." }
+      ];
       var AI_FAMILIES = ["Lexical Exhaust", "Boilerplate Exhaust", "Structural Exhaust", "Punctuation Exhaust", "User Watchlist"];
       var AI_SOURCES = [
         { id: "seeded", label: "Seeded drift", defaultOn: true },
@@ -1413,6 +1480,8 @@
         aiWatchInput: document.getElementById("aiWatchInput"),
         aiAddWatch: document.getElementById("aiAddWatchBtn"),
         aiFamilyGrid: document.getElementById("aiFamilyGrid"),
+        aiPhraseCloud: document.getElementById("aiPhraseCloud"),
+        aiRangeCopy: document.getElementById("aiRangeCopy"),
         aiBadges: document.getElementById("aiBadges"),
         aiSignalName: document.getElementById("aiSignalName"),
         aiSignalInterpretation: document.getElementById("aiSignalInterpretation"),
@@ -1749,6 +1818,8 @@
 
       function renderAiExhaust() {
         var signals = visibleAiSignals();
+        var range = aiSelectedRange();
+        els.aiRangeCopy.textContent = range.description + " Demo history shown where live history is unavailable.";
         var grouped = {};
         AI_FAMILIES.forEach(function (family) { grouped[family] = []; });
         signals.forEach(function (signal) {
@@ -1766,6 +1837,7 @@
             "<div class='signal-list'>" + (familySignals.length ? familySignals.map(signalButtonHtml).join("") : "<p class='copy'>No active signals in this family.</p>") + "</div>" +
           "</article>";
         }).join("");
+        renderAiPhraseCloud(signals.slice(0, 28));
         els.aiFamilyGrid.querySelectorAll(".signal-btn").forEach(function (button) {
           button.addEventListener("click", function () {
             state.settings.selectedAiSignal = button.dataset.signal;
@@ -1789,10 +1861,15 @@
       }
 
       function scoreAiSignal(signal) {
-        var i = clamp(state.settings.aiTimeIndex, 0, AI_YEARS.length - 1);
-        var current = signal.history[i] || 0;
+        var range = aiSelectedRange();
+        var end = signal.history.length;
+        var start = Math.max(0, end - range.window);
+        var currentWindow = signal.history.slice(start, end);
+        var current = average(currentWindow);
         var baseline = average(signal.history.slice(0, 3));
-        var previous = signal.history[Math.max(0, i - 1)] || baseline;
+        var previousStart = Math.max(0, start - range.window);
+        var previousWindow = signal.history.slice(previousStart, start);
+        var previous = previousWindow.length ? average(previousWindow) : baseline;
         var lexicalLift = signal.family === "Lexical Exhaust" ? current / Math.max(6, baseline) : 0;
         var phraseLift = signal.family === "Boilerplate Exhaust" ? current / Math.max(6, baseline) : 0;
         var structuralDensity = signal.family === "Structural Exhaust" ? current : 0;
@@ -1819,8 +1896,32 @@
             spread: spread,
             falsePositivePenalty: falsePositivePenalty,
             current: current,
-            baseline: baseline
+            baseline: baseline,
+            rangeLabel: range.label
           }
+        });
+      }
+
+      function renderAiPhraseCloud(signals) {
+        if (!signals.length) {
+          els.aiPhraseCloud.innerHTML = "<div class='empty-cloud'>No phrase fumes in this filter. Re-enable seeded drift or a signal family.</div>";
+          return;
+        }
+        var width = els.aiPhraseCloud.clientWidth || 840;
+        var height = els.aiPhraseCloud.clientHeight || 260;
+        var maxIndex = Math.max.apply(null, signals.map(function (signal) { return signal.metrics.index; })) || 1;
+        els.aiPhraseCloud.innerHTML = signals.map(function (signal, index) {
+          var point = phrasePoint(index, signals.length, width, height);
+          var size = clamp(14 + (signal.metrics.index / maxIndex) * 30, 14, 44);
+          var selected = state.settings.selectedAiSignal === signal.name ? " selected" : "";
+          return "<button class='phrase-btn" + selected + "' type='button' data-signal='" + escapeAttr(signal.name) + "' style='left:" + point.x + "px;top:" + point.y + "px;font-size:" + size.toFixed(1) + "px;--phrase-color:" + aiSignalColor(signal) + ";--phrase-rotate:" + phraseRotationFor(signal, index) + "deg' aria-label='" + escapeAttr(signal.name + ", Synthetic Prose Index " + Math.round(signal.metrics.index)) + "'>" + escapeHtml(signal.name) + "</button>";
+        }).join("");
+        els.aiPhraseCloud.querySelectorAll(".phrase-btn").forEach(function (button) {
+          button.addEventListener("click", function () {
+            state.settings.selectedAiSignal = button.dataset.signal;
+            persistSettings();
+            renderAiExhaust();
+          });
         });
       }
 
@@ -1854,7 +1955,7 @@
         els.aiContexts.innerHTML = signal.contexts.map(function (context) {
           return "<li>" + escapeHtml(context) + "</li>";
         }).join("");
-        els.aiMethodNote.textContent = "Compared " + AI_YEARS[state.settings.aiTimeIndex] + " against a 2020-2022 baseline. Provenance: " + signal.provenance + ". False-positive penalty: " + signal.metrics.falsePositivePenalty + ".";
+        els.aiMethodNote.textContent = "Compared " + signal.metrics.rangeLabel + " against a 2020-2022 seeded baseline. Provenance: " + signal.provenance + ". False-positive penalty: " + signal.metrics.falsePositivePenalty + ".";
         renderAiSparkline(signal);
       }
 
@@ -1870,7 +1971,9 @@
           signal.history.map(function (value, index) {
             var x = 10 + (index / Math.max(1, signal.history.length - 1)) * 340;
             var y = 64 - (value / max) * 52;
-            var fill = index === state.settings.aiTimeIndex ? "#ff6b9d" : "#ffd166";
+            var range = aiSelectedRange();
+            var activeStart = Math.max(0, signal.history.length - range.window);
+            var fill = index >= activeStart ? "#ff6b9d" : "#ffd166";
             return "<circle cx='" + x.toFixed(1) + "' cy='" + y.toFixed(1) + "' r='3' fill='" + fill + "'><title>" + AI_YEARS[index] + ": " + value + "</title></circle>";
           }).join("");
       }
@@ -1893,6 +1996,35 @@
         if (family === "Structural Exhaust") return "Composition habits that got extremely tidy.";
         if (family === "Punctuation Exhaust") return "Cultural suspicion around punctuation choices.";
         return "Your own suspiciously polished additions.";
+      }
+
+      function aiSelectedRange() {
+        return AI_RANGES[clamp(state.settings.aiTimeIndex, 0, AI_RANGES.length - 1)] || AI_RANGES[1];
+      }
+
+      function phrasePoint(index, total, width, height) {
+        var angle = index * 2.3999632297;
+        var radius = Math.sqrt(index / Math.max(1, total - 1));
+        return {
+          x: width / 2 + Math.cos(angle) * radius * width * 0.42 + Math.sin(index * 1.31) * 18,
+          y: height / 2 + Math.sin(angle) * radius * height * 0.36 + Math.cos(index * 1.7) * 12
+        };
+      }
+
+      function phraseRotationFor(signal, index) {
+        if (signal.name.length > 22) return index % 2 === 0 ? -5 : 5;
+        if (signal.family === "Punctuation Exhaust") return index % 2 === 0 ? -12 : 12;
+        if (index % 5 === 0) return -8;
+        if (index % 7 === 0) return 8;
+        return 0;
+      }
+
+      function aiSignalColor(signal) {
+        if (signal.family === "Lexical Exhaust") return "var(--cat-tech)";
+        if (signal.family === "Boilerplate Exhaust") return "var(--cat-pop)";
+        if (signal.family === "Structural Exhaust") return "var(--cat-therapy)";
+        if (signal.family === "Punctuation Exhaust") return "var(--cat-news)";
+        return "var(--cat-watch)";
       }
 
       function riskPenalty(risk) {
@@ -2299,7 +2431,7 @@
           watchlist: [],
           theme: "dark",
           selectedTab: "culture",
-          aiTimeIndex: 6,
+          aiTimeIndex: 1,
           aiSources: {},
           aiFamilies: {},
           aiWatchlist: [],
