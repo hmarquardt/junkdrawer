@@ -743,15 +743,15 @@
       function queueRender() {
         if (state.renderQueued) return;
         state.renderQueued = true;
-        requestAnimationFrame(() => {
+        requestAnimationFrame(async () => {
           state.renderQueued = false;
-          renderAll();
+          await renderAll();
         });
       }
 
-      function renderAll() {
+      async function renderAll() {
         renderStatus();
-        renderDashboard();
+        await renderDashboard();
         renderExplorer();
         renderFollowStack();
         renderDetail();
@@ -779,7 +779,7 @@
         textEl.textContent = label;
       }
 
-      function renderDashboard() {
+      async function renderDashboard() {
         const followedMarkets = getFollowedMarkets();
         const activeFollowed = followedMarkets.filter(isLiveMarket);
         const now = Date.now();
@@ -794,7 +794,7 @@
         const top = topTailoredNews(5);
         html("topNews", top.length ? top.map(articleCardHtml).join("") : `<div class="empty">No matched news yet. Refresh news after adding markets.</div>`);
         bindDynamicButtons();
-        renderSparklines();
+        await renderSparklines();
       }
 
       function renderExplorer() {
@@ -1947,14 +1947,22 @@
         if (Date.now() - latest >= state.settings.llmIntervalMinutes * 60000) runLlmAnalysis("follow-stack");
       }
 
-      function renderSparklines() {
+      async function renderSparklines() {
         if (!window.Chart) return;
-        document.querySelectorAll("canvas[data-sparkline]").forEach(async canvas => {
+        const canvases = Array.from(document.querySelectorAll("canvas[data-sparkline]"));
+        const neededKeys = new Set(canvases.map(c => `spark-${c.dataset.sparkline}`));
+        for (const key of Object.keys(state.charts)) {
+          if (key.startsWith("spark-") && !neededKeys.has(key)) {
+            state.charts[key].destroy();
+            delete state.charts[key];
+          }
+        }
+        for (const canvas of canvases) {
           const marketId = canvas.dataset.sparkline;
+          const key = `spark-${marketId}`;
+          if (state.charts[key]) continue;
           const since = Date.now() - 6 * 3600000;
           const ticks = await state.db.marketTicks.where("[marketId+timestamp]").between([marketId, since], [marketId, Date.now()]).toArray().catch(() => []);
-          const key = `spark-${marketId}`;
-          if (state.charts[key]) state.charts[key].destroy();
           state.charts[key] = new Chart(canvas, {
             type: "line",
             data: {
@@ -1968,7 +1976,7 @@
               scales: { x: { display: false }, y: { display: false, min: 0, max: 1 } }
             }
           });
-        });
+        }
       }
 
       function renderDetailCharts(m) {
@@ -2013,15 +2021,25 @@
         }
       }
 
+      async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+          clearTimeout(id);
+        }
+      }
+
       async function fetchJsonDirect(url, options) {
-        const res = await fetch(url, options);
+        const res = await fetchWithTimeout(url, options, 12000);
         const text = await res.text();
         if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${url}: ${text.slice(0, 240)}`);
         return parseJsonText(text, url);
       }
 
       async function fetchText(url) {
-        const res = await fetch(url);
+        const res = await fetchWithTimeout(url, {}, 12000);
         if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${url}`);
         return res.text();
       }
@@ -2074,9 +2092,9 @@
       function logError(type, err, extra) { logEvent("error", type, String(err?.stack || err?.message || err), extra); }
     })();
   </script>
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.05.2" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.05.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; Hank Marquardt 2026 &middot; Version 2026.06.05.2
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.05.3" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.05.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; Hank Marquardt 2026 &middot; Version 2026.06.05.3
   </footer>
 </body>
 </html>
