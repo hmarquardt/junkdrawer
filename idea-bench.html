@@ -819,6 +819,27 @@
       color: var(--danger);
     }
 
+    .error-list {
+      display: grid;
+      gap: 8px;
+      margin: 10px 0 0;
+    }
+
+    .error-item {
+      border: 1px solid #efb1ac;
+      border-radius: 8px;
+      background: #fff7f6;
+      padding: 10px;
+    }
+
+    .error-item h4 {
+      margin: 0 0 4px;
+      color: var(--danger);
+      font-size: 0.86rem;
+    }
+
+    .error-item p { margin: 4px 0; }
+
     .raw {
       white-space: pre-wrap;
       word-break: break-word;
@@ -987,16 +1008,16 @@
 
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.11" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.11" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.11
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.12" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.12" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.12
   </footer>
 
   <script>
     (() => {
       "use strict";
 
-      const APP_VERSION = "2026.06.09.11";
+      const APP_VERSION = "2026.06.09.12";
       const SCHEMA_VERSION = "idea-bench-run-v1";
       const DB_NAME = "idea-bench-db";
       const DB_VERSION = 1;
@@ -2896,6 +2917,33 @@
         return `<div class="content-box wide" style="margin-top: 12px;"><h3>Sources used in this section</h3><ul>${rows}</ul></div>`;
       }
 
+      function renderRunErrors(run = state.currentRun) {
+        const errors = asArray(run?.errors);
+        if (!run || !errors.length) return "";
+        return `
+          <details class="content-box wide" open>
+            <summary>Run Errors (${errors.length})</summary>
+            <div class="inside">
+              <p class="notice error">This run completed with recoverable errors. Partial outputs were saved, but the affected stages below may have used fallbacks or weaker evidence.</p>
+              <div class="error-list">
+                ${errors.map((error, index) => `
+                  <article class="error-item">
+                    <h4>${escapeHtml(index + 1)}. ${escapeHtml(error.stage || "unknown stage")}</h4>
+                    <p>${escapeHtml(error.message || "No message captured.")}</p>
+                    <p class="small">
+                      ${error.at ? `At: ${escapeHtml(error.at)}` : ""}
+                      ${error.query ? ` · Query: ${escapeHtml(error.query)}` : ""}
+                      ${error.url ? ` · URL: ${escapeHtml(error.url)}` : ""}
+                    </p>
+                    ${error.raw ? `<details><summary>Raw model output</summary><pre class="raw">${escapeHtml(error.raw)}</pre></details>` : ""}
+                  </article>
+                `).join("")}
+              </div>
+            </div>
+          </details>
+        `;
+      }
+
       function labelize(key) {
         return String(key)
           .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -2916,6 +2964,7 @@
         if (!sources.length) {
           const planned = state.currentRun?.researchPlan ? `<pre class="raw">${escapeHtml(JSON.stringify(state.currentRun.researchPlan, null, 2))}</pre>` : "";
           return `
+            ${renderRunErrors(state.currentRun)}
             <p class="notice warn">No live sources were collected. This static page cannot fetch Google or DuckDuckGo search result pages directly; add a JSON search API/backend provider for verified web research.</p>
             ${planned ? `<h3>Planned Search Queries</h3>${planned}` : ""}
           `;
@@ -2928,6 +2977,7 @@
           return acc;
         }, {});
         return `
+          ${renderRunErrors(state.currentRun)}
           <div class="section-toolbar">
             <div>
               <h3>Sources / Evidence</h3>
@@ -2990,10 +3040,12 @@
             <button id="refreshHistoryBtn" class="btn secondary" type="button">Refresh</button>
           </div>
           <div id="historyList" class="history-list"></div>
+          ${renderRunErrors(state.currentRun)}
           ${state.currentRun ? `<pre class="raw">${escapeHtml(JSON.stringify({
             id: state.currentRun.id,
             createdAt: state.currentRun.createdAt,
             status: state.currentRun.status,
+            errorCount: asArray(state.currentRun.errors).length,
             ideaText: state.currentRun.ideaText,
             appVersion: state.currentRun.appVersion
           }, null, 2))}</pre>` : ""}
@@ -3008,7 +3060,7 @@
           els.historyList.innerHTML = runs.map((run) => `
             <article class="history-item">
               <h3>${escapeHtml((run.ideaText || "Untitled idea").slice(0, 86))}</h3>
-              <p class="small">${escapeHtml(new Date(run.updatedAt || run.createdAt).toLocaleString())} · ${escapeHtml(run.status || "draft")}</p>
+              <p class="small">${escapeHtml(new Date(run.updatedAt || run.createdAt).toLocaleString())} · ${escapeHtml(run.status || "draft")}${asArray(run.errors).length ? ` · ${asArray(run.errors).length} error${asArray(run.errors).length === 1 ? "" : "s"}` : ""}</p>
               <div class="history-actions">
                 <button class="btn secondary" type="button" data-history-open="${escapeHtml(run.id)}">Open</button>
                 <button class="btn secondary" type="button" data-history-duplicate="${escapeHtml(run.id)}">Duplicate</button>
@@ -4224,7 +4276,7 @@
           setActiveTab("executive");
           els.cancelRunBtn.disabled = true;
           stopActivityTimer();
-          setProgress("Analysis saved", "The run is complete and stored in IndexedDB.", 100);
+          setProgress(run.errors.length ? "Analysis saved with errors" : "Analysis saved", run.errors.length ? `${run.errors.length} recoverable error${run.errors.length === 1 ? "" : "s"} captured. Open History or Sources / Evidence to inspect details.` : "The run is complete and stored in IndexedDB.", 100, run.errors.length ? "warn" : "done");
           updateReportButtons();
           await refreshHistory();
         } catch (error) {
