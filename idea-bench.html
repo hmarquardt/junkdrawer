@@ -792,16 +792,16 @@
 
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.6" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.6
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.7" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.7
   </footer>
 
   <script>
     (() => {
       "use strict";
 
-      const APP_VERSION = "2026.06.09.6";
+      const APP_VERSION = "2026.06.09.7";
       const SCHEMA_VERSION = "idea-bench-run-v1";
       const DB_NAME = "idea-bench-db";
       const DB_VERSION = 1;
@@ -2451,12 +2451,15 @@
       function renderValue(value) {
         if (Array.isArray(value)) {
           if (!value.length) return `<p class="muted">Not provided.</p>`;
+          if (value.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
+            return `<div class="settings-grid">${value.map((item) => renderObjectCard(item)).join("")}</div>`;
+          }
           return `<ul>${value.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ul>`;
         }
         if (value && typeof value === "object") {
           const entries = Object.entries(value);
           if (!entries.length) return `<p class="muted">Not provided.</p>`;
-          return `<ul>${entries.map(([key, item]) => `<li><b>${escapeHtml(labelize(key))}:</b> ${renderInline(item)}</li>`).join("")}</ul>`;
+          return renderObjectCard(value);
         }
         return `<p>${escapeHtml(compactText(value, "Not provided."))}</p>`;
       }
@@ -2465,14 +2468,51 @@
         if (value && typeof value === "object" && ("text" in value || "claim" in value)) {
           return `${escapeHtml(compactText(value.text || value.claim, "Not provided."))}${renderCitations(value.sourceIds)}`;
         }
-        if (Array.isArray(value)) return escapeHtml(value.join("; "));
+        if (Array.isArray(value)) {
+          if (!value.length) return `<span class="muted">None</span>`;
+          if (value.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
+            return `<div class="settings-grid">${value.map((item) => renderObjectCard(item, true)).join("")}</div>`;
+          }
+          return value.map((item) => renderInline(item)).join("; ");
+        }
         if (value && typeof value === "object") {
-          return Object.entries(value).map(([key, item]) => {
+          return Object.entries(value).filter(([_key, item]) => item !== undefined && item !== null && item !== "").map(([key, item]) => {
             if (key === "sourceIds") return renderCitations(item);
-            return `<b>${escapeHtml(labelize(key))}:</b> ${Array.isArray(item) ? escapeHtml(item.join(", ")) : escapeHtml(item)}`;
+            if (key === "claimIds") return `<span class="badge">${escapeHtml(`${asArray(item).length} claim IDs`)}</span>`;
+            return `<b>${escapeHtml(labelize(key))}:</b> ${renderInline(item)}`;
           }).join("; ");
         }
         return escapeHtml(compactText(value, "Not provided."));
+      }
+
+      function renderObjectCard(object, compact = false) {
+        const title = object.name || object.companyName || object.title || object.text || object.claim || object.url || "";
+        const sourceIds = asArray(object.sourceIds);
+        const claimIds = asArray(object.claimIds);
+        const entries = Object.entries(object).filter(([key, value]) => {
+          if (["name", "companyName", "title", "text", "claim", "sourceIds", "claimIds"].includes(key)) return false;
+          if (value === undefined || value === null || value === "") return false;
+          if (Array.isArray(value) && !value.length) return false;
+          return true;
+        });
+        return `
+          <div class="source-card" style="${compact ? "margin: 6px 0; padding: 8px;" : ""}">
+            ${title ? `<h3>${escapeHtml(title)}</h3>` : ""}
+            <div class="source-meta">
+              ${object.confidence ? `<span class="badge">${escapeHtml(`confidence: ${object.confidence}`)}</span>` : ""}
+              ${object.claimKind ? `<span class="badge infer">${escapeHtml(object.claimKind)}</span>` : ""}
+              ${object.type ? `<span class="badge">${escapeHtml(object.type)}</span>` : ""}
+              ${sourceIds.length ? renderCitations(sourceIds) : ""}
+              ${claimIds.length ? `<span class="badge">${escapeHtml(`${claimIds.length} claim IDs`)}</span>` : ""}
+            </div>
+            ${entries.length ? `<dl style="display:grid; gap:6px; margin:0;">${entries.map(([key, value]) => `
+              <div>
+                <dt class="small" style="font-weight:800;">${escapeHtml(labelize(key))}</dt>
+                <dd style="margin:0;">${renderInline(value)}</dd>
+              </div>
+            `).join("")}</dl>` : ""}
+          </div>
+        `;
       }
 
       function sourceById(id) {
@@ -2697,15 +2737,27 @@
           lines.push(`## ${labelize(field)}`);
           if (Array.isArray(value)) {
             if (!value.length) lines.push("- Not provided.");
-            value.forEach((item) => lines.push(`- ${typeof item === "object" ? JSON.stringify(item) : item}`));
+            value.forEach((item) => lines.push(`- ${markdownValue(item)}`));
           } else if (value && typeof value === "object") {
-            Object.entries(value).forEach(([key2, item]) => lines.push(`- **${labelize(key2)}:** ${Array.isArray(item) ? item.join("; ") : item}`));
+            Object.entries(value).forEach(([key2, item]) => lines.push(`- **${labelize(key2)}:** ${markdownValue(item)}`));
           } else {
             lines.push(String(value || "Not provided."));
           }
           lines.push("");
         });
         return lines.join("\n");
+      }
+
+      function markdownValue(value) {
+        if (Array.isArray(value)) {
+          if (!value.length) return "Not provided.";
+          return value.map((item) => markdownValue(item)).join("; ");
+        }
+        if (value && typeof value === "object") {
+          const sourceIds = asArray(value.sourceIds);
+          return Object.entries(value).filter(([key, item]) => key !== "sourceIds" && item !== undefined && item !== null && item !== "").map(([key, item]) => `${labelize(key)}: ${markdownValue(item)}`).join("; ") + (sourceIds.length ? ` Sources: ${sourceIds.join(", ")}` : "");
+        }
+        return String(value || "Not provided.");
       }
 
       async function copyText(text) {
