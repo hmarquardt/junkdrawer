@@ -732,16 +732,16 @@
 
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.3" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.3
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.4" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.4
   </footer>
 
   <script>
     (() => {
       "use strict";
 
-      const APP_VERSION = "2026.06.09.3";
+      const APP_VERSION = "2026.06.09.4";
       const SCHEMA_VERSION = "idea-bench-run-v1";
       const DB_NAME = "idea-bench-db";
       const DB_VERSION = 1;
@@ -887,7 +887,7 @@
             sectionTiers: parsed.sectionTiers || {},
             depth: parsed.depth || "standard",
             lens: parsed.lens || "bootstrapped",
-            scope: parsed.scope || "stubbed",
+            scope: parsed.scope === "stubbed" ? "offline" : parsed.scope || "offline",
             manualModel: parsed.manualModel || ""
           };
         } catch (error) {
@@ -897,7 +897,7 @@
             sectionTiers: {},
             depth: "standard",
             lens: "bootstrapped",
-            scope: "stubbed",
+            scope: "offline",
             manualModel: ""
           };
         }
@@ -913,7 +913,7 @@
         };
         state.settings.depth = els.depthSelect?.value || state.settings.depth || "standard";
         state.settings.lens = els.lensSelect?.value || state.settings.lens || "bootstrapped";
-        state.settings.scope = els.scopeSelect?.value || state.settings.scope || "stubbed";
+        state.settings.scope = els.scopeSelect?.value || state.settings.scope || "offline";
         state.settings.manualModel = els.manualModel?.value.trim() || state.settings.manualModel || "";
         state.settings.sectionTiers = {};
         document.querySelectorAll("[data-section-tier]").forEach((select) => {
@@ -1038,18 +1038,14 @@
 
       const ResearchProvider = {
         async searchWeb(query, group) {
-          const source = {
-            id: uid("src"),
-            group,
+          return {
             query,
-            title: `Search needed: ${query}`,
-            url: "",
-            snippet: "Live web search is not configured in this static Junkdrawer artifact. Replace ResearchProvider.searchWeb with a backend or search API integration before treating this as verified.",
-            claimType: "unknown",
-            provider: "stub",
-            fetchedAt: nowIso()
+            group,
+            provider: "browser-offline",
+            results: [],
+            unavailable: true,
+            note: "Live web search needs a search API or backend. Browser fetch cannot reliably query Google or DuckDuckGo result pages because of CORS, bot protection, and non-API HTML responses."
           };
-          return { query, group, provider: "stub", results: [source], unavailable: true };
         },
         async fetchPage(url) {
           return {
@@ -1057,7 +1053,7 @@
             title: "",
             text: "",
             unavailable: true,
-            note: "fetchPage is stubbed because browser CORS and no backend search provider are available."
+            note: "Page fetching is limited by browser CORS unless the target site explicitly allows cross-origin requests."
           };
         }
       };
@@ -1309,7 +1305,7 @@
         els.manualModel.value = state.settings.manualModel || "";
         els.depthSelect.value = state.settings.depth || "standard";
         els.lensSelect.value = state.settings.lens || "bootstrapped";
-        els.scopeSelect.value = state.settings.scope || "stubbed";
+        els.scopeSelect.value = state.settings.scope || "offline";
         fillSelect(els.fastModel, state.settings.selectedModels.fast);
         fillSelect(els.standardModel, state.settings.selectedModels.standard);
         fillSelect(els.deepModel, state.settings.selectedModels.deep);
@@ -1453,10 +1449,11 @@
                 </label>
                 <label for="scopeSelect">Research mode
                   <select id="scopeSelect">
-                    <option value="stubbed">Stubbed search provider</option>
+                    <option value="offline">No live web search</option>
                     <option value="manual">Use user-provided competitor names only</option>
                   </select>
                 </label>
+                <p class="notice">Google and DuckDuckGo result pages are not safe browser APIs. To add live research, wire <code>ResearchProvider.searchWeb()</code> to a search API or backend proxy that returns JSON.</p>
               </div>
             </section>
           </div>
@@ -1570,7 +1567,11 @@
           return acc;
         }, {});
         if (!sources.length) {
-          return `<p class="notice warn">No live sources have been collected. The current research provider is a stub and all analysis should be treated as model-inferred unless you provide known competitors or replace the provider.</p>`;
+          const planned = state.currentRun?.researchPlan ? `<pre class="raw">${escapeHtml(JSON.stringify(state.currentRun.researchPlan, null, 2))}</pre>` : "";
+          return `
+            <p class="notice warn">No live sources were collected. This static page cannot fetch Google or DuckDuckGo search result pages directly; add a JSON search API/backend provider for verified web research.</p>
+            ${planned ? `<h3>Planned Search Queries</h3>${planned}` : ""}
+          `;
         }
         return Object.entries(grouped).map(([group, items]) => `
           <details open>
@@ -1755,7 +1756,7 @@
       }
 
       function fallbackSection(sectionKey, run, researchContext, errorMessage = "") {
-        const unknown = "Live web research is not configured; verify competitor, pricing, and funding claims before acting.";
+        const unknown = "Verify competitor, pricing, and funding claims with live sources before acting.";
         const bySection = {
           executive: {
             paragraphSummary: `${run.ideaText} should be treated as an unvalidated opportunity. The strongest early move is not building a full product; it is finding a narrow customer segment with a painful, budgeted problem and testing whether they will pay for a smaller workflow improvement.`,
@@ -1766,11 +1767,11 @@
             biggestRisk: "The pain may be real but not urgent or budgeted enough to support a business.",
             recommendedNextStep: "Interview 8 to 12 target customers and validate current spending, switching pain, and distribution access.",
             recommendation: "Investigate",
-            evidenceNotes: ["Generated from user assumptions and model heuristics only.", researchContext.searchUnavailableNote],
+            evidenceNotes: ["Generated from user assumptions and model heuristics only.", researchContext.researchModeNote],
             unknowns: [unknown]
           },
           competitors: {
-            directCompetitors: ["Unknown until live search is configured.", compactText(run.assumptions.knownCompetitors, "")].filter(Boolean),
+            directCompetitors: ["Unknown unless supplied by the user or verified through a live search provider.", compactText(run.assumptions.knownCompetitors, "")].filter(Boolean),
             indirectCompetitors: ["Consultants, agencies, incumbent general-purpose tools, and internal workflows may be stronger substitutes than direct startups."],
             substituteBehaviors: ["Spreadsheets, email, shared docs, manual checklists, doing nothing, or delegating to a service provider."],
             diyAlternatives: ["Spreadsheet templates", "No-code workflows", "Open-source tools where applicable", "Fractional expert or agency support"],
@@ -1930,7 +1931,7 @@
           run.updatedAt = nowIso();
           await safeSave(run);
 
-          setProgress("Running research provider", "Using the current stub provider. Results are marked unknown unless replaced with live search.", 20);
+          setProgress("Preparing research context", "Live search is disabled in this static page; planned queries will be shown under Sources / Evidence.", 20);
           run.researchResults = await runResearch(run.researchPlan);
           run.sources = flattenSources(run.researchResults);
           run.updatedAt = nowIso();
@@ -1940,8 +1941,8 @@
             plan: run.researchPlan,
             results: run.researchResults,
             sources: run.sources,
-            hasLiveSources: run.sources.some((source) => source.url && source.provider !== "stub"),
-            searchUnavailableNote: "ResearchProvider.searchWeb is currently stubbed in this static page."
+            hasLiveSources: run.sources.some((source) => source.url && source.provider !== "browser-offline"),
+            researchModeNote: "No live web search provider is connected; planned queries are available in Sources / Evidence."
           };
 
           let completed = 0;
