@@ -644,6 +644,33 @@
 
     tr:last-child td { border-bottom: 0; }
 
+    .table-cell-list {
+      margin: 0;
+      padding-left: 1rem;
+    }
+
+    .table-cell-list li { margin-bottom: 4px; }
+
+    .table-cell-object {
+      display: grid;
+      gap: 4px;
+      margin: 0;
+    }
+
+    .table-cell-object div {
+      display: grid;
+      gap: 2px;
+    }
+
+    .table-cell-object dt {
+      color: var(--subtle);
+      font-size: 0.68rem;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .table-cell-object dd { margin: 0; }
+
     details {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -960,16 +987,16 @@
 
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.10" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.10" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.10
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.11" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.11" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.11
   </footer>
 
   <script>
     (() => {
       "use strict";
 
-      const APP_VERSION = "2026.06.09.10";
+      const APP_VERSION = "2026.06.09.11";
       const SCHEMA_VERSION = "idea-bench-run-v1";
       const DB_NAME = "idea-bench-db";
       const DB_VERSION = 1;
@@ -1096,6 +1123,20 @@
       }
 
       function compactText(value, fallback = "Unknown") {
+        if (Array.isArray(value)) {
+          const text = value.map((item) => compactText(item, "")).filter(Boolean).join("; ");
+          return text || fallback;
+        }
+        if (value && typeof value === "object") {
+          const preferred = value.text || value.claim || value.name || value.companyName || value.title || value.url || value.summary || value.notes;
+          if (preferred) return compactText(preferred, fallback);
+          const text = Object.entries(value)
+            .filter(([key, item]) => !["sourceIds", "claimIds", "id"].includes(key) && item !== undefined && item !== null && item !== "")
+            .map(([key, item]) => `${labelize(key)}: ${compactText(item, "")}`)
+            .filter((item) => !item.endsWith(": "))
+            .join("; ");
+          return text || fallback;
+        }
         const text = String(value ?? "").trim();
         return text || fallback;
       }
@@ -2663,14 +2704,14 @@
       function renderCompetitors(output) {
         const rows = asArray(output.competitorTable).map((item) => `
           <tr>
-            <td>${escapeHtml(item.name)}</td>
-            <td>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url)}</a>` : "Unknown"}</td>
-            <td>${escapeHtml(item.category)}</td>
-            <td>${escapeHtml(item.targetCustomer)}</td>
-            <td>${escapeHtml(item.pricing)}</td>
-            <td>${escapeHtml(item.strengths)}</td>
-            <td>${escapeHtml(item.weaknesses)}</td>
-            <td>${escapeHtml(item.notes)}</td>
+            <td>${renderTableCell(item.name)}</td>
+            <td>${renderUrlCell(item.url)}</td>
+            <td>${renderTableCell(item.category)}</td>
+            <td>${renderTableCell(item.targetCustomer)}</td>
+            <td>${renderTableCell(item.pricing || item.visiblePricing)}</td>
+            <td>${renderTableCell(item.strengths)}</td>
+            <td>${renderTableCell(item.weaknesses)}</td>
+            <td>${renderTableCell(item.notes)}</td>
           </tr>
         `).join("");
         return `
@@ -2694,6 +2735,40 @@
           </div>
           ${renderSectionSources(output)}
         `;
+      }
+
+      function renderUrlCell(value) {
+        const url = Array.isArray(value) ? value.find(Boolean) : value;
+        if (!url || typeof url === "object") return renderTableCell(url);
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`;
+      }
+
+      function renderTableCell(value) {
+        if (value === undefined || value === null || value === "") return `<span class="muted">Unknown</span>`;
+        if (Array.isArray(value)) {
+          const items = value.filter((item) => item !== undefined && item !== null && item !== "");
+          if (!items.length) return `<span class="muted">Unknown</span>`;
+          return `<ul class="table-cell-list">${items.map((item) => `<li>${renderTableCell(item)}</li>`).join("")}</ul>`;
+        }
+        if (value && typeof value === "object") {
+          if ("text" in value || "claim" in value) {
+            return `${escapeHtml(compactText(value.text || value.claim, "Unknown"))}${renderCitations(value.sourceIds)}`;
+          }
+          const entries = Object.entries(value).filter(([key, item]) => {
+            if (["sourceIds", "claimIds", "id"].includes(key)) return false;
+            if (item === undefined || item === null || item === "") return false;
+            if (Array.isArray(item) && !item.length) return false;
+            return true;
+          });
+          if (!entries.length) return `<span class="muted">Unknown</span>`;
+          return `<dl class="table-cell-object">${entries.map(([key, item]) => `
+            <div>
+              <dt>${escapeHtml(labelize(key))}</dt>
+              <dd>${renderTableCell(item)}</dd>
+            </div>
+          `).join("")}</dl>`;
+        }
+        return escapeHtml(compactText(value, "Unknown"));
       }
 
       function renderGenericGrid(output, keys) {
