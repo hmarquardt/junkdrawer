@@ -482,6 +482,51 @@
     .badge.user { border-color: #e8c891; background: var(--warn-soft); color: #8a5200; }
     .badge.unknown { border-color: #f1b6b1; background: var(--danger-soft); color: var(--danger); }
 
+    .badge.mock { border-color: #d8c2f0; background: #f6f0ff; color: #6b21a8; }
+
+    .citation {
+      display: inline-flex;
+      align-items: center;
+      margin-inline: 3px;
+      border-radius: 999px;
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      padding: 1px 6px;
+      color: var(--brand-strong);
+      font-size: 0.7rem;
+      font-weight: 900;
+      text-decoration: none;
+      vertical-align: baseline;
+    }
+
+    .source-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .source-card:target {
+      border-color: var(--brand);
+      box-shadow: var(--focus);
+    }
+
+    .source-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 8px 0;
+    }
+
+    .source-claims {
+      margin: 8px 0 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
     .table-wrap {
       overflow-x: auto;
       border: 1px solid var(--line);
@@ -573,6 +618,21 @@
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 8px;
       align-items: end;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      padding: 9px 10px;
+    }
+
+    .check-row input {
+      width: auto;
     }
 
     .notice {
@@ -732,16 +792,16 @@
 
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.4" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.4
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.09.5" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.09.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(95, 111, 133, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Idea Bench · version 2026.06.09.5
   </footer>
 
   <script>
     (() => {
       "use strict";
 
-      const APP_VERSION = "2026.06.09.4";
+      const APP_VERSION = "2026.06.09.5";
       const SCHEMA_VERSION = "idea-bench-run-v1";
       const DB_NAME = "idea-bench-db";
       const DB_VERSION = 1;
@@ -826,6 +886,7 @@
         currentRun: null,
         refiningQuestions: [],
         activeTab: "setup",
+        evidenceFilter: "all",
         dbReady: true,
         abortController: null
       };
@@ -873,22 +934,60 @@
           depthSelect: document.querySelector("#depthSelect"),
           lensSelect: document.querySelector("#lensSelect"),
           scopeSelect: document.querySelector("#scopeSelect"),
+          searchEnabled: document.querySelector("#searchEnabled"),
+          searchProvider: document.querySelector("#searchProvider"),
+          searchEngine: document.querySelector("#searchEngine"),
+          searchContextSize: document.querySelector("#searchContextSize"),
+          maxResultsPerQuery: document.querySelector("#maxResultsPerQuery"),
+          maxTotalResults: document.querySelector("#maxTotalResults"),
+          maxQueriesPerSection: document.querySelector("#maxQueriesPerSection"),
+          researchModel: document.querySelector("#researchModel"),
+          showRawEvidence: document.querySelector("#showRawEvidence"),
           refreshHistoryBtn: document.querySelector("#refreshHistoryBtn"),
           historyList: document.querySelector("#historyList")
         });
+      }
+
+      function readStoredSetting(parsed, key, fallback = "") {
+        const individual = localStorage.getItem(`ideaBench.${key}`);
+        if (individual !== null) return individual;
+        return parsed[key] ?? fallback;
+      }
+
+      function readStoredBoolean(parsed, key, fallback = false) {
+        const value = readStoredSetting(parsed, key, fallback ? "true" : "false");
+        return value === true || value === "true";
+      }
+
+      function readStoredNumber(parsed, key, fallback) {
+        const value = Number(readStoredSetting(parsed, key, String(fallback)));
+        return Number.isFinite(value) && value > 0 ? value : fallback;
       }
 
       function loadSettings() {
         try {
           const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
           return {
-            apiKey: parsed.apiKey || "",
-            selectedModels: parsed.selectedModels || { fast: "", standard: "", deep: "" },
+            apiKey: readStoredSetting(parsed, "openRouterKey", parsed.apiKey || ""),
+            selectedModels: {
+              fast: readStoredSetting(parsed, "fastModel", parsed.selectedModels?.fast || ""),
+              standard: readStoredSetting(parsed, "standardModel", parsed.selectedModels?.standard || ""),
+              deep: readStoredSetting(parsed, "deepModel", parsed.selectedModels?.deep || "")
+            },
             sectionTiers: parsed.sectionTiers || {},
             depth: parsed.depth || "standard",
             lens: parsed.lens || "bootstrapped",
             scope: parsed.scope === "stubbed" ? "offline" : parsed.scope || "offline",
-            manualModel: parsed.manualModel || ""
+            manualModel: parsed.manualModel || "",
+            researchModel: readStoredSetting(parsed, "researchModel", parsed.researchModel || ""),
+            searchProvider: readStoredSetting(parsed, "searchProvider", parsed.searchProvider || "none"),
+            searchEnabled: readStoredBoolean(parsed, "searchEnabled", Boolean(parsed.searchEnabled)),
+            searchEngine: readStoredSetting(parsed, "searchEngine", parsed.searchEngine || "auto"),
+            searchContextSize: readStoredSetting(parsed, "searchContextSize", parsed.searchContextSize || "medium"),
+            maxResultsPerQuery: readStoredNumber(parsed, "maxResultsPerQuery", parsed.maxResultsPerQuery || 5),
+            maxTotalResults: readStoredNumber(parsed, "maxTotalResults", parsed.maxTotalResults || 30),
+            maxQueriesPerSection: readStoredNumber(parsed, "maxQueriesPerSection", parsed.maxQueriesPerSection || 4),
+            showRawEvidence: readStoredBoolean(parsed, "showRawEvidence", Boolean(parsed.showRawEvidence))
           };
         } catch (error) {
           return {
@@ -898,7 +997,16 @@
             depth: "standard",
             lens: "bootstrapped",
             scope: "offline",
-            manualModel: ""
+            manualModel: "",
+            researchModel: "",
+            searchProvider: "none",
+            searchEnabled: false,
+            searchEngine: "auto",
+            searchContextSize: "medium",
+            maxResultsPerQuery: 5,
+            maxTotalResults: 30,
+            maxQueriesPerSection: 4,
+            showRawEvidence: false
           };
         }
       }
@@ -915,11 +1023,32 @@
         state.settings.lens = els.lensSelect?.value || state.settings.lens || "bootstrapped";
         state.settings.scope = els.scopeSelect?.value || state.settings.scope || "offline";
         state.settings.manualModel = els.manualModel?.value.trim() || state.settings.manualModel || "";
+        state.settings.researchModel = els.researchModel?.value || state.settings.researchModel || "";
+        state.settings.searchProvider = els.searchProvider?.value || state.settings.searchProvider || "none";
+        state.settings.searchEnabled = Boolean(els.searchEnabled?.checked);
+        state.settings.searchEngine = els.searchEngine?.value || state.settings.searchEngine || "auto";
+        state.settings.searchContextSize = els.searchContextSize?.value || state.settings.searchContextSize || "medium";
+        state.settings.maxResultsPerQuery = Math.max(1, Math.min(10, Number(els.maxResultsPerQuery?.value || state.settings.maxResultsPerQuery || 5)));
+        state.settings.maxTotalResults = Math.max(5, Math.min(80, Number(els.maxTotalResults?.value || state.settings.maxTotalResults || 30)));
+        state.settings.maxQueriesPerSection = Math.max(1, Math.min(8, Number(els.maxQueriesPerSection?.value || state.settings.maxQueriesPerSection || 4)));
+        state.settings.showRawEvidence = Boolean(els.showRawEvidence?.checked);
         state.settings.sectionTiers = {};
         document.querySelectorAll("[data-section-tier]").forEach((select) => {
           state.settings.sectionTiers[select.dataset.sectionTier] = select.value;
         });
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+        localStorage.setItem("ideaBench.openRouterKey", state.settings.apiKey);
+        localStorage.setItem("ideaBench.fastModel", state.settings.selectedModels.fast);
+        localStorage.setItem("ideaBench.standardModel", state.settings.selectedModels.standard);
+        localStorage.setItem("ideaBench.deepModel", state.settings.selectedModels.deep);
+        localStorage.setItem("ideaBench.researchModel", state.settings.researchModel);
+        localStorage.setItem("ideaBench.searchProvider", state.settings.searchProvider);
+        localStorage.setItem("ideaBench.searchEnabled", String(state.settings.searchEnabled));
+        localStorage.setItem("ideaBench.searchEngine", state.settings.searchEngine);
+        localStorage.setItem("ideaBench.searchContextSize", state.settings.searchContextSize);
+        localStorage.setItem("ideaBench.maxResultsPerQuery", String(state.settings.maxResultsPerQuery));
+        localStorage.setItem("ideaBench.maxTotalResults", String(state.settings.maxTotalResults));
+        localStorage.setItem("ideaBench.maxQueriesPerSection", String(state.settings.maxQueriesPerSection));
       }
 
       const Storage = {
@@ -1007,8 +1136,15 @@
           })).sort((a, b) => a.id.localeCompare(b.id));
         },
         async call(messages, model, options = {}) {
-          const apiKey = els.apiKey.value.trim();
+          const apiKey = els.apiKey?.value.trim() || state.settings.apiKey;
           if (!apiKey) throw new Error("Missing OpenRouter API key.");
+          const body = {
+            model,
+            messages,
+            temperature: options.temperature ?? 0.25,
+            response_format: options.json ? { type: "json_object" } : undefined
+          };
+          if (options.tools) body.tools = options.tools;
           const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             signal: options.signal,
@@ -1018,12 +1154,7 @@
               "HTTP-Referer": window.location.href,
               "X-Title": "Idea Bench"
             },
-            body: JSON.stringify({
-              model,
-              messages,
-              temperature: options.temperature ?? 0.25,
-              response_format: options.json ? { type: "json_object" } : undefined
-            })
+            body: JSON.stringify(body)
           });
           if (!response.ok) {
             const text = await response.text().catch(() => "");
@@ -1036,27 +1167,213 @@
         }
       };
 
-      const ResearchProvider = {
-        async searchWeb(query, group) {
+      function stableHash(text) {
+        let hash = 2166136261;
+        for (let i = 0; i < String(text).length; i += 1) {
+          hash ^= String(text).charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(36);
+      }
+
+      function domainFromUrl(url) {
+        try {
+          return new URL(url).hostname.replace(/^www\./, "");
+        } catch (error) {
+          return "";
+        }
+      }
+
+      class EvidenceStore {
+        constructor(runId) {
+          this.runId = runId;
+          this.sourcesById = new Map();
+          this.displayIds = new Map();
+          this.claims = [];
+        }
+
+        normalizeSource(raw, defaults = {}) {
+          const url = String(raw.url || "").trim();
+          const query = String(raw.query || defaults.query || "").trim();
+          const id = raw.id || `src_${stableHash(`${url || raw.title || raw.snippet}|${query}`)}`;
+          const claims = asArray(raw.claims).map((claim, index) => ({
+            id: claim.id || `claim_${stableHash(`${id}|${claim.text || claim.claim || index}`)}`,
+            text: compactText(claim.text || claim.claim, ""),
+            confidence: claim.confidence || raw.confidence || "medium",
+            sectionHints: asArray(claim.sectionHints || defaults.sectionHints)
+          })).filter((claim) => claim.text);
           return {
+            id,
+            runId: this.runId,
+            displayId: "",
             query,
-            group,
-            provider: "browser-offline",
-            results: [],
-            unavailable: true,
-            note: "Live web search needs a search API or backend. Browser fetch cannot reliably query Google or DuckDuckGo result pages because of CORS, bot protection, and non-API HTML responses."
-          };
-        },
-        async fetchPage(url) {
-          return {
+            title: compactText(raw.title, url || "Untitled source"),
             url,
-            title: "",
-            text: "",
-            unavailable: true,
-            note: "Page fetching is limited by browser CORS unless the target site explicitly allows cross-origin requests."
+            domain: raw.domain || domainFromUrl(url),
+            snippet: compactText(raw.snippet, ""),
+            highlights: asArray(raw.highlights),
+            evidenceType: raw.evidenceType || defaults.evidenceType || "other",
+            retrievedAt: raw.retrievedAt || nowIso(),
+            provider: raw.provider || defaults.provider || "unknown",
+            engine: raw.engine || defaults.engine || "",
+            relevance: raw.relevance || "medium",
+            confidence: raw.confidence || "medium",
+            claims,
+            isMock: Boolean(raw.isMock),
+            citedBy: asArray(raw.citedBy)
           };
         }
-      };
+
+        addMany(rawSources, defaults = {}) {
+          rawSources.forEach((raw) => this.add(raw, defaults));
+          return this.list();
+        }
+
+        add(raw, defaults = {}) {
+          const source = this.normalizeSource(raw, defaults);
+          if (!source.url && !source.snippet && !source.claims.length) return null;
+          const existing = this.sourcesById.get(source.id);
+          if (existing) {
+            existing.claims = [...existing.claims, ...source.claims].filter((claim, index, all) => all.findIndex((item) => item.id === claim.id) === index);
+            existing.citedBy = [...new Set([...existing.citedBy, ...source.citedBy])];
+            return existing;
+          }
+          source.displayId = `S${this.sourcesById.size + 1}`;
+          this.sourcesById.set(source.id, source);
+          source.claims.forEach((claim) => this.claims.push({ ...claim, sourceId: source.id }));
+          return source;
+        }
+
+        list() {
+          return Array.from(this.sourcesById.values());
+        }
+
+        extractedClaims() {
+          return this.list().flatMap((source) => source.claims.map((claim) => ({ ...claim, sourceId: source.id, displayId: source.displayId })));
+        }
+      }
+
+      class ResearchProvider {
+        async search(_query, _options = {}) {
+          throw new Error("Not implemented");
+        }
+
+        async searchMany(queries, options = {}) {
+          const results = [];
+          for (const query of queries) {
+            results.push(await this.search(query, options));
+          }
+          return results;
+        }
+
+        async fetchPage(_url, _options = {}) {
+          throw new Error("Page fetching is not available for this provider.");
+        }
+      }
+
+      class NoResearchProvider extends ResearchProvider {
+        async search(query, options = {}) {
+          return {
+            query,
+            group: options.evidenceType || "other",
+            provider: "none",
+            results: [],
+            unavailable: true,
+            note: "Live search is disabled for this run."
+          };
+        }
+      }
+
+      class MockResearchProvider extends ResearchProvider {
+        async search(query, options = {}) {
+          const type = options.evidenceType || "other";
+          const domain = `${type || "idea"}-example.test`;
+          return {
+            query,
+            group: type,
+            provider: "mock",
+            results: [
+              {
+                title: `Mock ${labelize(type)} Evidence`,
+                url: `https://${domain}/${stableHash(query)}`,
+                snippet: `Demo-only evidence for "${query}". This is not live web research.`,
+                highlights: ["Mock evidence is intentionally low confidence and should not be treated as verified."],
+                evidenceType: type,
+                provider: "mock",
+                relevance: "medium",
+                confidence: "low",
+                isMock: true,
+                claims: [
+                  {
+                    claim: `Mock claim related to ${query}.`,
+                    confidence: "low",
+                    sectionHints: [type === "review" ? "gaps" : type]
+                  }
+                ]
+              }
+            ],
+            unavailable: false
+          };
+        }
+      }
+
+      class OpenRouterWebSearchProvider extends ResearchProvider {
+        constructor(settings) {
+          super();
+          this.settings = settings;
+        }
+
+        async search(query, options = {}) {
+          const model = this.settings.researchModel || this.settings.selectedModels.standard || this.settings.selectedModels.deep || this.settings.manualModel;
+          if (!model) throw new Error("Choose a research model before using OpenRouter Web Search.");
+          const tools = [
+            {
+              type: "openrouter:web_search",
+              parameters: {
+                engine: this.settings.searchEngine || "auto",
+                max_results: Number(this.settings.maxResultsPerQuery || 5),
+                max_total_results: Number(this.settings.maxTotalResults || 30),
+                search_context_size: this.settings.searchContextSize || "medium"
+              }
+            }
+          ];
+          const messages = [
+            { role: "system", content: Prompts.system() },
+            {
+              role: "user",
+              content: Prompts.searchCollector(query, options.idea, options.assumptions, options.evidenceType)
+            }
+          ];
+          let raw;
+          try {
+            raw = await OpenRouter.call(messages, model, { json: true, tools, signal: options.signal, temperature: 0.05 });
+          } catch (error) {
+            throw new Error(`${error.message}. If the selected model does not support OpenRouter web_search tools, choose a different research model or switch Research Provider to Mock / Demo.`);
+          }
+          const parsed = parseJsonMaybe(raw);
+          if (!parsed.ok) {
+            const error = new Error(`OpenRouter web search returned invalid JSON: ${parsed.error.message}`);
+            error.raw = raw;
+            throw error;
+          }
+          const results = asArray(parsed.value.results).map((result) => ({
+            ...result,
+            query,
+            evidenceType: result.evidenceType || options.evidenceType || "other",
+            provider: "openrouter:web_search",
+            engine: this.settings.searchEngine || "auto",
+            retrievedAt: nowIso()
+          })).filter((result) => result.url || result.snippet || asArray(result.claims).length);
+          return { query, group: options.evidenceType || "other", provider: "openrouter:web_search", results };
+        }
+      }
+
+      function createResearchProvider(settings) {
+        if (!settings.searchEnabled || settings.searchProvider === "none") return new NoResearchProvider();
+        if (settings.searchProvider === "mock") return new MockResearchProvider();
+        if (settings.searchProvider === "openrouter") return new OpenRouterWebSearchProvider(settings);
+        return new NoResearchProvider();
+      }
 
       const Prompts = {
         system() {
@@ -1084,17 +1401,100 @@
             }
           ];
         },
-        researchPlan(idea, assumptions) {
+        researchPlan(idea, assumptions, settings = {}) {
           return [
             { role: "system", content: Prompts.system() },
             {
               role: "user",
               content: [
                 "Build a compact research plan for evaluating the business idea.",
-                "Return JSON with arrays: competitorQueries, pricingQueries, fundingQueries, marketSignalQueries.",
+                "Return JSON with arrays: competitorQueries, pricingQueries, fundingQueries, marketGapQueries, reviewPainPointQueries.",
+                `Default maximum per array: ${settings.maxQueriesPerSection || 4}. Keep funding, market gap, and review arrays at 3 or fewer unless the idea demands more.`,
+                "Generate queries that include likely category names, not just the user's exact wording.",
                 "Do not claim results. Only create search queries.",
                 `Idea: ${idea}`,
                 `Assumptions: ${JSON.stringify(assumptions)}`
+              ].join("\n")
+            }
+          ];
+        },
+        searchCollector(query, idea, assumptions, evidenceType) {
+          return [
+            "You are collecting web evidence for a business-idea research tool.",
+            "Search the web for the query below. Return only structured JSON.",
+            "",
+            `Query: ${query}`,
+            `Evidence type: ${evidenceType || "other"}`,
+            `Business idea: ${idea}`,
+            `Assumptions: ${JSON.stringify(assumptions)}`,
+            "",
+            "Return JSON:",
+            "{",
+            '  "query": "...",',
+            '  "results": [',
+            "    {",
+            '      "title": "...",',
+            '      "url": "...",',
+            '      "snippet": "...",',
+            '      "highlights": [],',
+            '      "relevance": "high|medium|low",',
+            '      "evidenceType": "competitor|pricing|funding|market|review|other",',
+            '      "claims": [{"claim": "...", "confidence": "high|medium|low", "sectionHints": []}]',
+            "    }",
+            "  ]",
+            "}",
+            "",
+            "Rules:",
+            "- Do not invent URLs.",
+            "- Do not invent pricing.",
+            "- Do not invent funding.",
+            "- If evidence is weak, say so.",
+            "- Prefer official pricing pages, company pages, investor announcements, acquisition announcements, reputable articles, and funding databases.",
+            "- Return JSON only."
+          ].join("\n");
+        },
+        competitorExtraction(run) {
+          return [
+            { role: "system", content: Prompts.system() },
+            {
+              role: "user",
+              content: [
+                "Extract competitor candidates from the evidence records. Return JSON only.",
+                "Return {\"competitors\":[{\"name\":\"...\",\"url\":\"...\",\"category\":\"...\",\"directness\":\"direct|indirect|substitute|unknown\",\"targetCustomer\":\"...\",\"evidenceSourceIds\":[]}]}",
+                "Use only supplied source IDs. Do not invent companies.",
+                `Idea: ${run.ideaText}`,
+                `Assumptions: ${JSON.stringify(run.assumptions)}`,
+                `Evidence: ${JSON.stringify(run.evidenceSources || []).slice(0, 12000)}`
+              ].join("\n")
+            }
+          ];
+        },
+        pricingExtraction(run) {
+          return [
+            { role: "system", content: Prompts.system() },
+            {
+              role: "user",
+              content: [
+                "Extract pricing findings from evidence. Return JSON only.",
+                "Return {\"pricingFindings\":[{\"companyName\":\"...\",\"pricingModel\":\"...\",\"freeTier\":\"true|false|unknown\",\"startingPrice\":\"\",\"priceRange\":\"\",\"billingPeriod\":\"\",\"sourceIds\":[],\"confidence\":\"high|medium|low\",\"notes\":\"\"}]}",
+                "Prefer official pricing pages. Do not invent starting prices.",
+                `Competitors: ${JSON.stringify(run.competitorCandidates || [])}`,
+                `Evidence: ${JSON.stringify(run.evidenceSources || []).slice(0, 12000)}`
+              ].join("\n")
+            }
+          ];
+        },
+        fundingExtraction(run) {
+          return [
+            { role: "system", content: Prompts.system() },
+            {
+              role: "user",
+              content: [
+                "Extract funding findings from evidence. Return JSON only.",
+                "Return {\"fundingFindings\":[{\"companyName\":\"...\",\"fundingFound\":true|false|null,\"amount\":\"\",\"stage\":\"\",\"investors\":[],\"fundingDate\":\"\",\"sourceIds\":[],\"confidence\":\"high|medium|low\"}]}",
+                "No result is not proof of no funding; use null when unclear. Do not invent amounts.",
+                `Competitors: ${JSON.stringify(run.competitorCandidates || [])}`,
+                `Evidence: ${JSON.stringify(run.evidenceSources || []).slice(0, 12000)}`
               ].join("\n")
             }
           ];
@@ -1108,12 +1508,16 @@
                 `Analyze section: ${sectionKey}.`,
                 SECTION_SCHEMA_HINTS[sectionKey],
                 "Return JSON only. Keep claims labeled. Do not fake verified research.",
-                "When search is unavailable, explicitly say the section is based on inference and user assumptions.",
-                "Use sourceIds only for supplied source IDs.",
+                "Every factual claim should include sourceIds from supplied evidence. Inferences and hypotheses may have empty sourceIds but must be labeled as inference or hypothesis.",
+                "Include a claims array when useful: [{text,type,confidence,sourceIds}].",
+                "Never invent URLs, pricing, funding, source IDs, investors, or acquisition facts.",
                 `Business idea: ${run.ideaText}`,
                 `Refining answers: ${JSON.stringify(run.refiningAnswers)}`,
                 `Assumptions: ${JSON.stringify(run.assumptions)}`,
                 `Model config: ${JSON.stringify(run.modelConfig)}`,
+                `Competitor candidates: ${JSON.stringify(run.competitorCandidates || [])}`,
+                `Pricing findings: ${JSON.stringify(run.pricingFindings || [])}`,
+                `Funding findings: ${JSON.stringify(run.fundingFindings || [])}`,
                 `Research context: ${JSON.stringify(researchContext).slice(0, 12000)}`
               ].join("\n")
             }
@@ -1183,8 +1587,14 @@
           refiningAnswers: collectAnswers(),
           assumptions: collectAssumptionsFromDom(),
           modelConfig: collectModelConfig(),
+          researchSettings: collectResearchSettings(),
           researchPlan: null,
           researchResults: [],
+          evidenceSources: [],
+          extractedClaims: [],
+          competitorCandidates: [],
+          pricingFindings: [],
+          fundingFindings: [],
           outputs: {},
           sources: [],
           status,
@@ -1232,11 +1642,27 @@
         saveSettings();
         return {
           tiers: { ...state.settings.selectedModels },
+          researchModel: state.settings.researchModel,
           sectionTiers: { ...state.settings.sectionTiers },
           manualModel: state.settings.manualModel,
           depth: state.settings.depth,
           lens: state.settings.lens,
           searchMode: state.settings.scope
+        };
+      }
+
+      function collectResearchSettings() {
+        saveSettings();
+        return {
+          enabled: state.settings.searchEnabled,
+          provider: state.settings.searchProvider,
+          engine: state.settings.searchEngine,
+          searchContextSize: state.settings.searchContextSize,
+          maxResultsPerQuery: state.settings.maxResultsPerQuery,
+          maxTotalResults: state.settings.maxTotalResults,
+          maxQueriesPerSection: state.settings.maxQueriesPerSection,
+          researchModel: state.settings.researchModel,
+          showRawEvidence: state.settings.showRawEvidence
         };
       }
 
@@ -1306,9 +1732,18 @@
         els.depthSelect.value = state.settings.depth || "standard";
         els.lensSelect.value = state.settings.lens || "bootstrapped";
         els.scopeSelect.value = state.settings.scope || "offline";
+        if (els.searchEnabled) els.searchEnabled.checked = Boolean(state.settings.searchEnabled);
+        if (els.searchProvider) els.searchProvider.value = state.settings.searchProvider || "none";
+        if (els.searchEngine) els.searchEngine.value = state.settings.searchEngine || "auto";
+        if (els.searchContextSize) els.searchContextSize.value = state.settings.searchContextSize || "medium";
+        if (els.maxResultsPerQuery) els.maxResultsPerQuery.value = state.settings.maxResultsPerQuery || 5;
+        if (els.maxTotalResults) els.maxTotalResults.value = state.settings.maxTotalResults || 30;
+        if (els.maxQueriesPerSection) els.maxQueriesPerSection.value = state.settings.maxQueriesPerSection || 4;
+        if (els.showRawEvidence) els.showRawEvidence.checked = Boolean(state.settings.showRawEvidence);
         fillSelect(els.fastModel, state.settings.selectedModels.fast);
         fillSelect(els.standardModel, state.settings.selectedModels.standard);
         fillSelect(els.deepModel, state.settings.selectedModels.deep);
+        fillSelect(els.researchModel, state.settings.researchModel);
         els.sectionOverrides.innerHTML = ANALYSIS_SECTIONS.map((section) => `
           <label for="tier-${section.key}">${escapeHtml(section.title)}
             <select id="tier-${section.key}" data-section-tier="${section.key}">
@@ -1367,12 +1802,12 @@
         if (output.raw) return toolbar + `<pre class="raw">${escapeHtml(output.raw)}</pre>`;
         if (key === "executive") return toolbar + renderExecutive(output);
         if (key === "competitors") return toolbar + renderCompetitors(output);
-        if (key === "pricing") return toolbar + renderGenericGrid(output, ["knownCompetitorPricing", "pricingModelPatterns", "freeTierNorms", "trialNorms", "pricingModeComparison", "suggestedPricingHypotheses", "whatCustomersMayResist", "evidenceNotes", "unknowns"]);
-        if (key === "funding") return toolbar + renderGenericGrid(output, ["fundedCompetitors", "investors", "stages", "approximateAmounts", "acquisitionSignals", "ventureChasingSignal", "bootstrappedVsVcShape", "evidenceNotes", "unknowns"]);
-        if (key === "gaps") return toolbar + renderGenericGrid(output, ["underservedSegments", "overbuiltAreas", "repeatedPainPoints", "wedgeOpportunities", "questionableGaps", "unsexyProfitableAngles", "evidenceNotes", "unknowns"]);
-        if (key === "positioning") return toolbar + renderGenericGrid(output, ["primaryPositioningStatement", "alternativePositioningOptions", "icp", "antiIcp", "messagingPillars", "landingPageHeadline", "landingPageSubheadline", "differentiation", "evidenceNotes", "unknowns"]);
-        if (key === "launch") return toolbar + renderGenericGrid(output, ["mvpScope", "first10Users", "first100Users", "distributionChannels", "contentCommunityPartnerships", "salesMotion", "experiments", "timeline7Days", "timeline30Days", "timeline90Days", "metricsToWatch", "evidenceNotes", "unknowns"]);
-        if (key === "failure") return toolbar + renderGenericGrid(output, ["whyCustomersMayNotCare", "whyCompetitorsMayBeGoodEnough", "whyDistributionMayBeHarderThanBuilding", "whyPricingMayCollapse", "whyMarketMayBeTooSmall", "operationalComplexity", "regulatoryTrustDataPlatformRisks", "brutalSummary", "evidenceNotes", "unknowns"]);
+        if (key === "pricing") return toolbar + renderGenericGrid(output, ["knownCompetitorPricing", "pricingModelPatterns", "freeTierNorms", "trialNorms", "pricingModeComparison", "suggestedPricingHypotheses", "whatCustomersMayResist", "claims", "evidenceNotes", "unknowns"]);
+        if (key === "funding") return toolbar + renderGenericGrid(output, ["fundedCompetitors", "investors", "stages", "approximateAmounts", "acquisitionSignals", "ventureChasingSignal", "bootstrappedVsVcShape", "claims", "evidenceNotes", "unknowns"]);
+        if (key === "gaps") return toolbar + renderGenericGrid(output, ["underservedSegments", "overbuiltAreas", "repeatedPainPoints", "wedgeOpportunities", "questionableGaps", "unsexyProfitableAngles", "claims", "evidenceNotes", "unknowns"]);
+        if (key === "positioning") return toolbar + renderGenericGrid(output, ["primaryPositioningStatement", "alternativePositioningOptions", "icp", "antiIcp", "messagingPillars", "landingPageHeadline", "landingPageSubheadline", "differentiation", "claims", "evidenceNotes", "unknowns"]);
+        if (key === "launch") return toolbar + renderGenericGrid(output, ["mvpScope", "first10Users", "first100Users", "distributionChannels", "contentCommunityPartnerships", "salesMotion", "experiments", "timeline7Days", "timeline30Days", "timeline90Days", "metricsToWatch", "claims", "evidenceNotes", "unknowns"]);
+        if (key === "failure") return toolbar + renderGenericGrid(output, ["whyCustomersMayNotCare", "whyCompetitorsMayBeGoodEnough", "whyDistributionMayBeHarderThanBuilding", "whyPricingMayCollapse", "whyMarketMayBeTooSmall", "operationalComplexity", "regulatoryTrustDataPlatformRisks", "brutalSummary", "claims", "evidenceNotes", "unknowns"]);
         return toolbar + renderGenericGrid(output, Object.keys(output));
       }
 
@@ -1428,6 +1863,56 @@
               </div>
             </section>
 
+            <section class="content-box wide" aria-labelledby="researchHeading">
+              <h3 id="researchHeading">Research Settings</h3>
+              <div class="grid-3">
+                <label class="check-row" for="searchEnabled">
+                  <input id="searchEnabled" type="checkbox" />
+                  Search enabled
+                </label>
+                <label for="searchProvider">Search provider
+                  <select id="searchProvider">
+                    <option value="openrouter">OpenRouter Web Search</option>
+                    <option value="mock">Mock / Demo</option>
+                    <option value="none">None</option>
+                  </select>
+                </label>
+                <label for="researchModel">Research model
+                  <select id="researchModel"></select>
+                </label>
+                <label for="searchEngine">Search engine
+                  <select id="searchEngine">
+                    <option value="auto">auto</option>
+                    <option value="native">native</option>
+                    <option value="exa">exa</option>
+                    <option value="firecrawl">firecrawl</option>
+                    <option value="parallel">parallel</option>
+                  </select>
+                </label>
+                <label for="searchContextSize">Search context size
+                  <select id="searchContextSize">
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </label>
+                <label class="check-row" for="showRawEvidence">
+                  <input id="showRawEvidence" type="checkbox" />
+                  Show raw evidence
+                </label>
+                <label for="maxResultsPerQuery">Max results per query
+                  <input id="maxResultsPerQuery" type="number" min="1" max="10" step="1" />
+                </label>
+                <label for="maxTotalResults">Max total results per run
+                  <input id="maxTotalResults" type="number" min="5" max="80" step="1" />
+                </label>
+                <label for="maxQueriesPerSection">Max queries per section
+                  <input id="maxQueriesPerSection" type="number" min="1" max="8" step="1" />
+                </label>
+              </div>
+              <p class="notice">OpenRouter search uses the server tool <code>openrouter:web_search</code>. If a model rejects tool use, choose another research model or switch to Mock / Demo.</p>
+            </section>
+
             <section class="content-box" aria-labelledby="prefsHeading">
               <h3 id="prefsHeading">Run Preferences</h3>
               <div class="settings-grid">
@@ -1453,7 +1938,7 @@
                     <option value="manual">Use user-provided competitor names only</option>
                   </select>
                 </label>
-                <p class="notice">Google and DuckDuckGo result pages are not safe browser APIs. To add live research, wire <code>ResearchProvider.searchWeb()</code> to a search API or backend proxy that returns JSON.</p>
+                <p class="notice">Google and DuckDuckGo result pages are not safe browser APIs. Use OpenRouter Web Search here, or later wire the provider layer to a JSON search API/backend proxy.</p>
               </div>
             </section>
           </div>
@@ -1473,9 +1958,11 @@
             ${box("Best customer segment", output.bestCustomerSegment)}
             ${box("Best positioning angle", output.bestPositioningAngle)}
             ${box("Biggest risk", output.biggestRisk)}
+            ${box("Claims", output.claims)}
             ${box("Evidence notes", output.evidenceNotes)}
             ${box("Unknowns", output.unknowns)}
           </div>
+          ${renderSectionSources(output)}
         `;
       }
 
@@ -1498,6 +1985,7 @@
             ${box("Indirect competitors", output.indirectCompetitors)}
             ${box("Substitute behaviors", output.substituteBehaviors)}
             ${box("DIY / open-source / agency alternatives", output.diyAlternatives)}
+            ${box("Claims", output.claims)}
             <div class="content-box wide">
               <h3>Competitor Table</h3>
               <div class="table-wrap">
@@ -1510,11 +1998,12 @@
             ${box("Evidence notes", output.evidenceNotes)}
             ${box("Unknowns", output.unknowns)}
           </div>
+          ${renderSectionSources(output)}
         `;
       }
 
       function renderGenericGrid(output, keys) {
-        return `<div class="content-grid">${keys.map((key) => box(labelize(key), output[key], key === "brutalSummary")).join("")}</div>`;
+        return `<div class="content-grid">${keys.map((key) => box(labelize(key), output[key], key === "brutalSummary")).join("")}</div>${renderSectionSources(output)}`;
       }
 
       function kpi(label, value) {
@@ -1544,11 +2033,58 @@
       }
 
       function renderInline(value) {
+        if (value && typeof value === "object" && ("text" in value || "claim" in value)) {
+          return `${escapeHtml(compactText(value.text || value.claim, "Not provided."))}${renderCitations(value.sourceIds)}`;
+        }
         if (Array.isArray(value)) return escapeHtml(value.join("; "));
         if (value && typeof value === "object") {
-          return escapeHtml(Object.entries(value).map(([key, item]) => `${labelize(key)}: ${Array.isArray(item) ? item.join(", ") : item}`).join("; "));
+          return Object.entries(value).map(([key, item]) => {
+            if (key === "sourceIds") return renderCitations(item);
+            return `<b>${escapeHtml(labelize(key))}:</b> ${Array.isArray(item) ? escapeHtml(item.join(", ")) : escapeHtml(item)}`;
+          }).join("; ");
         }
         return escapeHtml(compactText(value, "Not provided."));
+      }
+
+      function sourceById(id) {
+        return asArray(state.currentRun?.evidenceSources || state.currentRun?.sources).find((source) => source.id === id);
+      }
+
+      function renderCitations(sourceIds) {
+        return asArray(sourceIds).map((id) => {
+          const source = sourceById(id);
+          if (!source) return "";
+          return `<a class="citation" href="#source-${escapeHtml(source.id)}" title="${escapeHtml(source.title)}">${escapeHtml(source.displayId || id.slice(0, 6))}</a>`;
+        }).join("");
+      }
+
+      function citedSectionsForSource(sourceId) {
+        const outputs = state.currentRun?.outputs || {};
+        return Object.entries(outputs).filter(([_key, output]) => collectSourceIds(output).has(sourceId)).map(([key]) => SECTION_DEFS.find((section) => section.key === key)?.title || labelize(key));
+      }
+
+      function collectSourceIds(value, found = new Set()) {
+        if (!value) return found;
+        if (Array.isArray(value)) {
+          value.forEach((item) => collectSourceIds(item, found));
+          return found;
+        }
+        if (typeof value === "object") {
+          asArray(value.sourceIds).forEach((id) => found.add(id));
+          Object.values(value).forEach((item) => collectSourceIds(item, found));
+        }
+        return found;
+      }
+
+      function renderSectionSources(output) {
+        const ids = Array.from(collectSourceIds(output));
+        if (!ids.length) return "";
+        const rows = ids.map((id) => {
+          const source = sourceById(id);
+          if (!source) return "";
+          return `<li>${escapeHtml(source.displayId)} — ${source.url ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title)}</a>` : escapeHtml(source.title)}</li>`;
+        }).join("");
+        return `<div class="content-box wide" style="margin-top: 12px;"><h3>Sources used in this section</h3><ul>${rows}</ul></div>`;
       }
 
       function labelize(key) {
@@ -1559,9 +2095,11 @@
       }
 
       function renderSources() {
-        const sources = state.currentRun?.sources || [];
+        const sources = state.currentRun?.evidenceSources || state.currentRun?.sources || [];
+        const filter = state.evidenceFilter || "all";
+        const filteredSources = filter === "all" ? sources : sources.filter((source) => source.evidenceType === filter);
         const grouped = sources.reduce((acc, source) => {
-          const group = source.group || "Other";
+          const group = source.evidenceType || source.group || "other";
           acc[group] = acc[group] || [];
           acc[group].push(source);
           return acc;
@@ -1573,21 +2111,56 @@
             ${planned ? `<h3>Planned Search Queries</h3>${planned}` : ""}
           `;
         }
-        return Object.entries(grouped).map(([group, items]) => `
+        const queryList = Object.entries(state.currentRun?.researchPlan || {}).flatMap(([group, queries]) => asArray(queries).map((query) => ({ group, query })));
+        const filteredGrouped = filteredSources.reduce((acc, source) => {
+          const group = source.evidenceType || "other";
+          acc[group] = acc[group] || [];
+          acc[group].push(source);
+          return acc;
+        }, {});
+        return `
+          <div class="section-toolbar">
+            <div>
+              <h3>Sources / Evidence</h3>
+              <p class="small">${sources.length} stored sources · ${asArray(state.currentRun?.extractedClaims).length} extracted claims</p>
+            </div>
+            <div class="actions">
+              ${["all", "competitor", "pricing", "funding", "market", "review", "other"].map((type) => `<button class="btn ${filter === type ? "primary" : "secondary"}" type="button" data-evidence-filter="${type}">${escapeHtml(labelize(type))}</button>`).join("")}
+            </div>
+          </div>
+          <details>
+            <summary>Search queries run (${queryList.length})</summary>
+            <div class="inside">
+              <ul>${queryList.map((item) => `<li><b>${escapeHtml(labelize(item.group))}:</b> ${escapeHtml(item.query)}</li>`).join("")}</ul>
+            </div>
+          </details>
+          ${Object.entries(filteredGrouped).map(([group, items]) => `
           <details open>
             <summary>${escapeHtml(labelize(group))} (${items.length})</summary>
             <div class="inside">
               ${items.map((source) => `
-                <div class="content-box" style="margin-bottom: 8px;">
+                <div id="source-${escapeHtml(source.id)}" class="source-card">
                   <h3>${escapeHtml(source.title || source.query || source.url || "Source")}</h3>
                   <p>${source.url ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.url)}</a>` : "<span class='badge unknown'>No URL</span>"}</p>
                   <p class="muted">${escapeHtml(source.snippet || source.note || "No snippet.")}</p>
-                  <div class="badge-row"><span class="badge ${source.claimType === "unknown" ? "unknown" : "fact"}">${escapeHtml(source.provider || "source")}</span><span class="badge">${escapeHtml(source.id)}</span></div>
+                  ${asArray(source.highlights).length ? `<ul class="source-claims">${asArray(source.highlights).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+                  <div class="source-meta">
+                    <span class="badge fact">${escapeHtml(source.displayId || source.id)}</span>
+                    <span class="badge">${escapeHtml(source.provider || "source")}</span>
+                    <span class="badge">${escapeHtml(source.engine || "engine n/a")}</span>
+                    <span class="badge ${source.isMock ? "mock" : "infer"}">${escapeHtml(source.isMock ? "Mock / demo" : source.evidenceType || "other")}</span>
+                    <span class="badge">${escapeHtml(`relevance: ${source.relevance || "unknown"}`)}</span>
+                    <span class="badge">${escapeHtml(`confidence: ${source.confidence || "unknown"}`)}</span>
+                  </div>
+                  <p class="small">Cited by: ${citedSectionsForSource(source.id).length ? escapeHtml(citedSectionsForSource(source.id).join(", ")) : "Not cited by section outputs yet"}</p>
+                  ${asArray(source.claims).length ? `<h3>Claims</h3><ul class="source-claims">${asArray(source.claims).map((claim) => `<li>${escapeHtml(claim.text || claim.claim)} <span class="badge">${escapeHtml(claim.confidence || source.confidence || "medium")}</span></li>`).join("")}</ul>` : ""}
+                  ${state.settings.showRawEvidence ? `<pre class="raw">${escapeHtml(JSON.stringify(source, null, 2))}</pre>` : ""}
                 </div>
               `).join("")}
             </div>
           </details>
-        `).join("");
+          `).join("") || `<p class="notice">No sources match this filter.</p>`}
+        `;
       }
 
       function renderHistoryPanel() {
@@ -1719,40 +2292,185 @@
             `${base} startup funding`,
             `${base} acquisitions investors`
           ],
-          marketSignalQueries: [
+          marketGapQueries: [
             `${base} market report`,
             `${base} customer pain points`
+          ],
+          reviewPainPointQueries: [
+            `${base} reviews complaints`,
+            `${base} user pain points`
           ]
         };
       }
 
       async function buildResearchPlan(run, signal) {
         try {
-          return await callJson(Prompts.researchPlan(run.ideaText, run.assumptions), "fast", signal);
+          const plan = await callJson(Prompts.researchPlan(run.ideaText, run.assumptions, run.researchSettings), "fast", signal);
+          return normalizeResearchPlan(plan, run.researchSettings);
         } catch (error) {
           run.errors.push({ stage: "researchPlan", message: error.message, at: nowIso() });
-          return fallbackResearchPlan(run.ideaText, run.assumptions);
+          return normalizeResearchPlan(fallbackResearchPlan(run.ideaText, run.assumptions), run.researchSettings);
         }
       }
 
-      async function runResearch(plan) {
-        const queryGroups = [
-          ["competitors", plan.competitorQueries],
-          ["pricing", plan.pricingQueries],
-          ["funding", plan.fundingQueries],
-          ["marketReports", plan.marketSignalQueries]
-        ];
+      function normalizeResearchPlan(plan, settings) {
+        const max = Number(settings.maxQueriesPerSection || 4);
+        return {
+          competitorQueries: asArray(plan.competitorQueries).slice(0, max),
+          pricingQueries: asArray(plan.pricingQueries).slice(0, max),
+          fundingQueries: asArray(plan.fundingQueries).slice(0, Math.min(3, max)),
+          marketGapQueries: asArray(plan.marketGapQueries || plan.marketSignalQueries).slice(0, Math.min(3, max)),
+          reviewPainPointQueries: asArray(plan.reviewPainPointQueries).slice(0, Math.min(3, max))
+        };
+      }
+
+      function flattenSources(researchResults) {
+        return researchResults.flatMap((result) => result.results || []);
+      }
+
+      function topEvidenceSources(run, type, limit = 10) {
+        return asArray(run.evidenceSources).filter((source) => source.evidenceType === type || asArray(source.claims).some((claim) => asArray(claim.sectionHints).includes(type))).slice(0, limit);
+      }
+
+      async function boundedSearch(provider, store, queries, evidenceType, run, signal) {
+        const limited = asArray(queries).slice(0, run.researchSettings.maxQueriesPerSection);
         const results = [];
-        for (const [group, queries] of queryGroups) {
-          for (const query of asArray(queries).slice(0, 4)) {
-            results.push(await ResearchProvider.searchWeb(query, group));
+        for (const query of limited) {
+          const currentTotal = store.list().length;
+          if (currentTotal >= run.researchSettings.maxTotalResults) break;
+          try {
+            const result = await provider.search(query, {
+              idea: run.ideaText,
+              assumptions: run.assumptions,
+              evidenceType,
+              signal
+            });
+            results.push(result);
+            const remaining = Math.max(0, run.researchSettings.maxTotalResults - currentTotal);
+            store.addMany(asArray(result.results).slice(0, Math.min(run.researchSettings.maxResultsPerQuery, remaining)), {
+              query,
+              evidenceType,
+              provider: result.provider,
+              engine: run.researchSettings.searchEngine
+            });
+          } catch (error) {
+            run.errors.push({ stage: `search:${evidenceType}`, query, message: error.message, at: nowIso() });
+            results.push({ query, group: evidenceType, provider: run.researchSettings.provider, results: [], unavailable: true, error: error.message });
           }
         }
         return results;
       }
 
-      function flattenSources(researchResults) {
-        return researchResults.flatMap((result) => result.results || []);
+      function fallbackCompetitorCandidates(run) {
+        return asArray(run.assumptions.knownCompetitors).join(",").split(",").map((name) => name.trim()).filter(Boolean).map((name) => ({
+          id: `cmp_${stableHash(name)}`,
+          name,
+          url: "",
+          category: "User-provided",
+          directness: "unknown",
+          targetCustomer: run.assumptions.targetCustomer,
+          evidenceSourceIds: []
+        }));
+      }
+
+      async function extractCompetitors(run, signal) {
+        try {
+          if (!modelForTier("standard") || !state.settings.apiKey) return fallbackCompetitorCandidates(run);
+          const parsed = await callJson(Prompts.competitorExtraction(run), "standard", signal);
+          return asArray(parsed.competitors).slice(0, 8).map((item) => ({
+            id: item.id || `cmp_${stableHash(`${item.name}|${item.url || ""}`)}`,
+            name: compactText(item.name, "Unknown"),
+            url: item.url || "",
+            category: item.category || "Unknown",
+            directness: item.directness || "unknown",
+            targetCustomer: item.targetCustomer || "",
+            evidenceSourceIds: asArray(item.evidenceSourceIds)
+          })).filter((item) => item.name !== "Unknown");
+        } catch (error) {
+          run.errors.push({ stage: "competitorExtraction", message: error.message, at: nowIso() });
+          return fallbackCompetitorCandidates(run);
+        }
+      }
+
+      async function extractPricing(run, signal) {
+        try {
+          if (!modelForTier("standard") || !state.settings.apiKey) return [];
+          const parsed = await callJson(Prompts.pricingExtraction(run), "standard", signal);
+          return asArray(parsed.pricingFindings);
+        } catch (error) {
+          run.errors.push({ stage: "pricingExtraction", message: error.message, at: nowIso() });
+          return [];
+        }
+      }
+
+      async function extractFunding(run, signal) {
+        try {
+          if (!modelForTier("standard") || !state.settings.apiKey) return [];
+          const parsed = await callJson(Prompts.fundingExtraction(run), "standard", signal);
+          return asArray(parsed.fundingFindings);
+        } catch (error) {
+          run.errors.push({ stage: "fundingExtraction", message: error.message, at: nowIso() });
+          return [];
+        }
+      }
+
+      function competitorDrivenQueries(competitors, suffixes, limit) {
+        return competitors.slice(0, limit).flatMap((competitor) => suffixes.map((suffix) => `${competitor.name} ${suffix}`));
+      }
+
+      async function runResearch(run, signal, onStage) {
+        const provider = createResearchProvider(state.settings);
+        const store = new EvidenceStore(run.id);
+        const results = [];
+        if (!run.researchSettings.enabled || run.researchSettings.provider === "none") {
+          run.evidenceSources = [];
+          run.extractedClaims = [];
+          return { results, sources: [], claims: [] };
+        }
+
+        onStage("Searching competitors...", "Collecting bounded competitor evidence.");
+        results.push(...await boundedSearch(provider, store, run.researchPlan.competitorQueries, "competitor", run, signal));
+        run.evidenceSources = store.list();
+        run.sources = run.evidenceSources;
+        run.extractedClaims = store.extractedClaims();
+        await safeSave(run);
+
+        onStage("Extracting competitor candidates...", "Finding candidate direct, indirect, and substitute competitors from evidence.");
+        run.competitorCandidates = await extractCompetitors(run, signal);
+        await safeSave(run);
+
+        onStage("Checking pricing...", "Searching official pricing and pricing mentions for top candidates.");
+        const pricingQueries = [
+          ...run.researchPlan.pricingQueries,
+          ...competitorDrivenQueries(run.competitorCandidates, ["pricing", "plans", "cost"], Math.min(5, run.researchSettings.maxQueriesPerSection))
+        ];
+        results.push(...await boundedSearch(provider, store, pricingQueries, "pricing", run, signal));
+        run.evidenceSources = store.list();
+        run.sources = run.evidenceSources;
+        run.extractedClaims = store.extractedClaims();
+        run.pricingFindings = await extractPricing(run, signal);
+        await safeSave(run);
+
+        onStage("Checking funding...", "Looking for funding, investor, acquisition, and consolidation signals.");
+        const fundingQueries = [
+          ...run.researchPlan.fundingQueries,
+          ...competitorDrivenQueries(run.competitorCandidates, ["funding", "investors", "acquired", "Crunchbase"], Math.min(5, run.researchSettings.maxQueriesPerSection))
+        ];
+        results.push(...await boundedSearch(provider, store, fundingQueries, "funding", run, signal));
+        run.evidenceSources = store.list();
+        run.sources = run.evidenceSources;
+        run.extractedClaims = store.extractedClaims();
+        run.fundingFindings = await extractFunding(run, signal);
+        await safeSave(run);
+
+        onStage("Looking for market gaps...", "Collecting market-gap and review pain-point evidence.");
+        results.push(...await boundedSearch(provider, store, run.researchPlan.marketGapQueries, "market", run, signal));
+        results.push(...await boundedSearch(provider, store, run.researchPlan.reviewPainPointQueries, "review", run, signal));
+        run.evidenceSources = store.list();
+        run.sources = run.evidenceSources;
+        run.extractedClaims = store.extractedClaims();
+        await safeSave(run);
+        return { results, sources: run.evidenceSources, claims: run.extractedClaims };
       }
 
       function fallbackSection(sectionKey, run, researchContext, errorMessage = "") {
@@ -1926,30 +2644,37 @@
         els.copyExecBtn.disabled = true;
 
         try {
-          setProgress("Building research plan", "Creating competitor, pricing, funding, and market-signal queries.", 8);
+          setProgress("Planning searches...", "Creating bounded competitor, pricing, funding, market-gap, and review queries.", 8);
           run.researchPlan = await buildResearchPlan(run, signal);
           run.updatedAt = nowIso();
           await safeSave(run);
 
-          setProgress("Preparing research context", "Live search is disabled in this static page; planned queries will be shown under Sources / Evidence.", 20);
-          run.researchResults = await runResearch(run.researchPlan);
-          run.sources = flattenSources(run.researchResults);
+          setProgress("Searching competitors...", "Starting bounded evidence collection.", 20);
+          const researchPayload = await runResearch(run, signal, (title, detail) => setProgress(title, detail, 20));
+          run.researchResults = researchPayload.results;
+          run.sources = researchPayload.sources;
+          run.evidenceSources = researchPayload.sources;
+          run.extractedClaims = researchPayload.claims;
           run.updatedAt = nowIso();
           await safeSave(run);
 
           const researchContext = {
             plan: run.researchPlan,
             results: run.researchResults,
-            sources: run.sources,
-            hasLiveSources: run.sources.some((source) => source.url && source.provider !== "browser-offline"),
-            researchModeNote: "No live web search provider is connected; planned queries are available in Sources / Evidence."
+            evidenceSources: run.evidenceSources,
+            extractedClaims: run.extractedClaims,
+            competitorCandidates: run.competitorCandidates,
+            pricingFindings: run.pricingFindings,
+            fundingFindings: run.fundingFindings,
+            hasLiveSources: run.evidenceSources.some((source) => source.url && !source.isMock && source.provider !== "none"),
+            researchModeNote: run.researchSettings.enabled ? "Evidence collection ran through the selected research provider. Cite only supplied source IDs." : "Live research was disabled; analysis must be marked as assumption, inference, hypothesis, or unknown."
           };
 
           let completed = 0;
           for (const section of ANALYSIS_SECTIONS.filter((item) => item.key !== "executive" && item.key !== "failure")) {
             jobStatus[section.key] = "running";
             renderJobs(jobStatus);
-            setProgress(`Analyzing ${section.title}`, "Saving partial results after this section.", 28 + completed * 7);
+            setProgress("Analyzing evidence...", `Writing ${section.title} with source IDs where available.`, 28 + completed * 7);
             run.outputs[section.key] = await runSection(section, run, researchContext, signal);
             jobStatus[section.key] = run.outputs[section.key].error && run.outputs[section.key].raw ? "error" : "done";
             completed += 1;
@@ -1961,7 +2686,7 @@
           for (const section of ANALYSIS_SECTIONS.filter((item) => ["executive", "failure"].includes(item.key))) {
             jobStatus[section.key] = "running";
             renderJobs(jobStatus);
-            setProgress(`Analyzing ${section.title}`, "Running the deeper synthesis section.", 76 + completed * 7);
+            setProgress(section.key === "executive" ? "Writing executive summary..." : "Writing steelman failure case...", "Running the deeper synthesis section with evidence context.", 76 + completed * 7);
             run.outputs[section.key] = await runSection(section, run, researchContext, signal);
             jobStatus[section.key] = run.outputs[section.key].error && run.outputs[section.key].raw ? "error" : "done";
             completed += 1;
@@ -2104,6 +2829,13 @@
             refreshHistory();
             return;
           }
+          const evidenceFilter = event.target.closest("[data-evidence-filter]");
+          if (evidenceFilter) {
+            state.evidenceFilter = evidenceFilter.dataset.evidenceFilter;
+            renderTabs();
+            setActiveTab("sources");
+            return;
+          }
           const open = event.target.closest("[data-history-open]");
           const duplicate = event.target.closest("[data-history-duplicate]");
           const exportBtn = event.target.closest("[data-history-export]");
@@ -2120,10 +2852,10 @@
           }
         });
         els.tabPanels.addEventListener("change", (event) => {
-          if (event.target.closest("#fastModel, #standardModel, #deepModel, #manualModel, #depthSelect, #lensSelect, #scopeSelect, [data-section-tier]")) saveSettings();
+          if (event.target.closest("#fastModel, #standardModel, #deepModel, #researchModel, #manualModel, #depthSelect, #lensSelect, #scopeSelect, #searchEnabled, #searchProvider, #searchEngine, #searchContextSize, #maxResultsPerQuery, #maxTotalResults, #maxQueriesPerSection, #showRawEvidence, [data-section-tier]")) saveSettings();
         });
         els.tabPanels.addEventListener("input", (event) => {
-          if (event.target.closest("#manualModel")) saveSettings();
+          if (event.target.closest("#manualModel, #maxResultsPerQuery, #maxTotalResults, #maxQueriesPerSection")) saveSettings();
         });
         els.exportRunBtn.addEventListener("click", () => {
           if (state.currentRun) downloadJson(`idea-bench-${state.currentRun.id}.json`, state.currentRun);
