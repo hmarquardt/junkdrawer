@@ -670,9 +670,9 @@
       </div>
     </main>
   </div>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
-    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.06.01.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.12.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.12.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--muted); font: 0.85rem/1.4 var(--font);">
+    &copy; 2026 Hank Marquardt &middot; Quack Drawer v2 &middot; version 2026.06.12.1
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -783,29 +783,70 @@
       try { if (navigator.storage && navigator.storage.getDirectory) { await navigator.storage.getDirectory(); caps.opfs = true; } } catch {}
       state.capabilities = caps;
     }
-    async function loadDuckDBModule() { try { duckdb = await import('https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev45.0/+esm'); return true; } catch (err) { state.status.dbState = 'failed'; state.status.dbError = 'Module load failed: ' + (err.message || String(err)); renderStatus(); return false; } }
+    function timeoutError(label, ms) { return new Error(label + ' timed out after ' + Math.round(ms / 1000) + 's'); }
+    function withTimeout(promise, ms, label) {
+      let timer;
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(timeoutError(label, ms)), ms); });
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    }
+    function markDuckDBFailed(message, err) {
+      state.status.dbState = 'failed';
+      state.status.dbError = message;
+      state.status.lastError = message;
+      setStatus(message, 'error');
+      if (err) console.error(message, err);
+      renderStatus();
+    }
+    async function loadDuckDBModule() {
+      try {
+        setStatus('Loading DuckDB module...', 'info');
+        duckdb = await withTimeout(import('https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev45.0/+esm'), 20000, 'DuckDB module import');
+        return true;
+      } catch (err) {
+        markDuckDBFailed('DuckDB module load failed: ' + (err.message || String(err)), err);
+        return false;
+      }
+    }
     async function loadChartModule() { if (Chart) return; try { const mod = await import('https://cdn.jsdelivr.net/npm/chart.js@4.4.3/auto/+esm'); Chart = mod.default || mod.Chart; } catch (err) { console.error('Chart.js load failed', err); } }
     async function loadTopoJSONModule() { if (topojson) return; try { const mod = await import('https://cdn.jsdelivr.net/npm/topojson-client@3/+esm'); topojson = mod; } catch (err) { console.error('topojson-client load failed', err); } }
     async function initDuckDB() {
       if (!duckdb) return;
       const t0 = performance.now();
+      let workerUrl = null;
       try {
+        state.status.dbState = 'loading';
+        setStatus('Selecting DuckDB WASM bundle...', 'info');
         const bundles = duckdb.getJsDelivrBundles();
-        const bundle = await duckdb.selectBundle(bundles);
+        const bundle = await withTimeout(duckdb.selectBundle(bundles), 10000, 'DuckDB bundle selection');
         state.status.bundleName = bundle.mainModule.includes('eh') ? 'eh' : bundle.mainModule.includes('coi') ? 'coi' : 'mvp';
-        const worker_url = URL.createObjectURL(new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' }));
-        const worker = new Worker(worker_url);
+        setStatus('Starting DuckDB worker (' + state.status.bundleName + ')...', 'info');
+        workerUrl = URL.createObjectURL(new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' }));
+        const worker = new Worker(workerUrl);
         const logger = new duckdb.ConsoleLogger();
         const db = new duckdb.AsyncDuckDB(logger, worker);
-        await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-        URL.revokeObjectURL(worker_url);
+        await withTimeout(db.instantiate(bundle.mainModule, bundle.pthreadWorker), 25000, 'DuckDB WASM instantiate');
+        URL.revokeObjectURL(workerUrl);
+        workerUrl = null;
         if (state.capabilities.opfs) {
-          try { await db.open({ path: 'opfs://quack_drawer.db' }); } catch (opfsErr) { console.warn('OPFS open failed, falling back to memory', opfsErr); }
+          try {
+            setStatus('Opening DuckDB OPFS database...', 'info');
+            await withTimeout(db.open({ path: 'opfs://quack_drawer.db' }), 5000, 'DuckDB OPFS open');
+          } catch (opfsErr) {
+            state.capabilities.opfs = false;
+            console.warn('OPFS open failed or timed out, falling back to memory', opfsErr);
+            setStatus('OPFS unavailable; using in-memory DuckDB.', 'warning');
+          }
         }
-        state.db = db; state.conn = await db.connect();
-        try { const ver = await db.getVersion(); state.status.dbVersion = ver; } catch {}
+        setStatus('Connecting to DuckDB...', 'info');
+        state.db = db; state.conn = await withTimeout(db.connect(), 10000, 'DuckDB connection');
+        try { const ver = await withTimeout(db.getVersion(), 3000, 'DuckDB version lookup'); state.status.dbVersion = ver; } catch {}
         state.status.dbState = 'ready'; state.initTime = performance.now() - t0;
-      } catch (err) { state.status.dbState = 'failed'; state.status.dbError = err.message || String(err); console.error('DuckDB init failed', err); }
+        setStatus('DuckDB ready', 'success');
+      } catch (err) {
+        markDuckDBFailed('DuckDB init failed: ' + (err.message || String(err)), err);
+      } finally {
+        if (workerUrl) URL.revokeObjectURL(workerUrl);
+      }
       renderStatus();
     }
 
@@ -1985,6 +2026,7 @@
         ['Theme', state.settings.theme], ['Tables', state.tables.length], ['Saved Queries', state.savedQueries.length],
         ['Query History', state.queryHistory.length], ['Last SQL', state.currentResults ? state.currentResults.sql.slice(0, 200) : 'N/A'],
         ['Last Runtime (ms)', state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) : 'N/A'], ['Last Error', state.status.lastError || 'None'],
+        ['DuckDB Error', state.status.dbError || 'None'],
         ['AI Interactions', state.aiHistory.length],
       ];
       rows.forEach(([k, v]) => { const li = el('li'); li.appendChild(el('span', { text: k })); li.appendChild(el('span', { text: String(v) })); list.appendChild(li); });
@@ -2010,6 +2052,7 @@
         'Theme: ' + state.settings.theme, 'Tables: ' + state.tables.length, 'Saved Queries: ' + state.savedQueries.length,
         'History: ' + state.queryHistory.length, 'Last SQL: ' + (state.currentResults ? state.currentResults.sql : 'N/A'),
         'Last Runtime: ' + (state.status.lastQueryRuntime != null ? state.status.lastQueryRuntime.toFixed(1) + 'ms' : 'N/A'), 'Last Error: ' + (state.status.lastError || 'None'),
+        'DuckDB Error: ' + (state.status.dbError || 'None'),
         'AI Interactions: ' + state.aiHistory.length,
       ].join('\n') + (state.aiHistory.length ? '\n\n--- AI History ---\n' + state.aiHistory.slice(-5).map(h => h.timestamp + ' | ' + h.action + ' | ' + h.response.slice(0, 200)).join('\n') : '');
     }
