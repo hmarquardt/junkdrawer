@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Questionable Oracle — Three.js Magic 8 Ball</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>" />
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root {
+      --bg0: #07060b;
+      --bg1: #151024;
+      --hot: #ff3aa7;
+      --violet: #8f5cff;
+      --cyan: #55e7ff;
+      --cream: #fff3d8;
+      --muted: rgba(255,255,255,.72);
+      --line: rgba(255,255,255,.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      min-height: 100%;
+      overflow: hidden;
+      color: var(--cream);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 20% 18%, rgba(255, 58, 167, .20), transparent 32%),
+        radial-gradient(circle at 82% 16%, rgba(85, 231, 255, .14), transparent 30%),
+        radial-gradient(circle at 50% 100%, rgba(143, 92, 255, .22), transparent 44%),
+        linear-gradient(145deg, var(--bg0), var(--bg1));
+    }
+
+    #app {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+
+    .layout {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      display: grid;
+      grid-template-rows: auto 1fr auto auto;
+      gap: 12px;
+      padding: clamp(16px, 3vw, 34px);
+      pointer-events: none;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+    }
+
+    .title {
+      width: min(560px, 62vw);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 5rem);
+      line-height: .88;
+      letter-spacing: -.07em;
+      text-transform: uppercase;
+      text-shadow:
+        0 0 18px rgba(255, 58, 167, .55),
+        0 0 48px rgba(143, 92, 255, .35);
+    }
+
+    .sub {
+      margin: .65rem 0 0;
+      max-width: 36rem;
+      color: var(--muted);
+      font-size: clamp(.92rem, 1.45vw, 1.08rem);
+      line-height: 1.4;
+    }
+
+    .seed-list {
+      width: min(330px, 30vw);
+      max-height: 34vh;
+      overflow: auto;
+      padding: 14px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(8, 6, 14, .50);
+      backdrop-filter: blur(16px);
+      color: rgba(255,255,255,.66);
+      font-size: .8rem;
+      line-height: 1.32;
+    }
+
+    .seed-list strong {
+      color: white;
+      display: block;
+      margin-bottom: 8px;
+      font-size: .88rem;
+    }
+
+    .seed-list div {
+      padding: 6px 0;
+      border-top: 1px solid rgba(255,255,255,.08);
+    }
+
+    .ball-spacer {
+      min-height: 260px;
+    }
+
+    .controls {
+      justify-self: center;
+      width: min(760px, 100%);
+      display: grid;
+      gap: 12px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.045));
+      box-shadow: 0 22px 70px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.14);
+      backdrop-filter: blur(18px);
+      pointer-events: auto;
+    }
+
+    .answer {
+      min-height: 58px;
+      display: grid;
+      place-items: center;
+      padding: 12px 16px;
+      border-radius: 19px;
+      background: rgba(0,0,0,.30);
+      border: 1px solid rgba(255,255,255,.12);
+      color: white;
+      text-align: center;
+      font-size: clamp(1rem, 2.25vw, 1.55rem);
+      font-weight: 850;
+      letter-spacing: -.035em;
+      text-shadow: 0 0 18px rgba(85, 231, 255, .28);
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+    }
+
+    button, input {
+      border: 0;
+      font: inherit;
+      border-radius: 999px;
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+      padding: 14px 18px;
+      color: white;
+      background: rgba(0,0,0,.36);
+      border: 1px solid rgba(255,255,255,.16);
+      outline: none;
+    }
+
+    input::placeholder { color: rgba(255,255,255,.42); }
+
+    input:focus {
+      border-color: rgba(85,231,255,.7);
+      box-shadow: 0 0 0 4px rgba(85,231,255,.12);
+    }
+
+    button {
+      padding: 14px 22px;
+      cursor: pointer;
+      color: #170813;
+      font-weight: 950;
+      text-transform: uppercase;
+      letter-spacing: .02em;
+      background: linear-gradient(135deg, var(--hot), #ffd05c 55%, var(--cyan));
+      box-shadow: 0 10px 30px rgba(255, 58, 167, .24);
+      transition: transform .16s ease, filter .16s ease;
+      white-space: nowrap;
+    }
+
+    button:hover { transform: translateY(-1px) scale(1.015); filter: saturate(1.12); }
+    button:active { transform: translateY(1px) scale(.99); }
+
+    .tiny {
+      color: rgba(255,255,255,.46);
+      font-size: .78rem;
+      text-align: center;
+      line-height: 1.35;
+    }
+
+    .deploy-footer {
+      pointer-events: auto;
+    }
+
+    @media (max-width: 850px) {
+      .layout {
+        padding: 14px;
+        gap: 8px;
+      }
+
+      .topbar {
+        display: block;
+      }
+
+      .title {
+        width: 100%;
+      }
+
+      .seed-list {
+        display: none;
+      }
+
+      .sub {
+        max-width: 25rem;
+      }
+
+      .ball-spacer {
+        min-height: 330px;
+      }
+
+      .row {
+        flex-direction: column;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+
+    @media (max-height: 710px) {
+      .sub { display: none; }
+      .ball-spacer { min-height: 220px; }
+      .answer { min-height: 48px; }
+      .controls { padding: 12px; }
+      .deploy-footer { padding-block: .35rem !important; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main id="app" aria-label="Three dimensional magic 8 ball scene"></main>
+
+  <section class="layout">
+    <div class="topbar">
+      <div class="title">
+        <h1>Questionable Oracle</h1>
+        <p class="sub">Ask the cursed snack sphere a question, shake the ball, and receive unlicensed wisdom from the goblin annex.</p>
+      </div>
+
+      <aside class="seed-list" aria-label="Seed phrases">
+        <strong>Seed phrase pool</strong>
+        <div>The raccoon has entered the group chat</div><div>I’ve seen enough soup to know where this is going</div><div>That’s not a red flag, that’s a full marching band</div><div>We are currently between disasters</div><div>I’m emotionally dressed for the wrong weather</div><div>This smells like a meeting that should’ve been a nap</div><div>The vibes have filed a complaint</div><div>I didn’t survive dial-up for this</div><div>Let’s not put a hat on a ghost and call it leadership</div><div>I’m at the age where my knees have opinions</div><div>That idea has wet carpet energy</div><div>The plot has wandered into traffic</div><div>I support this in theory and fear it in practice</div><div>Somewhere, a possum just nodded knowingly</div><div>That’s a tomorrow goblin problem</div><div>I’m not saying it’s cursed, but it has paperwork</div><div>We have angered the tiny gods of logistics</div><div>This feels federally haunted</div><div>I came here to help, not to become folklore</div><div>The cheese has left the cracker</div><div>I’m choosing peace, but I packed a wrench</div><div>That plan has raccoon fingerprints all over it</div><div>We’re one decision away from banjo music</div><div>I reject the premise and the casserole</div><div>Let the record show: I was against the vibes</div><div>That’s a lot of confidence for a folding chair</div><div>We’re gonna need a bigger excuse</div><div>I have neither the pants nor the patience</div><div>This is how side quests get people killed</div><div>The spreadsheet has become self-aware</div><div>I’m not spiraling, I’m conducting vertical research</div><div>Nothing good starts with “technically legal”</div><div>The barn has opinions</div><div>I fear we’ve underestimated the dumbass coefficient</div><div>A goose would know what to do</div><div>This has strong “found in a drawer” energy</div><div>I’m listening, but my ancestors are pacing</div><div>You can’t microwave your way out of destiny</div><div>That’s not closure, that’s a receipt with feelings</div><div>The prophecy was poorly sourced</div>
+      </aside>
+    </div>
+
+    <div class="ball-spacer" aria-hidden="true"></div>
+
+    <section class="controls">
+      <div id="answer" class="answer">Ask me something, coward.</div>
+      <div class="row">
+        <input id="question" type="text" autocomplete="off" placeholder="Will this plan survive contact with reality?" />
+        <button id="shake">Shake</button>
+      </div>
+      <div class="tiny">Click the ball, press Enter, or mash the button like the vibes owe you money.</div>
+    </section>
+
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.22.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer class="deploy-footer" data-junkdrawer-deploy-footer data-deploy-version="2026.06.22.1" style="margin: 0 auto; padding: 0.7rem 1rem; text-align: center; color: rgba(255, 255, 255, 0.54); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · Questionable Oracle · version 2026.06.22.1
+    </footer>
+  </section>
+
+  <script type="module">
+    import * as THREE from "https://unpkg.com/three@0.160.1/build/three.module.js";
+
+    const phrases = ['The raccoon has entered the group chat', 'I’ve seen enough soup to know where this is going', 'That’s not a red flag, that’s a full marching band', 'We are currently between disasters', 'I’m emotionally dressed for the wrong weather', 'This smells like a meeting that should’ve been a nap', 'The vibes have filed a complaint', 'I didn’t survive dial-up for this', 'Let’s not put a hat on a ghost and call it leadership', 'I’m at the age where my knees have opinions', 'That idea has wet carpet energy', 'The plot has wandered into traffic', 'I support this in theory and fear it in practice', 'Somewhere, a possum just nodded knowingly', 'That’s a tomorrow goblin problem', 'I’m not saying it’s cursed, but it has paperwork', 'We have angered the tiny gods of logistics', 'This feels federally haunted', 'I came here to help, not to become folklore', 'The cheese has left the cracker', 'I’m choosing peace, but I packed a wrench', 'That plan has raccoon fingerprints all over it', 'We’re one decision away from banjo music', 'I reject the premise and the casserole', 'Let the record show: I was against the vibes', 'That’s a lot of confidence for a folding chair', 'We’re gonna need a bigger excuse', 'I have neither the pants nor the patience', 'This is how side quests get people killed', 'The spreadsheet has become self-aware', 'I’m not spiraling, I’m conducting vertical research', 'Nothing good starts with “technically legal”', 'The barn has opinions', 'I fear we’ve underestimated the dumbass coefficient', 'A goose would know what to do', 'This has strong “found in a drawer” energy', 'I’m listening, but my ancestors are pacing', 'You can’t microwave your way out of destiny', 'That’s not closure, that’s a receipt with feelings', 'The prophecy was poorly sourced'];
+
+    const app = document.getElementById("app");
+    const answerEl = document.getElementById("answer");
+    const questionEl = document.getElementById("question");
+    const shakeButton = document.getElementById("shake");
+
+    let w = window.innerWidth;
+    let h = window.innerHeight;
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x090713, 0.035);
+
+    const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
+    camera.position.set(0, 0.42, 7.4);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(w, h);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    app.appendChild(renderer.domElement);
+
+    const group = new THREE.Group();
+    group.position.y = 0.05;
+    scene.add(group);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.62);
+    scene.add(ambient);
+
+    const key = new THREE.PointLight(0xff3aa7, 44, 16);
+    key.position.set(-3.8, 3.0, 4.2);
+    scene.add(key);
+
+    const fill = new THREE.PointLight(0x55e7ff, 35, 16);
+    fill.position.set(4.2, -0.2, 4.6);
+    scene.add(fill);
+
+    const rim = new THREE.PointLight(0xffd05c, 22, 12);
+    rim.position.set(0, -3.4, 3.2);
+    scene.add(rim);
+
+    const ballGeo = new THREE.SphereGeometry(1.72, 96, 96);
+    const ballMat = new THREE.MeshPhysicalMaterial({
+      color: 0x050509,
+      roughness: 0.18,
+      metalness: 0.1,
+      clearcoat: 1,
+      clearcoatRoughness: 0.06,
+      reflectivity: 0.82
+    });
+    const ball = new THREE.Mesh(ballGeo, ballMat);
+    group.add(ball);
+
+    const ringGeo = new THREE.TorusGeometry(0.86, 0.047, 18, 160);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0xf8f0dc,
+      roughness: 0.32,
+      metalness: 0.2,
+      emissive: 0xff3aa7,
+      emissiveIntensity: 0.05
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(0, 0, 1.695);
+    group.add(ring);
+
+    const windowGeo = new THREE.CircleGeometry(0.77, 96);
+    const windowMat = new THREE.MeshPhysicalMaterial({
+      color: 0x140824,
+      roughness: 0.08,
+      clearcoat: 1,
+      transparent: true,
+      opacity: 0.92,
+      emissive: 0x201050,
+      emissiveIntensity: 0.7
+    });
+    const windowMesh = new THREE.Mesh(windowGeo, windowMat);
+    windowMesh.position.set(0, 0, 1.748);
+    group.add(windowMesh);
+
+    const triangleShape = new THREE.Shape();
+    triangleShape.moveTo(0, 0.50);
+    triangleShape.lineTo(-0.58, -0.40);
+    triangleShape.lineTo(0.58, -0.40);
+    triangleShape.lineTo(0, 0.50);
+
+    const triangleGeo = new THREE.ShapeGeometry(triangleShape);
+    const triangleMat = new THREE.MeshBasicMaterial({
+      color: 0x7b5cff,
+      transparent: true,
+      opacity: 0.86,
+      side: THREE.DoubleSide
+    });
+    const triangle = new THREE.Mesh(triangleGeo, triangleMat);
+    triangle.position.set(0, -0.015, 1.775);
+    group.add(triangle);
+
+    function makeCanvasTexture(text, options = {}) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = options.fill || "#e9ffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = options.font || "900 58px system-ui, sans-serif";
+
+      const maxWidth = 760;
+      const words = text.split(" ");
+      const lines = [];
+      let line = "";
+
+      for (const word of words) {
+        const test = line ? `${line} ${word}` : word;
+        if (ctx.measureText(test).width > maxWidth && line) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = test;
+        }
+      }
+      lines.push(line);
+
+      const lineHeight = options.lineHeight || 70;
+      const visible = lines.slice(0, 5);
+      const y0 = canvas.height / 2 - ((visible.length - 1) * lineHeight / 2);
+
+      ctx.shadowColor = options.glow || "#55e7ff";
+      ctx.shadowBlur = 22;
+      visible.forEach((l, i) => {
+        ctx.fillText(l, canvas.width / 2, y0 + i * lineHeight);
+      });
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      return texture;
+    }
+
+    let answerTexture = makeCanvasTexture("8", { font: "1000 210px system-ui, sans-serif" });
+    const textMat = new THREE.MeshBasicMaterial({ map: answerTexture, transparent: true });
+    const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.12, .56), textMat);
+    textPlane.position.set(0, -0.03, 1.795);
+    group.add(textPlane);
+
+    const starGroup = new THREE.Group();
+    scene.add(starGroup);
+
+    const sparkleGeo = new THREE.BufferGeometry();
+    const count = 420;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (Math.random() - .5) * 18;
+      positions[i * 3 + 1] = (Math.random() - .5) * 12;
+      positions[i * 3 + 2] = -Math.random() * 9 - 1;
+    }
+    sparkleGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const sparkleMat = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.024,
+      transparent: true,
+      opacity: 0.62
+    });
+    const sparkles = new THREE.Points(sparkleGeo, sparkleMat);
+    starGroup.add(sparkles);
+
+    const floorGeo = new THREE.CircleGeometry(2.72, 96);
+    const floorMat = new THREE.MeshBasicMaterial({
+      color: 0x2a183d,
+      transparent: true,
+      opacity: .22,
+      side: THREE.DoubleSide
+    });
+    const glowFloor = new THREE.Mesh(floorGeo, floorMat);
+    glowFloor.rotation.x = -Math.PI / 2;
+    glowFloor.position.y = -2.06;
+    glowFloor.position.z = .1;
+    scene.add(glowFloor);
+
+    let shaking = false;
+    let shakeT = 0;
+    let targetAnswer = "8";
+    let elapsed = 0;
+
+    function chooseAnswer() {
+      const question = questionEl.value.trim();
+      let hash = 0;
+      const basis = question || String(Date.now()) + Math.random();
+      for (let i = 0; i < basis.length; i++) {
+        hash = ((hash << 5) - hash + basis.charCodeAt(i)) | 0;
+      }
+      const randomSalt = Math.floor(Math.random() * phrases.length);
+      return phrases[Math.abs(hash + randomSalt) % phrases.length];
+    }
+
+    function setAnswer(text) {
+      answerEl.textContent = text;
+      answerTexture.dispose();
+      answerTexture = makeCanvasTexture(text, {
+        font: text.length > 55 ? "900 44px system-ui, sans-serif" : "950 55px system-ui, sans-serif",
+        lineHeight: text.length > 55 ? 56 : 68
+      });
+      textMat.map = answerTexture;
+      textMat.needsUpdate = true;
+    }
+
+    function shake() {
+      if (shaking) return;
+      targetAnswer = chooseAnswer();
+      setAnswer("Consulting the snack gods...");
+      shaking = true;
+      shakeT = 0;
+      questionEl.blur();
+    }
+
+    shakeButton.addEventListener("click", shake);
+    renderer.domElement.addEventListener("click", shake);
+    questionEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") shake();
+    });
+
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = Math.min(clock.getDelta(), 0.05);
+      elapsed += delta;
+      const t = elapsed;
+
+      const baseY = h < 710 ? 0.32 : 0.05;
+
+      if (!shaking) {
+        group.position.x = 0;
+        group.position.y = baseY + Math.sin(t * 0.72) * 0.045;
+        group.rotation.z = 0;
+        group.rotation.y = Math.sin(t * 0.26) * 0.10;
+        group.rotation.x = Math.sin(t * 0.19) * 0.045;
+      }
+
+      sparkles.rotation.z = t * 0.018;
+      sparkles.rotation.x = Math.sin(t * 0.12) * 0.06;
+      windowMat.emissiveIntensity = 0.58 + Math.sin(t * 2.0) * 0.13;
+      triangleMat.opacity = 0.72 + Math.sin(t * 2.6) * 0.12;
+
+      if (shaking) {
+        shakeT += delta;
+        const intensity = Math.max(0, 1 - shakeT / 1.25);
+        group.position.x = (Math.random() - .5) * 0.48 * intensity;
+        group.position.y = baseY + Math.sin(t * 34) * 0.18 * intensity;
+        group.rotation.z = (Math.random() - .5) * 0.45 * intensity;
+        group.rotation.x = Math.sin(t * 45) * 0.18 * intensity;
+        group.rotation.y = Math.cos(t * 39) * 0.32 * intensity;
+
+        if (shakeT >= 1.25) {
+          shaking = false;
+          group.position.x = 0;
+          group.position.y = baseY;
+          group.rotation.z = 0;
+          group.rotation.x = 0;
+          group.rotation.y = 0;
+          setAnswer(targetAnswer);
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    function resize() {
+      w = window.innerWidth;
+      h = window.innerHeight;
+      camera.aspect = w / h;
+      camera.position.z = w < 850 ? 8.2 : 7.4;
+      camera.position.y = w < 850 ? 0.36 : 0.42;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
+
+    window.addEventListener("resize", resize);
+    resize();
+  </script>
+</body>
+</html>
