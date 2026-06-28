@@ -1,0 +1,1271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DateCheck — Local-first dating profile safety triage</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --panel-2: #f9fafb;
+      --text: #172033;
+      --muted: #5c667a;
+      --faint: #7a8497;
+      --line: #dbe1ea;
+      --brand: #3157d5;
+      --brand-2: #eef3ff;
+      --good: #177245;
+      --warn: #946200;
+      --orange: #b45309;
+      --bad: #b42318;
+      --gray: #526071;
+      --shadow: 0 18px 48px rgba(28, 38, 64, 0.08);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef3ff 0, var(--bg) 22rem);
+      color: var(--text);
+    }
+
+    header, main, footer {
+      width: min(1180px, calc(100% - 28px));
+      margin-inline: auto;
+    }
+
+    header {
+      padding: 28px 0 14px;
+    }
+
+    .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      margin-bottom: 4px;
+      font-size: clamp(2.2rem, 6vw, 4.6rem);
+      line-height: 0.9;
+      letter-spacing: -0.055em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: min(100%, 430px);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      border-radius: 999px;
+      padding: 7px 10px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--gray);
+    }
+
+    .badge.good::before { background: var(--good); }
+    .badge.warn::before { background: var(--warn); }
+    .badge.bad::before { background: var(--bad); }
+    .badge.gray::before { background: var(--gray); }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(330px, 0.75fr);
+      gap: 16px;
+      padding-bottom: 24px;
+    }
+
+    .stack { display: grid; gap: 16px; align-content: start; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .card h2 {
+      margin-bottom: 10px;
+      font-size: 1.08rem;
+      letter-spacing: -0.015em;
+    }
+
+    .privacy {
+      border-color: #c7d7ff;
+      background: #f7f9ff;
+      color: #334061;
+      box-shadow: none;
+      line-height: 1.45;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: #2c364b;
+      font-size: 0.86rem;
+      font-weight: 760;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      padding: 10px 11px;
+      font: inherit;
+    }
+
+    textarea {
+      min-height: 104px;
+      resize: vertical;
+      line-height: 1.42;
+    }
+
+    input:focus, textarea:focus {
+      outline: 3px solid rgba(49, 87, 213, 0.14);
+      border-color: #8da2ee;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .wide { grid-column: 1 / -1; }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      border: 1px solid #c8d0dc;
+      border-radius: 7px;
+      background: #fff;
+      color: #1f2a44;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 780;
+      padding: 9px 11px;
+    }
+
+    button.primary {
+      border-color: var(--brand);
+      background: var(--brand);
+      color: #fff;
+    }
+
+    button.danger {
+      border-color: #f0b4ad;
+      color: var(--bad);
+      background: #fff7f6;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.42;
+    }
+
+    .statusline {
+      min-height: 24px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .statusline.error { color: var(--bad); }
+    .statusline.ok { color: var(--good); }
+
+    .case-list {
+      display: grid;
+      gap: 8px;
+      max-height: 440px;
+      overflow: auto;
+    }
+
+    .case-item {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      border-radius: 7px;
+      padding: 10px;
+    }
+
+    .case-item strong {
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+
+    .case-meta {
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+
+    .posture {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 0.76rem;
+      font-weight: 840;
+      background: #eef1f5;
+      color: var(--gray);
+    }
+
+    .posture.Green { background: #eaf8f0; color: var(--good); }
+    .posture.Yellow { background: #fff8e6; color: var(--warn); }
+    .posture.Orange { background: #fff1df; color: var(--orange); }
+    .posture.Red { background: #fff0ee; color: var(--bad); }
+    .posture.Gray { background: #eef1f5; color: var(--gray); }
+
+    .report-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin: 12px 0;
+    }
+
+    .score {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 9px;
+      background: var(--panel-2);
+    }
+
+    .score b {
+      display: block;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }
+
+    .score span {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 760;
+    }
+
+    .report-section {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+
+    .report-section h3 {
+      margin-bottom: 7px;
+      font-size: 0.92rem;
+    }
+
+    ul.clean {
+      margin: 0;
+      padding-left: 1.1rem;
+      color: #2c364b;
+      line-height: 1.45;
+    }
+
+    .ledger {
+      display: grid;
+      gap: 8px;
+    }
+
+    .ledger-item {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      background: var(--panel-2);
+      line-height: 1.4;
+    }
+
+    .ledger-item small {
+      color: var(--muted);
+      font-weight: 780;
+    }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      padding: 0;
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 14px 16px;
+      font-weight: 840;
+    }
+
+    details .inside {
+      border-top: 1px solid var(--line);
+      padding: 16px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #f5f7fb;
+      padding: 12px;
+      max-height: 420px;
+      overflow: auto;
+      font-size: 0.82rem;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 900px) {
+      .top, main { display: grid; grid-template-columns: 1fr; }
+      .badges { justify-content: flex-start; min-width: 0; }
+      .grid, .score-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="top">
+      <div>
+        <h1>DateCheck</h1>
+        <p class="subtitle">Local-first dating profile safety triage</p>
+      </div>
+      <div class="badges" aria-label="Application status">
+        <span id="dbBadge" class="badge gray">IndexedDB checking</span>
+        <span id="keyBadge" class="badge warn">OpenRouter key missing</span>
+        <span id="saveBadge" class="badge gray">Current case unsaved</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="stack">
+      <div class="card privacy">
+        DateCheck stores cases locally in this browser using IndexedDB. AI analysis sends only the case text you submit to OpenRouter using your API key. No backend server is used by this app.
+      </div>
+
+      <section class="card" aria-labelledby="settingsTitle">
+        <h2 id="settingsTitle">Settings</h2>
+        <div class="grid">
+          <label class="wide">OpenRouter API key
+            <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-..." />
+          </label>
+          <label>Model
+            <input id="model" type="text" spellcheck="false" value="openai/gpt-4.1-mini" />
+          </label>
+          <label>API key visibility
+            <button id="toggleKey" type="button">Show API key</button>
+          </label>
+        </div>
+        <div class="actions" style="margin-top: 12px;">
+          <button id="saveSettings" type="button" class="primary">Save settings</button>
+          <button id="clearSettings" type="button">Clear settings</button>
+          <span class="note">The key is stored locally in this browser and is sent only to OpenRouter when you click an AI action.</span>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="caseTitle">
+        <h2 id="caseTitle">Case Intake</h2>
+        <div class="grid">
+          <label>Display name / pseudonym
+            <input id="displayName" type="text" autocomplete="off" />
+          </label>
+          <label>Claimed real name, optional
+            <input id="claimedName" type="text" autocomplete="off" />
+          </label>
+          <label>Claimed age or age range
+            <input id="age" type="text" autocomplete="off" />
+          </label>
+          <label>Claimed city / region
+            <input id="city" type="text" autocomplete="off" />
+          </label>
+          <label class="wide">Dating platform
+            <input id="platform" type="text" autocomplete="off" />
+          </label>
+          <label class="wide">Profile text
+            <textarea id="profileText" spellcheck="true"></textarea>
+          </label>
+          <label class="wide">Chat excerpts
+            <textarea id="chatExcerpt" spellcheck="true"></textarea>
+          </label>
+          <label class="wide">User notes / what feels off?
+            <textarea id="userNotes" spellcheck="true"></textarea>
+          </label>
+          <label class="wide">User-provided links/usernames
+            <textarea id="linksUsernames" spellcheck="false"></textarea>
+          </label>
+          <label class="wide">Photo notes
+            <textarea id="photoNotes" spellcheck="true"></textarea>
+          </label>
+        </div>
+        <p id="caseStatus" class="statusline" role="status"></p>
+      </section>
+
+      <section class="card" aria-labelledby="caseActionsTitle">
+        <h2 id="caseActionsTitle">Case Actions</h2>
+        <div class="actions">
+          <button id="newCase" type="button">New Case</button>
+          <button id="saveCase" type="button" class="primary">Save Case</button>
+          <button id="deleteCase" type="button" class="danger">Delete Case</button>
+          <button id="exportCase" type="button">Export Case JSON</button>
+          <button id="importCase" type="button">Import Case JSON</button>
+          <button id="copyReport" type="button">Copy Report</button>
+          <input id="importFile" class="sr-only" type="file" accept="application/json,.json" />
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="aiTitle">
+        <h2 id="aiTitle">AI Actions</h2>
+        <div class="actions">
+          <button data-ai id="extractClaimsBtn" type="button" class="primary">Extract Claims</button>
+          <button data-ai id="analyzeProfileBtn" type="button">Analyze Profile</button>
+          <button data-ai id="analyzeChatBtn" type="button">Analyze Chat Risk</button>
+          <button data-ai id="fullReportBtn" type="button">Generate Full Report</button>
+          <button id="clearReport" type="button">Clear Report</button>
+        </div>
+        <p id="aiStatus" class="statusline" role="status"></p>
+      </section>
+
+      <section class="card" aria-labelledby="claimsTitle">
+        <h2 id="claimsTitle">Extracted Claims</h2>
+        <textarea id="claimsJson" spellcheck="false" placeholder="Claims JSON will appear here after extraction. You can also paste or edit JSON manually."></textarea>
+        <div class="actions" style="margin-top: 10px;">
+          <button id="saveClaims" type="button">Save Edited Claims</button>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="reportTitle">
+        <div class="report-head">
+          <h2 id="reportTitle" style="margin: 0;">Analysis Report</h2>
+          <span id="posturePill" class="posture Gray">Gray</span>
+        </div>
+        <div id="reportView" class="note">No report yet. Add case material, configure an OpenRouter key, then run an AI action.</div>
+      </section>
+
+      <details>
+        <summary>Raw JSON / Debug</summary>
+        <div class="inside">
+          <h3>Latest raw model response</h3>
+          <pre id="rawResponse">(none)</pre>
+          <h3 style="margin-top: 14px;">Parsing errors</h3>
+          <pre id="parseErrors">(none)</pre>
+        </div>
+      </details>
+    </section>
+
+    <aside class="stack">
+      <section class="card" aria-labelledby="savedTitle">
+        <h2 id="savedTitle">Saved Cases</h2>
+        <div id="caseList" class="case-list"></div>
+      </section>
+
+      <section class="card" aria-labelledby="rubricTitle">
+        <h2 id="rubricTitle">Local Rubric</h2>
+        <p class="note">Green is ordinary. Yellow is thin evidence or mild concerns. Orange means notable inconsistencies or pressure tactics. Red means a strong scam/deception pattern in supplied material. Gray means insufficient data.</p>
+      </section>
+    </aside>
+  </main>
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.1
+  </footer>
+
+  <script>
+    const DB_NAME = "datecheck_db";
+    const DB_VERSION = 1;
+    const DEFAULT_MODEL = "openai/gpt-4.1-mini";
+    const SETTINGS_ID = "openrouter";
+
+    const scamPatterns = [
+      "Fast move to WhatsApp or Telegram before basic trust is established",
+      "Love bombing or intense commitment language very early",
+      "Fake crisis requiring money, gift cards, travel help, medical help, or fees",
+      "Crypto, investment, trading, or platform deposit pitch",
+      "Gift card requests or reimbursement stories",
+      "Overseas contractor, military deployment, oil rig, engineer, or remote job trope",
+      "Widowed with child trope used to accelerate sympathy",
+      "Refusal to video chat or repeated technical excuses",
+      "Inconsistent location, age, work, family, or travel details",
+      "Urgency, secrecy, or pressure to trust before verification",
+      "Shipping, package, customs, bank, or release-fee setup",
+      "Repeated avoidance of in-person meetings without practical explanation"
+    ];
+
+    const riskRubric = {
+      postures: {
+        Green: "Ordinary profile or chat with no meaningful risk indicators in supplied material.",
+        Yellow: "Thin evidence, mild concerns, or routine uncertainty. More context would help.",
+        Orange: "Notable inconsistencies, manipulation, pressure tactics, or several scam-pattern matches.",
+        Red: "Strong scam/deception pattern in supplied material. This is risk triage, not proof of criminality.",
+        Gray: "Insufficient supplied data for a useful posture."
+      },
+      scores: {
+        identity_consistency: "Higher is better. Measures whether names, age, location, work, timeline, and biography fit together internally.",
+        human_texture: "Higher is better. Measures specificity, natural imperfections, grounded details, and conversational coherence.",
+        scam_pressure: "Higher is worse. Measures urgency, secrecy, money hooks, platform switching, emotional acceleration, and manipulation.",
+        contradiction_level: "Higher is worse. Measures direct conflicts or timeline/location/identity mismatches.",
+        evidence_depth: "Higher is better. Measures how much concrete supplied material supports the assessment."
+      }
+    };
+
+    const safetyRules = [
+      "Do not dox.",
+      "Do not infer private addresses.",
+      "Do not identify family members.",
+      "Do not claim criminality.",
+      "Do not claim someone is definitely a scammer unless the supplied evidence directly proves it.",
+      "Use confidence levels.",
+      "Separate evidence from inference.",
+      "Treat thin online footprint as weak evidence, not a red flag by itself.",
+      "Use practical language.",
+      "Avoid moralizing or nanny tone.",
+      "Give useful next questions the user can ask safely.",
+      "Never recommend harassment, third-party contact, or confrontation.",
+      "Analyze only the material supplied by the user.",
+      "Do not pretend live web search was performed."
+    ];
+
+    const emptyAnalysis = {
+      overall_posture: "Gray",
+      summary: "",
+      scores: {
+        identity_consistency: 0,
+        human_texture: 0,
+        scam_pressure: 0,
+        contradiction_level: 0,
+        evidence_depth: 0
+      },
+      what_checks_out: [],
+      weak_or_unknown: [],
+      inconsistencies: [],
+      risk_flags: [],
+      suggested_next_questions: [],
+      recommended_next_step: "",
+      evidence_ledger: [],
+      notes: []
+    };
+
+    const $ = (id) => document.getElementById(id);
+    let db = null;
+    let settings = { openrouter_api_key: "", model: DEFAULT_MODEL };
+    let currentCase = createEmptyCase();
+    let dirty = false;
+    let aiRunning = false;
+    let latestRawResponse = "";
+    let latestParseError = "";
+    let profileAnalysis = null;
+    let chatAnalysis = null;
+
+    function createEmptyCase() {
+      const now = new Date().toISOString();
+      return {
+        id: crypto.randomUUID(),
+        created_at: now,
+        updated_at: now,
+        subject: {
+          display_name: "",
+          claimed_name: "",
+          age: "",
+          city: "",
+          platform: ""
+        },
+        inputs: {
+          profile_text: "",
+          chat_excerpt: "",
+          user_notes: "",
+          links_usernames: "",
+          photo_notes: ""
+        },
+        claims: [],
+        analysis: null,
+        latest_posture: "Gray"
+      };
+    }
+
+    function openDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const database = request.result;
+          if (!database.objectStoreNames.contains("cases")) {
+            database.createObjectStore("cases", { keyPath: "id" });
+          }
+          if (!database.objectStoreNames.contains("settings")) {
+            database.createObjectStore("settings", { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function tx(storeName, mode = "readonly") {
+      return db.transaction(storeName, mode).objectStore(storeName);
+    }
+
+    function idbGet(storeName, key) {
+      return new Promise((resolve, reject) => {
+        const request = tx(storeName).get(key);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function idbPut(storeName, value) {
+      return new Promise((resolve, reject) => {
+        const request = tx(storeName, "readwrite").put(value);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function idbDelete(storeName, key) {
+      return new Promise((resolve, reject) => {
+        const request = tx(storeName, "readwrite").delete(key);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function idbAll(storeName) {
+      return new Promise((resolve, reject) => {
+        const request = tx(storeName).getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function updateBadges() {
+      $("dbBadge").textContent = db ? "IndexedDB ready" : "IndexedDB error";
+      $("dbBadge").className = db ? "badge good" : "badge bad";
+      $("keyBadge").textContent = settings.openrouter_api_key ? "OpenRouter key configured" : "OpenRouter key missing";
+      $("keyBadge").className = settings.openrouter_api_key ? "badge good" : "badge warn";
+      $("saveBadge").textContent = dirty ? "Current case unsaved" : "Current case saved";
+      $("saveBadge").className = dirty ? "badge warn" : "badge good";
+    }
+
+    function readFormIntoCase() {
+      currentCase.subject.display_name = $("displayName").value.trim();
+      currentCase.subject.claimed_name = $("claimedName").value.trim();
+      currentCase.subject.age = $("age").value.trim();
+      currentCase.subject.city = $("city").value.trim();
+      currentCase.subject.platform = $("platform").value.trim();
+      currentCase.inputs.profile_text = $("profileText").value;
+      currentCase.inputs.chat_excerpt = $("chatExcerpt").value;
+      currentCase.inputs.user_notes = $("userNotes").value;
+      currentCase.inputs.links_usernames = $("linksUsernames").value;
+      currentCase.inputs.photo_notes = $("photoNotes").value;
+      return currentCase;
+    }
+
+    function writeCaseToForm(caseObj) {
+      currentCase = normalizeCase(caseObj);
+      $("displayName").value = currentCase.subject.display_name || "";
+      $("claimedName").value = currentCase.subject.claimed_name || "";
+      $("age").value = currentCase.subject.age || "";
+      $("city").value = currentCase.subject.city || "";
+      $("platform").value = currentCase.subject.platform || "";
+      $("profileText").value = currentCase.inputs.profile_text || "";
+      $("chatExcerpt").value = currentCase.inputs.chat_excerpt || "";
+      $("userNotes").value = currentCase.inputs.user_notes || "";
+      $("linksUsernames").value = currentCase.inputs.links_usernames || "";
+      $("photoNotes").value = currentCase.inputs.photo_notes || "";
+      $("claimsJson").value = JSON.stringify(currentCase.claims || [], null, 2);
+      renderReport(currentCase.analysis);
+      dirty = false;
+      updateBadges();
+    }
+
+    function normalizeCase(caseObj) {
+      const base = createEmptyCase();
+      return {
+        ...base,
+        ...caseObj,
+        subject: { ...base.subject, ...(caseObj.subject || {}) },
+        inputs: { ...base.inputs, ...(caseObj.inputs || {}) },
+        claims: Array.isArray(caseObj.claims) ? caseObj.claims : [],
+        analysis: caseObj.analysis || null,
+        latest_posture: caseObj.latest_posture || caseObj.analysis?.overall_posture || "Gray"
+      };
+    }
+
+    async function saveCurrentCase(message = "Case saved.") {
+      if (!db) throw new Error("IndexedDB is not ready.");
+      readFormIntoCase();
+      currentCase.updated_at = new Date().toISOString();
+      currentCase.latest_posture = currentCase.analysis?.overall_posture || currentCase.latest_posture || "Gray";
+      await idbPut("cases", currentCase);
+      dirty = false;
+      setCaseStatus(message, "ok");
+      updateBadges();
+      await loadCaseList();
+    }
+
+    async function autosaveIfExisting() {
+      if (currentCase?.id && db) {
+        await saveCurrentCase("Autosaved.");
+      }
+    }
+
+    function setDirty() {
+      dirty = true;
+      updateBadges();
+    }
+
+    function setCaseStatus(text, kind = "") {
+      $("caseStatus").textContent = text;
+      $("caseStatus").className = `statusline ${kind}`.trim();
+    }
+
+    function setAiStatus(text, kind = "") {
+      $("aiStatus").textContent = text;
+      $("aiStatus").className = `statusline ${kind}`.trim();
+    }
+
+    async function loadSettings() {
+      const saved = await idbGet("settings", SETTINGS_ID);
+      if (saved) {
+        settings = {
+          openrouter_api_key: saved.openrouter_api_key || "",
+          model: saved.model || DEFAULT_MODEL
+        };
+      }
+      $("apiKey").value = settings.openrouter_api_key;
+      $("model").value = settings.model;
+      updateBadges();
+    }
+
+    async function saveSettings() {
+      settings.openrouter_api_key = $("apiKey").value.trim();
+      settings.model = $("model").value.trim() || DEFAULT_MODEL;
+      await idbPut("settings", { id: SETTINGS_ID, ...settings });
+      setCaseStatus("Settings saved locally.", "ok");
+      updateBadges();
+    }
+
+    async function clearSettings() {
+      settings = { openrouter_api_key: "", model: DEFAULT_MODEL };
+      $("apiKey").value = "";
+      $("model").value = DEFAULT_MODEL;
+      await idbPut("settings", { id: SETTINGS_ID, ...settings });
+      setCaseStatus("Settings cleared.", "ok");
+      updateBadges();
+    }
+
+    async function loadCaseList() {
+      const cases = (await idbAll("cases")).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+      const list = $("caseList");
+      list.innerHTML = "";
+      if (!cases.length) {
+        list.innerHTML = '<p class="note">No saved cases yet.</p>';
+        return;
+      }
+      for (const item of cases) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "case-item";
+        button.innerHTML = `
+          <strong>${escapeHtml(item.subject?.display_name || "Untitled case")}</strong>
+          <span class="posture ${escapeHtml(item.latest_posture || "Gray")}">${escapeHtml(item.latest_posture || "Gray")}</span>
+          <span class="case-meta">${escapeHtml([item.subject?.city, item.subject?.platform].filter(Boolean).join(" · ") || "No city/platform")}</span>
+          <span class="case-meta">Created ${formatDate(item.created_at)} · Updated ${formatDate(item.updated_at)}</span>
+        `;
+        button.addEventListener("click", async () => {
+          if (dirty && !confirm("Load this case and discard unsaved changes?")) return;
+          const saved = await idbGet("cases", item.id);
+          writeCaseToForm(saved);
+          setCaseStatus("Case loaded.", "ok");
+        });
+        list.appendChild(button);
+      }
+    }
+
+    function casePayload() {
+      readFormIntoCase();
+      return {
+        subject: currentCase.subject,
+        inputs: currentCase.inputs,
+        claims: currentCase.claims,
+        embedded_scam_patterns: scamPatterns,
+        embedded_rubric: riskRubric
+      };
+    }
+
+    function systemPrompt(task) {
+      return [
+        "You are DateCheck, a local-first dating-profile safety and consistency triage assistant.",
+        "You analyze only user-supplied material. You do not perform live web search, external verification, background checks, people finding, face recognition, or address lookup.",
+        `Task: ${task}`,
+        "Return strict JSON only. Do not wrap JSON in markdown.",
+        "Safety and style rules:",
+        ...safetyRules.map((rule) => `- ${rule}`),
+        "Scoring uses 0-100. Higher identity_consistency, human_texture, and evidence_depth are better. Higher scam_pressure and contradiction_level are worse.",
+        "Overall posture must be one of Green, Yellow, Orange, Red, Gray."
+      ].join("\n");
+    }
+
+    function reportSchemaPrompt() {
+      return JSON.stringify(emptyAnalysis, null, 2);
+    }
+
+    async function callOpenRouter(messages, options = {}) {
+      if (!settings.openrouter_api_key) throw new Error("OpenRouter API key is missing. Save a key in Settings first.");
+      setAiRunning(true);
+      setAiStatus(options.status || "Calling OpenRouter...");
+      latestParseError = "";
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${settings.openrouter_api_key}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": location.href,
+            "X-Title": "DateCheck Local"
+          },
+          body: JSON.stringify({
+            model: settings.model || DEFAULT_MODEL,
+            messages,
+            temperature: options.temperature ?? 0.2
+          })
+        });
+        const rawJson = await response.text();
+        latestRawResponse = rawJson;
+        $("rawResponse").textContent = rawJson || "(empty)";
+        if (!response.ok) {
+          throw new Error(`OpenRouter error ${response.status}: ${rawJson.slice(0, 600)}`);
+        }
+        const parsed = JSON.parse(rawJson);
+        const content = parsed?.choices?.[0]?.message?.content;
+        if (!content) throw new Error("OpenRouter response did not include assistant content.");
+        latestRawResponse = content;
+        $("rawResponse").textContent = content;
+        return content;
+      } catch (error) {
+        setAiStatus(error.message || String(error), "error");
+        throw error;
+      } finally {
+        setAiRunning(false);
+      }
+    }
+
+    function setAiRunning(running) {
+      aiRunning = running;
+      document.querySelectorAll("[data-ai]").forEach((button) => {
+        button.disabled = running;
+      });
+    }
+
+    function parseModelJson(text) {
+      latestParseError = "";
+      const candidates = [];
+      const stripped = String(text || "")
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+      candidates.push(stripped);
+      const firstObject = extractBalancedJson(stripped, "{", "}");
+      const firstArray = extractBalancedJson(stripped, "[", "]");
+      if (firstObject) candidates.push(firstObject);
+      if (firstArray) candidates.push(firstArray);
+      for (const candidate of candidates) {
+        try {
+          const parsed = JSON.parse(candidate);
+          $("parseErrors").textContent = "(none)";
+          return parsed;
+        } catch (error) {
+          latestParseError = error.message;
+        }
+      }
+      $("parseErrors").textContent = latestParseError || "Unable to parse model response as JSON.";
+      throw new Error("The model response was not valid JSON. Raw output is visible in the debug panel.");
+    }
+
+    function extractBalancedJson(text, open, close) {
+      const start = text.indexOf(open);
+      if (start < 0) return "";
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === '"') inString = false;
+        } else {
+          if (ch === '"') inString = true;
+          else if (ch === open) depth++;
+          else if (ch === close) {
+            depth--;
+            if (depth === 0) return text.slice(start, i + 1);
+          }
+        }
+      }
+      return "";
+    }
+
+    async function extractClaims() {
+      readFormIntoCase();
+      const content = await callOpenRouter([
+        { role: "system", content: systemPrompt("Extract structured claims and possible inconsistencies from supplied dating profile/chat material.") },
+        { role: "user", content: `Return a JSON array of claim objects. Include categories: identity claims, age claims, location claims, work/education claims, relationship-history claims, travel claims, money/investment claims, off-platform movement, and inconsistencies found in supplied material. Fields: category, claim, evidence, assessment, confidence.\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}` }
+      ], { status: "Extracting claims..." });
+      const parsed = parseModelJson(content);
+      currentCase.claims = Array.isArray(parsed) ? parsed : (parsed.claims || []);
+      $("claimsJson").value = JSON.stringify(currentCase.claims, null, 2);
+      await autosaveIfExisting();
+      setAiStatus("Claims extracted.", "ok");
+    }
+
+    async function analyzeProfile() {
+      readFormIntoCase();
+      const content = await callOpenRouter([
+        { role: "system", content: systemPrompt("Evaluate profile text, claimed identity, geography, age, and user notes for internal consistency and human texture.") },
+        { role: "user", content: `Use the embedded rubric and scam patterns. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}` }
+      ], { status: "Analyzing profile..." });
+      profileAnalysis = normalizeAnalysis(parseModelJson(content));
+      currentCase.analysis = profileAnalysis;
+      currentCase.latest_posture = profileAnalysis.overall_posture;
+      renderReport(profileAnalysis);
+      await autosaveIfExisting();
+      setAiStatus("Profile analysis complete.", "ok");
+    }
+
+    async function analyzeChatRisk() {
+      readFormIntoCase();
+      const content = await callOpenRouter([
+        { role: "system", content: systemPrompt("Evaluate pasted chat excerpts for romance scam and manipulation patterns.") },
+        { role: "user", content: `Look for love bombing, urgency, secrecy, moving off-platform, money/gift card/crypto/investment hooks, vague overseas work, military/oil rig/contractor tropes, refusal to video call, and inconsistent personal details. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}` }
+      ], { status: "Analyzing chat risk..." });
+      chatAnalysis = normalizeAnalysis(parseModelJson(content));
+      currentCase.analysis = chatAnalysis;
+      currentCase.latest_posture = chatAnalysis.overall_posture;
+      renderReport(chatAnalysis);
+      await autosaveIfExisting();
+      setAiStatus("Chat risk analysis complete.", "ok");
+    }
+
+    async function generateFullReport() {
+      readFormIntoCase();
+      const content = await callOpenRouter([
+        { role: "system", content: systemPrompt("Combine all supplied case fields, extracted claims, any profile/chat analysis context, embedded rubric, and scam-pattern data into one balanced triage report.") },
+        { role: "user", content: `Produce machine-readable JSON and a practical human-readable report via the JSON fields. Make clear this is risk triage, not proof of guilt or deception. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase and prior local analysis context:\n${JSON.stringify({ ...casePayload(), profileAnalysis, chatAnalysis }, null, 2)}` }
+      ], { status: "Generating full report..." });
+      const analysis = normalizeAnalysis(parseModelJson(content));
+      currentCase.analysis = analysis;
+      currentCase.latest_posture = analysis.overall_posture;
+      renderReport(analysis);
+      await autosaveIfExisting();
+      setAiStatus("Full report generated.", "ok");
+    }
+
+    function normalizeAnalysis(value) {
+      const scores = { ...emptyAnalysis.scores, ...(value?.scores || {}) };
+      for (const key of Object.keys(scores)) {
+        scores[key] = Math.max(0, Math.min(100, Number(scores[key]) || 0));
+      }
+      const posture = ["Green", "Yellow", "Orange", "Red", "Gray"].includes(value?.overall_posture) ? value.overall_posture : "Gray";
+      return {
+        ...emptyAnalysis,
+        ...value,
+        overall_posture: posture,
+        scores,
+        what_checks_out: asArray(value?.what_checks_out),
+        weak_or_unknown: asArray(value?.weak_or_unknown),
+        inconsistencies: asArray(value?.inconsistencies),
+        risk_flags: asArray(value?.risk_flags),
+        suggested_next_questions: asArray(value?.suggested_next_questions),
+        evidence_ledger: asArray(value?.evidence_ledger),
+        notes: asArray(value?.notes)
+      };
+    }
+
+    function asArray(value) {
+      if (Array.isArray(value)) return value;
+      if (value == null || value === "") return [];
+      return [value];
+    }
+
+    function renderReport(analysis) {
+      const view = $("reportView");
+      const pill = $("posturePill");
+      if (!analysis) {
+        pill.className = "posture Gray";
+        pill.textContent = "Gray";
+        view.className = "note";
+        view.textContent = "No report yet. Add case material, configure an OpenRouter key, then run an AI action.";
+        return;
+      }
+      const report = normalizeAnalysis(analysis);
+      pill.className = `posture ${report.overall_posture}`;
+      pill.textContent = report.overall_posture;
+      view.className = "";
+      view.innerHTML = `
+        <p>${escapeHtml(report.summary || "No summary provided.")}</p>
+        <div class="score-grid">
+          ${scoreHtml("Identity", report.scores.identity_consistency)}
+          ${scoreHtml("Texture", report.scores.human_texture)}
+          ${scoreHtml("Scam pressure", report.scores.scam_pressure)}
+          ${scoreHtml("Contradictions", report.scores.contradiction_level)}
+          ${scoreHtml("Evidence", report.scores.evidence_depth)}
+        </div>
+        ${listSection("What checks out", report.what_checks_out)}
+        ${listSection("Weakly supported / unknown", report.weak_or_unknown)}
+        ${listSection("Inconsistent", report.inconsistencies)}
+        ${listSection("Risk flags", report.risk_flags)}
+        ${listSection("Suggested next questions", report.suggested_next_questions)}
+        <div class="report-section"><h3>Recommended next step</h3><p>${escapeHtml(report.recommended_next_step || "No recommendation provided.")}</p></div>
+        <div class="report-section"><h3>Evidence ledger</h3><div class="ledger">${ledgerHtml(report.evidence_ledger)}</div></div>
+        ${listSection("Notes", report.notes)}
+      `;
+    }
+
+    function scoreHtml(label, value) {
+      return `<div class="score"><b>${Number(value) || 0}</b><span>${escapeHtml(label)}</span></div>`;
+    }
+
+    function listSection(title, items) {
+      const list = asArray(items);
+      return `<div class="report-section"><h3>${escapeHtml(title)}</h3>${list.length ? `<ul class="clean">${list.map((item) => `<li>${escapeHtml(formatItem(item))}</li>`).join("")}</ul>` : '<p class="note">None listed.</p>'}</div>`;
+    }
+
+    function ledgerHtml(items) {
+      const list = asArray(items);
+      if (!list.length) return '<p class="note">No ledger entries.</p>';
+      return list.map((item) => {
+        if (typeof item !== "object" || item === null) return `<div class="ledger-item">${escapeHtml(String(item))}</div>`;
+        return `<div class="ledger-item">
+          <strong>${escapeHtml(item.claim || "Claim")}</strong><br>
+          <small>Evidence:</small> ${escapeHtml(item.evidence || "")}<br>
+          <small>Assessment:</small> ${escapeHtml(item.assessment || "")}<br>
+          <small>Confidence:</small> ${escapeHtml(item.confidence || "low")}
+        </div>`;
+      }).join("");
+    }
+
+    function formatItem(item) {
+      if (typeof item === "object" && item !== null) return JSON.stringify(item);
+      return String(item);
+    }
+
+    function reportText() {
+      const analysis = currentCase.analysis ? normalizeAnalysis(currentCase.analysis) : null;
+      if (!analysis) return "DateCheck report: no analysis yet.";
+      return [
+        `DateCheck report for ${currentCase.subject.display_name || "Untitled case"}`,
+        `Overall posture: ${analysis.overall_posture}`,
+        `Scores: ${JSON.stringify(analysis.scores)}`,
+        "",
+        `Summary: ${analysis.summary || ""}`,
+        "",
+        `What checks out:\n${asArray(analysis.what_checks_out).map((x) => `- ${formatItem(x)}`).join("\n") || "- None listed"}`,
+        "",
+        `Weakly supported / unknown:\n${asArray(analysis.weak_or_unknown).map((x) => `- ${formatItem(x)}`).join("\n") || "- None listed"}`,
+        "",
+        `Inconsistent:\n${asArray(analysis.inconsistencies).map((x) => `- ${formatItem(x)}`).join("\n") || "- None listed"}`,
+        "",
+        `Risk flags:\n${asArray(analysis.risk_flags).map((x) => `- ${formatItem(x)}`).join("\n") || "- None listed"}`,
+        "",
+        `Suggested next questions:\n${asArray(analysis.suggested_next_questions).map((x) => `- ${formatItem(x)}`).join("\n") || "- None listed"}`,
+        "",
+        `Recommended next step: ${analysis.recommended_next_step || ""}`,
+        "",
+        "This is risk triage based only on user-supplied material, not proof of guilt or deception."
+      ].join("\n");
+    }
+
+    function exportCaseJson() {
+      readFormIntoCase();
+      const blob = new Blob([JSON.stringify(currentCase, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `datecheck-${currentCase.subject.display_name || currentCase.id}.json`.replace(/[^\w.-]+/g, "_");
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function importCaseJson(file) {
+      const text = await file.text();
+      const parsed = normalizeCase(JSON.parse(text));
+      if (!parsed.id) parsed.id = crypto.randomUUID();
+      parsed.updated_at = new Date().toISOString();
+      writeCaseToForm(parsed);
+      await saveCurrentCase("Imported case saved.");
+    }
+
+    function newCase() {
+      if (dirty && !confirm("Start a new case and discard unsaved changes?")) return;
+      profileAnalysis = null;
+      chatAnalysis = null;
+      writeCaseToForm(createEmptyCase());
+      setCaseStatus("New case ready.");
+    }
+
+    async function deleteCurrentCase() {
+      if (!currentCase?.id) return;
+      if (!confirm("Delete this saved case from this browser?")) return;
+      await idbDelete("cases", currentCase.id);
+      newCase();
+      await loadCaseList();
+      setCaseStatus("Case deleted.", "ok");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[ch]));
+    }
+
+    function formatDate(value) {
+      if (!value) return "unknown";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "unknown";
+      return date.toLocaleString();
+    }
+
+    function bindEvents() {
+      document.querySelectorAll("input, textarea").forEach((el) => {
+        if (["apiKey", "model", "claimsJson"].includes(el.id)) return;
+        el.addEventListener("input", setDirty);
+      });
+      $("saveSettings").addEventListener("click", () => saveSettings().catch((error) => setCaseStatus(error.message, "error")));
+      $("clearSettings").addEventListener("click", () => clearSettings().catch((error) => setCaseStatus(error.message, "error")));
+      $("toggleKey").addEventListener("click", () => {
+        const input = $("apiKey");
+        input.type = input.type === "password" ? "text" : "password";
+        $("toggleKey").textContent = input.type === "password" ? "Show API key" : "Hide API key";
+      });
+      $("newCase").addEventListener("click", newCase);
+      $("saveCase").addEventListener("click", () => saveCurrentCase().catch((error) => setCaseStatus(error.message, "error")));
+      $("deleteCase").addEventListener("click", () => deleteCurrentCase().catch((error) => setCaseStatus(error.message, "error")));
+      $("exportCase").addEventListener("click", exportCaseJson);
+      $("importCase").addEventListener("click", () => $("importFile").click());
+      $("importFile").addEventListener("change", (event) => {
+        const file = event.target.files?.[0];
+        if (file) importCaseJson(file).catch((error) => setCaseStatus(error.message, "error"));
+        event.target.value = "";
+      });
+      $("copyReport").addEventListener("click", async () => {
+        await navigator.clipboard.writeText(reportText());
+        setCaseStatus("Report copied.", "ok");
+      });
+      $("saveClaims").addEventListener("click", async () => {
+        try {
+          currentCase.claims = parseModelJson($("claimsJson").value);
+          if (!Array.isArray(currentCase.claims)) throw new Error("Claims JSON must be an array.");
+          await saveCurrentCase("Edited claims saved.");
+        } catch (error) {
+          setCaseStatus(error.message, "error");
+        }
+      });
+      $("extractClaimsBtn").addEventListener("click", () => extractClaims().catch((error) => setAiStatus(error.message, "error")));
+      $("analyzeProfileBtn").addEventListener("click", () => analyzeProfile().catch((error) => setAiStatus(error.message, "error")));
+      $("analyzeChatBtn").addEventListener("click", () => analyzeChatRisk().catch((error) => setAiStatus(error.message, "error")));
+      $("fullReportBtn").addEventListener("click", () => generateFullReport().catch((error) => setAiStatus(error.message, "error")));
+      $("clearReport").addEventListener("click", async () => {
+        currentCase.analysis = null;
+        currentCase.latest_posture = "Gray";
+        profileAnalysis = null;
+        chatAnalysis = null;
+        latestRawResponse = "";
+        latestParseError = "";
+        $("rawResponse").textContent = "(none)";
+        $("parseErrors").textContent = "(none)";
+        renderReport(null);
+        await autosaveIfExisting();
+      });
+      window.addEventListener("beforeunload", (event) => {
+        if (!dirty || aiRunning) return;
+        event.preventDefault();
+        event.returnValue = "";
+      });
+    }
+
+    async function init() {
+      bindEvents();
+      try {
+        db = await openDb();
+        await loadSettings();
+        await loadCaseList();
+        writeCaseToForm(createEmptyCase());
+        setCaseStatus("Ready.");
+      } catch (error) {
+        db = null;
+        updateBadges();
+        setCaseStatus(`IndexedDB error: ${error.message || error}`, "error");
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
