@@ -82,6 +82,19 @@ Public user-facing pages should include the local Analytics Lite / JunkStats tra
 
 Do not add analytics to `analytics-dashboard.html`, hidden/private/test pages, generated/vendor/example files, or pages that already include `analytics-lite.js` or define their own equivalent `window.JunkStatsConfig`.
 
+### 6. OpenRouter Model Selection
+
+Pages that use OpenRouter should provide a user-configurable model selector instead of hard-coding a single model in the UI.
+
+- Store the user's OpenRouter API key and selected model locally only, using IndexedDB or localStorage according to the page's existing storage pattern.
+- Use a default model when no setting exists: `openai/gpt-4.1-mini`.
+- Once an OpenRouter key is entered or saved, fetch available models from `https://openrouter.ai/api/v1/models` using the user's key.
+- Populate the model control as a `<select>` grouped by provider with `<optgroup>` labels. For standard OpenRouter IDs, use the prefix before `/` as the provider, e.g. `openai/gpt-4.1-mini` groups under `openai`.
+- Preserve the current or previously saved model as a fallback option if it is not returned by the model list.
+- Include a manual "Refresh models" action and a visible status/error element for model loading.
+- Do not fetch models until the user has provided a key. Do not make hidden OpenRouter calls beyond model-list loading and explicit AI actions.
+- If model loading fails, keep the saved/default model usable and show a clear error rather than blocking the page.
+
 ## General Principles
 
 - Prefer single-file HTML tools with no build step
@@ -98,6 +111,7 @@ Do not add analytics to `analytics-dashboard.html`, hidden/private/test pages, g
 - [ ] Add emoji favicon to `<head>`
 - [ ] Add `JUNKDRAWER_DEPLOY_FOOTER` comment and footer with inline styles
 - [ ] Add Analytics Lite script for public user-facing pages
+- [ ] For OpenRouter tools, add a provider-grouped model selector populated from OpenRouter after a key is provided
 - [ ] Add entry to `junk-drawer.json` with title, description, emoji, and version
 - [ ] Commit with a brief, descriptive message
 - [ ] Push to remote
