@@ -341,6 +341,65 @@
       font-weight: 780;
     }
 
+    .screenshot-tools {
+      display: grid;
+      gap: 10px;
+      border: 1px dashed #b8c3d4;
+      border-radius: 8px;
+      background: #fbfcff;
+      padding: 12px;
+    }
+
+    .paste-target {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--muted);
+      padding: 10px 11px;
+      font-size: 0.86rem;
+    }
+
+    .paste-target:focus {
+      outline: 3px solid rgba(49, 87, 213, 0.14);
+      border-color: #8da2ee;
+    }
+
+    .screenshot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+    }
+
+    .screenshot-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .screenshot-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      background: #eef1f5;
+    }
+
+    .screenshot-card .screenshot-meta {
+      display: grid;
+      gap: 5px;
+      padding: 8px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.3;
+    }
+
+    .screenshot-card button {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 0.78rem;
+    }
+
     details {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -410,7 +469,8 @@
   <main>
     <section class="stack">
       <div class="card privacy">
-        DateCheck stores cases locally in this browser using IndexedDB. AI analysis sends only the case text you submit to OpenRouter using your API key. No backend server is used by this app.
+        DateCheck stores cases locally in this browser using IndexedDB. AI analysis sends only the case text and screenshots you submit to OpenRouter using your API key. No backend server is used by this app.
+        Screenshots you attach are stored locally with the case and are sent to OpenRouter only when you click an AI action.
       </div>
 
       <section class="card" aria-labelledby="settingsTitle">
@@ -470,6 +530,22 @@
           <label class="wide">Photo notes
             <textarea id="photoNotes" spellcheck="true"></textarea>
           </label>
+          <div class="wide screenshot-tools" aria-labelledby="screenshotsTitle">
+            <div>
+              <strong id="screenshotsTitle">Screenshots</strong>
+              <p class="note" style="margin: 4px 0 0;">Add profile or chat screenshots. They are stored locally with this case and sent to OpenRouter only when you click an AI action. Screenshot analysis needs a vision-capable model.</p>
+            </div>
+            <div class="actions">
+              <label style="display: inline-flex; width: auto;">Upload screenshots
+                <input id="screenshotInput" type="file" accept="image/*" multiple />
+              </label>
+              <button id="clearScreenshots" type="button">Clear screenshots</button>
+            </div>
+            <div id="screenshotPasteTarget" class="paste-target" tabindex="0" role="button" aria-label="Paste screenshots here">
+              Focus here and paste copied screenshots from the clipboard.
+            </div>
+            <div id="screenshotList" class="screenshot-grid" aria-live="polite"></div>
+          </div>
         </div>
         <p id="caseStatus" class="statusline" role="status"></p>
       </section>
@@ -539,9 +615,9 @@
     </aside>
   </main>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.4" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.4
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.5" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.5
   </footer>
 
   <script>
@@ -649,7 +725,8 @@
           chat_excerpt: "",
           user_notes: "",
           links_usernames: "",
-          photo_notes: ""
+          photo_notes: "",
+          screenshots: []
         },
         claims: [],
         analysis: null,
@@ -730,6 +807,7 @@
       currentCase.inputs.user_notes = $("userNotes").value;
       currentCase.inputs.links_usernames = $("linksUsernames").value;
       currentCase.inputs.photo_notes = $("photoNotes").value;
+      if (!Array.isArray(currentCase.inputs.screenshots)) currentCase.inputs.screenshots = [];
       return currentCase;
     }
 
@@ -745,6 +823,7 @@
       $("userNotes").value = currentCase.inputs.user_notes || "";
       $("linksUsernames").value = currentCase.inputs.links_usernames || "";
       $("photoNotes").value = currentCase.inputs.photo_notes || "";
+      renderScreenshotList();
       $("claimsJson").value = JSON.stringify(currentCase.claims || [], null, 2);
       renderReport(currentCase.analysis);
       dirty = false;
@@ -753,15 +832,95 @@
 
     function normalizeCase(caseObj) {
       const base = createEmptyCase();
+      const inputs = { ...base.inputs, ...(caseObj.inputs || {}) };
+      inputs.screenshots = Array.isArray(inputs.screenshots) ? inputs.screenshots : [];
       return {
         ...base,
         ...caseObj,
         subject: { ...base.subject, ...(caseObj.subject || {}) },
-        inputs: { ...base.inputs, ...(caseObj.inputs || {}) },
+        inputs,
         claims: Array.isArray(caseObj.claims) ? caseObj.claims : [],
         analysis: caseObj.analysis || null,
         latest_posture: caseObj.latest_posture || caseObj.analysis?.overall_posture || "Gray"
       };
+    }
+
+    function renderScreenshotList() {
+      const list = $("screenshotList");
+      const screenshots = currentCase.inputs.screenshots || [];
+      list.innerHTML = "";
+      if (!screenshots.length) {
+        list.innerHTML = '<p class="note">No screenshots added.</p>';
+        return;
+      }
+      screenshots.forEach((shot) => {
+        const card = document.createElement("div");
+        card.className = "screenshot-card";
+        const img = document.createElement("img");
+        img.src = shot.data_url;
+        img.alt = shot.name || "Uploaded screenshot";
+        const meta = document.createElement("div");
+        meta.className = "screenshot-meta";
+        meta.innerHTML = `
+          <strong>${escapeHtml(shot.name || "Screenshot")}</strong>
+          <span>${escapeHtml(shot.type || "image")} · ${formatBytes(shot.size || estimateDataUrlBytes(shot.data_url))}</span>
+          <button type="button" data-remove-screenshot="${escapeHtml(shot.id)}">Remove</button>
+        `;
+        card.appendChild(img);
+        card.appendChild(meta);
+        list.appendChild(card);
+      });
+      list.querySelectorAll("[data-remove-screenshot]").forEach((button) => {
+        button.addEventListener("click", () => removeScreenshot(button.dataset.removeScreenshot));
+      });
+    }
+
+    async function addScreenshotFiles(files) {
+      const images = [...files].filter((file) => file.type.startsWith("image/"));
+      if (!images.length) {
+        setCaseStatus("No image files found.", "error");
+        return;
+      }
+      if (!Array.isArray(currentCase.inputs.screenshots)) currentCase.inputs.screenshots = [];
+      for (const file of images) {
+        const dataUrl = await fileToDataUrl(file);
+        currentCase.inputs.screenshots.push({
+          id: crypto.randomUUID(),
+          name: file.name || `pasted-screenshot-${currentCase.inputs.screenshots.length + 1}.png`,
+          type: file.type || "image/png",
+          size: file.size || estimateDataUrlBytes(dataUrl),
+          created_at: new Date().toISOString(),
+          data_url: dataUrl
+        });
+      }
+      renderScreenshotList();
+      setDirty();
+      setCaseStatus(`${images.length} screenshot${images.length === 1 ? "" : "s"} added.`, "ok");
+    }
+
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function removeScreenshot(id) {
+      currentCase.inputs.screenshots = (currentCase.inputs.screenshots || []).filter((shot) => shot.id !== id);
+      renderScreenshotList();
+      setDirty();
+      setCaseStatus("Screenshot removed.");
+    }
+
+    function clearScreenshots() {
+      if (!(currentCase.inputs.screenshots || []).length) return;
+      if (!confirm("Remove all screenshots from this case?")) return;
+      currentCase.inputs.screenshots = [];
+      renderScreenshotList();
+      setDirty();
+      setCaseStatus("Screenshots cleared.");
     }
 
     async function saveCurrentCase(message = "Case saved.") {
@@ -961,19 +1120,52 @@
 
     function casePayload() {
       readFormIntoCase();
+      const inputs = {
+        ...currentCase.inputs,
+        screenshots: screenshotMetadata()
+      };
       return {
         subject: currentCase.subject,
-        inputs: currentCase.inputs,
+        inputs,
         claims: currentCase.claims,
         embedded_scam_patterns: scamPatterns,
         embedded_rubric: riskRubric
       };
     }
 
+    function screenshotMetadata() {
+      return (currentCase.inputs.screenshots || []).map((shot, index) => ({
+        index: index + 1,
+        id: shot.id,
+        name: shot.name || `Screenshot ${index + 1}`,
+        type: shot.type || "image",
+        size: shot.size || estimateDataUrlBytes(shot.data_url),
+        added_at: shot.created_at || ""
+      }));
+    }
+
+    function userMessageWithScreenshots(text) {
+      const screenshots = currentCase.inputs.screenshots || [];
+      if (!screenshots.length) return { role: "user", content: text };
+      return {
+        role: "user",
+        content: [
+          { type: "text", text: `${text}\n\nAttached screenshots are user-provided case material. Read visible profile/chat text and visual context only. Do not identify people, infer private addresses, or claim external verification.` },
+          ...screenshots.map((shot) => ({
+            type: "image_url",
+            image_url: {
+              url: shot.data_url
+            }
+          }))
+        ]
+      };
+    }
+
     function systemPrompt(task) {
       return [
         "You are DateCheck, a local-first dating-profile safety and consistency triage assistant.",
-        "You analyze only user-supplied material. You do not perform live web search, external verification, background checks, people finding, face recognition, or address lookup.",
+        "You analyze only user-supplied material, including typed text and any screenshots the user attached. You may read visible text and visible context in screenshots, but do not identify people or infer hidden/private details.",
+        "You do not perform live web search, external verification, background checks, people finding, face recognition, or address lookup.",
         `Task: ${task}`,
         "Return strict JSON only. Do not wrap JSON in markdown.",
         "Safety and style rules:",
@@ -1103,7 +1295,7 @@
       readFormIntoCase();
       const content = await callOpenRouter([
         { role: "system", content: systemPrompt("Extract structured claims and possible inconsistencies from supplied dating profile/chat material.") },
-        { role: "user", content: `Return a JSON array of claim objects. Include categories: identity claims, age claims, location claims, work/education claims, relationship-history claims, travel claims, money/investment claims, off-platform movement, and inconsistencies found in supplied material. Fields: category, claim, evidence, assessment, confidence.\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}` }
+        userMessageWithScreenshots(`Return a JSON array of claim objects. Include categories: identity claims, age claims, location claims, work/education claims, relationship-history claims, travel claims, money/investment claims, off-platform movement, screenshot-visible claims, and inconsistencies found in supplied material. Fields: category, claim, evidence, assessment, confidence.\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}`)
       ], { status: "Extracting claims..." });
       const parsed = parseModelJson(content);
       currentCase.claims = Array.isArray(parsed) ? parsed : (parsed.claims || []);
@@ -1116,7 +1308,7 @@
       readFormIntoCase();
       const content = await callOpenRouter([
         { role: "system", content: systemPrompt("Evaluate profile text, claimed identity, geography, age, and user notes for internal consistency and human texture.") },
-        { role: "user", content: `Use the embedded rubric and scam patterns. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}` }
+        userMessageWithScreenshots(`Use the embedded rubric and scam patterns. Consider attached screenshots as user-provided evidence if present. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}`)
       ], { status: "Analyzing profile..." });
       profileAnalysis = normalizeAnalysis(parseModelJson(content));
       currentCase.analysis = profileAnalysis;
@@ -1130,7 +1322,7 @@
       readFormIntoCase();
       const content = await callOpenRouter([
         { role: "system", content: systemPrompt("Evaluate pasted chat excerpts for romance scam and manipulation patterns.") },
-        { role: "user", content: `Look for love bombing, urgency, secrecy, moving off-platform, money/gift card/crypto/investment hooks, vague overseas work, military/oil rig/contractor tropes, refusal to video call, and inconsistent personal details. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}` }
+        userMessageWithScreenshots(`Look for love bombing, urgency, secrecy, moving off-platform, money/gift card/crypto/investment hooks, vague overseas work, military/oil rig/contractor tropes, refusal to video call, and inconsistent personal details. Consider attached screenshots as user-provided chat/profile material if present. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase:\n${JSON.stringify(casePayload(), null, 2)}`)
       ], { status: "Analyzing chat risk..." });
       chatAnalysis = normalizeAnalysis(parseModelJson(content));
       currentCase.analysis = chatAnalysis;
@@ -1144,7 +1336,7 @@
       readFormIntoCase();
       const content = await callOpenRouter([
         { role: "system", content: systemPrompt("Combine all supplied case fields, extracted claims, any profile/chat analysis context, embedded rubric, and scam-pattern data into one balanced triage report.") },
-        { role: "user", content: `Produce machine-readable JSON and a practical human-readable report via the JSON fields. Make clear this is risk triage, not proof of guilt or deception. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase and prior local analysis context:\n${JSON.stringify({ ...casePayload(), profileAnalysis, chatAnalysis }, null, 2)}` }
+        userMessageWithScreenshots(`Produce machine-readable JSON and a practical human-readable report via the JSON fields. Make clear this is risk triage, not proof of guilt or deception. Consider attached screenshots as user-provided evidence if present. Return strict JSON in this shape:\n${reportSchemaPrompt()}\n\nCase and prior local analysis context:\n${JSON.stringify({ ...casePayload(), profileAnalysis, chatAnalysis }, null, 2)}`)
       ], { status: "Generating full report..." });
       const analysis = normalizeAnalysis(parseModelJson(content));
       currentCase.analysis = analysis;
@@ -1250,6 +1442,7 @@
         `DateCheck report for ${currentCase.subject.display_name || "Untitled case"}`,
         `Overall posture: ${analysis.overall_posture}`,
         `Scores: ${JSON.stringify(analysis.scores)}`,
+        `Screenshots attached: ${(currentCase.inputs.screenshots || []).length}`,
         "",
         `Summary: ${analysis.summary || ""}`,
         "",
@@ -1323,6 +1516,18 @@
       return date.toLocaleString();
     }
 
+    function formatBytes(bytes) {
+      const value = Number(bytes) || 0;
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function estimateDataUrlBytes(dataUrl) {
+      const base64 = String(dataUrl || "").split(",")[1] || "";
+      return Math.round(base64.length * 0.75);
+    }
+
     function bindEvents() {
       document.querySelectorAll("input, textarea").forEach((el) => {
         if (["apiKey", "model", "claimsJson"].includes(el.id)) return;
@@ -1353,6 +1558,19 @@
         const file = event.target.files?.[0];
         if (file) importCaseJson(file).catch((error) => setCaseStatus(error.message, "error"));
         event.target.value = "";
+      });
+      $("screenshotInput").addEventListener("change", (event) => {
+        const files = event.target.files;
+        if (files?.length) addScreenshotFiles(files).catch((error) => setCaseStatus(error.message, "error"));
+        event.target.value = "";
+      });
+      $("clearScreenshots").addEventListener("click", clearScreenshots);
+      $("screenshotPasteTarget").addEventListener("paste", (event) => {
+        const files = [...(event.clipboardData?.files || [])].filter((file) => file.type.startsWith("image/"));
+        if (files.length) {
+          event.preventDefault();
+          addScreenshotFiles(files).catch((error) => setCaseStatus(error.message, "error"));
+        }
       });
       $("copyReport").addEventListener("click", async () => {
         await navigator.clipboard.writeText(reportText());
