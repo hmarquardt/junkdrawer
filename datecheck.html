@@ -420,7 +420,9 @@
             <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-..." />
           </label>
           <label>Model
-            <input id="model" type="text" spellcheck="false" value="openai/gpt-4.1-mini" />
+            <select id="model">
+              <option value="openai/gpt-4.1-mini">openai/gpt-4.1-mini</option>
+            </select>
           </label>
           <label>API key visibility
             <button id="toggleKey" type="button">Show API key</button>
@@ -429,8 +431,10 @@
         <div class="actions" style="margin-top: 12px;">
           <button id="saveSettings" type="button" class="primary">Save settings</button>
           <button id="clearSettings" type="button">Clear settings</button>
-          <span class="note">The key is stored locally in this browser and is sent only to OpenRouter when you click an AI action.</span>
+          <button id="refreshModels" type="button">Refresh models</button>
+          <span class="note">The key is stored locally in this browser and is sent to OpenRouter only to load models or run an AI action.</span>
         </div>
+        <p id="modelStatus" class="statusline" role="status"></p>
       </section>
 
       <section class="card" aria-labelledby="caseTitle">
@@ -535,9 +539,9 @@
     </aside>
   </main>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.2
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.3
   </footer>
 
   <script>
@@ -625,6 +629,7 @@
     let latestParseError = "";
     let profileAnalysis = null;
     let chatAnalysis = null;
+    let openRouterModels = [];
 
     function createEmptyCase() {
       const now = new Date().toISOString();
@@ -792,6 +797,11 @@
       $("aiStatus").className = `statusline ${kind}`.trim();
     }
 
+    function setModelStatus(text, kind = "") {
+      $("modelStatus").textContent = text;
+      $("modelStatus").className = `statusline ${kind}`.trim();
+    }
+
     async function loadSettings() {
       const saved = await idbGet("settings", SETTINGS_ID);
       if (saved) {
@@ -801,8 +811,11 @@
         };
       }
       $("apiKey").value = settings.openrouter_api_key;
-      $("model").value = settings.model;
+      populateModelSelect([], settings.model || DEFAULT_MODEL);
       updateBadges();
+      if (settings.openrouter_api_key) {
+        fetchOpenRouterModels().catch((error) => setModelStatus(error.message, "error"));
+      }
     }
 
     async function saveSettings() {
@@ -811,15 +824,111 @@
       await idbPut("settings", { id: SETTINGS_ID, ...settings });
       setCaseStatus("Settings saved locally.", "ok");
       updateBadges();
+      if (settings.openrouter_api_key) {
+        fetchOpenRouterModels().catch((error) => setModelStatus(error.message, "error"));
+      } else {
+        populateModelSelect([], settings.model || DEFAULT_MODEL);
+      }
     }
 
     async function clearSettings() {
       settings = { openrouter_api_key: "", model: DEFAULT_MODEL };
       $("apiKey").value = "";
-      $("model").value = DEFAULT_MODEL;
+      openRouterModels = [];
+      populateModelSelect([], DEFAULT_MODEL);
       await idbPut("settings", { id: SETTINGS_ID, ...settings });
       setCaseStatus("Settings cleared.", "ok");
+      setModelStatus("Model list cleared.");
       updateBadges();
+    }
+
+    async function fetchOpenRouterModels() {
+      const apiKey = $("apiKey").value.trim() || settings.openrouter_api_key;
+      if (!apiKey) {
+        setModelStatus("Enter an OpenRouter API key to load models.", "error");
+        return [];
+      }
+      const previousModel = $("model").value || settings.model || DEFAULT_MODEL;
+      $("refreshModels").disabled = true;
+      $("model").disabled = true;
+      setModelStatus("Loading OpenRouter models...");
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/models", {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": location.href,
+            "X-Title": "DateCheck Local"
+          }
+        });
+        const raw = await response.text();
+        if (!response.ok) {
+          throw new Error(`OpenRouter models error ${response.status}: ${raw.slice(0, 400)}`);
+        }
+        const payload = JSON.parse(raw);
+        openRouterModels = Array.isArray(payload?.data) ? payload.data : [];
+        if (!openRouterModels.length) {
+          throw new Error("OpenRouter returned no models.");
+        }
+        populateModelSelect(openRouterModels, previousModel);
+        settings.model = $("model").value || previousModel || DEFAULT_MODEL;
+        setModelStatus(`Loaded ${openRouterModels.length.toLocaleString()} OpenRouter models.`, "ok");
+        return openRouterModels;
+      } finally {
+        $("refreshModels").disabled = false;
+        $("model").disabled = false;
+      }
+    }
+
+    function populateModelSelect(models, selectedModel = DEFAULT_MODEL) {
+      const select = $("model");
+      const normalizedSelected = selectedModel || DEFAULT_MODEL;
+      select.innerHTML = "";
+
+      const byProvider = new Map();
+      for (const model of models) {
+        const id = String(model?.id || "").trim();
+        if (!id) continue;
+        const provider = providerFromModelId(id);
+        if (!byProvider.has(provider)) byProvider.set(provider, []);
+        byProvider.get(provider).push({
+          id,
+          label: model?.name ? `${model.name} (${id})` : id
+        });
+      }
+
+      const modelIds = new Set([...byProvider.values()].flat().map((model) => model.id));
+      if (!modelIds.has(normalizedSelected)) {
+        const group = document.createElement("optgroup");
+        group.label = "Current / custom";
+        group.appendChild(new Option(normalizedSelected, normalizedSelected));
+        select.appendChild(group);
+      }
+
+      const sortedProviders = [...byProvider.keys()].sort((a, b) => a.localeCompare(b));
+      for (const provider of sortedProviders) {
+        const group = document.createElement("optgroup");
+        group.label = provider;
+        byProvider.get(provider)
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .forEach((model) => group.appendChild(new Option(model.label, model.id)));
+        select.appendChild(group);
+      }
+
+      if (!models.length && !select.options.length) {
+        select.appendChild(new Option(DEFAULT_MODEL, DEFAULT_MODEL));
+      }
+      select.value = normalizedSelected;
+      if (!select.value && select.options.length) select.selectedIndex = 0;
+    }
+
+    function providerFromModelId(id) {
+      const slash = id.indexOf("/");
+      if (slash > 0) return id.slice(0, slash);
+      const colon = id.indexOf(":");
+      if (colon > 0) return id.slice(0, colon);
+      return "Other";
     }
 
     async function loadCaseList() {
@@ -880,6 +989,7 @@
 
     async function callOpenRouter(messages, options = {}) {
       if (!settings.openrouter_api_key) throw new Error("OpenRouter API key is missing. Save a key in Settings first.");
+      settings.model = $("model").value.trim() || settings.model || DEFAULT_MODEL;
       setAiRunning(true);
       setAiStatus(options.status || "Calling OpenRouter...");
       latestParseError = "";
@@ -1205,6 +1315,15 @@
       });
       $("saveSettings").addEventListener("click", () => saveSettings().catch((error) => setCaseStatus(error.message, "error")));
       $("clearSettings").addEventListener("click", () => clearSettings().catch((error) => setCaseStatus(error.message, "error")));
+      $("refreshModels").addEventListener("click", () => fetchOpenRouterModels().catch((error) => setModelStatus(error.message, "error")));
+      $("model").addEventListener("change", () => {
+        settings.model = $("model").value || DEFAULT_MODEL;
+      });
+      $("apiKey").addEventListener("change", () => {
+        if ($("apiKey").value.trim()) {
+          fetchOpenRouterModels().catch((error) => setModelStatus(error.message, "error"));
+        }
+      });
       $("toggleKey").addEventListener("click", () => {
         const input = $("apiKey");
         input.type = input.type === "password" ? "text" : "password";
