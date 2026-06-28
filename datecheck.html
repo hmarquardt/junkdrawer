@@ -487,6 +487,9 @@
           <label>API key visibility
             <button id="toggleKey" type="button">Show API key</button>
           </label>
+          <label>Model scope
+            <span class="note"><input id="visionOnlyModels" type="checkbox" /> Vision-capable only</span>
+          </label>
         </div>
         <div class="actions" style="margin-top: 12px;">
           <button id="saveSettings" type="button" class="primary">Save settings</button>
@@ -615,9 +618,9 @@
     </aside>
   </main>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.5" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.5
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.6" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.6
   </footer>
 
   <script>
@@ -697,7 +700,7 @@
 
     const $ = (id) => document.getElementById(id);
     let db = null;
-    let settings = { openrouter_api_key: "", model: DEFAULT_MODEL };
+    let settings = { openrouter_api_key: "", model: DEFAULT_MODEL, vision_only_models: false };
     let currentCase = createEmptyCase();
     let dirty = false;
     let aiRunning = false;
@@ -824,6 +827,7 @@
       $("linksUsernames").value = currentCase.inputs.links_usernames || "";
       $("photoNotes").value = currentCase.inputs.photo_notes || "";
       renderScreenshotList();
+      if (hasScreenshots()) enableVisionScopeForScreenshots();
       $("claimsJson").value = JSON.stringify(currentCase.claims || [], null, 2);
       renderReport(currentCase.analysis);
       dirty = false;
@@ -894,6 +898,7 @@
         });
       }
       renderScreenshotList();
+      enableVisionScopeForScreenshots();
       setDirty();
       setCaseStatus(`${images.length} screenshot${images.length === 1 ? "" : "s"} added.`, "ok");
     }
@@ -910,6 +915,7 @@
     function removeScreenshot(id) {
       currentCase.inputs.screenshots = (currentCase.inputs.screenshots || []).filter((shot) => shot.id !== id);
       renderScreenshotList();
+      updateModelStatusForSelection();
       setDirty();
       setCaseStatus("Screenshot removed.");
     }
@@ -919,6 +925,7 @@
       if (!confirm("Remove all screenshots from this case?")) return;
       currentCase.inputs.screenshots = [];
       renderScreenshotList();
+      updateModelStatusForSelection();
       setDirty();
       setCaseStatus("Screenshots cleared.");
     }
@@ -966,10 +973,12 @@
       if (saved) {
         settings = {
           openrouter_api_key: saved.openrouter_api_key || "",
-          model: saved.model || DEFAULT_MODEL
+          model: saved.model || DEFAULT_MODEL,
+          vision_only_models: Boolean(saved.vision_only_models)
         };
       }
       $("apiKey").value = settings.openrouter_api_key;
+      $("visionOnlyModels").checked = settings.vision_only_models;
       populateModelSelect([], settings.model || DEFAULT_MODEL);
       updateBadges();
       if (settings.openrouter_api_key) {
@@ -980,6 +989,7 @@
     async function saveSettings() {
       settings.openrouter_api_key = $("apiKey").value.trim();
       settings.model = $("model").value.trim() || DEFAULT_MODEL;
+      settings.vision_only_models = $("visionOnlyModels").checked;
       await idbPut("settings", { id: SETTINGS_ID, ...settings });
       setCaseStatus("Settings saved locally.", "ok");
       updateBadges();
@@ -991,8 +1001,9 @@
     }
 
     async function clearSettings() {
-      settings = { openrouter_api_key: "", model: DEFAULT_MODEL };
+      settings = { openrouter_api_key: "", model: DEFAULT_MODEL, vision_only_models: false };
       $("apiKey").value = "";
+      $("visionOnlyModels").checked = false;
       openRouterModels = [];
       populateModelSelect([], DEFAULT_MODEL);
       await idbPut("settings", { id: SETTINGS_ID, ...settings });
@@ -1032,7 +1043,9 @@
         }
         populateModelSelect(openRouterModels, previousModel);
         settings.model = $("model").value || previousModel || DEFAULT_MODEL;
-        setModelStatus(`Loaded ${openRouterModels.length.toLocaleString()} OpenRouter models.`, "ok");
+        if (!$("visionOnlyModels")?.checked) {
+          setModelStatus(`Loaded ${openRouterModels.length.toLocaleString()} OpenRouter models.`, "ok");
+        }
         return openRouterModels;
       } finally {
         $("refreshModels").disabled = false;
@@ -1043,22 +1056,26 @@
     function populateModelSelect(models, selectedModel = DEFAULT_MODEL) {
       const select = $("model");
       const normalizedSelected = selectedModel || DEFAULT_MODEL;
+      const sourceModels = Array.isArray(models) ? models : [];
+      const visionOnly = $("visionOnlyModels")?.checked || false;
+      const visibleModels = visionOnly ? sourceModels.filter(isVisionCapableModel) : sourceModels;
       select.innerHTML = "";
 
       const byProvider = new Map();
-      for (const model of models) {
+      for (const model of visibleModels) {
         const id = String(model?.id || "").trim();
         if (!id) continue;
         const provider = providerFromModelId(id);
         if (!byProvider.has(provider)) byProvider.set(provider, []);
         byProvider.get(provider).push({
           id,
-          label: model?.name ? `${model.name} (${id})` : id
+          label: modelLabel(model)
         });
       }
 
       const modelIds = new Set([...byProvider.values()].flat().map((model) => model.id));
-      if (!modelIds.has(normalizedSelected)) {
+      const shouldKeepFallback = !modelIds.has(normalizedSelected) && (!visionOnly || !sourceModels.length || !visibleModels.length);
+      if (shouldKeepFallback) {
         const group = document.createElement("optgroup");
         group.label = "Current / custom";
         group.appendChild(new Option(normalizedSelected, normalizedSelected));
@@ -1075,11 +1092,55 @@
         select.appendChild(group);
       }
 
-      if (!models.length && !select.options.length) {
+      if (!sourceModels.length && !select.options.length) {
         select.appendChild(new Option(DEFAULT_MODEL, DEFAULT_MODEL));
       }
       select.value = normalizedSelected;
       if (!select.value && select.options.length) select.selectedIndex = 0;
+      settings.model = select.value || normalizedSelected;
+      updateModelStatusForSelection(sourceModels, visibleModels);
+    }
+
+    function modelLabel(model) {
+      const id = String(model?.id || "").trim();
+      const name = model?.name ? `${model.name} (${id})` : id;
+      return isVisionCapableModel(model) ? `${name} · vision` : name;
+    }
+
+    function isVisionCapableModel(modelOrId) {
+      const model = typeof modelOrId === "string" ? openRouterModels.find((item) => item?.id === modelOrId) : modelOrId;
+      if (!model) return false;
+      const values = [
+        ...(Array.isArray(model?.architecture?.input_modalities) ? model.architecture.input_modalities : []),
+        ...(Array.isArray(model?.architecture?.modality) ? model.architecture.modality : []),
+        ...(Array.isArray(model?.input_modalities) ? model.input_modalities : []),
+        model?.architecture?.modality,
+        model?.modality
+      ].flat().filter(Boolean).map((value) => String(value).toLowerCase());
+      return values.some((value) => value.includes("image") || value.includes("vision"));
+    }
+
+    function hasScreenshots() {
+      return (currentCase.inputs.screenshots || []).length > 0;
+    }
+
+    function enableVisionScopeForScreenshots() {
+      if (!$("visionOnlyModels") || $("visionOnlyModels").checked) return;
+      $("visionOnlyModels").checked = true;
+      if (openRouterModels.length) {
+        populateModelSelect(openRouterModels, $("model").value || settings.model || DEFAULT_MODEL);
+      }
+    }
+
+    function updateModelStatusForSelection(sourceModels = openRouterModels, visibleModels = sourceModels) {
+      const selected = $("model").value || settings.model || DEFAULT_MODEL;
+      if (hasScreenshots() && sourceModels.length && !isVisionCapableModel(selected)) {
+        setModelStatus("Screenshots are attached, but the selected model is not marked vision-capable by OpenRouter. Select a vision model or remove screenshots.", "error");
+        return;
+      }
+      if ($("visionOnlyModels")?.checked && sourceModels.length) {
+        setModelStatus(`Showing ${visibleModels.length.toLocaleString()} vision-capable model${visibleModels.length === 1 ? "" : "s"} from ${sourceModels.length.toLocaleString()} OpenRouter models.`, "ok");
+      }
     }
 
     function providerFromModelId(id) {
@@ -1182,6 +1243,9 @@
     async function callOpenRouter(messages, options = {}) {
       if (!settings.openrouter_api_key) throw new Error("OpenRouter API key is missing. Save a key in Settings first.");
       settings.model = $("model").value.trim() || settings.model || DEFAULT_MODEL;
+      if (hasScreenshots() && openRouterModels.length && !isVisionCapableModel(settings.model)) {
+        throw new Error("Screenshots are attached, but the selected model is not marked vision-capable by OpenRouter. Choose a vision-capable model or remove screenshots.");
+      }
       setAiRunning(true);
       setAiStatus(options.status || "Calling OpenRouter...");
       latestParseError = "";
@@ -1538,6 +1602,10 @@
       $("refreshModels").addEventListener("click", () => fetchOpenRouterModels().catch((error) => setModelStatus(error.message, "error")));
       $("model").addEventListener("change", () => {
         settings.model = $("model").value || DEFAULT_MODEL;
+        updateModelStatusForSelection();
+      });
+      $("visionOnlyModels").addEventListener("change", () => {
+        populateModelSelect(openRouterModels, $("model").value || settings.model || DEFAULT_MODEL);
       });
       $("apiKey").addEventListener("change", () => {
         if ($("apiKey").value.trim()) {
