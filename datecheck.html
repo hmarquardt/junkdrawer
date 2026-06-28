@@ -539,9 +539,9 @@
     </aside>
   </main>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.3" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.3
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.28.4" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.28.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(92, 102, 122, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · DateCheck · version 2026.06.28.4
   </footer>
 
   <script>
@@ -1014,7 +1014,7 @@
         if (!response.ok) {
           throw new Error(`OpenRouter error ${response.status}: ${rawJson.slice(0, 600)}`);
         }
-        const parsed = JSON.parse(rawJson);
+        const parsed = parseOpenRouterEnvelope(rawJson);
         const content = parsed?.choices?.[0]?.message?.content;
         if (!content) throw new Error("OpenRouter response did not include assistant content.");
         latestRawResponse = content;
@@ -1025,6 +1025,17 @@
         throw error;
       } finally {
         setAiRunning(false);
+      }
+    }
+
+    function parseOpenRouterEnvelope(rawText) {
+      try {
+        return JSON.parse(rawText);
+      } catch (error) {
+        const preview = String(rawText || "").trim().slice(0, 240) || "(empty response)";
+        latestParseError = `OpenRouter returned a non-JSON API response: ${error.message}`;
+        $("parseErrors").textContent = `${latestParseError}\n\nResponse preview:\n${preview}`;
+        throw new Error("OpenRouter returned a non-JSON response. The raw response is visible in Debug; try refreshing models and selecting a different model.");
       }
     }
 
@@ -1048,6 +1059,7 @@
       if (firstObject) candidates.push(firstObject);
       if (firstArray) candidates.push(firstArray);
       for (const candidate of candidates) {
+        if (!candidate || !/^[\[{]/.test(candidate.trim())) continue;
         try {
           const parsed = JSON.parse(candidate);
           $("parseErrors").textContent = "(none)";
@@ -1056,7 +1068,10 @@
           latestParseError = error.message;
         }
       }
-      $("parseErrors").textContent = latestParseError || "Unable to parse model response as JSON.";
+      if (!latestParseError) {
+        latestParseError = "No valid JSON object or array was found in the model response.";
+      }
+      $("parseErrors").textContent = `${latestParseError}\n\nRaw response is preserved above. Try a different model or rerun the action.`;
       throw new Error("The model response was not valid JSON. Raw output is visible in the debug panel.");
     }
 
