@@ -408,6 +408,95 @@
       display: none;
     }
 
+    .ai-layout {
+      display: grid;
+      gap: 16px;
+    }
+
+    .ai-form {
+      display: grid;
+      gap: 12px;
+    }
+
+    .ai-form textarea {
+      width: 100%;
+      min-height: 118px;
+      border: 1px solid #d9cbb8;
+      border-radius: 10px;
+      padding: 10px 12px;
+      resize: vertical;
+      color: var(--ink);
+      background: #fff;
+      font: inherit;
+    }
+
+    .ai-form textarea:focus,
+    .ai-form select:focus {
+      outline: 3px solid rgba(50, 115, 86, 0.2);
+      outline-offset: 2px;
+    }
+
+    .ai-form select {
+      width: 100%;
+      border: 1px solid #d9cbb8;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .check-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .check-row input {
+      width: auto;
+      margin: 0;
+    }
+
+    .gear-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+    }
+
+    .ai-output {
+      min-height: 76px;
+      border: 1px solid #d9cbb8;
+      border-radius: 12px;
+      background: #fffdf8;
+      padding: 12px;
+      white-space: pre-wrap;
+    }
+
+    .ai-output.loading {
+      background: var(--blue-2);
+      border-color: #bed7ee;
+    }
+
+    .ai-output.error {
+      background: var(--red-2);
+      border-color: #f2b9b3;
+      color: var(--red);
+    }
+
+    .ai-history {
+      display: grid;
+      gap: 10px;
+    }
+
+    .history-item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fffdf8;
+      padding: 10px;
+    }
+
     @media (min-width: 860px) {
       .two-col { grid-template-columns: minmax(0, 1fr) minmax(320px, 0.65fr); }
       .recipe-toolbar { grid-template-columns: minmax(260px, 0.5fr) minmax(0, 1fr); align-items: center; }
@@ -456,6 +545,7 @@
     <button class="tab-button" role="tab" aria-selected="false" aria-controls="prep" id="tab-prep" data-tab="prep">Prep Guide</button>
     <button class="tab-button" role="tab" aria-selected="false" aria-controls="shopping" id="tab-shopping" data-tab="shopping">Shopping List</button>
     <button class="tab-button" role="tab" aria-selected="false" aria-controls="emergency" id="tab-emergency" data-tab="emergency">Emergency / Call Doctor</button>
+    <button class="tab-button" role="tab" aria-selected="false" aria-controls="ai" id="tab-ai" data-tab="ai">AI Assist</button>
   </nav>
 
   <main>
@@ -685,15 +775,188 @@
         <p>If pain is increasing, food is not staying down, skin or eyes look yellow, urine looks tea-colored, stools look pale, or the person is getting weak/confused, call the care team. The pancreas is not a "walk it off" organ.</p>
       </section>
     </section>
+
+    <section id="ai" class="panel section-grid" role="tabpanel" aria-labelledby="tab-ai" hidden>
+      <section class="card callout warning">
+        <h2>AI Assist</h2>
+        <p><strong>AI Assist is for food planning and plain-English translation.</strong> It does not diagnose, treat, or replace the discharge team.</p>
+        <label class="check-row">
+          <input id="aiConsent" type="checkbox" />
+          <span>I understand this is planning help, not medical advice.</span>
+        </label>
+      </section>
+
+      <section class="card ai-form" aria-labelledby="openRouterSetupTitle">
+        <h2 id="openRouterSetupTitle">OpenRouter Setup</h2>
+        <p class="mini">Only the text you submit to AI Assist is sent to OpenRouter. The rest of this page stays in your browser. Don't paste DOB, address, insurance info, medical record numbers, or anything you wouldn't want sent to an AI service.</p>
+        <div class="three-col">
+          <label>OpenRouter API key
+            <input id="aiApiKey" type="password" autocomplete="off" placeholder="sk-or-..." />
+          </label>
+          <label>Model
+            <select id="aiModelSelect">
+              <option value="openai/gpt-4.1-mini">openai/gpt-4.1-mini</option>
+            </select>
+          </label>
+          <label>Manual model fallback
+            <input id="aiManualModel" type="text" placeholder="openai/gpt-4.1-mini" />
+          </label>
+          <label>Daily fat target
+            <input id="aiFatTarget" type="number" min="5" max="100" step="1" value="30" />
+          </label>
+          <label>Meals per day
+            <input id="aiMealsPerDay" type="number" min="1" max="8" step="1" value="4" />
+          </label>
+        </div>
+        <label>Optional patient notes
+          <textarea id="aiPatientNotes" placeholder="No dairy, hates fish, doctor said 25g/day, surgery follow-up in 6 weeks."></textarea>
+        </label>
+        <div class="actions">
+          <button class="primary" id="saveAiKey" type="button">Save key</button>
+          <button id="clearAiKey" type="button">Clear saved API key</button>
+          <button id="refreshAiModels" type="button">Refresh model list</button>
+          <button id="testAiConnection" type="button">Test connection</button>
+        </div>
+        <p id="aiSetupStatus" class="mini" role="status"></p>
+      </section>
+
+      <section class="card ai-form" data-ai-tool="meal">
+        <h2>Build a Meal From What I Have</h2>
+        <label>What ingredients do you have?
+          <textarea id="mealIngredients" placeholder="Chicken breast, rice, salsa, potatoes, carrots, fat-free yogurt..."></textarea>
+        </label>
+        <div class="gear-grid" aria-label="Available cooking gear">
+          <label class="check-row"><input type="checkbox" name="gear" value="microwave" /> microwave</label>
+          <label class="check-row"><input type="checkbox" name="gear" value="stovetop" /> stovetop</label>
+          <label class="check-row"><input type="checkbox" name="gear" value="oven" /> oven</label>
+          <label class="check-row"><input type="checkbox" name="gear" value="air fryer" /> air fryer</label>
+          <label class="check-row"><input type="checkbox" name="gear" value="rice cooker" /> rice cooker</label>
+          <label class="check-row"><input type="checkbox" name="gear" value="instant pot" /> instant pot</label>
+        </div>
+        <div class="actions"><button class="primary" data-ai-run="meal" type="button">Make this not suck</button><button data-copy-output="mealOutput" type="button">Copy result</button></div>
+        <div id="mealOutput" class="ai-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card ai-form" data-ai-tool="recipe">
+        <h2>Rewrite a Recipe</h2>
+        <label>Pasted recipe
+          <textarea id="recipePaste" placeholder="Paste the original recipe here. Oil, butter, cream, cheese, and chaos are allowed in the source."></textarea>
+        </label>
+        <label>Serving count, optional
+          <input id="recipeServings" type="number" min="1" step="1" placeholder="4" />
+        </label>
+        <div class="actions"><button class="primary" data-ai-run="recipe" type="button">Rewrite for very-low-fat</button><button data-copy-output="recipeOutput" type="button">Copy result</button></div>
+        <div id="recipeOutput" class="ai-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card ai-form" data-ai-tool="label">
+        <h2>Explain a Food Label</h2>
+        <div class="three-col">
+          <label>Fat grams per serving
+            <input id="labelFat" type="number" min="0" step="0.1" placeholder="2" />
+          </label>
+          <label>Servings per container
+            <input id="labelServings" type="number" min="0" step="0.1" placeholder="3.5" />
+          </label>
+          <label>Calories, optional
+            <input id="labelCalories" type="number" min="0" step="1" placeholder="120" />
+          </label>
+        </div>
+        <label>Product description, optional
+          <textarea id="labelDescription" placeholder="Canned soup, frozen meal, protein shake, sauce bottle..."></textarea>
+        </label>
+        <div class="actions"><button class="primary" data-ai-run="label" type="button">Explain this label</button><button data-copy-output="labelOutput" type="button">Copy result</button></div>
+        <div id="labelOutput" class="ai-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card ai-form" data-ai-tool="plan">
+        <h2>Make a 3-Day Meal Plan</h2>
+        <label>Likes / dislikes
+          <textarea id="planLikes" placeholder="Likes potatoes and spicy food. Hates fish. No dairy."></textarea>
+        </label>
+        <label>Available foods
+          <textarea id="planFoods" placeholder="Rice, chicken breast, egg whites, salsa, oatmeal, frozen vegetables..."></textarea>
+        </label>
+        <div class="three-col">
+          <label>Budget, optional
+            <input id="planBudget" type="text" placeholder="$60-ish" />
+          </label>
+          <label>Number of people, optional
+            <input id="planPeople" type="number" min="1" step="1" placeholder="1" />
+          </label>
+        </div>
+        <div class="actions"><button class="primary" data-ai-run="plan" type="button">Make 3-day plan</button><button data-copy-output="planOutput" type="button">Copy result</button></div>
+        <div id="planOutput" class="ai-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card ai-form" data-ai-tool="discharge">
+        <h2>Translate Discharge Instructions</h2>
+        <p class="callout warning mini">Remove names, DOB, addresses, MRNs, insurance info, and other private details before pasting.</p>
+        <label>Pasted instructions
+          <textarea id="dischargeText" placeholder="Paste discharge diet instructions or medication/follow-up notes here after removing private details."></textarea>
+        </label>
+        <div class="actions"><button class="primary" data-ai-run="discharge" type="button">Translate to plain English</button><button data-copy-output="dischargeOutput" type="button">Copy result</button></div>
+        <div id="dischargeOutput" class="ai-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card ai-form" data-ai-tool="eat">
+        <h2>Can I Eat This?</h2>
+        <label>Food or meal
+          <textarea id="eatFood" placeholder="Turkey sandwich with mustard, canned soup, sushi, protein bar, restaurant chicken bowl..."></textarea>
+        </label>
+        <label>Known fat grams, optional
+          <input id="eatFat" type="number" min="0" step="0.1" placeholder="8" />
+        </label>
+        <div class="actions"><button class="primary" data-ai-run="eat" type="button">Sanity check this food</button><button data-copy-output="eatOutput" type="button">Copy result</button></div>
+        <div id="eatOutput" class="ai-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card ai-form" data-ai-tool="questions">
+        <h2>Doctor Questions Builder</h2>
+        <label>Current situation / confusion
+          <textarea id="questionsSituation" placeholder="We were told no fat but not how many grams. Antibiotics for 7 days. Gallbladder surgery maybe later. What should we ask?"></textarea>
+        </label>
+        <div class="actions"><button class="primary" data-ai-run="questions" type="button">Build questions</button><button data-copy-output="questionsOutput" type="button">Copy result</button></div>
+        <div id="questionsOutput" class="ai-output" aria-live="polite"></div>
+      </section>
+
+      <section class="card">
+        <div class="actions">
+          <h2 style="margin: 0;">Recent AI Outputs</h2>
+          <button id="clearAiHistory" type="button">Clear AI history</button>
+        </div>
+        <div id="aiHistory" class="ai-history"></div>
+      </section>
+    </section>
   </main>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.29.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.29.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(100, 112, 95, 0.9); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Food That Doesn't Suck · version 2026.06.29.2
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.29.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.29.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(100, 112, 95, 0.9); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Food That Doesn't Suck · version 2026.06.29.3
   </footer>
 
   <script>
     const STORAGE_KEY = "lowFatPancreatitisGuideSettings";
+    const AI_STORAGE_KEY = "lowFatPancreatitisGuideAiSettings";
+    const AI_HISTORY_KEY = "lowFatPancreatitisGuideAiHistory";
+    const DEFAULT_AI_MODEL = "openai/gpt-4.1-mini";
+    const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+    const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+    const AI_SYSTEM_PROMPT = `You are a practical food-planning assistant for a person recovering from acute pancreatitis / possible gallstone pancreatitis who has been told to follow a very-low-fat diet. You are not a doctor and you do not diagnose, treat, or override discharge instructions. Help translate diet limits into practical meals, recipes, shopping, and questions for the care team.
+
+Rules:
+
+* If the user gives a doctor-provided fat limit, use that number.
+* If no number is given, use the page default daily fat target.
+* Treat 'no fat' as 'very-low-fat,' not literal zero fat.
+* Estimate fat conservatively.
+* Never say a food is medically safe. Use categories: 'usually low-fat,' 'measure carefully,' or 'ask the care team.'
+* Avoid recommending added oils, butter, cream, mayo, cheese, fried foods, nuts, avocado, fatty meats, and other high-fat foods during the strict phase.
+* Prefer lean proteins, starches, fruits, vegetables, broth-based soups, fat-free dairy if tolerated, herbs, spices, citrus, salsa, vinegar, mustard, hot sauce, and other low-fat flavor boosters.
+* Always mention hidden-fat traps when relevant.
+* Keep the tone warm, practical, lightly funny, and not clinical.
+* Include urgent red flags when discharge instructions or symptoms are discussed: fever, jaundice, worsening abdominal pain, persistent vomiting, confusion, weakness, dark urine/pale stools, or inability to keep fluids down.
+* End with 1-3 useful questions to ask the doctor/dietitian when appropriate.`;
     const tabs = [...document.querySelectorAll(".tab-button")];
     const panels = [...document.querySelectorAll(".panel")];
     const tagSet = ["chicken", "turkey", "fish", "vegetarian-ish", "breakfast", "soup", "fast", "batch prep"];
@@ -1008,6 +1271,485 @@
       `).join("");
     }
 
+    function getAiSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(AI_STORAGE_KEY) || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    function persistAiSettings(partial = {}) {
+      const next = { ...getAiSettings(), ...partial };
+      localStorage.setItem(AI_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    }
+
+    function getOpenRouterKey() {
+      return document.getElementById("aiApiKey")?.value.trim() || getAiSettings().apiKey || "";
+    }
+
+    function saveOpenRouterKey() {
+      const apiKey = document.getElementById("aiApiKey").value.trim();
+      if (!apiKey) {
+        setAiStatus("Paste an OpenRouter API key before saving.");
+        return;
+      }
+      persistAiSettings({ apiKey });
+      setAiStatus("API key saved locally in this browser.");
+    }
+
+    function clearOpenRouterKey() {
+      persistAiSettings({ apiKey: "" });
+      document.getElementById("aiApiKey").value = "";
+      setAiStatus("Saved API key cleared.");
+    }
+
+    function getSelectedModel() {
+      const manual = document.getElementById("aiManualModel")?.value.trim();
+      const selected = document.getElementById("aiModelSelect")?.value;
+      return manual || selected || getAiSettings().model || DEFAULT_AI_MODEL;
+    }
+
+    function saveSelectedModel() {
+      persistAiSettings({
+        model: getSelectedModel(),
+        manualModel: document.getElementById("aiManualModel").value.trim()
+      });
+    }
+
+    async function fetchOpenRouterModels() {
+      const select = document.getElementById("aiModelSelect");
+      const current = getSelectedModel();
+      setAiStatus("Refreshing model list...");
+      try {
+        const headers = {};
+        const apiKey = getOpenRouterKey();
+        if (apiKey) persistAiSettings({ apiKey });
+        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+        const response = await fetch(OPENROUTER_MODELS_URL, { headers });
+        if (!response.ok) throw new Error(`OpenRouter returned ${response.status}`);
+        const payload = await response.json();
+        const ids = (payload.data || [])
+          .map((model) => model.id)
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+        const uniqueIds = [...new Set([DEFAULT_AI_MODEL, current, ...ids].filter(Boolean))];
+        populateModelSelect(uniqueIds);
+        select.value = uniqueIds.includes(current) ? current : DEFAULT_AI_MODEL;
+        saveSelectedModel();
+        setAiStatus(`Loaded ${ids.length} OpenRouter models. Manual model entry still works.`);
+      } catch (error) {
+        ensureModelOption(current);
+        setAiStatus(`Could not refresh models: ${error.message}. You can type a model manually.`);
+      }
+    }
+
+    function populateModelSelect(modelIds) {
+      const select = document.getElementById("aiModelSelect");
+      const grouped = modelIds.reduce((groups, id) => {
+        const provider = id.includes("/") ? id.split("/")[0] : "other";
+        if (!groups[provider]) groups[provider] = [];
+        groups[provider].push(id);
+        return groups;
+      }, {});
+      select.replaceChildren();
+      Object.keys(grouped).sort((a, b) => a.localeCompare(b)).forEach((provider) => {
+        const group = document.createElement("optgroup");
+        group.label = provider;
+        grouped[provider].sort((a, b) => a.localeCompare(b)).forEach((id) => {
+          group.append(new Option(id, id));
+        });
+        select.append(group);
+      });
+    }
+
+    function ensureModelOption(modelId) {
+      const select = document.getElementById("aiModelSelect");
+      const wanted = modelId || DEFAULT_AI_MODEL;
+      const values = [...select.options].map((option) => option.value);
+      if (!values.includes(wanted)) {
+        select.add(new Option(wanted, wanted));
+      }
+      select.value = wanted;
+    }
+
+    function buildSharedMedicalDietContext(mode, userInput, extraFields = {}) {
+      const target = clamp(Number(document.getElementById("aiFatTarget").value) || 30, 5, 100);
+      const meals = clamp(Number(document.getElementById("aiMealsPerDay").value) || 4, 1, 8);
+      const perMeal = target / meals;
+      const notes = document.getElementById("aiPatientNotes").value.trim() || "None provided.";
+      return [
+        `Selected tool: ${mode}`,
+        `Daily fat target: ${target}g/day`,
+        `Meals per day: ${meals}`,
+        `Estimated fat budget per meal: ${perMeal.toFixed(perMeal % 1 ? 1 : 0)}g`,
+        `Patient notes: ${notes}`,
+        `Extra fields: ${JSON.stringify(extraFields, null, 2)}`,
+        "",
+        "User input:",
+        userInput
+      ].join("\n");
+    }
+
+    async function callOpenRouter({ mode, userInput, extraFields = {} }) {
+      if (!document.getElementById("aiConsent").checked) {
+        throw new Error("Check the planning-help acknowledgement before using AI Assist.");
+      }
+      const apiKey = getOpenRouterKey();
+      if (!apiKey) throw new Error("Add and save your OpenRouter API key first.");
+      const model = getSelectedModel();
+      if (!model) throw new Error("Choose a model or type one manually.");
+      const context = buildSharedMedicalDietContext(mode, userInput, extraFields);
+      setAiButtonsDisabled(true);
+      try {
+        const response = await fetch(OPENROUTER_CHAT_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": window.location.href,
+            "X-Title": "Food That Doesn't Suck"
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "system", content: AI_SYSTEM_PROMPT },
+              { role: "user", content: context }
+            ],
+            temperature: 0.4,
+            max_tokens: 1200
+          })
+        });
+        const rawText = await response.text();
+        let payload;
+        try {
+          payload = JSON.parse(rawText);
+        } catch {
+          throw new Error(`OpenRouter returned a non-JSON response: ${rawText.slice(0, 160)}`);
+        }
+        if (!response.ok) {
+          throw new Error(payload.error?.message || `OpenRouter returned ${response.status}`);
+        }
+        const content = payload.choices?.[0]?.message?.content?.trim();
+        if (!content) throw new Error("The model returned an empty response.");
+        return content;
+      } finally {
+        setAiButtonsDisabled(false);
+      }
+    }
+
+    function renderAIOutput(targetId, text, state = "ready") {
+      const target = document.getElementById(targetId);
+      target.classList.toggle("loading", state === "loading");
+      target.classList.toggle("error", state === "error");
+      target.textContent = text || "";
+    }
+
+    async function copyOutput(targetId) {
+      const text = document.getElementById(targetId).textContent.trim();
+      if (!text) {
+        setAiStatus("Nothing to copy yet.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        setAiStatus("Copied result.");
+      } catch {
+        setAiStatus("Copy failed. Select the text and copy it manually.");
+      }
+    }
+
+    function setAiStatus(message) {
+      document.getElementById("aiSetupStatus").textContent = message;
+    }
+
+    function setAiButtonsDisabled(disabled) {
+      document.querySelectorAll("[data-ai-run], #testAiConnection, #refreshAiModels").forEach((button) => {
+        button.disabled = disabled;
+      });
+    }
+
+    function buildLabelMath() {
+      const fat = Number(document.getElementById("labelFat").value);
+      const servings = Number(document.getElementById("labelServings").value);
+      if (!Number.isFinite(fat) || fat < 0 || !Number.isFinite(servings) || servings <= 0) {
+        throw new Error("Enter fat grams per serving and servings per container first.");
+      }
+      const target = clamp(Number(document.getElementById("aiFatTarget").value) || 30, 5, 100);
+      const meals = clamp(Number(document.getElementById("aiMealsPerDay").value) || 4, 1, 8);
+      const perMeal = target / meals;
+      const total = fat * servings;
+      return [
+        `Local math:`,
+        `- Fat per serving: ${fat.toFixed(fat % 1 ? 1 : 0)}g`,
+        `- Servings per container: ${servings}`,
+        `- Total package fat: ${total.toFixed(total % 1 ? 1 : 0)}g`,
+        `- One serving uses ${((fat / target) * 100).toFixed(0)}% of the ${target}g daily target.`,
+        `- One serving uses ${((fat / perMeal) * 100).toFixed(0)}% of the ${perMeal.toFixed(perMeal % 1 ? 1 : 0)}g per-meal estimate.`,
+        `- Whole package uses ${((total / target) * 100).toFixed(0)}% of the daily target.`
+      ].join("\n");
+    }
+
+    function getPromptForMode(mode) {
+      const prompts = {
+        meal: `Create 3 very-low-fat meal ideas using these ingredients. Keep each meal under the per-meal fat target if possible. Include rough fat estimates, short steps, flavor boosters, and hidden-fat warnings. Be practical and lightly funny.
+
+Output format:
+Meal 1 / Meal 2 / Meal 3
+Ingredients used
+Steps
+Estimated fat
+Flavor boosters
+Don't accidentally ruin it with...`,
+        recipe: `Rewrite this recipe for a very-low-fat pancreatitis recovery diet. Keep the spirit of the recipe but remove or replace high-fat ingredients. Estimate fat per serving. List what changed and why.
+
+Output format:
+Friendly summary
+Revised ingredients
+Revised steps
+Estimated fat per serving
+Swaps made
+Hidden-fat traps`,
+        label: `Explain this food label for someone on a very-low-fat diet. Include total package fat, percent of daily target, percent of per-meal target, whether it is usually low-fat / measure carefully / ask the care team, and any serving-size traps.
+
+Output format:
+Math
+Plain-English verdict
+How to use it, if at all
+Watch-outs`,
+        plan: `Create a realistic 3-day very-low-fat meal plan using the daily fat target. Include breakfast, lunch, dinner, and one snack per day. Include rough fat estimates, batch prep notes, and a grouped shopping list. Avoid punishment food.
+
+Output format:
+Day 1 / Day 2 / Day 3
+Fat estimate per meal and day
+Batch prep
+Shopping list
+Notes`,
+        discharge: `Translate these discharge instructions into plain English. Do not add medical advice beyond the text. Identify what to do today, what to avoid, what follow-up may be needed, red flags, and questions to ask the care team.
+
+Output format:
+What this means
+What to do today
+What to avoid
+Call doctor / ER if...
+Questions to ask`,
+        eat: `Evaluate this food or meal for a very-low-fat pancreatitis recovery diet. Do not call it safe. Classify it as usually low-fat, measure carefully, or ask the care team. Explain why, estimate fat if possible, suggest lower-fat swaps, and identify hidden-fat traps.
+
+Output format:
+Category
+Why
+Approx fat concern
+Better version
+Ask the care team if...`,
+        questions: `Turn this situation into clear questions for the doctor, surgeon, GI doctor, or dietitian. Focus on fat gram target, duration, antibiotics, gallbladder plan, follow-up imaging/labs, red flags, and diet progression.
+
+Output format:
+Top 5 questions
+Optional follow-up questions
+Bring this info to the appointment`
+      };
+      return prompts[mode] || "";
+    }
+
+    function getAiToolPayload(mode) {
+      if (mode === "meal") {
+        const gear = [...document.querySelectorAll("input[name='gear']:checked")].map((box) => box.value);
+        return {
+          outputId: "mealOutput",
+          userInput: document.getElementById("mealIngredients").value.trim(),
+          extraFields: { gear, prompt: getPromptForMode(mode) }
+        };
+      }
+      if (mode === "recipe") {
+        return {
+          outputId: "recipeOutput",
+          userInput: document.getElementById("recipePaste").value.trim(),
+          extraFields: { servings: document.getElementById("recipeServings").value.trim(), prompt: getPromptForMode(mode) }
+        };
+      }
+      if (mode === "label") {
+        const localMath = buildLabelMath();
+        const product = document.getElementById("labelDescription").value.trim();
+        return {
+          outputId: "labelOutput",
+          userInput: [product || "No product description provided.", localMath].join("\n\n"),
+          extraFields: {
+            calories: document.getElementById("labelCalories").value.trim(),
+            localMath,
+            prompt: getPromptForMode(mode)
+          }
+        };
+      }
+      if (mode === "plan") {
+        return {
+          outputId: "planOutput",
+          userInput: [
+            `Likes/dislikes: ${document.getElementById("planLikes").value.trim() || "Not provided."}`,
+            `Available foods: ${document.getElementById("planFoods").value.trim() || "Not provided."}`
+          ].join("\n"),
+          extraFields: {
+            budget: document.getElementById("planBudget").value.trim(),
+            people: document.getElementById("planPeople").value.trim(),
+            prompt: getPromptForMode(mode)
+          }
+        };
+      }
+      if (mode === "discharge") {
+        return {
+          outputId: "dischargeOutput",
+          userInput: document.getElementById("dischargeText").value.trim(),
+          extraFields: { prompt: getPromptForMode(mode) }
+        };
+      }
+      if (mode === "eat") {
+        return {
+          outputId: "eatOutput",
+          userInput: document.getElementById("eatFood").value.trim(),
+          extraFields: { knownFatGrams: document.getElementById("eatFat").value.trim(), prompt: getPromptForMode(mode) }
+        };
+      }
+      if (mode === "questions") {
+        return {
+          outputId: "questionsOutput",
+          userInput: document.getElementById("questionsSituation").value.trim(),
+          extraFields: { prompt: getPromptForMode(mode) }
+        };
+      }
+      throw new Error("Unknown AI tool.");
+    }
+
+    async function runAiTool(mode) {
+      let payload;
+      try {
+        payload = getAiToolPayload(mode);
+        if (!payload.userInput.trim()) throw new Error("Add a little input first.");
+        if (mode === "label" && (!getOpenRouterKey() || !document.getElementById("aiConsent").checked)) {
+          renderAIOutput("labelOutput", `${payload.extraFields.localMath}\n\nAdd an API key and check the acknowledgement for the AI plain-English explanation.`, "ready");
+          return;
+        }
+        renderAIOutput(payload.outputId, "Working on it...", "loading");
+        const result = await callOpenRouter({
+          mode,
+          userInput: `${payload.extraFields.prompt}\n\n${payload.userInput}`,
+          extraFields: payload.extraFields
+        });
+        renderAIOutput(payload.outputId, result, "ready");
+        saveAiHistory(mode, result);
+      } catch (error) {
+        const outputId = payload?.outputId || "aiSetupStatus";
+        if (outputId === "aiSetupStatus") setAiStatus(error.message);
+        else renderAIOutput(outputId, error.message, "error");
+      }
+    }
+
+    async function testOpenRouterConnection() {
+      setAiStatus("");
+      try {
+        if (!document.getElementById("aiConsent").checked) throw new Error("Check the planning-help acknowledgement before testing.");
+        renderAIOutput("mealOutput", "", "ready");
+        setAiButtonsDisabled(true);
+        const result = await callOpenRouter({
+          mode: "connection test",
+          userInput: "Reply with one short sentence that says the connection works.",
+          extraFields: { purpose: "OpenRouter setup test" }
+        });
+        setAiStatus(`Connection works. Model replied: ${result.slice(0, 160)}`);
+      } catch (error) {
+        setAiStatus(error.message);
+      } finally {
+        setAiButtonsDisabled(false);
+      }
+    }
+
+    function saveAiHistory(mode, text) {
+      let history = [];
+      try {
+        history = JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || "[]");
+      } catch {}
+      history.unshift({
+        mode,
+        text,
+        timestamp: new Date().toLocaleString()
+      });
+      localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(history.slice(0, 5)));
+      renderAiHistory();
+    }
+
+    function renderAiHistory() {
+      const container = document.getElementById("aiHistory");
+      let history = [];
+      try {
+        history = JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || "[]");
+      } catch {}
+      container.replaceChildren();
+      if (!history.length) {
+        const empty = document.createElement("p");
+        empty.className = "mini";
+        empty.textContent = "No AI outputs saved yet.";
+        container.append(empty);
+        return;
+      }
+      history.forEach((item) => {
+        const article = document.createElement("article");
+        article.className = "history-item";
+        const title = document.createElement("strong");
+        title.textContent = `${item.mode} · ${item.timestamp}`;
+        const body = document.createElement("pre");
+        body.className = "ai-output";
+        body.textContent = item.text;
+        article.append(title, body);
+        container.append(article);
+      });
+    }
+
+    function loadAiSettings() {
+      const saved = getAiSettings();
+      const fatTarget = saved.fatTarget || document.getElementById("fatTarget").value || "30";
+      const mealsPerDay = saved.mealsPerDay || document.getElementById("mealCount").value || "4";
+      document.getElementById("aiApiKey").value = saved.apiKey || "";
+      document.getElementById("aiManualModel").value = saved.manualModel || "";
+      document.getElementById("aiFatTarget").value = fatTarget;
+      document.getElementById("aiMealsPerDay").value = mealsPerDay;
+      document.getElementById("aiPatientNotes").value = saved.patientNotes || "";
+      document.getElementById("aiConsent").checked = Boolean(saved.consent);
+      ensureModelOption(saved.model || DEFAULT_AI_MODEL);
+    }
+
+    function saveAiFormSettings() {
+      persistAiSettings({
+        model: getSelectedModel(),
+        manualModel: document.getElementById("aiManualModel").value.trim(),
+        fatTarget: document.getElementById("aiFatTarget").value,
+        mealsPerDay: document.getElementById("aiMealsPerDay").value,
+        patientNotes: document.getElementById("aiPatientNotes").value,
+        consent: document.getElementById("aiConsent").checked
+      });
+    }
+
+    function bindAiEvents() {
+      document.getElementById("saveAiKey").addEventListener("click", saveOpenRouterKey);
+      document.getElementById("clearAiKey").addEventListener("click", clearOpenRouterKey);
+      document.getElementById("refreshAiModels").addEventListener("click", fetchOpenRouterModels);
+      document.getElementById("testAiConnection").addEventListener("click", testOpenRouterConnection);
+      document.getElementById("aiModelSelect").addEventListener("change", saveSelectedModel);
+      ["aiManualModel", "aiFatTarget", "aiMealsPerDay", "aiPatientNotes"].forEach((id) => {
+        document.getElementById(id).addEventListener("input", saveAiFormSettings);
+      });
+      document.getElementById("aiConsent").addEventListener("change", saveAiFormSettings);
+      document.querySelectorAll("[data-ai-run]").forEach((button) => {
+        button.addEventListener("click", () => runAiTool(button.dataset.aiRun));
+      });
+      document.querySelectorAll("[data-copy-output]").forEach((button) => {
+        button.addEventListener("click", () => copyOutput(button.dataset.copyOutput));
+      });
+      document.getElementById("clearAiHistory").addEventListener("click", () => {
+        localStorage.removeItem(AI_HISTORY_KEY);
+        renderAiHistory();
+        setAiStatus("AI history cleared.");
+      });
+    }
+
     function initTabs() {
       tabs.forEach((tab, index) => {
         tab.addEventListener("click", () => activateTab(tab.dataset.tab));
@@ -1036,6 +1778,9 @@
       renderRecipes();
       renderShopping();
       loadSettings();
+      loadAiSettings();
+      renderAiHistory();
+      bindAiEvents();
       updateBudget();
       document.getElementById("fatTarget").addEventListener("input", updateBudget);
       document.getElementById("mealCount").addEventListener("input", updateBudget);
