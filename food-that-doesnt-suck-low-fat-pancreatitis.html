@@ -788,7 +788,7 @@
 
       <section class="card ai-form" aria-labelledby="openRouterSetupTitle">
         <h2 id="openRouterSetupTitle">OpenRouter Setup</h2>
-        <p class="mini">Only the text you submit to AI Assist is sent to OpenRouter. The rest of this page stays in your browser. Don't paste DOB, address, insurance info, medical record numbers, or anything you wouldn't want sent to an AI service.</p>
+        <p class="mini">Only the text you submit to AI Assist is sent to OpenRouter. The rest of this page stays in your browser. Don't paste DOB, address, insurance info, medical record numbers, or anything you wouldn't want sent to an AI service. Need the plain-English setup version? Open <a href="openrouter.html">What the Heck Is an OpenRouter Key?</a>.</p>
         <div class="three-col">
           <label>OpenRouter API key
             <input id="aiApiKey" type="password" autocomplete="off" placeholder="sk-or-..." />
@@ -797,9 +797,6 @@
             <select id="aiModelSelect">
               <option value="openai/gpt-4.1-mini">openai/gpt-4.1-mini</option>
             </select>
-          </label>
-          <label>Manual model fallback
-            <input id="aiManualModel" type="text" placeholder="openai/gpt-4.1-mini" />
           </label>
           <label>Daily fat target
             <input id="aiFatTarget" type="number" min="5" max="100" step="1" value="30" />
@@ -930,9 +927,9 @@
     </section>
   </main>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.29.3" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.29.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(100, 112, 95, 0.9); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Food That Doesn't Suck · version 2026.06.29.3
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.29.4" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.29.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(100, 112, 95, 0.9); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Food That Doesn't Suck · version 2026.06.29.4
   </footer>
 
   <script>
@@ -1289,14 +1286,15 @@ Rules:
       return document.getElementById("aiApiKey")?.value.trim() || getAiSettings().apiKey || "";
     }
 
-    function saveOpenRouterKey() {
+    async function saveOpenRouterKey() {
       const apiKey = document.getElementById("aiApiKey").value.trim();
       if (!apiKey) {
         setAiStatus("Paste an OpenRouter API key before saving.");
         return;
       }
       persistAiSettings({ apiKey });
-      setAiStatus("API key saved locally in this browser.");
+      setAiStatus("API key saved locally. Refreshing model list...");
+      await fetchOpenRouterModels({ fromSave: true });
     }
 
     function clearOpenRouterKey() {
@@ -1306,19 +1304,17 @@ Rules:
     }
 
     function getSelectedModel() {
-      const manual = document.getElementById("aiManualModel")?.value.trim();
       const selected = document.getElementById("aiModelSelect")?.value;
-      return manual || selected || getAiSettings().model || DEFAULT_AI_MODEL;
+      return selected || getAiSettings().model || DEFAULT_AI_MODEL;
     }
 
     function saveSelectedModel() {
       persistAiSettings({
-        model: getSelectedModel(),
-        manualModel: document.getElementById("aiManualModel").value.trim()
+        model: getSelectedModel()
       });
     }
 
-    async function fetchOpenRouterModels() {
+    async function fetchOpenRouterModels({ fromSave = false } = {}) {
       const select = document.getElementById("aiModelSelect");
       const current = getSelectedModel();
       setAiStatus("Refreshing model list...");
@@ -1338,10 +1334,10 @@ Rules:
         populateModelSelect(uniqueIds);
         select.value = uniqueIds.includes(current) ? current : DEFAULT_AI_MODEL;
         saveSelectedModel();
-        setAiStatus(`Loaded ${ids.length} OpenRouter models. Manual model entry still works.`);
+        setAiStatus(`${fromSave ? "API key saved locally. " : ""}Loaded ${ids.length} OpenRouter models.`);
       } catch (error) {
         ensureModelOption(current);
-        setAiStatus(`Could not refresh models: ${error.message}. You can type a model manually.`);
+        setAiStatus(`Could not refresh models: ${error.message}. The saved/default model is still available.`);
       }
     }
 
@@ -1708,7 +1704,6 @@ Bring this info to the appointment`
       const fatTarget = saved.fatTarget || document.getElementById("fatTarget").value || "30";
       const mealsPerDay = saved.mealsPerDay || document.getElementById("mealCount").value || "4";
       document.getElementById("aiApiKey").value = saved.apiKey || "";
-      document.getElementById("aiManualModel").value = saved.manualModel || "";
       document.getElementById("aiFatTarget").value = fatTarget;
       document.getElementById("aiMealsPerDay").value = mealsPerDay;
       document.getElementById("aiPatientNotes").value = saved.patientNotes || "";
@@ -1719,7 +1714,6 @@ Bring this info to the appointment`
     function saveAiFormSettings() {
       persistAiSettings({
         model: getSelectedModel(),
-        manualModel: document.getElementById("aiManualModel").value.trim(),
         fatTarget: document.getElementById("aiFatTarget").value,
         mealsPerDay: document.getElementById("aiMealsPerDay").value,
         patientNotes: document.getElementById("aiPatientNotes").value,
@@ -1733,7 +1727,7 @@ Bring this info to the appointment`
       document.getElementById("refreshAiModels").addEventListener("click", fetchOpenRouterModels);
       document.getElementById("testAiConnection").addEventListener("click", testOpenRouterConnection);
       document.getElementById("aiModelSelect").addEventListener("change", saveSelectedModel);
-      ["aiManualModel", "aiFatTarget", "aiMealsPerDay", "aiPatientNotes"].forEach((id) => {
+      ["aiFatTarget", "aiMealsPerDay", "aiPatientNotes"].forEach((id) => {
         document.getElementById(id).addEventListener("input", saveAiFormSettings);
       });
       document.getElementById("aiConsent").addEventListener("change", saveAiFormSettings);
