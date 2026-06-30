@@ -109,6 +109,21 @@
     .card h2 { margin: 0 0 10px; font-size: 1rem; }
     .card h3 { margin: 14px 0 8px; font-size: 0.92rem; color: var(--muted); }
     .section-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .payload-tools { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .task-timer {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 66px;
+      border: 1px solid rgba(36,95,115,0.25);
+      background: #fff;
+      color: var(--accent);
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+    }
+    .task-timer.hot { color: var(--warn); border-color: rgba(161,92,9,.35); background: #fff5df; }
     .help { color: var(--muted); font-size: 0.9rem; line-height: 1.45; }
     .callout {
       border-left: 4px solid var(--accent);
@@ -237,9 +252,12 @@
           <section class="card">
             <div class="section-title">
               <h2>Bookmarklet Payload</h2>
-              <button id="pasteBtn" class="btn icon secondary" type="button" title="Paste from clipboard" aria-label="Paste from clipboard">📋</button>
+              <div class="payload-tools">
+                <span id="taskTimer" class="task-timer" title="Task cadence timer. Aim for a 12-15 minute average.">0:00</span>
+                <button id="pasteBtn" class="btn icon secondary" type="button" title="Paste from clipboard" aria-label="Paste from clipboard">📋</button>
+              </div>
             </div>
-            <p class="help">Run the bookmarklet on the ADU-Bench task page, open this verifier, click the paste icon, then Evaluate. Optionally run Sniff Test before copying fields back.</p>
+            <p class="help">Run the bookmarklet on the ADU-Bench task page, open this verifier, click the paste icon, then Evaluate. The timer resets when a new payload is pasted so you can keep an eye on the 12-15 minute average cadence.</p>
             <label for="payloadInput">Pasted ADU-Bench task text
               <textarea id="payloadInput" class="mono" rows="18" placeholder="Paste the copied ADU-Bench task text here. Include the question, AI-generated answer, evidence pages, and doc/page labels."></textarea>
             </label>
@@ -414,9 +432,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.30.3" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.30.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(117, 107, 94, 0.9); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt · ADU-Bench Verifier · version 2026.06.30.3
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.30.4" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.30.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(117, 107, 94, 0.9); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · ADU-Bench Verifier · version 2026.06.30.4
     </footer>
   </div>
 
@@ -502,6 +520,9 @@ Use the ADU-Bench tab/document label and page number for every quote and page re
     let currentRun = null;
     let history = [];
     let suppressManualChange = false;
+    let taskTimerStartedAt = null;
+    let taskTimerInterval = null;
+    let timerPayloadText = "";
 
     const $ = (id) => document.getElementById(id);
 
@@ -515,6 +536,28 @@ Use the ADU-Bench tab/document label and page number for every quote and page re
       const el = $("adminStatus");
       el.textContent = message;
       el.className = `status ${type}`.trim();
+    }
+
+    function formatElapsed(ms) {
+      const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    function updateTaskTimer() {
+      const elapsed = taskTimerStartedAt ? Date.now() - taskTimerStartedAt : 0;
+      const timer = $("taskTimer");
+      timer.textContent = formatElapsed(elapsed);
+      timer.classList.toggle("hot", elapsed >= 12 * 60 * 1000);
+    }
+
+    function resetTaskTimer(payloadText = "") {
+      if (taskTimerInterval) clearInterval(taskTimerInterval);
+      timerPayloadText = payloadText.trim();
+      taskTimerStartedAt = timerPayloadText ? Date.now() : null;
+      updateTaskTimer();
+      if (taskTimerStartedAt) taskTimerInterval = setInterval(updateTaskTimer, 1000);
     }
 
     function playAudioCue() {
@@ -1048,7 +1091,7 @@ ${currentRun.primaryRawResponse || ""}`;
         if (!navigator.clipboard?.readText) throw new Error("Clipboard API unavailable.");
         const text = await navigator.clipboard.readText();
         $("payloadInput").value = text;
-        handlePayloadInput();
+        handlePayloadInput({ forceNewPayload: true });
         setStatus("Pasted from clipboard.", "ok");
       } catch {
         $("payloadInput").focus();
@@ -1077,11 +1120,20 @@ ${currentRun.primaryRawResponse || ""}`;
       updateBadges();
     }
 
-    function handlePayloadInput() {
+    function handlePayloadInput({ forceNewPayload = false } = {}) {
       const text = $("payloadInput").value.trim();
-      if (currentRun && text !== (currentRun.pastedPayload || "").trim()) {
+      const changedFromRun = currentRun && text !== (currentRun.pastedPayload || "").trim();
+      const newTimedPayload = text && text !== timerPayloadText;
+      if (forceNewPayload && newTimedPayload) {
         clearResultsForNewPayload();
+        resetTaskTimer(text);
+        setStatus("New task timer started.", "ok");
+      } else if (changedFromRun) {
+        clearResultsForNewPayload();
+        resetTaskTimer(text);
         setStatus("New task detected. Prior results cleared.", "ok");
+      } else if (!text) {
+        resetTaskTimer("");
       }
       previewPayloadMetadata();
     }
@@ -1106,6 +1158,7 @@ ${currentRun.primaryRawResponse || ""}`;
       EMPTY_META_IDS.forEach((id) => $(id).textContent = "-");
       $("sniffSection").classList.add("hidden");
       $("sniffBtn").disabled = true;
+      resetTaskTimer("");
       renderVerdictBadge("");
       renderSniff(null, "");
       updateBadges();
@@ -1254,7 +1307,10 @@ ${currentRun.primaryRawResponse || ""}`;
       $("clearBtn").addEventListener("click", clearEvaluate);
       $("copyAllBtn").addEventListener("click", copyAllResults);
       $("useCorrectionBtn").addEventListener("click", useSniffCorrection);
-      $("payloadInput").addEventListener("input", handlePayloadInput);
+      $("payloadInput").addEventListener("input", () => handlePayloadInput());
+      $("payloadInput").addEventListener("paste", () => {
+        setTimeout(() => handlePayloadInput({ forceNewPayload: true }), 0);
+      });
       document.querySelectorAll("[data-copy-field]").forEach((button) => {
         button.addEventListener("click", () => copyText($(button.dataset.copyField).value, `${button.dataset.copyField.replace("Output", "")} copied.`));
       });
