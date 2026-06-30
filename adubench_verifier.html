@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ADU-Bench Verifier</title>
+  <meta name="description" content="Local-first helper for ADU-Bench QA verification with OpenRouter evaluation, sniff-test review, and IndexedDB history." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>" />
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root {
+      --bg: #f6f2ea;
+      --panel: #fffdf8;
+      --panel-2: #fdf8ee;
+      --ink: #24201b;
+      --muted: #756b5e;
+      --line: #dccfbb;
+      --accent: #245f73;
+      --accent-2: #1f7a5c;
+      --warn: #a15c09;
+      --danger: #b93226;
+      --good: #23704d;
+      --shadow: 0 18px 40px rgba(70, 51, 26, 0.10);
+      --radius: 10px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--bg); color: var(--ink); }
+    body { margin: 0; min-height: 100vh; }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    textarea { resize: vertical; min-height: 96px; }
+    a { color: var(--accent); font-weight: 700; }
+
+    .shell { width: min(1420px, calc(100% - 24px)); margin: 0 auto; padding: 18px 0 28px; }
+    header {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding: 18px;
+      background: linear-gradient(135deg, #fffdf8, #f4e7d2);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: clamp(1.6rem, 3vw, 2.6rem); letter-spacing: -0.02em; }
+    .subtitle { margin: 4px 0 0; color: var(--muted); max-width: 760px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .badge.good { color: var(--good); border-color: rgba(35,112,77,.35); background: #eef9f0; }
+    .badge.warn { color: var(--warn); border-color: rgba(161,92,9,.35); background: #fff5df; }
+    .badge.bad { color: var(--danger); border-color: rgba(185,50,38,.35); background: #fff0ed; }
+    .badge.info { color: var(--accent); border-color: rgba(36,95,115,.35); background: #eef8fb; }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.65);
+      width: fit-content;
+      max-width: 100%;
+    }
+    .tab {
+      border: 0;
+      border-radius: 999px;
+      padding: 9px 14px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .tab[aria-selected="true"] { background: var(--accent); color: #fff; }
+
+    .panel { display: grid; gap: 14px; }
+    .panel[hidden] { display: none; }
+    .grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 0.9fr); gap: 14px; align-items: start; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    @media (max-width: 980px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .tabs { width: 100%; border-radius: 14px; }
+      .tab { flex: 1; }
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 24px rgba(70, 51, 26, 0.06);
+      padding: 16px;
+    }
+    .card h2 { margin: 0 0 10px; font-size: 1rem; }
+    .card h3 { margin: 14px 0 8px; font-size: 0.92rem; color: var(--muted); }
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .help { color: var(--muted); font-size: 0.9rem; line-height: 1.45; }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #eff8fb;
+      padding: 11px 12px;
+      border-radius: 8px;
+      color: #244753;
+    }
+    .callout.warn { border-color: var(--warn); background: #fff4df; color: #68420b; }
+
+    label { display: grid; gap: 6px; color: var(--muted); font-weight: 800; font-size: 0.85rem; }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 9px;
+      padding: 10px 11px;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(36,95,115,0.14); }
+    textarea.mono, pre.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .actions.spread { justify-content: space-between; }
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 9px;
+      padding: 9px 12px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 850;
+    }
+    .btn.secondary { background: #fff; color: var(--accent); border-color: rgba(36,95,115,0.25); }
+    .btn.good { background: var(--good); }
+    .btn.warn { background: var(--warn); }
+    .btn.danger { background: var(--danger); }
+    .btn.icon { min-width: 42px; padding: 9px; }
+    .btn.small { padding: 6px 9px; font-size: 0.82rem; }
+
+    .status {
+      min-height: 24px;
+      padding: 8px 10px;
+      border-radius: 9px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .status.error { color: var(--danger); background: #fff0ed; border-color: rgba(185,50,38,.28); }
+    .status.ok { color: var(--good); background: #eef9f0; border-color: rgba(35,112,77,.28); }
+
+    .output-grid { display: grid; gap: 12px; }
+    .output-card {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .output-card textarea { min-height: 76px; background: #fff; }
+    .output-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .output-head strong { font-size: 0.92rem; }
+    details { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 10px 12px; }
+    details summary { cursor: pointer; font-weight: 850; color: var(--accent); }
+    pre {
+      margin: 10px 0 0;
+      white-space: pre-wrap;
+      overflow: auto;
+      max-height: 360px;
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+
+    .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .meta-item { background: #fff; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+    .meta-item span { display: block; color: var(--muted); font-size: 0.74rem; font-weight: 850; text-transform: uppercase; letter-spacing: 0.05em; }
+    .meta-item strong { display: block; margin-top: 2px; font-size: 0.9rem; overflow-wrap: anywhere; }
+
+    .sniff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    @media (max-width: 780px) { .sniff-grid { grid-template-columns: 1fr; } }
+    .sniff-box { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .sniff-box strong { display: block; margin-bottom: 6px; color: var(--muted); font-size: 0.82rem; }
+    .sniff-box pre { margin: 0; max-height: 220px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 850; background: #fff8ee; }
+    tr:hover td { background: rgba(36,95,115,0.04); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .row-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 190px; }
+
+    .prompt-area { min-height: 260px; }
+    .setting-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    @media (max-width: 760px) { .setting-row { grid-template-columns: 1fr; } }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="title-row">
+        <div>
+          <h1>ADU-Bench Verifier</h1>
+          <p class="subtitle">Local-first QA helper for pasted ADU-Bench tasks. Evaluate evidence, run a second-model sniff test, and copy paste-ready fields back into the annotation form.</p>
+        </div>
+        <div class="badges" aria-label="Status badges">
+          <span id="dbBadge" class="badge warn">IndexedDB: starting</span>
+          <span id="keyBadge" class="badge warn">OpenRouter key: missing</span>
+          <span id="runBadge" class="badge info">Run: none</span>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="ADU-Bench Verifier tabs">
+        <button class="tab" role="tab" aria-selected="true" aria-controls="evaluatePanel" data-tab="evaluatePanel">Evaluate</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="adminPanel" data-tab="adminPanel">Admin</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="historyPanel" data-tab="historyPanel">History</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="evaluatePanel" class="panel" role="tabpanel">
+        <section class="card callout warn">
+          <strong>This is a local-first helper.</strong> You still need to verify the evidence yourself before submitting. The model must use only the pasted evidence. If the task text is incomplete, the correct result may be Wrong/insufficient evidence.
+        </section>
+
+        <div class="grid-2">
+          <section class="card">
+            <div class="section-title">
+              <h2>Bookmarklet Payload</h2>
+              <button id="pasteBtn" class="btn icon secondary" type="button" title="Paste from clipboard" aria-label="Paste from clipboard">📋</button>
+            </div>
+            <p class="help">Run the bookmarklet on the ADU-Bench task page, open this verifier, click the paste icon, then Evaluate. Optionally run Sniff Test before copying fields back.</p>
+            <label for="payloadInput">Pasted ADU-Bench task text
+              <textarea id="payloadInput" class="mono" rows="18" placeholder="Paste the copied ADU-Bench task text here. Include the question, AI-generated answer, evidence pages, and doc/page labels."></textarea>
+            </label>
+            <div class="actions" style="margin-top: 10px;">
+              <button id="evaluateBtn" class="btn" type="button">Evaluate</button>
+              <button id="sniffBtn" class="btn secondary" type="button" disabled>Sniff Test</button>
+              <button id="clearBtn" class="btn secondary" type="button">Clear</button>
+              <button id="copyAllBtn" class="btn good" type="button">Copy All Results</button>
+            </div>
+            <div id="status" class="status" role="status" style="margin-top: 10px;">Ready. Configure your OpenRouter key in Admin before evaluating.</div>
+          </section>
+
+          <aside class="card">
+            <h2>Parsed Task Metadata</h2>
+            <div class="meta-grid">
+              <div class="meta-item"><span>Timestamp</span><strong id="metaTimestamp">-</strong></div>
+              <div class="meta-item"><span>Verdict</span><strong id="metaVerdict">-</strong></div>
+              <div class="meta-item"><span>Primary model</span><strong id="metaPrimaryModel">-</strong></div>
+              <div class="meta-item"><span>Sniff model</span><strong id="metaSniffModel">-</strong></div>
+              <div class="meta-item"><span>Task title</span><strong id="metaTitle">-</strong></div>
+              <div class="meta-item"><span>Question</span><strong id="metaQuestion">-</strong></div>
+              <div class="meta-item"><span>AI answer</span><strong id="metaAnswer">-</strong></div>
+              <div class="meta-item"><span>Cross-doc</span><strong id="metaCrossDoc">-</strong></div>
+              <div class="meta-item"><span>Pages found</span><strong id="metaPages">-</strong></div>
+            </div>
+          </aside>
+        </div>
+
+        <section class="card">
+          <div class="section-title">
+            <h2>Paste-Ready Evaluation Output</h2>
+            <div class="badges">
+              <span id="verdictBadge" class="badge">Verdict: none</span>
+              <span id="sniffBadge" class="badge">Sniff: none</span>
+            </div>
+          </div>
+          <div class="output-grid">
+            <article class="output-card">
+              <div class="output-head"><strong>Verdict</strong><button class="btn small secondary" data-copy-field="verdictOutput" type="button">Copy</button></div>
+              <textarea id="verdictOutput" rows="2" placeholder="Correct or Wrong"></textarea>
+            </article>
+            <article class="output-card">
+              <div class="output-head"><strong>Evidence Quotes</strong><button class="btn small secondary" data-copy-field="evidenceQuotesOutput" type="button">Copy</button></div>
+              <textarea id="evidenceQuotesOutput" class="mono" rows="5" placeholder="[Doc1 Page 95] 'quote...'"></textarea>
+            </article>
+            <article class="output-card">
+              <div class="output-head"><strong>Evidence Pages Used</strong><button class="btn small secondary" data-copy-field="evidencePagesOutput" type="button">Copy</button></div>
+              <textarea id="evidencePagesOutput" rows="3" placeholder="Doc1: 95, 96 | Doc2: 152"></textarea>
+            </article>
+            <article class="output-card">
+              <div class="output-head"><strong>Notes</strong><button class="btn small secondary" data-copy-field="notesOutput" type="button">Copy</button></div>
+              <textarea id="notesOutput" rows="5" placeholder="Brief explanation of why the answer is correct or wrong."></textarea>
+            </article>
+          </div>
+        </section>
+
+        <section id="sniffSection" class="card hidden">
+          <div class="section-title">
+            <h2>Sniff Test Result</h2>
+            <button id="useCorrectionBtn" class="btn warn" type="button" disabled>Use Sniff Correction</button>
+          </div>
+          <div class="sniff-grid">
+            <div class="sniff-box"><strong>Sniff Verdict</strong><pre id="sniffVerdictOut"></pre></div>
+            <div class="sniff-box"><strong>Recommended Final Verdict</strong><pre id="sniffRecommendedOut"></pre></div>
+            <div class="sniff-box"><strong>Issues</strong><pre id="sniffIssuesOut"></pre></div>
+            <div class="sniff-box"><strong>Suggested Correction</strong><pre id="sniffCorrectionOut"></pre></div>
+          </div>
+        </section>
+
+        <details>
+          <summary>Raw first model response</summary>
+          <pre id="primaryRaw" class="mono"></pre>
+        </details>
+        <details>
+          <summary>Raw sniff-test response</summary>
+          <pre id="sniffRaw" class="mono"></pre>
+        </details>
+      </section>
+
+      <section id="adminPanel" class="panel" role="tabpanel" hidden>
+        <section class="card">
+          <h2>OpenRouter Settings</h2>
+          <p class="help">API keys are stored in this browser's localStorage. That is convenient, not secure on shared machines. For a plain-English setup guide, see <a href="openrouter.html">What the Heck Is an OpenRouter Key?</a>.</p>
+          <div class="setting-row">
+            <label for="apiKeyInput">OpenRouter API key
+              <input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-or-..." />
+            </label>
+            <label for="primaryModelInput">Primary model
+              <input id="primaryModelInput" list="modelOptions" placeholder="openai/gpt-4.1" />
+            </label>
+            <label for="sniffModelInput">Sniff test model
+              <input id="sniffModelInput" list="modelOptions" placeholder="anthropic/claude-sonnet-4" />
+            </label>
+            <label for="primaryTempInput">Primary temperature
+              <input id="primaryTempInput" type="number" min="0" max="2" step="0.1" />
+            </label>
+            <label for="primaryTokensInput">Primary max tokens
+              <input id="primaryTokensInput" type="number" min="256" max="12000" step="128" />
+            </label>
+            <label for="sniffTempInput">Sniff temperature
+              <input id="sniffTempInput" type="number" min="0" max="2" step="0.1" />
+            </label>
+            <label for="sniffTokensInput">Sniff max tokens
+              <input id="sniffTokensInput" type="number" min="256" max="12000" step="128" />
+            </label>
+          </div>
+          <datalist id="modelOptions"></datalist>
+          <div class="actions" style="margin-top: 12px;">
+            <button id="saveSettingsBtn" class="btn" type="button">Save settings</button>
+            <button id="clearKeyBtn" class="btn secondary" type="button">Clear key</button>
+            <button id="fetchModelsBtn" class="btn secondary" type="button">Fetch OpenRouter Models</button>
+          </div>
+          <div id="adminStatus" class="status" role="status" style="margin-top: 10px;"></div>
+        </section>
+
+        <section class="card">
+          <h2>Prompts</h2>
+          <label for="primaryPromptInput">Primary system prompt
+            <textarea id="primaryPromptInput" class="mono prompt-area"></textarea>
+          </label>
+          <label for="sniffPromptInput" style="margin-top: 12px;">Sniff test system prompt
+            <textarea id="sniffPromptInput" class="mono prompt-area"></textarea>
+          </label>
+          <div class="actions" style="margin-top: 12px;">
+            <button id="resetPromptsBtn" class="btn secondary" type="button">Reset prompts to defaults</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Import / Export Settings</h2>
+          <div class="actions">
+            <button id="exportSettingsBtn" class="btn secondary" type="button">Export settings JSON</button>
+          </div>
+          <label for="settingsImportInput" style="margin-top: 12px;">Import settings JSON
+            <textarea id="settingsImportInput" class="mono" rows="6" placeholder='{"primaryModel":"openai/gpt-4.1", ...}'></textarea>
+          </label>
+          <div class="actions" style="margin-top: 10px;">
+            <button id="importSettingsBtn" class="btn secondary" type="button">Import settings</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="historyPanel" class="panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="section-title">
+            <h2>Run History</h2>
+            <div class="actions">
+              <button id="exportRunsBtn" class="btn secondary" type="button">Export All Runs JSON</button>
+              <button id="deleteAllRunsBtn" class="btn danger" type="button">Delete All Runs</button>
+            </div>
+          </div>
+          <label for="historySearch">Search history
+            <input id="historySearch" type="search" placeholder="Search question, answer, verdict, notes, model..." />
+          </label>
+          <div class="table-wrap" style="margin-top: 12px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Question</th>
+                  <th>Answer</th>
+                  <th>Verdicts</th>
+                  <th>Models</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="historyBody"></tbody>
+            </table>
+          </div>
+          <p id="historyEmpty" class="help">No saved runs yet.</p>
+        </section>
+      </section>
+    </main>
+
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.30.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.30.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(117, 107, 94, 0.9); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · ADU-Bench Verifier · version 2026.06.30.1
+    </footer>
+  </div>
+
+  <script>
+    const SETTINGS_KEY = "adubenchVerifierSettings";
+    const DB_NAME = "adubenchVerifierDB";
+    const DB_VERSION = 1;
+    const STORE = "runs";
+    const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+    const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+
+    const DEFAULT_PRIMARY_PROMPT = `You are verifying ADU-Bench QA tasks.
+
+Use only the evidence provided in the user's pasted task text.
+Do not browse.
+Do not use outside knowledge.
+Do not infer beyond the provided evidence.
+For cross-document tasks, preserve Doc/Page labels exactly as shown.
+If the evidence is missing, incomplete, or insufficient to verify the AI-generated answer, mark the answer Wrong.
+Return only these four sections:
+
+Verdict:
+Correct or Wrong
+
+Evidence Quotes:
+Paste-ready quoted evidence with Doc/Page labels. Use the task's labels exactly, e.g. [Doc1 Page 95] 'quote...'
+
+Evidence Pages Used:
+Paste-ready page list, e.g. Doc1: 95, 96 | Doc2: 152, 153
+
+Notes:
+Brief explanation of why the answer is correct or wrong.`;
+
+    const DEFAULT_SNIFF_PROMPT = `You are a second-pass QA reviewer for ADU-Bench verification.
+
+You will receive:
+1. The original ADU-Bench task text.
+2. The first model's proposed Verdict, Evidence Quotes, Evidence Pages Used, and Notes.
+
+Use only the provided task evidence.
+Do not browse.
+Do not use outside knowledge.
+Check whether the first model's judgment is supported by the evidence.
+Be especially skeptical of missing evidence, uncited claims, wrong page labels, and conclusions based on generic text rather than the requested comparison.
+
+Return only:
+
+Sniff Verdict:
+Pass, Concern, or Fail
+
+Recommended Final Verdict:
+Correct or Wrong
+
+Issues:
+Bullet list of any problems, or 'None'
+
+Suggested Correction:
+If the first response should be changed, provide corrected Verdict, Evidence Quotes, Evidence Pages Used, and Notes. Otherwise write 'No correction needed.'`;
+
+    const DEFAULT_SETTINGS = {
+      apiKey: "",
+      primaryModel: "openai/gpt-4.1",
+      sniffModel: "anthropic/claude-sonnet-4",
+      primaryTemperature: 0.1,
+      primaryMaxTokens: 1800,
+      sniffTemperature: 0.1,
+      sniffMaxTokens: 1800,
+      primaryPrompt: DEFAULT_PRIMARY_PROMPT,
+      sniffPrompt: DEFAULT_SNIFF_PROMPT,
+      modelIds: []
+    };
+
+    let db = null;
+    let settings = { ...DEFAULT_SETTINGS };
+    let currentRun = null;
+    let history = [];
+    let suppressManualChange = false;
+
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(message, type = "") {
+      const el = $("status");
+      el.textContent = message;
+      el.className = `status ${type}`.trim();
+    }
+
+    function setAdminStatus(message, type = "") {
+      const el = $("adminStatus");
+      el.textContent = message;
+      el.className = `status ${type}`.trim();
+    }
+
+    function updateBadges() {
+      $("dbBadge").textContent = db ? "IndexedDB: ready" : "IndexedDB: error";
+      $("dbBadge").className = `badge ${db ? "good" : "bad"}`;
+      $("keyBadge").textContent = settings.apiKey ? "OpenRouter key: saved" : "OpenRouter key: missing";
+      $("keyBadge").className = `badge ${settings.apiKey ? "good" : "warn"}`;
+      $("runBadge").textContent = currentRun ? `Run: ${currentRun.finalUsed || "primary"}` : "Run: none";
+      $("runBadge").className = `badge ${currentRun ? "info" : ""}`.trim();
+    }
+
+    function loadSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+        settings = { ...DEFAULT_SETTINGS, ...saved };
+      } catch {
+        settings = { ...DEFAULT_SETTINGS };
+      }
+      renderSettings();
+      updateBadges();
+    }
+
+    function saveSettings() {
+      settings = {
+        ...settings,
+        apiKey: $("apiKeyInput").value.trim(),
+        primaryModel: $("primaryModelInput").value.trim() || DEFAULT_SETTINGS.primaryModel,
+        sniffModel: $("sniffModelInput").value.trim() || DEFAULT_SETTINGS.sniffModel,
+        primaryTemperature: Number($("primaryTempInput").value) || 0,
+        primaryMaxTokens: Number($("primaryTokensInput").value) || 1800,
+        sniffTemperature: Number($("sniffTempInput").value) || 0,
+        sniffMaxTokens: Number($("sniffTokensInput").value) || 1800,
+        primaryPrompt: $("primaryPromptInput").value.trim() || DEFAULT_PRIMARY_PROMPT,
+        sniffPrompt: $("sniffPromptInput").value.trim() || DEFAULT_SNIFF_PROMPT
+      };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      populateModelDatalist();
+      updateBadges();
+      setAdminStatus("Settings saved locally.", "ok");
+    }
+
+    function renderSettings() {
+      $("apiKeyInput").value = settings.apiKey || "";
+      $("primaryModelInput").value = settings.primaryModel || DEFAULT_SETTINGS.primaryModel;
+      $("sniffModelInput").value = settings.sniffModel || DEFAULT_SETTINGS.sniffModel;
+      $("primaryTempInput").value = settings.primaryTemperature;
+      $("primaryTokensInput").value = settings.primaryMaxTokens;
+      $("sniffTempInput").value = settings.sniffTemperature;
+      $("sniffTokensInput").value = settings.sniffMaxTokens;
+      $("primaryPromptInput").value = settings.primaryPrompt || DEFAULT_PRIMARY_PROMPT;
+      $("sniffPromptInput").value = settings.sniffPrompt || DEFAULT_SNIFF_PROMPT;
+      populateModelDatalist();
+    }
+
+    function populateModelDatalist() {
+      const list = $("modelOptions");
+      list.replaceChildren();
+      [...new Set([settings.primaryModel, settings.sniffModel, ...(settings.modelIds || [])].filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b))
+        .forEach((id) => list.append(new Option(id, id)));
+    }
+
+    function openDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const database = request.result;
+          if (!database.objectStoreNames.contains(STORE)) {
+            const store = database.createObjectStore(STORE, { keyPath: "id" });
+            store.createIndex("createdAt", "createdAt");
+            store.createIndex("taskHash", "taskHash");
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function txStore(mode = "readonly") {
+      return db.transaction(STORE, mode).objectStore(STORE);
+    }
+
+    function saveRun(run) {
+      return new Promise((resolve, reject) => {
+        run.updatedAt = new Date().toISOString();
+        const request = txStore("readwrite").put(run);
+        request.onsuccess = () => resolve(run);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function deleteRun(id) {
+      return new Promise((resolve, reject) => {
+        const request = txStore("readwrite").delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function clearRuns() {
+      return new Promise((resolve, reject) => {
+        const request = txStore("readwrite").clear();
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function getAllRuns() {
+      return new Promise((resolve, reject) => {
+        const request = txStore().getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function refreshHistory() {
+      if (!db) return;
+      history = (await getAllRuns()).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      renderHistory();
+    }
+
+    function parseTaskMetadata(text) {
+      if (!text.trim()) return { taskTitle: "", question: "", aiAnswer: "", crossDoc: "", pageLabels: [] };
+      const question = extractAfterHeading(text, ["📝 Question", "Question"]);
+      const aiAnswer = extractAfterHeading(text, ["✅ Answer", "Answer", "AI-generated answer", "AI Answer"]);
+      const title = extractAfterHeading(text, ["Task Title", "Title"]) || firstNonEmptyLine(text);
+      const crossDocMatch = text.match(/cross[-\s]?doc(?:ument)?\s*[:\-]?\s*(yes|no|true|false)/i);
+      const pageLabels = [...new Set([...text.matchAll(/\[(Doc\s*\d+\s+Page\s+\d+|Doc\d+\s+Page\s+\d+|Page\s+\d+)\]/gi)].map((m) => m[1].replace(/\s+/g, " ").trim()))];
+      return {
+        taskTitle: title.slice(0, 180),
+        question: question.slice(0, 1200),
+        aiAnswer: aiAnswer.slice(0, 1200),
+        crossDoc: crossDocMatch ? crossDocMatch[1] : "",
+        pageLabels
+      };
+    }
+
+    function extractAfterHeading(text, headings) {
+      const lines = text.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i].trim();
+        const normalizedHeadings = headings.map((h) => h.replace(/[*#:_-]/g, "").trim().toLowerCase());
+        const clean = raw.replace(/[*#:_-]/g, "").trim().toLowerCase();
+        const inlineMatch = raw.match(/^(.+?)[\s:：-]+(.+)$/);
+        const inlineHeading = inlineMatch ? inlineMatch[1].replace(/[*#:_-]/g, "").trim().toLowerCase() : "";
+        if (normalizedHeadings.includes(clean) || normalizedHeadings.includes(inlineHeading)) {
+          if (inlineMatch && normalizedHeadings.includes(inlineHeading)) return inlineMatch[2].trim();
+          const collected = [];
+          for (let j = i + 1; j < lines.length; j++) {
+            const next = lines[j].trim();
+            if (j > i + 1 && looksLikeHeading(next)) break;
+            collected.push(lines[j]);
+          }
+          return collected.join("\n").trim();
+        }
+      }
+      return "";
+    }
+
+    function looksLikeHeading(line) {
+      const clean = line.replace(/[*#:_-]/g, "").trim();
+      return /^(📝 Question|✅ Answer|Question|Answer|Evidence|Documents?|Pages?|Context|Task Title|Title|Cross[-\s]?doc)/i.test(clean);
+    }
+
+    function firstNonEmptyLine(text) {
+      return (text.split(/\r?\n/).find((line) => line.trim()) || "ADU-Bench task").trim();
+    }
+
+    function normalizeHeadingName(value) {
+      return value.replace(/\*/g, "").replace(/#+/g, "").trim().replace(/:$/, "").toLowerCase();
+    }
+
+    function parseSections(text, headingMap) {
+      const matches = [];
+      const lineRegex = /^[ \t]*(?:#{1,4}[ \t]*)?(?:\*\*)?([A-Za-z][A-Za-z \/-]*?)(?:\*\*)?[ \t]*:[ \t]*(.*)$/gm;
+      let match;
+      while ((match = lineRegex.exec(text)) !== null) {
+        const normalized = normalizeHeadingName(match[1]);
+        const key = Object.keys(headingMap).find((candidate) => headingMap[candidate].some((label) => normalized === label.toLowerCase()));
+        if (key) {
+          matches.push({ key, start: match.index, contentStart: lineRegex.lastIndex, inline: match[2] || "" });
+        }
+      }
+      const result = {};
+      matches.forEach((item, index) => {
+        const end = matches[index + 1]?.start ?? text.length;
+        const body = [item.inline, text.slice(item.contentStart, end)].filter(Boolean).join("\n").trim();
+        result[item.key] = body;
+      });
+      return result;
+    }
+
+    function parseFourSectionResponse(text) {
+      const parsed = parseSections(text, {
+        verdict: ["Verdict"],
+        evidenceQuotes: ["Evidence Quotes"],
+        evidencePagesUsed: ["Evidence Pages Used"],
+        notes: ["Notes"]
+      });
+      return {
+        verdict: cleanVerdict(parsed.verdict || ""),
+        evidenceQuotes: parsed.evidenceQuotes || "",
+        evidencePagesUsed: parsed.evidencePagesUsed || "",
+        notes: parsed.notes || (parsed.verdict || parsed.evidenceQuotes || parsed.evidencePagesUsed ? "" : text.trim())
+      };
+    }
+
+    function parseSniffResponse(text) {
+      const parsed = parseSections(text, {
+        sniffVerdict: ["Sniff Verdict"],
+        recommendedFinalVerdict: ["Recommended Final Verdict"],
+        issues: ["Issues"],
+        suggestedCorrection: ["Suggested Correction"]
+      });
+      return {
+        sniffVerdict: parsed.sniffVerdict || "",
+        recommendedFinalVerdict: cleanVerdict(parsed.recommendedFinalVerdict || ""),
+        issues: parsed.issues || "",
+        suggestedCorrection: parsed.suggestedCorrection || ""
+      };
+    }
+
+    function cleanVerdict(value) {
+      const text = value.trim();
+      if (/^correct\b/i.test(text)) return "Correct";
+      if (/^wrong\b/i.test(text)) return "Wrong";
+      return text;
+    }
+
+    async function hashText(text) {
+      if (crypto.subtle) {
+        const data = new TextEncoder().encode(text);
+        const digest = await crypto.subtle.digest("SHA-256", data);
+        return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      let hash = 0;
+      for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+      return String(hash);
+    }
+
+    async function callOpenRouter({ model, temperature, maxTokens, messages }) {
+      const apiKey = settings.apiKey || $("apiKeyInput").value.trim();
+      if (!apiKey) throw new Error("Missing OpenRouter API key. Add it in Admin first.");
+      if (!model) throw new Error("Missing model. Add a primary/sniff model in Admin.");
+      const response = await fetch(OPENROUTER_CHAT_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": location.origin,
+          "X-Title": "ADU-Bench Verifier"
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature,
+          max_tokens: maxTokens
+        })
+      });
+      const raw = await response.text();
+      let json;
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        throw new Error(`OpenRouter returned non-JSON output: ${raw.slice(0, 180)}`);
+      }
+      if (!response.ok) throw new Error(json.error?.message || `OpenRouter HTTP ${response.status}`);
+      const content = json.choices?.[0]?.message?.content?.trim();
+      if (!content) throw new Error("OpenRouter returned an empty model response.");
+      return { content, response: json };
+    }
+
+    async function evaluateTask() {
+      const pastedPayload = $("payloadInput").value.trim();
+      if (!pastedPayload) return setStatus("Paste the ADU-Bench task text first.", "error");
+      saveSettings();
+      setBusy(true);
+      setStatus("Calling primary model...", "");
+      try {
+        const metadata = parseTaskMetadata(pastedPayload);
+        const primaryRequest = {
+          model: settings.primaryModel,
+          messages: [
+            { role: "system", content: settings.primaryPrompt },
+            { role: "user", content: pastedPayload }
+          ],
+          temperature: settings.primaryTemperature,
+          max_tokens: settings.primaryMaxTokens
+        };
+        const { content } = await callOpenRouter({
+          model: settings.primaryModel,
+          temperature: settings.primaryTemperature,
+          maxTokens: settings.primaryMaxTokens,
+          messages: primaryRequest.messages
+        });
+        const parsed = parseFourSectionResponse(content);
+        const taskHash = await hashText(pastedPayload);
+        const now = new Date().toISOString();
+        currentRun = {
+          id: `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          createdAt: now,
+          updatedAt: now,
+          taskHash,
+          taskTitle: metadata.taskTitle,
+          question: metadata.question,
+          aiAnswer: metadata.aiAnswer,
+          pastedPayload,
+          primaryModel: settings.primaryModel,
+          primaryRequest,
+          primaryRawResponse: content,
+          primaryParsed: parsed,
+          sniffModel: settings.sniffModel,
+          sniffRequest: null,
+          sniffRawResponse: "",
+          sniffParsed: null,
+          finalUsed: "primary",
+          finalOutput: { ...parsed }
+        };
+        renderRun(currentRun);
+        await saveRun(currentRun);
+        await refreshHistory();
+        setStatus("Evaluation complete and saved to local history.", "ok");
+        $("sniffBtn").disabled = false;
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function buildStructuredResponseFromFields() {
+      return {
+        verdict: $("verdictOutput").value.trim(),
+        evidenceQuotes: $("evidenceQuotesOutput").value.trim(),
+        evidencePagesUsed: $("evidencePagesOutput").value.trim(),
+        notes: $("notesOutput").value.trim()
+      };
+    }
+
+    function formatFourFields(output) {
+      return `Verdict: ${output.verdict || ""}
+
+Evidence Quotes:
+${output.evidenceQuotes || ""}
+
+Evidence Pages Used:
+${output.evidencePagesUsed || ""}
+
+Notes:
+${output.notes || ""}`;
+    }
+
+    function buildSniffPayload() {
+      const structured = buildStructuredResponseFromFields();
+      return `ORIGINAL ADU-BENCH TASK:
+${currentRun.pastedPayload}
+
+FIRST MODEL RESPONSE:
+${formatFourFields(structured)}
+
+RAW FIRST MODEL RESPONSE:
+${currentRun.primaryRawResponse || ""}`;
+    }
+
+    async function runSniffTest() {
+      if (!currentRun) return setStatus("Run Evaluate first.", "error");
+      saveSettings();
+      setBusy(true);
+      setStatus("Calling sniff-test model...", "");
+      try {
+        const userPayload = buildSniffPayload();
+        const sniffRequest = {
+          model: settings.sniffModel,
+          messages: [
+            { role: "system", content: settings.sniffPrompt },
+            { role: "user", content: userPayload }
+          ],
+          temperature: settings.sniffTemperature,
+          max_tokens: settings.sniffMaxTokens
+        };
+        const { content } = await callOpenRouter({
+          model: settings.sniffModel,
+          temperature: settings.sniffTemperature,
+          maxTokens: settings.sniffMaxTokens,
+          messages: sniffRequest.messages
+        });
+        const parsed = parseSniffResponse(content);
+        currentRun.sniffModel = settings.sniffModel;
+        currentRun.sniffRequest = sniffRequest;
+        currentRun.sniffRawResponse = content;
+        currentRun.sniffParsed = parsed;
+        await saveRun(currentRun);
+        await refreshHistory();
+        renderRun(currentRun);
+        setStatus("Sniff test complete and saved.", "ok");
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function renderRun(run) {
+      suppressManualChange = true;
+      const out = run.finalOutput || run.primaryParsed || {};
+      $("verdictOutput").value = out.verdict || "";
+      $("evidenceQuotesOutput").value = out.evidenceQuotes || "";
+      $("evidencePagesOutput").value = out.evidencePagesUsed || "";
+      $("notesOutput").value = out.notes || "";
+      $("primaryRaw").textContent = run.primaryRawResponse || "";
+      $("sniffRaw").textContent = run.sniffRawResponse || "";
+      $("payloadInput").value = run.pastedPayload || $("payloadInput").value;
+      suppressManualChange = false;
+
+      $("metaTimestamp").textContent = run.createdAt ? new Date(run.createdAt).toLocaleString() : "-";
+      $("metaVerdict").textContent = out.verdict || "-";
+      $("metaPrimaryModel").textContent = run.primaryModel || "-";
+      $("metaSniffModel").textContent = run.sniffModel || "-";
+      $("metaTitle").textContent = trimPreview(run.taskTitle, 180) || "-";
+      $("metaQuestion").textContent = trimPreview(run.question, 220) || "-";
+      $("metaAnswer").textContent = trimPreview(run.aiAnswer, 220) || "-";
+      const parsedMeta = parseTaskMetadata(run.pastedPayload || "");
+      $("metaCrossDoc").textContent = parsedMeta.crossDoc || "-";
+      $("metaPages").textContent = parsedMeta.pageLabels.length ? parsedMeta.pageLabels.join(", ") : "-";
+
+      renderVerdictBadge(out.verdict);
+      renderSniff(run.sniffParsed, run.sniffRawResponse);
+      updateBadges();
+      $("sniffBtn").disabled = !run.primaryRawResponse;
+    }
+
+    function renderVerdictBadge(verdict) {
+      const badge = $("verdictBadge");
+      badge.textContent = `Verdict: ${verdict || "none"}`;
+      badge.className = "badge";
+      if (/correct/i.test(verdict || "")) badge.classList.add("good");
+      if (/wrong/i.test(verdict || "")) badge.classList.add("bad");
+    }
+
+    function renderSniff(parsed, raw) {
+      const hasSniff = Boolean(parsed || raw);
+      $("sniffSection").classList.toggle("hidden", !hasSniff);
+      $("sniffVerdictOut").textContent = parsed?.sniffVerdict || "";
+      $("sniffRecommendedOut").textContent = parsed?.recommendedFinalVerdict || "";
+      $("sniffIssuesOut").textContent = parsed?.issues || "";
+      $("sniffCorrectionOut").textContent = parsed?.suggestedCorrection || "";
+      const badge = $("sniffBadge");
+      const sniff = parsed?.sniffVerdict || "none";
+      badge.textContent = `Sniff: ${sniff}`;
+      badge.className = "badge";
+      if (/pass/i.test(sniff)) badge.classList.add("good");
+      if (/concern/i.test(sniff)) badge.classList.add("warn");
+      if (/fail/i.test(sniff)) badge.classList.add("bad");
+      $("useCorrectionBtn").disabled = !parseCorrectionFromSniff(parsed?.suggestedCorrection || raw || "");
+    }
+
+    function parseCorrectionFromSniff(text) {
+      const parsed = parseFourSectionResponse(text || "");
+      if (!parsed.verdict && !parsed.evidenceQuotes && !parsed.evidencePagesUsed && !parsed.notes) return null;
+      if (/no correction needed/i.test(text)) return null;
+      return parsed;
+    }
+
+    async function useSniffCorrection() {
+      if (!currentRun) return;
+      const correction = parseCorrectionFromSniff(currentRun.sniffParsed?.suggestedCorrection || currentRun.sniffRawResponse || "");
+      if (!correction) return setStatus("No parseable sniff correction found.", "error");
+      currentRun.finalUsed = "sniff-correction";
+      currentRun.finalOutput = correction;
+      await saveRun(currentRun);
+      await refreshHistory();
+      renderRun(currentRun);
+      setStatus("Sniff correction applied to the main output fields.", "ok");
+    }
+
+    async function markManualEdit() {
+      if (suppressManualChange || !currentRun) return;
+      currentRun.finalUsed = "manual";
+      currentRun.finalOutput = buildStructuredResponseFromFields();
+      await saveRun(currentRun);
+      updateBadges();
+      renderVerdictBadge(currentRun.finalOutput.verdict);
+    }
+
+    function setBusy(busy) {
+      ["evaluateBtn", "sniffBtn", "fetchModelsBtn", "saveSettingsBtn"].forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = busy || (id === "sniffBtn" && !currentRun?.primaryRawResponse);
+      });
+    }
+
+    async function pasteFromClipboard() {
+      try {
+        if (!navigator.clipboard?.readText) throw new Error("Clipboard API unavailable.");
+        const text = await navigator.clipboard.readText();
+        $("payloadInput").value = text;
+        previewPayloadMetadata();
+        setStatus("Pasted from clipboard.", "ok");
+      } catch {
+        $("payloadInput").focus();
+        setStatus("Clipboard paste was blocked. Focused the textarea so you can paste manually.", "error");
+      }
+    }
+
+    function previewPayloadMetadata() {
+      const text = $("payloadInput").value.trim();
+      const meta = parseTaskMetadata(text);
+      $("metaTitle").textContent = trimPreview(meta.taskTitle, 180) || "-";
+      $("metaQuestion").textContent = trimPreview(meta.question, 220) || "-";
+      $("metaAnswer").textContent = trimPreview(meta.aiAnswer, 220) || "-";
+      $("metaCrossDoc").textContent = meta.crossDoc || "-";
+      $("metaPages").textContent = meta.pageLabels.length ? meta.pageLabels.join(", ") : "-";
+    }
+
+    async function copyText(text, label = "Copied.") {
+      if (!text.trim()) return setStatus("Nothing to copy yet.", "error");
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus(label, "ok");
+      } catch {
+        setStatus("Copy failed. Select the text and copy it manually.", "error");
+      }
+    }
+
+    function copyAllResults() {
+      copyText(formatFourFields(buildStructuredResponseFromFields()), "All result fields copied.");
+    }
+
+    function clearEvaluate() {
+      currentRun = null;
+      ["payloadInput", "verdictOutput", "evidenceQuotesOutput", "evidencePagesOutput", "notesOutput", "primaryRaw", "sniffRaw", "sniffVerdictOut", "sniffRecommendedOut", "sniffIssuesOut", "sniffCorrectionOut"].forEach((id) => $(id).value !== undefined ? $(id).value = "" : $(id).textContent = "");
+      ["metaTimestamp", "metaVerdict", "metaPrimaryModel", "metaSniffModel", "metaTitle", "metaQuestion", "metaAnswer", "metaCrossDoc", "metaPages"].forEach((id) => $(id).textContent = "-");
+      $("sniffSection").classList.add("hidden");
+      $("sniffBtn").disabled = true;
+      renderVerdictBadge("");
+      renderSniff(null, "");
+      updateBadges();
+      setStatus("Cleared.", "ok");
+    }
+
+    async function fetchOpenRouterModels() {
+      saveSettings();
+      const apiKey = settings.apiKey;
+      if (!apiKey) return setAdminStatus("Add an OpenRouter API key first.", "error");
+      setAdminStatus("Fetching OpenRouter models...", "");
+      try {
+        const response = await fetch(OPENROUTER_MODELS_URL, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "HTTP-Referer": location.origin,
+            "X-Title": "ADU-Bench Verifier"
+          }
+        });
+        if (!response.ok) throw new Error(`OpenRouter HTTP ${response.status}`);
+        const json = await response.json();
+        settings.modelIds = (json.data || []).map((model) => model.id).filter(Boolean).sort((a, b) => a.localeCompare(b));
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        populateModelDatalist();
+        setAdminStatus(`Loaded ${settings.modelIds.length} model IDs. Start typing in a model field to use them.`, "ok");
+      } catch (error) {
+        setAdminStatus(`Model fetch failed: ${error.message}`, "error");
+      }
+    }
+
+    function exportSettings() {
+      const safe = { ...settings, apiKey: "" };
+      $("settingsImportInput").value = JSON.stringify(safe, null, 2);
+      copyText(JSON.stringify(safe, null, 2), "Settings JSON copied without API key.");
+    }
+
+    function importSettings() {
+      try {
+        const imported = JSON.parse($("settingsImportInput").value);
+        settings = { ...DEFAULT_SETTINGS, ...settings, ...imported, apiKey: imported.apiKey || settings.apiKey || "" };
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        renderSettings();
+        updateBadges();
+        setAdminStatus("Settings imported.", "ok");
+      } catch (error) {
+        setAdminStatus(`Import failed: ${error.message}`, "error");
+      }
+    }
+
+    function renderHistory() {
+      const query = $("historySearch").value.trim().toLowerCase();
+      const rows = history.filter((run) => {
+        if (!query) return true;
+        return JSON.stringify(run).toLowerCase().includes(query);
+      });
+      $("historyEmpty").style.display = rows.length ? "none" : "block";
+      $("historyBody").replaceChildren(...rows.map(renderHistoryRow));
+    }
+
+    function renderHistoryRow(run) {
+      const tr = document.createElement("tr");
+      const final = run.finalOutput || run.primaryParsed || {};
+      const sniff = run.sniffParsed?.sniffVerdict || "-";
+      tr.innerHTML = `
+        <td>${escapeHtml(new Date(run.createdAt).toLocaleString())}</td>
+        <td>${escapeHtml(trimPreview(run.question || run.taskTitle, 120))}</td>
+        <td>${escapeHtml(trimPreview(run.aiAnswer, 100))}</td>
+        <td><span class="badge ${/correct/i.test(final.verdict || "") ? "good" : /wrong/i.test(final.verdict || "") ? "bad" : ""}">${escapeHtml(final.verdict || "-")}</span><br><span class="help">${escapeHtml(sniff)}</span></td>
+        <td>${escapeHtml(run.primaryModel || "-")}<br><span class="help">${escapeHtml(run.sniffModel || "-")}</span></td>
+        <td><div class="row-actions"></div></td>
+      `;
+      const actions = tr.querySelector(".row-actions");
+      actions.append(actionButton("Load", "secondary", () => loadHistoryRun(run.id)));
+      actions.append(actionButton("Copy All", "good", () => copyText(formatFourFields(run.finalOutput || run.primaryParsed || {}), "History result copied.")));
+      actions.append(actionButton("Delete", "danger", async () => {
+        if (!confirm("Delete this run?")) return;
+        await deleteRun(run.id);
+        await refreshHistory();
+      }));
+      return tr;
+    }
+
+    function actionButton(text, kind, handler) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `btn small ${kind}`;
+      button.textContent = text;
+      button.addEventListener("click", handler);
+      return button;
+    }
+
+    async function loadHistoryRun(id) {
+      const run = history.find((item) => item.id === id);
+      if (!run) return;
+      currentRun = run;
+      renderRun(run);
+      activateTab("evaluatePanel");
+      setStatus("Loaded history run.", "ok");
+    }
+
+    async function exportRuns() {
+      const runs = await getAllRuns();
+      const json = JSON.stringify(runs, null, 2);
+      await copyText(json, "All runs JSON copied.");
+    }
+
+    async function deleteAllRuns() {
+      if (!confirm("Delete all ADU-Bench Verifier runs from this browser?")) return;
+      await clearRuns();
+      currentRun = null;
+      await refreshHistory();
+      updateBadges();
+      setStatus("All runs deleted.", "ok");
+    }
+
+    function activateTab(panelId) {
+      document.querySelectorAll(".tab").forEach((button) => {
+        const active = button.dataset.tab === panelId;
+        button.setAttribute("aria-selected", String(active));
+      });
+      document.querySelectorAll("main > .panel").forEach((panel) => {
+        panel.hidden = panel.id !== panelId;
+      });
+      if (panelId === "historyPanel") refreshHistory();
+    }
+
+    function trimPreview(value, length = 120) {
+      const text = (value || "").replace(/\s+/g, " ").trim();
+      return text.length > length ? `${text.slice(0, length - 1)}...` : text;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function bindEvents() {
+      document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.tab)));
+      $("pasteBtn").addEventListener("click", pasteFromClipboard);
+      $("evaluateBtn").addEventListener("click", evaluateTask);
+      $("sniffBtn").addEventListener("click", runSniffTest);
+      $("clearBtn").addEventListener("click", clearEvaluate);
+      $("copyAllBtn").addEventListener("click", copyAllResults);
+      $("useCorrectionBtn").addEventListener("click", useSniffCorrection);
+      $("payloadInput").addEventListener("input", previewPayloadMetadata);
+      document.querySelectorAll("[data-copy-field]").forEach((button) => {
+        button.addEventListener("click", () => copyText($(button.dataset.copyField).value, `${button.dataset.copyField.replace("Output", "")} copied.`));
+      });
+      ["verdictOutput", "evidenceQuotesOutput", "evidencePagesOutput", "notesOutput"].forEach((id) => $(id).addEventListener("input", markManualEdit));
+      $("saveSettingsBtn").addEventListener("click", saveSettings);
+      $("clearKeyBtn").addEventListener("click", () => {
+        $("apiKeyInput").value = "";
+        settings.apiKey = "";
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        updateBadges();
+        setAdminStatus("API key cleared.", "ok");
+      });
+      $("fetchModelsBtn").addEventListener("click", fetchOpenRouterModels);
+      $("resetPromptsBtn").addEventListener("click", () => {
+        $("primaryPromptInput").value = DEFAULT_PRIMARY_PROMPT;
+        $("sniffPromptInput").value = DEFAULT_SNIFF_PROMPT;
+        saveSettings();
+      });
+      $("exportSettingsBtn").addEventListener("click", exportSettings);
+      $("importSettingsBtn").addEventListener("click", importSettings);
+      $("historySearch").addEventListener("input", renderHistory);
+      $("exportRunsBtn").addEventListener("click", exportRuns);
+      $("deleteAllRunsBtn").addEventListener("click", deleteAllRuns);
+    }
+
+    async function init() {
+      bindEvents();
+      loadSettings();
+      try {
+        db = await openDb();
+        updateBadges();
+        await refreshHistory();
+      } catch (error) {
+        db = null;
+        updateBadges();
+        setStatus(`IndexedDB failed: ${error.message}`, "error");
+      }
+      setAdminStatus("Settings are stored locally in this browser.");
+      previewPayloadMetadata();
+    }
+
+    init();
+  </script>
+</body>
+</html>
