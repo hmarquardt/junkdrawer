@@ -93,6 +93,8 @@
       background: #070a0f;
     }
     .editor-shell.split { grid-template-columns: minmax(0, 1fr) minmax(240px, .42fr); }
+    .editor-shell.pipeline-open { grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); }
+    .editor-shell.split.pipeline-open { grid-template-columns: minmax(0, 1fr) minmax(240px, .34fr) minmax(340px, 420px); }
     #editor { min-height: 0; }
     .split-pane {
       display: none;
@@ -111,6 +113,85 @@
       line-height: 1.45;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: .85rem;
+    }
+
+    .pipeline-pane {
+      display: none;
+      min-width: 0;
+      overflow: auto;
+      border-left: 1px solid var(--line);
+      background: #0b111a;
+      padding: 10px;
+    }
+    .editor-shell.pipeline-open .pipeline-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px; }
+    .pipeline-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .pipeline-head h2 { margin: 0; font-size: .98rem; }
+    .pipeline-tools, .pipeline-add, .pipeline-vars, .pipeline-batch { display: grid; gap: 8px; }
+    .pipeline-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .pipeline-pane input, .pipeline-pane select, .pipeline-pane textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #080c12;
+      color: var(--text);
+      border-radius: 7px;
+      padding: 7px 9px;
+      min-height: 31px;
+    }
+    .pipeline-pane textarea {
+      resize: vertical;
+      min-height: 64px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: .82rem;
+    }
+    .pipeline-list { display: grid; gap: 8px; min-height: 0; overflow: auto; padding-right: 2px; }
+    .pipeline-node {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 10px;
+      padding: 9px;
+      display: grid;
+      gap: 7px;
+    }
+    .pipeline-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(125,211,252,.24); }
+    .pipeline-node.disabled { opacity: .55; }
+    .pipeline-node.original { border-color: rgba(52,211,153,.45); }
+    .node-title { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .node-title strong { font-size: .88rem; overflow-wrap: anywhere; }
+    .node-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; color: var(--muted); font-size: .72rem; }
+    .node-meta span { border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; background: #080c12; }
+    .node-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+    .node-actions .btn { min-height: 25px; padding: 3px 6px; font-size: .72rem; }
+    .pipeline-preview {
+      border: 1px solid var(--line);
+      background: #080c12;
+      border-radius: 10px;
+      padding: 8px;
+      display: grid;
+      gap: 7px;
+    }
+    .pipeline-preview h3 { margin: 0; font-size: .86rem; }
+    .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .preview-grid pre, .pipeline-preview pre {
+      margin: 0;
+      max-height: 190px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      color: var(--muted);
+      background: #05070b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: .76rem;
+    }
+    .diff-del { color: var(--bad); }
+    .diff-add { color: var(--good); }
+    .batch-results {
+      color: var(--muted);
+      font-size: .8rem;
+      white-space: pre-wrap;
+      max-height: 120px;
+      overflow: auto;
     }
 
     .command-row {
@@ -205,6 +286,9 @@
       .cheat { grid-template-columns: 1fr; }
       #status { display: none; }
       .toolbar { align-items: flex-start; }
+      .editor-shell.pipeline-open, .editor-shell.split.pipeline-open { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(280px, 42vh); }
+      .editor-shell.pipeline-open .pipeline-pane { border-left: 0; border-top: 1px solid var(--line); }
+      .preview-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -221,6 +305,7 @@
     <button class="btn" id="prevMatchBtn" type="button">Previous</button>
     <button class="btn" id="nextMatchBtn" type="button">Next</button>
     <button class="btn" id="splitBtn" type="button">Split</button>
+    <button class="btn primary" id="pipelineBtn" type="button">Pipeline</button>
     <button class="btn" id="cheatBtn" type="button">Regex Cheat Sheet</button>
     <div class="toolbar-spacer"></div>
     <span class="metric">Match Count <strong id="matchCount">0 matches</strong></span>
@@ -236,6 +321,52 @@
     <aside class="split-pane" id="splitPane">
       <h2>Printed Lines / Scratch</h2>
       <pre id="splitOutput">Use :g/foo/p to print matching lines here.</pre>
+    </aside>
+    <aside class="pipeline-pane" id="pipelinePane" aria-label="Pipeline Mode">
+      <div class="pipeline-head">
+        <h2>Pipeline Mode</h2>
+        <button class="btn" id="closePipelineBtn" type="button">Collapse</button>
+      </div>
+      <div class="pipeline-tools">
+        <div class="pipeline-row">
+          <button class="btn primary" id="runPipelineBtn" type="button">Run</button>
+          <button class="btn" id="commitPipelineBtn" type="button">Commit Output</button>
+          <button class="btn" id="undoPipelineBtn" type="button">Undo</button>
+          <button class="btn" id="redoPipelineBtn" type="button">Redo</button>
+        </div>
+        <div class="pipeline-row">
+          <button class="btn" id="savePipelineBtn" type="button">Save JSON</button>
+          <button class="btn" id="loadPipelineBtn" type="button">Load JSON</button>
+          <button class="btn danger" id="clearPipelineBtn" type="button">Clear</button>
+        </div>
+      </div>
+      <div class="pipeline-add">
+        <select id="pipelineOpSelect" aria-label="Pipeline operation"></select>
+        <input id="pipelineCommandInput" type="text" placeholder="Ex stage, e.g. :%s/foo/bar/g or :g/^ERROR/p" />
+        <div class="pipeline-row">
+          <button class="btn" id="addPipelineOpBtn" type="button">Add Built-in</button>
+          <button class="btn" id="addPipelineCommandBtn" type="button">Add Ex Stage</button>
+        </div>
+        <textarea id="pipelineVariablesInput" placeholder="Variables, one per line:&#10;Pattern=^ERROR&#10;Replacement=WARNING"></textarea>
+      </div>
+      <div class="pipeline-list" id="pipelineList"></div>
+      <div class="pipeline-preview">
+        <h3 id="pipelinePreviewTitle">Preview</h3>
+        <div class="preview-grid">
+          <pre id="pipelineOriginalPreview">Original</pre>
+          <pre id="pipelinePrevPreview">Previous stage</pre>
+          <pre id="pipelineCurrentPreview">Current stage</pre>
+          <pre id="pipelineFinalPreview">Final output</pre>
+        </div>
+        <pre id="pipelineDiffPreview">Diff</pre>
+        <div class="pipeline-batch">
+          <div class="pipeline-row">
+            <button class="btn" id="batchFilesBtn" type="button">Batch Files</button>
+            <button class="btn" id="batchDirectoryBtn" type="button">Batch Directory</button>
+          </div>
+          <div class="batch-results" id="batchResults">Batch results will appear here.</div>
+        </div>
+      </div>
     </aside>
   </main>
 
@@ -288,10 +419,12 @@
   </dialog>
 
   <input id="fileInput" type="file" accept=".txt,.md,.json,.csv,.log,text/plain,text/markdown,application/json,text/csv" hidden />
+  <input id="pipelineFileInput" type="file" accept="application/json,.json" hidden />
+  <input id="batchFileInput" type="file" accept=".txt,.md,.json,.csv,.log,text/plain,text/markdown,application/json,text/csv" multiple hidden />
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.05.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.05.1" style="position: fixed; left: -9999px; width: 1px; height: 1px; overflow: hidden;">
-    &copy; 2026 Hank Marquardt · Play Editor · version 2026.07.05.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.05.2" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.05.2" style="position: fixed; left: -9999px; width: 1px; height: 1px; overflow: hidden;">
+    &copy; 2026 Hank Marquardt · Play Editor · version 2026.07.05.2
   </footer>
 
   <script type="module">
@@ -339,7 +472,8 @@
           recentRegexes: [],
           recentCommands: [],
           replaceHistory: [],
-          bookmarks: []
+          bookmarks: [],
+          pipeline: { steps: [], variables: {}, selectedIndex: -1 }
         };
         this.state = this.load();
       }
@@ -596,6 +730,492 @@
       }
     }
 
+    class PipelineOperationRegistry {
+      constructor() {
+        this.plugins = new Map();
+        this.registerBuiltIns();
+      }
+      register(plugin) { this.plugins.set(plugin.id, plugin); }
+      list() { return [...this.plugins.values()].sort((a, b) => a.label.localeCompare(b.label)); }
+      get(id) { return this.plugins.get(id); }
+      registerBuiltIns() {
+        const lineOp = (id, label, fn, defaultConfig = {}) => this.register({ id, label, defaultConfig, run: (text, config, context) => fn(text, config, context) });
+        lineOp("sort", "Sort", (text) => this.lines(text, (lines) => lines.sort((a, b) => a.localeCompare(b))));
+        lineOp("reverseSort", "Reverse Sort", (text) => this.lines(text, (lines) => lines.sort((a, b) => b.localeCompare(a))));
+        lineOp("unique", "Unique", (text) => this.lines(text, (lines) => [...new Set(lines)]));
+        lineOp("dedupeAdjacent", "Deduplicate Adjacent", (text) => this.lines(text, (lines) => lines.filter((line, i) => i === 0 || line !== lines[i - 1])));
+        lineOp("reverseLines", "Reverse Lines", (text) => this.lines(text, (lines) => lines.reverse()));
+        lineOp("shuffle", "Shuffle", (text) => this.lines(text, (lines) => {
+          for (let i = lines.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [lines[i], lines[j]] = [lines[j], lines[i]];
+          }
+          return lines;
+        }));
+        lineOp("keepFirstN", "Keep First N", (text, config) => this.lines(text, (lines) => lines.slice(0, Number(config.n) || 10), { n: 10 }));
+        lineOp("keepLastN", "Keep Last N", (text, config) => this.lines(text, (lines) => lines.slice(-(Number(config.n) || 10)), { n: 10 }));
+        lineOp("head", "Head", (text, config) => this.lines(text, (lines) => lines.slice(0, Number(config.n) || 25), { n: 25 }));
+        lineOp("tail", "Tail", (text, config) => this.lines(text, (lines) => lines.slice(-(Number(config.n) || 25)), { n: 25 }));
+        lineOp("trimWhitespace", "Trim Whitespace", (text) => text.split(/\n/).map((line) => line.trim()).join("\n"));
+        lineOp("normalizeLineEndings", "Normalize Line Endings", (text) => text.replace(/\r\n?/g, "\n"));
+        lineOp("removeBlankLines", "Remove Blank Lines", (text) => this.lines(text, (lines) => lines.filter((line) => line.trim())));
+        lineOp("collapseBlankLines", "Collapse Multiple Blank Lines", (text) => text.replace(/(\n\s*){3,}/g, "\n\n"));
+        lineOp("tabsToSpaces", "Convert Tabs to Spaces", (text, config) => text.replace(/\t/g, " ".repeat(Number(config.size) || 2)));
+        lineOp("spacesToTabs", "Convert Spaces to Tabs", (text, config) => text.replace(new RegExp(` {${Number(config.size) || 2}}`, "g"), "\t"));
+        lineOp("uppercase", "Uppercase", (text) => text.toUpperCase());
+        lineOp("lowercase", "Lowercase", (text) => text.toLowerCase());
+        lineOp("titleCase", "Title Case", (text) => text.toLowerCase().replace(/\b\p{L}/gu, (m) => m.toUpperCase()));
+        lineOp("sentenceCase", "Sentence Case", (text) => text.toLowerCase().replace(/(^\s*\p{L}|[.!?]\s+\p{L})/gu, (m) => m.toUpperCase()));
+        lineOp("urlDecode", "URL Decode", (text) => decodeURIComponent(text));
+        lineOp("urlEncode", "URL Encode", (text) => encodeURIComponent(text));
+        lineOp("base64Encode", "Base64 Encode", (text) => btoa(unescape(encodeURIComponent(text))));
+        lineOp("base64Decode", "Base64 Decode", (text) => decodeURIComponent(escape(atob(text.trim()))));
+        lineOp("jsonPretty", "JSON Pretty Print", (text) => JSON.stringify(JSON.parse(text), null, 2));
+        lineOp("jsonMinify", "JSON Minify", (text) => JSON.stringify(JSON.parse(text)));
+        lineOp("csvColumnExtract", "CSV Column Extract", (text, config) => this.csvColumn(text, config.column || "0"));
+        lineOp("csvFilter", "CSV Filter", (text, config, context) => this.csvFilter(text, context.expand(config.pattern || "")));
+        lineOp("markdownCleanup", "Markdown Cleanup", (text) => text.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").replace(/^#{1,6}\s*/gm, (m) => m.replace(/\s+/g, " ")));
+      }
+      lines(text, fn) {
+        const hadFinalNewline = text.endsWith("\n");
+        const lines = text.replace(/\r\n?/g, "\n").split("\n");
+        if (hadFinalNewline) lines.pop();
+        const out = fn(lines).join("\n");
+        return hadFinalNewline ? `${out}\n` : out;
+      }
+      csvColumn(text, column) {
+        const idx = Number(column);
+        return text.split(/\r?\n/).map((line) => this.parseCsvLine(line)[Number.isFinite(idx) ? idx : 0] ?? "").join("\n");
+      }
+      csvFilter(text, pattern) {
+        if (!pattern) return text;
+        const re = new RegExp(pattern);
+        return text.split(/\r?\n/).filter((line) => re.test(line)).join("\n");
+      }
+      parseCsvLine(line) {
+        const out = [];
+        let cur = "";
+        let quoted = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; continue; }
+          if (ch === '"') { quoted = !quoted; continue; }
+          if (ch === "," && !quoted) { out.push(cur); cur = ""; continue; }
+          cur += ch;
+        }
+        out.push(cur);
+        return out;
+      }
+    }
+
+    class PipelineManager {
+      constructor(app) {
+        this.app = app;
+        this.registry = new PipelineOperationRegistry();
+        this.steps = app.storage.state.pipeline?.steps || [];
+        this.variables = app.storage.state.pipeline?.variables || {};
+        this.selectedIndex = app.storage.state.pipeline?.selectedIndex ?? -1;
+        this.stageCache = [];
+        this.history = [];
+        this.historyIndex = -1;
+        this.lastOutput = "";
+        this.runTimer = null;
+        this.bind();
+        this.renderOperationSelect();
+        this.renderVariables();
+        this.run(false);
+      }
+      bind() {
+        const on = (id, fn) => document.getElementById(id).addEventListener("click", fn);
+        on("pipelineBtn", () => this.toggle(true));
+        on("closePipelineBtn", () => this.toggle(false));
+        on("runPipelineBtn", () => this.run());
+        on("commitPipelineBtn", () => this.commit());
+        on("undoPipelineBtn", () => this.historyMove(-1));
+        on("redoPipelineBtn", () => this.historyMove(1));
+        on("addPipelineOpBtn", () => this.addBuiltIn());
+        on("addPipelineCommandBtn", () => this.addExStage());
+        on("clearPipelineBtn", () => this.clear());
+        on("savePipelineBtn", () => this.saveJson());
+        on("loadPipelineBtn", () => document.getElementById("pipelineFileInput").click());
+        on("batchFilesBtn", () => document.getElementById("batchFileInput").click());
+        on("batchDirectoryBtn", () => this.batchDirectory());
+        document.getElementById("pipelineVariablesInput").addEventListener("input", () => {
+          this.variables = this.parseVariables(document.getElementById("pipelineVariablesInput").value);
+          this.persist();
+          this.run(false);
+        });
+        document.getElementById("pipelineFileInput").addEventListener("change", (event) => this.loadJsonFile(event.target.files[0]));
+        document.getElementById("batchFileInput").addEventListener("change", (event) => this.batchFiles([...event.target.files]));
+      }
+      toggle(open) {
+        document.getElementById("editorShell").classList.toggle("pipeline-open", open);
+        document.getElementById("pipelineBtn").classList.toggle("primary", open);
+      }
+      renderOperationSelect() {
+        const select = document.getElementById("pipelineOpSelect");
+        select.replaceChildren(...this.registry.list().map((plugin) => new Option(plugin.label, plugin.id)));
+      }
+      renderVariables() {
+        document.getElementById("pipelineVariablesInput").value = Object.entries(this.variables).map(([k, v]) => `${k}=${v}`).join("\n");
+      }
+      parseVariables(text) {
+        const vars = {};
+        text.split(/\r?\n/).forEach((line) => {
+          const idx = line.indexOf("=");
+          if (idx > 0) vars[line.slice(0, idx).trim()] = line.slice(idx + 1);
+        });
+        return vars;
+      }
+      expand(text) {
+        return String(text ?? "").replace(/\$\{([A-Za-z0-9_ -]+)\}/g, (_, key) => this.variables[key] ?? "");
+      }
+      addBuiltIn() {
+        const id = document.getElementById("pipelineOpSelect").value;
+        const plugin = this.registry.get(id);
+        if (!plugin) return;
+        const config = { ...(plugin.defaultConfig || {}) };
+        if (["keepFirstN", "keepLastN", "head", "tail"].includes(id)) config.n = prompt("N:", config.n || 10) || config.n || 10;
+        if (id === "csvColumnExtract") config.column = prompt("Zero-based column index:", "0") || "0";
+        if (id === "csvFilter") config.pattern = prompt("CSV filter regex:", "${Pattern}") || "${Pattern}";
+        if (id === "tabsToSpaces" || id === "spacesToTabs") config.size = prompt("Spaces per tab:", "2") || "2";
+        this.steps.push(this.makeStep({ type: "builtin", op: id, label: plugin.label, config }));
+        this.selectedIndex = this.steps.length - 1;
+        this.persist();
+        this.run();
+      }
+      addExStage(commandText = document.getElementById("pipelineCommandInput").value.trim()) {
+        if (!commandText) return this.app.setStatus("Enter an Ex command for the pipeline stage", "warn");
+        this.steps.push(this.makeStep({ type: "ex", op: "ex", label: commandText, command: commandText, config: {} }));
+        document.getElementById("pipelineCommandInput").value = "";
+        this.selectedIndex = this.steps.length - 1;
+        this.persist();
+        this.run();
+      }
+      makeStep(partial) {
+        return {
+          id: crypto.randomUUID ? crypto.randomUUID() : `step_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          enabled: true,
+          name: "",
+          notes: "",
+          ...partial
+        };
+      }
+      run(recordHistory = true, input = this.app.getText()) {
+        const started = performance.now();
+        const stages = [{ label: "Original Document", text: input, meta: this.metrics("", input, 0, 0), original: true }];
+        let text = input;
+        for (const step of this.steps) {
+          const before = text;
+          const t0 = performance.now();
+          let error = "";
+          const cacheKey = `${this.fastHash(before)}|${JSON.stringify(this.cleanStep(step))}|${JSON.stringify(this.variables)}`;
+          if (step._cacheKey === cacheKey && typeof step._cacheText === "string") {
+            text = step._cacheText;
+          } else if (step.enabled) {
+            try {
+              text = step.type === "ex" ? this.runEx(before, this.expand(step.command)) : this.runBuiltin(before, step);
+              step._cacheKey = cacheKey;
+              step._cacheText = text;
+            } catch (err) {
+              error = err.message;
+              text = before;
+            }
+          }
+          const meta = this.metrics(before, text, performance.now() - t0, error ? 1 : 0);
+          stages.push({ step, label: step.name || step.label, text, meta, error });
+        }
+        this.stageCache = stages;
+        this.lastOutput = text;
+        if (recordHistory) this.recordHistory(stages, performance.now() - started);
+        this.render();
+        this.app.setStatus(`Pipeline ran ${this.steps.length} stage${this.steps.length === 1 ? "" : "s"}`, "ok");
+        return { text, stages, elapsed: performance.now() - started };
+      }
+      fastHash(text) {
+        let hash = 2166136261;
+        const step = Math.max(1, Math.floor(text.length / 20000));
+        for (let i = 0; i < text.length; i += step) {
+          hash ^= text.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return `${text.length}:${hash >>> 0}`;
+      }
+      cleanStep(step) {
+        const { _cacheKey, _cacheText, ...clean } = step;
+        return clean;
+      }
+      scheduleRun() {
+        clearTimeout(this.runTimer);
+        this.runTimer = setTimeout(() => this.run(false), 250);
+      }
+      runBuiltin(text, step) {
+        const plugin = this.registry.get(step.op);
+        if (!plugin) throw new Error(`Unknown operation: ${step.op}`);
+        const config = {};
+        Object.entries(step.config || {}).forEach(([k, v]) => config[k] = this.expand(v));
+        return plugin.run(text, config, this);
+      }
+      runEx(text, commandText) {
+        const command = this.app.parser.parse(commandText);
+        if (command.type === "substitute") return this.applySubstitute(text, command);
+        if (command.type === "global") return this.applyGlobal(text, command);
+        throw new Error("Only substitute and :g/:v commands are pipeline-safe");
+      }
+      applySubstitute(text, command) {
+        const flags = command.flags || "";
+        const re = flags.includes("g") ? this.app.regex.makeGlobal(command.pattern, flags) : this.app.regex.makeRegExp(command.pattern, flags);
+        const replacement = command.replacement.replace(/\\n/g, "\n");
+        if (command.range && command.range !== "%") {
+          const lines = text.split("\n");
+          const current = 0;
+          lines[current] = lines[current].replace(re, replacement);
+          return lines.join("\n");
+        }
+        return text.replace(re, replacement);
+      }
+      applyGlobal(text, command) {
+        const re = this.app.regex.makeRegExp(command.pattern);
+        const lines = text.split("\n");
+        const selected = lines.filter((line) => {
+          const hit = re.test(line);
+          re.lastIndex = 0;
+          return command.invert ? !hit : hit;
+        });
+        if (command.action === "p" || command.action === "y") return selected.join("\n");
+        if (command.action === "d") return lines.filter((line) => {
+          const hit = re.test(line);
+          re.lastIndex = 0;
+          return command.invert ? hit : !hit;
+        }).join("\n");
+        return text;
+      }
+      metrics(before, after, ms, errors) {
+        const beforeRows = before ? before.split("\n").length : 0;
+        const afterRows = after ? after.split("\n").length : 0;
+        return {
+          ms,
+          rowsChanged: before === after ? 0 : Math.max(beforeRows, afterRows),
+          rowsRemoved: Math.max(0, beforeRows - afterRows),
+          rowsAdded: Math.max(0, afterRows - beforeRows),
+          matches: Math.abs((before.match(/\n/g) || []).length - (after.match(/\n/g) || []).length) || (before === after ? 0 : 1),
+          errors
+        };
+      }
+      recordHistory(stages, elapsed) {
+        this.history = this.history.slice(0, this.historyIndex + 1);
+        this.history.push({
+          id: Date.now(),
+          elapsed,
+          selectedIndex: this.selectedIndex,
+          steps: JSON.parse(JSON.stringify(this.steps)),
+          variables: { ...this.variables },
+          output: stages.at(-1)?.text || ""
+        });
+        this.historyIndex = this.history.length - 1;
+      }
+      historyMove(delta) {
+        const next = this.historyIndex + delta;
+        if (next < 0 || next >= this.history.length) return;
+        const node = this.history[next];
+        this.historyIndex = next;
+        this.steps = JSON.parse(JSON.stringify(node.steps));
+        this.variables = { ...node.variables };
+        this.selectedIndex = node.selectedIndex;
+        this.persist();
+        this.renderVariables();
+        this.run(false);
+      }
+      select(index) {
+        this.selectedIndex = index;
+        this.persist();
+        this.render();
+      }
+      move(index, delta) {
+        const next = index + delta;
+        if (next < 0 || next >= this.steps.length) return;
+        [this.steps[index], this.steps[next]] = [this.steps[next], this.steps[index]];
+        this.selectedIndex = next;
+        this.persist();
+        this.run();
+      }
+      toggleStep(index) {
+        this.steps[index].enabled = !this.steps[index].enabled;
+        this.persist();
+        this.run();
+      }
+      rename(index) {
+        const value = prompt("Stage name:", this.steps[index].name || this.steps[index].label);
+        if (value != null) {
+          this.steps[index].name = value.trim();
+          this.persist();
+          this.render();
+        }
+      }
+      note(index) {
+        const value = prompt("Stage notes:", this.steps[index].notes || "");
+        if (value != null) {
+          this.steps[index].notes = value;
+          this.persist();
+          this.render();
+        }
+      }
+      remove(index) {
+        this.steps.splice(index, 1);
+        this.selectedIndex = Math.min(this.selectedIndex, this.steps.length - 1);
+        this.persist();
+        this.run();
+      }
+      clear() {
+        if (!confirm("Clear the current pipeline?")) return;
+        this.steps = [];
+        this.selectedIndex = -1;
+        this.persist();
+        this.run();
+      }
+      commit() {
+        this.app.setText(this.lastOutput || this.app.getText());
+        this.app.setStatus("Pipeline output committed to editor", "ok");
+      }
+      persist() {
+        const steps = this.steps.map((step) => this.cleanStep(step));
+        this.app.storage.save({ pipeline: { steps, variables: this.variables, selectedIndex: this.selectedIndex } });
+      }
+      render() {
+        const list = document.getElementById("pipelineList");
+        const nodes = [{ original: true, label: "Original Document", enabled: true }, ...this.steps];
+        list.replaceChildren(...nodes.map((node, visualIndex) => this.renderNode(node, visualIndex - 1)));
+        this.renderPreview();
+      }
+      renderNode(node, index) {
+        const stage = this.stageCache[index + 1];
+        const article = document.createElement("article");
+        article.className = `pipeline-node ${node.original ? "original" : ""} ${index === this.selectedIndex ? "selected" : ""} ${node.enabled === false ? "disabled" : ""}`;
+        article.innerHTML = `
+          <div class="node-title"><strong>${this.escape(node.original ? "Original Document" : (node.name || node.label))}</strong><span>${node.enabled === false ? "off" : "on"}</span></div>
+          <div class="node-meta">
+            <span>${(stage?.meta?.ms || 0).toFixed(1)}ms</span>
+            <span>±${stage?.meta?.rowsChanged || 0} rows</span>
+            <span>${stage?.meta?.matches || 0} hits</span>
+            <span>-${stage?.meta?.rowsRemoved || 0}</span>
+            <span>+${stage?.meta?.rowsAdded || 0}</span>
+            <span>${stage?.error ? "error" : "ok"}</span>
+          </div>
+          ${node.notes ? `<div style="color:var(--muted);font-size:.75rem">${this.escape(node.notes)}</div>` : ""}
+          <div class="node-actions"></div>
+        `;
+        article.addEventListener("click", () => this.select(index));
+        const actions = article.querySelector(".node-actions");
+        if (!node.original) {
+          actions.append(this.button(node.enabled === false ? "Enable" : "Disable", () => this.toggleStep(index)));
+          actions.append(this.button("↑", () => this.move(index, -1)));
+          actions.append(this.button("↓", () => this.move(index, 1)));
+          actions.append(this.button("Rename", () => this.rename(index)));
+          actions.append(this.button("Note", () => this.note(index)));
+          actions.append(this.button("Delete", () => this.remove(index), "danger"));
+        }
+        return article;
+      }
+      renderPreview() {
+        const index = this.selectedIndex;
+        const currentStage = this.stageCache[index + 1] || this.stageCache.at(-1) || this.stageCache[0];
+        const prevStage = this.stageCache[index] || this.stageCache[0];
+        const originalStage = this.stageCache[0];
+        const finalStage = this.stageCache.at(-1);
+        document.getElementById("pipelinePreviewTitle").textContent = currentStage?.label || "Preview";
+        document.getElementById("pipelineOriginalPreview").textContent = this.previewText(originalStage?.text || "");
+        document.getElementById("pipelinePrevPreview").textContent = this.previewText(prevStage?.text || "");
+        document.getElementById("pipelineCurrentPreview").textContent = this.previewText(currentStage?.text || "");
+        document.getElementById("pipelineFinalPreview").textContent = this.previewText(finalStage?.text || "");
+        document.getElementById("pipelineDiffPreview").innerHTML = this.diffHtml(prevStage?.text || "", currentStage?.text || "");
+      }
+      previewText(text) { return text.length > 20000 ? `${text.slice(0, 20000)}\n\n[preview truncated]` : text; }
+      diffHtml(a, b) {
+        const left = a.split("\n");
+        const right = b.split("\n");
+        const max = Math.min(Math.max(left.length, right.length), 600);
+        const out = [];
+        for (let i = 0; i < max; i++) {
+          if (left[i] === right[i]) continue;
+          if (left[i] !== undefined) out.push(`<span class="diff-del">- ${this.escape(left[i])}</span>`);
+          if (right[i] !== undefined) out.push(`<span class="diff-add">+ ${this.escape(right[i])}</span>`);
+        }
+        return out.join("\n") || "No line-level differences.";
+      }
+      saveJson() {
+        const json = JSON.stringify({ steps: this.steps.map((step) => this.cleanStep(step)), variables: this.variables, options: this.app.options, comments: "Play Editor pipeline" }, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "Play Editor Pipeline.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      async loadJsonFile(file) {
+        if (!file) return;
+        const json = JSON.parse(await file.text());
+        this.steps = json.steps || [];
+        this.variables = json.variables || {};
+        if (json.options) {
+          this.app.options = { ...this.app.options, ...json.options };
+          this.app.view.dispatch({
+            effects: [
+              this.app.wrapCompartment.reconfigure(this.app.options.wrap ? EditorView.lineWrapping : []),
+              this.app.lineCompartment.reconfigure(this.app.options.lineNumbers ? this.app.bookmarkGutter() : []),
+              this.app.listCompartment.reconfigure(this.app.options.list ? highlightSpecialChars() : [])
+            ]
+          });
+          this.app.updateToggles();
+          this.app.updateInvisibles();
+        }
+        this.selectedIndex = this.steps.length - 1;
+        this.renderVariables();
+        this.persist();
+        this.run();
+      }
+      async batchFiles(files) {
+        if (!files.length) return;
+        const started = performance.now();
+        const rows = [];
+        for (const file of files) {
+          try {
+            const text = await file.text();
+            const result = this.run(false, text);
+            const totals = result.stages.reduce((acc, stage) => {
+              acc.changed += stage.meta?.rowsChanged || 0;
+              acc.errors += stage.meta?.errors || 0;
+              return acc;
+            }, { changed: 0, errors: 0 });
+            rows.push(`${file.name}: ok, ${result.text.length} chars, ${totals.changed} changed rows, ${result.elapsed.toFixed(1)}ms`);
+          } catch (error) {
+            rows.push(`${file.name}: ERROR ${error.message}`);
+          }
+        }
+        document.getElementById("batchResults").textContent = `${files.length} files processed in ${(performance.now() - started).toFixed(1)}ms\n${rows.join("\n")}`;
+      }
+      async batchDirectory() {
+        if (!window.showDirectoryPicker) return this.app.setStatus("Directory batch needs File System Access API", "warn");
+        const dir = await showDirectoryPicker();
+        const files = [];
+        for await (const entry of dir.values()) {
+          if (entry.kind === "file") files.push(await entry.getFile());
+        }
+        await this.batchFiles(files);
+      }
+      button(text, fn, kind = "") {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `btn ${kind}`;
+        button.textContent = text;
+        button.addEventListener("click", (event) => { event.stopPropagation(); fn(); });
+        return button;
+      }
+      escape(value) {
+        return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+      }
+    }
+
     class PlayEditor {
       constructor() {
         this.storage = new StorageManager("playEditor.settings.v1");
@@ -618,6 +1238,7 @@
         this.search = new SearchController(this);
         this.commandBar = new CommandBar(this, document.getElementById("commandInput"));
         this.bindUI();
+        this.pipeline = new PipelineManager(this);
         this.updateStats();
         this.updateToggles();
       }
@@ -669,6 +1290,7 @@
                     this.persist();
                     this.regex?.refresh();
                     if (this.options.list) this.updateInvisibles();
+                    this.pipeline?.scheduleRun();
                   }
                 }
               }),
