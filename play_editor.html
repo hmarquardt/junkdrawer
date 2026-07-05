@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Play Editor</title>
+  <meta name="description" content="A Vim-minded text manipulation workbench with CodeMirror, regex tools, Ex commands, and local file support." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✂️</text></svg>" />
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080b10;
+      --panel: #0f141d;
+      --panel-2: #131a25;
+      --panel-3: #1a2330;
+      --line: #283242;
+      --line-2: #344154;
+      --text: #d9e2ef;
+      --muted: #8c9aab;
+      --accent: #7dd3fc;
+      --accent-2: #a78bfa;
+      --good: #34d399;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --shadow: 0 18px 60px rgba(0,0,0,.35);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
+    body { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #121824, #0e131c);
+      box-shadow: var(--shadow);
+      min-height: 48px;
+      overflow-x: auto;
+    }
+
+    .btn {
+      border: 1px solid var(--line-2);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 7px;
+      padding: 6px 10px;
+      min-height: 32px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--accent); color: #fff; }
+    .btn.primary { background: #0b4861; border-color: #11617f; color: #e0f7ff; }
+    .btn.warn { background: #4f3511; border-color: #8a5a12; color: #ffe8aa; }
+    .btn.danger { background: #501b28; border-color: #8e2c42; color: #ffe2e8; }
+
+    .toolbar-spacer { flex: 1 1 auto; min-width: 20px; }
+    .metric {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: #0a1018;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: .82rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .metric strong { color: var(--text); font-weight: 900; }
+    .mode-normal strong { color: var(--accent); }
+    .mode-insert strong { color: var(--good); }
+    .mode-visual strong { color: var(--accent-2); }
+
+    .editor-shell {
+      position: relative;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      background: #070a0f;
+    }
+    .editor-shell.split { grid-template-columns: minmax(0, 1fr) minmax(240px, .42fr); }
+    #editor { min-height: 0; }
+    .split-pane {
+      display: none;
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+      min-width: 0;
+      overflow: auto;
+      padding: 12px;
+    }
+    .editor-shell.split .split-pane { display: block; }
+    .split-pane h2 { margin: 0 0 10px; font-size: .95rem; }
+    .split-pane pre {
+      white-space: pre-wrap;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: .85rem;
+    }
+
+    .command-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      border-top: 1px solid var(--line);
+      background: #0c1119;
+      padding: 8px 10px;
+    }
+    .colon {
+      color: var(--accent);
+      font-size: 1.35rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-weight: 900;
+      line-height: 1;
+    }
+    #commandInput {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      outline: none;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 1rem;
+      padding: 5px 2px;
+    }
+    #commandInput:focus { border-bottom-color: var(--accent); }
+    #status {
+      color: var(--muted);
+      min-width: 220px;
+      text-align: right;
+      font-size: .86rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #status.ok { color: var(--good); }
+    #status.warn { color: var(--warn); }
+    #status.error { color: var(--bad); }
+
+    .cm-editor { height: 100%; background: #080c12; color: var(--text); font-size: 14px; }
+    .cm-scroller {
+      font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      line-height: 1.55;
+    }
+    .cm-gutters { background: #0b1018 !important; color: #637084 !important; border-right: 1px solid var(--line) !important; }
+    .cm-activeLine, .cm-activeLineGutter { background: rgba(125, 211, 252, .08) !important; }
+    .cm-selectionBackground, .cm-content ::selection { background: rgba(125, 211, 252, .25) !important; }
+    .cm-cursor { border-left-color: var(--accent) !important; }
+    .cm-searchMatch { background: rgba(251, 191, 36, .26); outline: 1px solid rgba(251, 191, 36, .35); border-radius: 2px; }
+    .cm-searchMatch-current { background: rgba(52, 211, 153, .32); outline: 1px solid rgba(52, 211, 153, .7); border-radius: 2px; }
+    .cm-trailing-space { background: rgba(251, 113, 133, .32); }
+    .cm-tab-char { background: rgba(167, 139, 250, .24); }
+    .cm-tab-char, .cm-invisible-char { color: #64748b; opacity: .9; }
+    .cm-bookmark-gutter .cm-gutterElement { color: var(--warn); }
+
+    dialog {
+      border: 1px solid var(--line-2);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 12px;
+      box-shadow: 0 25px 90px rgba(0,0,0,.55);
+      width: min(760px, calc(100vw - 32px));
+      padding: 0;
+    }
+    dialog::backdrop { background: rgba(0,0,0,.55); }
+    .dialog-body { padding: 16px; display: grid; gap: 12px; }
+    .dialog-body h2 { margin: 0; font-size: 1.1rem; }
+    .dialog-body pre {
+      max-height: 52vh;
+      overflow: auto;
+      background: #080c12;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: .88rem;
+    }
+    .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+    .cheat {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      font-size: .88rem;
+    }
+    .cheat code { color: var(--accent); }
+    @media (max-width: 760px) {
+      .cheat { grid-template-columns: 1fr; }
+      #status { display: none; }
+      .toolbar { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="toolbar" aria-label="Editor toolbar">
+    <button class="btn" id="newBtn" type="button">New</button>
+    <button class="btn" id="openBtn" type="button">Open</button>
+    <button class="btn" id="saveBtn" type="button">Save</button>
+    <button class="btn" id="saveAsBtn" type="button">Save As</button>
+    <button class="btn" id="undoBtn" type="button">Undo</button>
+    <button class="btn" id="redoBtn" type="button">Redo</button>
+    <button class="btn" id="wrapBtn" type="button">Toggle Wrap</button>
+    <button class="btn" id="lineNumbersBtn" type="button">Toggle Line Numbers</button>
+    <button class="btn" id="prevMatchBtn" type="button">Previous</button>
+    <button class="btn" id="nextMatchBtn" type="button">Next</button>
+    <button class="btn" id="splitBtn" type="button">Split</button>
+    <button class="btn" id="cheatBtn" type="button">Regex Cheat Sheet</button>
+    <div class="toolbar-spacer"></div>
+    <span class="metric">Match Count <strong id="matchCount">0 matches</strong></span>
+    <span class="metric" id="modePill">Current Mode <strong id="modeLabel">NORMAL</strong></span>
+    <span class="metric">Ln <strong id="lineCount">1</strong></span>
+    <span class="metric">Col <strong id="columnCount">1</strong></span>
+    <span class="metric">Words <strong id="wordCount">0</strong></span>
+    <span class="metric">Chars <strong id="charCount">0</strong></span>
+  </header>
+
+  <main class="editor-shell" id="editorShell">
+    <div id="editor"></div>
+    <aside class="split-pane" id="splitPane">
+      <h2>Printed Lines / Scratch</h2>
+      <pre id="splitOutput">Use :g/foo/p to print matching lines here.</pre>
+    </aside>
+  </main>
+
+  <footer class="command-row">
+    <span class="colon">:</span>
+    <input id="commandInput" autocomplete="off" spellcheck="false" aria-label="Ex command bar" placeholder="%s/foo/bar/g, /ERROR, :g/foo/p" />
+    <span id="status" aria-live="polite">Ready</span>
+  </footer>
+
+  <dialog id="replaceDialog">
+    <div class="dialog-body">
+      <h2>Replace Preview</h2>
+      <p id="replaceSummary">0 replacements</p>
+      <pre id="replacePreview"></pre>
+      <div class="dialog-actions">
+        <button class="btn primary" id="applyReplaceBtn" type="button">Apply</button>
+        <button class="btn" id="cancelReplaceBtn" type="button">Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="printDialog">
+    <div class="dialog-body">
+      <h2>Matching Lines</h2>
+      <pre id="printOutput"></pre>
+      <div class="dialog-actions">
+        <button class="btn" id="copyPrintBtn" type="button">Copy</button>
+        <button class="btn" id="closePrintBtn" type="button">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="cheatDialog">
+    <div class="dialog-body">
+      <h2>Regex / Ex Cheat Sheet</h2>
+      <div class="cheat">
+        <div><code>:%s/\bcat\b/dog/g</code><br />Replace every whole-word cat.</div>
+        <div><code>:s/foo/bar/</code><br />Replace first match on current line.</div>
+        <div><code>:'&lt;,'&gt;s/foo/bar/g</code><br />Replace inside current selection.</div>
+        <div><code>:g/^ERROR/p</code><br />Print matching lines.</div>
+        <div><code>:g/foo/d</code><br />Delete matching lines.</div>
+        <div><code>:v/foo/d</code><br />Delete nonmatching lines.</div>
+        <div><code>:g/foo/y</code><br />Copy matching lines.</div>
+        <div><code>:42</code><br />Jump to line 42.</div>
+        <div><code>:set ic</code> / <code>:set noic</code><br />Toggle case-insensitive regex.</div>
+        <div><code>:set list</code> / <code>:set nolist</code><br />Toggle invisible characters.</div>
+      </div>
+      <div class="dialog-actions"><button class="btn" id="closeCheatBtn" type="button">Close</button></div>
+    </div>
+  </dialog>
+
+  <input id="fileInput" type="file" accept=".txt,.md,.json,.csv,.log,text/plain,text/markdown,application/json,text/csv" hidden />
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.05.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.05.1" style="position: fixed; left: -9999px; width: 1px; height: 1px; overflow: hidden;">
+    &copy; 2026 Hank Marquardt · Play Editor · version 2026.07.05.1
+  </footer>
+
+  <script type="module">
+    import { EditorState, Compartment, StateEffect, StateField } from "https://esm.sh/@codemirror/state@6.5.2";
+    import { EditorView, Decoration, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, highlightActiveLine, rectangularSelection, crosshairCursor } from "https://esm.sh/@codemirror/view@6.38.1";
+    import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from "https://esm.sh/@codemirror/commands@6.8.1";
+    import { searchKeymap } from "https://esm.sh/@codemirror/search@6.5.11";
+    import { vim } from "https://esm.sh/@replit/codemirror-vim@6.2.1?deps=@codemirror/state@6.5.2,@codemirror/view@6.38.1";
+
+    const setInvisibleDecorations = StateEffect.define();
+    const invisibleField = StateField.define({
+      create: () => Decoration.none,
+      update(value, tr) {
+        value = value.map(tr.changes);
+        for (const effect of tr.effects) {
+          if (effect.is(setInvisibleDecorations)) return Decoration.set(effect.value, true);
+        }
+        return value;
+      },
+      provide: (field) => EditorView.decorations.from(field)
+    });
+
+    function buildInvisibleDecorations(state) {
+      const marks = [];
+      const text = state.doc.toString();
+      const re = /\t|[ ]+$/gm;
+      let match;
+      while ((match = re.exec(text)) !== null) {
+        const cls = match[0] === "\t" ? "cm-tab-char" : "cm-trailing-space";
+        marks.push(Decoration.mark({ class: cls }).range(match.index, match.index + match[0].length));
+      }
+      return marks;
+    }
+
+    class StorageManager {
+      constructor(key) {
+        this.key = key;
+        this.defaults = {
+          doc: "",
+          wrap: false,
+          lineNumbers: true,
+          theme: "dark",
+          list: false,
+          ignoreCase: false,
+          recentRegexes: [],
+          recentCommands: [],
+          replaceHistory: [],
+          bookmarks: []
+        };
+        this.state = this.load();
+      }
+      load() {
+        try { return { ...this.defaults, ...JSON.parse(localStorage.getItem(this.key) || "{}") }; }
+        catch { return { ...this.defaults }; }
+      }
+      save(patch = {}) {
+        this.state = { ...this.state, ...patch };
+        localStorage.setItem(this.key, JSON.stringify(this.state));
+      }
+      pushRecent(field, value, limit = 12) {
+        if (!value) return;
+        const next = [value, ...(this.state[field] || []).filter((item) => item !== value)].slice(0, limit);
+        this.save({ [field]: next });
+      }
+    }
+
+    class RegexEngine {
+      static setDecorations = StateEffect.define();
+      static field = StateField.define({
+        create: () => Decoration.none,
+        update(value, tr) {
+          value = value.map(tr.changes);
+          for (const effect of tr.effects) {
+            if (effect.is(RegexEngine.setDecorations)) return Decoration.set(effect.value, true);
+          }
+          return value;
+        },
+        provide: (field) => EditorView.decorations.from(field)
+      });
+      constructor(app) {
+        this.app = app;
+        this.query = "";
+        this.direction = 1;
+        this.matches = [];
+        this.currentIndex = -1;
+      }
+      makeRegExp(pattern, flags = "") {
+        const allowed = [...new Set((flags + (this.app.options.ignoreCase ? "i" : "")).split("").filter((f) => "gimus".includes(f)))].join("");
+        return new RegExp(pattern, allowed);
+      }
+      makeGlobal(pattern, flags = "") {
+        return this.makeRegExp(pattern, flags.includes("g") ? flags : `${flags}g`);
+      }
+      findAll(pattern, flags = "") {
+        const text = this.app.getText();
+        if (!pattern) return [];
+        const re = this.makeGlobal(pattern, flags);
+        const found = [];
+        let match;
+        while ((match = re.exec(text)) !== null) {
+          found.push({ from: match.index, to: match.index + match[0].length, text: match[0] });
+          if (match[0].length === 0) re.lastIndex++;
+        }
+        return found;
+      }
+      setSearch(pattern, direction = 1, flags = "") {
+        this.query = pattern;
+        this.direction = direction;
+        this.matches = this.findAll(pattern, flags);
+        this.currentIndex = this.pickNearestIndex(direction);
+        this.render();
+        this.app.storage.pushRecent("recentRegexes", pattern);
+        if (this.currentIndex >= 0) this.gotoCurrent();
+        this.app.updateMatchCount();
+      }
+      pickNearestIndex(direction) {
+        if (!this.matches.length) return -1;
+        const head = this.app.view.state.selection.main.head;
+        if (direction >= 0) {
+          const idx = this.matches.findIndex((m) => m.from >= head);
+          return idx === -1 ? 0 : idx;
+        }
+        for (let i = this.matches.length - 1; i >= 0; i--) if (this.matches[i].to <= head) return i;
+        return this.matches.length - 1;
+      }
+      refresh() {
+        if (!this.query) {
+          this.matches = [];
+          this.currentIndex = -1;
+        } else {
+          this.matches = this.findAll(this.query);
+          if (this.currentIndex >= this.matches.length) this.currentIndex = this.matches.length - 1;
+        }
+        this.render();
+        this.app.updateMatchCount();
+      }
+      move(delta) {
+        if (!this.matches.length) return this.app.setStatus("No matches", "warn");
+        this.currentIndex = (this.currentIndex + delta + this.matches.length) % this.matches.length;
+        this.gotoCurrent();
+        this.render();
+      }
+      gotoCurrent() {
+        const match = this.matches[this.currentIndex];
+        if (!match) return;
+        this.app.view.dispatch({ selection: { anchor: match.from, head: match.to }, effects: EditorView.scrollIntoView(match.from, { y: "center" }) });
+        this.app.view.focus();
+      }
+      render(extra = []) {
+        const decos = this.matches.map((m, i) => Decoration.mark({ class: i === this.currentIndex ? "cm-searchMatch-current" : "cm-searchMatch" }).range(m.from, Math.max(m.to, m.from + 1)));
+        this.app.view.dispatch({ effects: RegexEngine.setDecorations.of([...decos, ...extra]) });
+      }
+    }
+
+    class ExParser {
+      parse(input) {
+        const raw = input.trim();
+        const command = raw.startsWith(":") ? raw.slice(1) : raw;
+        if (!command) return { type: "empty" };
+        if (/^[/?]/.test(raw)) return { type: "search", direction: raw[0] === "/" ? 1 : -1, pattern: raw.slice(1) };
+        if (/^\d+$/.test(command)) return { type: "line", line: Number(command) };
+
+        const set = command.match(/^set\s+(no)?(ic|list)$/i);
+        if (set) return { type: "set", option: set[2].toLowerCase(), value: !set[1] };
+
+        const global = this.parseGlobal(command);
+        if (global) return global;
+
+        const sub = this.parseSubstitute(command);
+        if (sub) return sub;
+
+        if (/^(w|write)$/i.test(command)) return { type: "write" };
+        if (/^(q|quit)$/i.test(command)) return { type: "noop", message: "This editor does not close tabs. Use New or close the browser tab." };
+        return { type: "unknown", command };
+      }
+      parseGlobal(command) {
+        const match = command.match(/^([gv])(.)([\s\S]*)$/i);
+        if (!match) return null;
+        const [, kind, delim, rest] = match;
+        const pattern = this.readUntil(rest, delim, 0);
+        if (!pattern) return null;
+        const action = rest.slice(pattern.next + 1).trim() || "p";
+        if (!/^[dyp]$/.test(action)) return null;
+        return { type: "global", invert: kind.toLowerCase() === "v", pattern: pattern.value, action };
+      }
+      parseSubstitute(command) {
+        const prefix = command.match(/^((?:%|'<,'>|[.$]|\d+)?(?:,(?:[.$]|\d+))?)?s(.)([\s\S]*)$/);
+        if (!prefix) return null;
+        const range = prefix[1] || "";
+        const delim = prefix[2];
+        const rest = prefix[3];
+        const pat = this.readUntil(rest, delim, 0);
+        if (!pat) return null;
+        const repl = this.readUntil(rest, delim, pat.next + 1);
+        if (!repl) return null;
+        const flags = rest.slice(repl.next + 1).trim();
+        return { type: "substitute", range, pattern: pat.value, replacement: repl.value, flags };
+      }
+      readUntil(text, delim, start) {
+        let escaped = false;
+        let out = "";
+        for (let i = start; i < text.length; i++) {
+          const ch = text[i];
+          if (!escaped && ch === delim) return { value: out, next: i };
+          if (!escaped && ch === "\\") {
+            escaped = true;
+            out += ch;
+            continue;
+          }
+          escaped = false;
+          out += ch;
+        }
+        return null;
+      }
+    }
+
+    class SearchController {
+      constructor(app) { this.app = app; }
+      search(pattern, direction) {
+        try {
+          this.app.regex.setSearch(pattern, direction);
+          this.app.setStatus(`${this.app.regex.matches.length} matches`, this.app.regex.matches.length ? "ok" : "warn");
+        } catch (error) {
+          this.app.setStatus(error.message, "error");
+        }
+      }
+      next() { this.app.regex.move(1); }
+      previous() { this.app.regex.move(-1); }
+    }
+
+    class CommandBar {
+      constructor(app, input) {
+        this.app = app;
+        this.input = input;
+        input.addEventListener("keydown", (event) => this.onKey(event));
+      }
+      onKey(event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const command = this.input.value;
+          this.input.value = "";
+          this.app.executeCommand(command);
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          this.input.value = "";
+          this.app.view.focus();
+          this.app.setMode("NORMAL");
+        }
+      }
+      focus(prefix = ":") {
+        this.input.value = prefix;
+        this.input.focus();
+        this.input.setSelectionRange(prefix.length, prefix.length);
+      }
+    }
+
+    class FileManager {
+      constructor(app) {
+        this.app = app;
+        this.handle = null;
+      }
+      async open(file) {
+        if (!file && window.showOpenFilePicker) {
+          const [handle] = await showOpenFilePicker({
+            types: [{ description: "Text", accept: { "text/*": [".txt", ".md", ".json", ".csv", ".log"] } }],
+            multiple: false
+          });
+          this.handle = handle;
+          file = await handle.getFile();
+        }
+        if (!file) return;
+        const text = await file.text();
+        this.app.setText(text);
+        this.app.currentName = file.name || "untitled.txt";
+        this.app.setStatus(`Opened ${this.app.currentName}`, "ok");
+      }
+      async save(as = false) {
+        const text = this.app.getText();
+        const suggestedName = this.app.currentName || "play-editor.txt";
+        if (window.showSaveFilePicker && (as || !this.handle)) {
+          this.handle = await showSaveFilePicker({
+            suggestedName,
+            types: [{ description: "Text", accept: { "text/plain": [".txt", ".md", ".json", ".csv", ".log"] } }]
+          });
+        }
+        if (window.showSaveFilePicker && this.handle) {
+          const writable = await this.handle.createWritable();
+          await writable.write(text);
+          await writable.close();
+          this.app.setStatus("Saved", "ok");
+          return;
+        }
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = suggestedName;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.app.setStatus("Downloaded file", "ok");
+      }
+    }
+
+    class PlayEditor {
+      constructor() {
+        this.storage = new StorageManager("playEditor.settings.v1");
+        this.parser = new ExParser();
+        this.options = {
+          wrap: this.storage.state.wrap,
+          lineNumbers: this.storage.state.lineNumbers,
+          list: this.storage.state.list,
+          ignoreCase: this.storage.state.ignoreCase
+        };
+        this.wrapCompartment = new Compartment();
+        this.lineCompartment = new Compartment();
+        this.listCompartment = new Compartment();
+        this.fileManager = new FileManager(this);
+        this.currentName = "untitled.txt";
+        this.pendingReplace = null;
+        this.bookmarks = new Set(this.storage.state.bookmarks || []);
+        this.setupEditor();
+        this.regex = new RegexEngine(this);
+        this.search = new SearchController(this);
+        this.commandBar = new CommandBar(this, document.getElementById("commandInput"));
+        this.bindUI();
+        this.updateStats();
+        this.updateToggles();
+      }
+      setupEditor() {
+        const modeTracker = EditorView.domEventHandlers({
+          keydown: (event) => {
+            if (event.key === "Escape") this.setMode("NORMAL");
+            if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+              if (["i", "a", "o", "O", "I", "A"].includes(event.key)) this.setMode("INSERT");
+              if (event.key === "v" || event.key === "V") this.setMode("VISUAL");
+              if (event.key === ":") {
+                event.preventDefault();
+                this.commandBar.focus(":");
+                return true;
+              }
+              if (event.key === "/" || event.key === "?") {
+                event.preventDefault();
+                this.commandBar.focus(event.key);
+                return true;
+              }
+            }
+            return false;
+          },
+          paste: () => setTimeout(() => this.persist(), 0)
+        });
+        this.view = new EditorView({
+          parent: document.getElementById("editor"),
+          state: EditorState.create({
+            doc: this.storage.state.doc || "",
+            extensions: [
+              history(),
+              drawSelection(),
+              rectangularSelection(),
+              crosshairCursor(),
+              highlightActiveLine(),
+              highlightActiveLineGutter(),
+              RegexEngine.field,
+              invisibleField,
+              this.wrapCompartment.of(this.options.wrap ? EditorView.lineWrapping : []),
+              this.lineCompartment.of(this.options.lineNumbers ? this.bookmarkGutter() : []),
+              this.listCompartment.of(this.options.list ? highlightSpecialChars() : []),
+              keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+              vim(),
+              modeTracker,
+              EditorView.updateListener.of((update) => {
+                if (update.docChanged || update.selectionSet) {
+                  this.updateStats();
+                  if (update.docChanged) {
+                    this.persist();
+                    this.regex?.refresh();
+                    if (this.options.list) this.updateInvisibles();
+                  }
+                }
+              }),
+              EditorView.theme({
+                "&": { height: "100%" },
+                ".cm-content": { caretColor: "#7dd3fc" },
+                ".cm-line": { padding: "0 10px" }
+              })
+            ]
+          })
+        });
+        if (this.options.list) this.updateInvisibles();
+        this.setMode("NORMAL");
+      }
+      bookmarkGutter() {
+        return lineNumbers({
+          domEventHandlers: {
+            click: (view, line) => {
+              const n = view.state.doc.lineAt(line.from).number;
+              this.toggleBookmark(n);
+              return true;
+            }
+          },
+          formatNumber: (n) => this.bookmarks.has(n) ? `★${n}` : String(n),
+          class: "cm-bookmark-gutter"
+        });
+      }
+      bindUI() {
+        const on = (id, fn) => document.getElementById(id).addEventListener("click", fn);
+        on("newBtn", () => this.newDocument());
+        on("openBtn", () => this.openDocument());
+        on("saveBtn", () => this.fileManager.save(false).catch((e) => this.setStatus(e.message, "error")));
+        on("saveAsBtn", () => this.fileManager.save(true).catch((e) => this.setStatus(e.message, "error")));
+        on("undoBtn", () => undo(this.view));
+        on("redoBtn", () => redo(this.view));
+        on("wrapBtn", () => this.toggleWrap());
+        on("lineNumbersBtn", () => this.toggleLineNumbers());
+        on("nextMatchBtn", () => this.search.next());
+        on("prevMatchBtn", () => this.search.previous());
+        on("splitBtn", () => document.getElementById("editorShell").classList.toggle("split"));
+        on("cheatBtn", () => document.getElementById("cheatDialog").showModal());
+        on("closeCheatBtn", () => document.getElementById("cheatDialog").close());
+        on("cancelReplaceBtn", () => this.cancelReplace());
+        on("applyReplaceBtn", () => this.applyReplace());
+        on("closePrintBtn", () => document.getElementById("printDialog").close());
+        on("copyPrintBtn", () => navigator.clipboard.writeText(document.getElementById("printOutput").textContent));
+        document.getElementById("fileInput").addEventListener("change", (event) => {
+          const file = event.target.files[0];
+          if (file) this.fileManager.open(file).catch((e) => this.setStatus(e.message, "error"));
+          event.target.value = "";
+        });
+        window.addEventListener("keydown", (event) => {
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+            event.preventDefault();
+            this.fileManager.save(false).catch((e) => this.setStatus(e.message, "error"));
+          }
+        });
+      }
+      executeCommand(input) {
+        const trimmed = input.trim();
+        this.storage.pushRecent("recentCommands", trimmed);
+        try {
+          const command = this.parser.parse(trimmed);
+          const actions = {
+            empty: () => {},
+            search: () => this.search.search(command.pattern, command.direction),
+            line: () => this.jumpToLine(command.line),
+            set: () => this.setOption(command.option, command.value),
+            substitute: () => this.previewSubstitution(command),
+            global: () => this.executeGlobal(command),
+            write: () => this.fileManager.save(false),
+            noop: () => this.setStatus(command.message, "warn"),
+            unknown: () => this.setStatus(`Unknown command: ${command.command}`, "error")
+          };
+          return actions[command.type]();
+        } catch (error) {
+          this.setStatus(error.message, "error");
+        }
+      }
+      getText() { return this.view.state.doc.toString(); }
+      setText(text) {
+        this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: text } });
+        this.persist();
+      }
+      persist() {
+        this.storage.save({ doc: this.getText(), wrap: this.options.wrap, lineNumbers: this.options.lineNumbers, list: this.options.list, ignoreCase: this.options.ignoreCase, bookmarks: [...this.bookmarks] });
+      }
+      newDocument() {
+        if (this.getText().trim() && !confirm("Clear the current document?")) return;
+        this.fileManager.handle = null;
+        this.currentName = "untitled.txt";
+        this.setText("");
+        this.setStatus("New document", "ok");
+      }
+      openDocument() {
+        if (window.showOpenFilePicker) this.fileManager.open().catch((e) => this.setStatus(e.message, "error"));
+        else document.getElementById("fileInput").click();
+      }
+      toggleWrap() {
+        this.options.wrap = !this.options.wrap;
+        this.view.dispatch({ effects: this.wrapCompartment.reconfigure(this.options.wrap ? EditorView.lineWrapping : []) });
+        this.persist();
+        this.updateToggles();
+      }
+      toggleLineNumbers() {
+        this.options.lineNumbers = !this.options.lineNumbers;
+        this.view.dispatch({ effects: this.lineCompartment.reconfigure(this.options.lineNumbers ? this.bookmarkGutter() : []) });
+        this.persist();
+        this.updateToggles();
+      }
+      setOption(option, value) {
+        if (option === "ic") {
+          this.options.ignoreCase = value;
+          this.regex.refresh();
+          this.setStatus(`ignorecase ${value ? "on" : "off"}`, "ok");
+        }
+        if (option === "list") {
+          this.options.list = value;
+          this.view.dispatch({ effects: this.listCompartment.reconfigure(value ? highlightSpecialChars() : []) });
+          this.updateInvisibles();
+          this.setStatus(`list ${value ? "on" : "off"}`, "ok");
+        }
+        this.persist();
+        this.updateToggles();
+      }
+      rangeForCommand(range) {
+        const state = this.view.state;
+        const doc = state.doc;
+        const sel = state.selection.main;
+        if (range === "%") return { from: 0, to: doc.length, label: "document" };
+        if (range === "'<,'>") return { from: sel.from, to: sel.to, label: "selection" };
+        if (/^\d+(,\d+)?$/.test(range)) {
+          const [start, end = start] = range.split(",").map(Number);
+          return { from: doc.line(start).from, to: doc.line(end).to, label: `lines ${start}-${end}` };
+        }
+        const line = doc.lineAt(sel.head);
+        return { from: line.from, to: line.to, label: `line ${line.number}` };
+      }
+      previewSubstitution(command) {
+        const range = this.rangeForCommand(command.range);
+        const source = this.getText().slice(range.from, range.to);
+        const flags = command.flags || "";
+        const re = flags.includes("g") ? this.regex.makeGlobal(command.pattern, flags) : this.regex.makeRegExp(command.pattern, flags);
+        let count = 0;
+        const replacement = command.replacement.replace(/\\n/g, "\n");
+        const replaced = source.replace(re, (...args) => {
+          count++;
+          return replacement.replace(/\\(\d+)/g, (_, n) => args[Number(n)] ?? "");
+        });
+        this.pendingReplace = { range, replaced, count, command };
+        document.getElementById("replaceSummary").textContent = `${count} replacement${count === 1 ? "" : "s"} in ${range.label}`;
+        document.getElementById("replacePreview").textContent = replaced.slice(0, 10000) || "(empty result)";
+        document.getElementById("replaceDialog").showModal();
+      }
+      applyReplace() {
+        if (!this.pendingReplace) return;
+        const { range, replaced, count, command } = this.pendingReplace;
+        this.view.dispatch({ changes: { from: range.from, to: range.to, insert: replaced } });
+        this.storage.pushRecent("replaceHistory", `${command.pattern} → ${command.replacement}`);
+        this.cancelReplace();
+        this.setStatus(`${count} replacement${count === 1 ? "" : "s"} applied`, "ok");
+      }
+      cancelReplace() {
+        this.pendingReplace = null;
+        document.getElementById("replaceDialog").close();
+      }
+      executeGlobal(command) {
+        const doc = this.view.state.doc;
+        const re = this.regex.makeRegExp(command.pattern);
+        const selected = [];
+        for (let i = 1; i <= doc.lines; i++) {
+          const line = doc.line(i);
+          const hit = re.test(line.text);
+          re.lastIndex = 0;
+          if (command.invert ? !hit : hit) selected.push(line);
+        }
+        if (command.action === "p") return this.printLines(selected, command.pattern);
+        if (command.action === "y") return this.copyLines(selected);
+        if (command.action === "d") return this.deleteLines(selected);
+      }
+      deleteLines(lines) {
+        const changes = lines.slice().reverse().map((line) => ({ from: line.from, to: Math.min(line.to + 1, this.view.state.doc.length), insert: "" }));
+        this.view.dispatch({ changes });
+        this.setStatus(`Deleted ${lines.length} line${lines.length === 1 ? "" : "s"}`, "ok");
+      }
+      async copyLines(lines) {
+        const text = lines.map((line) => line.text).join("\n");
+        await navigator.clipboard.writeText(text);
+        this.setStatus(`Copied ${lines.length} matching line${lines.length === 1 ? "" : "s"}`, "ok");
+      }
+      printLines(lines, pattern) {
+        const text = lines.map((line) => line.text).join("\n");
+        document.getElementById("printOutput").textContent = text || "(no matching lines)";
+        document.getElementById("splitOutput").textContent = text || "(no matching lines)";
+        document.getElementById("printDialog").showModal();
+        document.getElementById("editorShell").classList.add("split");
+        this.setStatus(`Printed ${lines.length} line${lines.length === 1 ? "" : "s"} for ${pattern}`, lines.length ? "ok" : "warn");
+      }
+      jumpToLine(number) {
+        const line = this.view.state.doc.line(Math.max(1, Math.min(number, this.view.state.doc.lines)));
+        this.view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
+        this.view.focus();
+        this.setStatus(`Line ${line.number}`, "ok");
+      }
+      toggleBookmark(lineNumber) {
+        if (this.bookmarks.has(lineNumber)) this.bookmarks.delete(lineNumber);
+        else this.bookmarks.add(lineNumber);
+        this.view.dispatch({ effects: this.lineCompartment.reconfigure(this.options.lineNumbers ? this.bookmarkGutter() : []) });
+        this.persist();
+      }
+      setMode(mode) {
+        document.getElementById("modeLabel").textContent = mode;
+        const pill = document.getElementById("modePill");
+        pill.className = `metric mode-${mode.toLowerCase()}`;
+      }
+      updateMatchCount() {
+        const count = this.regex?.matches.length || 0;
+        document.getElementById("matchCount").textContent = `${count} match${count === 1 ? "" : "es"}`;
+      }
+      updateStats() {
+        const state = this.view.state;
+        const text = this.getText();
+        const pos = state.selection.main.head;
+        const line = state.doc.lineAt(pos);
+        document.getElementById("lineCount").textContent = String(state.doc.lines);
+        document.getElementById("columnCount").textContent = String(pos - line.from + 1);
+        document.getElementById("wordCount").textContent = String((text.trim().match(/\S+/g) || []).length);
+        document.getElementById("charCount").textContent = String(text.length);
+      }
+      updateToggles() {
+        document.getElementById("wrapBtn").classList.toggle("primary", this.options.wrap);
+        document.getElementById("lineNumbersBtn").classList.toggle("primary", this.options.lineNumbers);
+      }
+      updateInvisibles() {
+        const decorations = this.options.list ? buildInvisibleDecorations(this.view.state) : [];
+        this.view.dispatch({ effects: setInvisibleDecorations.of(decorations) });
+      }
+      setStatus(message, type = "") {
+        const el = document.getElementById("status");
+        el.textContent = message;
+        el.className = type;
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      window.playEditor = new PlayEditor();
+    });
+  </script>
+</body>
+</html>
