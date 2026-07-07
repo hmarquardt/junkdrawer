@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ADU-Bench Deterministic Verifier</title>
+  <meta name="description" content="Browser-only deterministic helper for ADU-Bench verification tasks with parsed evidence search, date/number/table extraction, and response building." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>" />
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --panel-2: #f8fafc;
+      --ink: #172033;
+      --muted: #526074;
+      --line: #d5deea;
+      --blue: #0c5a7a;
+      --blue-2: #eaf6fb;
+      --green: #146c43;
+      --green-2: #eaf8f0;
+      --red: #b42332;
+      --red-2: #fff0f1;
+      --amber: #946200;
+      --amber-2: #fff7df;
+      --shadow: 0 14px 34px rgba(15, 23, 42, .08);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
+    button, textarea, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .6; }
+    textarea { resize: vertical; }
+    .shell { width: min(1500px, calc(100% - 24px)); margin: 0 auto; padding: 16px 0 28px; }
+    header {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(135deg, #fff, #edf6fb);
+      box-shadow: var(--shadow);
+      margin-bottom: 12px;
+    }
+    .title-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: clamp(1.35rem, 2.6vw, 2.15rem); letter-spacing: -.02em; }
+    .subtitle { margin: 4px 0 0; color: var(--muted); max-width: 850px; }
+    .actions, .tabs, .badge-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 8px 11px;
+      background: var(--blue);
+      color: white;
+      font-weight: 800;
+    }
+    .btn.secondary { background: white; color: var(--blue); border-color: rgba(12, 90, 122, .28); }
+    .btn.good { background: var(--green); }
+    .btn.bad { background: var(--red); }
+    .btn.warn { background: var(--amber); }
+    .btn.small { padding: 5px 8px; font-size: .82rem; }
+    .tabs { border: 1px solid var(--line); border-radius: 999px; padding: 4px; width: fit-content; max-width: 100%; background: rgba(255,255,255,.75); }
+    .tab { border: 0; border-radius: 999px; background: transparent; color: var(--muted); padding: 8px 13px; font-weight: 850; }
+    .tab[aria-selected="true"] { color: white; background: var(--blue); }
+    .panel { display: grid; gap: 12px; }
+    .panel[hidden] { display: none; }
+    .grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .75fr); gap: 12px; align-items: start; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    @media (max-width: 980px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .tabs { width: 100%; border-radius: 12px; }
+      .tab { flex: 1; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, .05);
+    }
+    .card h2 { margin: 0 0 10px; font-size: 1rem; }
+    .card h3 { margin: 12px 0 8px; font-size: .9rem; color: var(--muted); }
+    .section-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .help { color: var(--muted); font-size: .9rem; line-height: 1.45; }
+    .status {
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-height: 24px;
+      font-size: .88rem;
+    }
+    .status.ok { color: var(--green); background: var(--green-2); border-color: rgba(20,108,67,.25); }
+    .status.error { color: var(--red); background: var(--red-2); border-color: rgba(180,35,50,.25); }
+    .status.warn { color: var(--amber); background: var(--amber-2); border-color: rgba(148,98,0,.25); }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--muted);
+      padding: 4px 9px;
+      font-size: .78rem;
+      font-weight: 850;
+    }
+    .badge.blue { color: var(--blue); background: var(--blue-2); border-color: rgba(12,90,122,.25); }
+    .badge.green { color: var(--green); background: var(--green-2); border-color: rgba(20,108,67,.25); }
+    .badge.red { color: var(--red); background: var(--red-2); border-color: rgba(180,35,50,.25); }
+    .badge.amber { color: var(--amber); background: var(--amber-2); border-color: rgba(148,98,0,.25); }
+    label { display: grid; gap: 6px; color: var(--muted); font-weight: 800; font-size: .85rem; }
+    textarea, input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 9px 10px;
+      outline: none;
+    }
+    textarea:focus, input:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(12,90,122,.14); }
+    .mono, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    pre { white-space: pre-wrap; margin: 0; }
+    .input-area { min-height: 52vh; }
+    .kv { display: grid; gap: 7px; }
+    .kv div { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 10px; border-bottom: 1px solid var(--line); padding: 7px 0; }
+    .kv span:first-child { color: var(--muted); font-weight: 850; }
+    .list { display: grid; gap: 8px; }
+    .hit {
+      border: 1px solid var(--line);
+      background: white;
+      border-left: 4px solid var(--blue);
+      border-radius: 10px;
+      padding: 11px;
+      display: grid;
+      gap: 8px;
+    }
+    .hit.support { border-left-color: var(--green); background: var(--green-2); }
+    .hit.contra { border-left-color: var(--red); background: var(--red-2); }
+    .hit.ignore { opacity: .72; }
+    .hit-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    mark { background: #fff0a6; color: #172033; padding: 0 2px; border-radius: 3px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: white; }
+    table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #eef5fa; color: var(--muted); font-weight: 850; }
+    .response-grid { display: grid; gap: 10px; }
+    .response-grid textarea { min-height: 92px; }
+    .history-item { display: grid; gap: 5px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: white; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="title-row">
+        <div>
+          <h1>ADU-Bench Deterministic Verifier</h1>
+          <p class="subtitle">Parse pasted ADU-Bench task exports, search the supplied evidence deterministically, compare dates/numbers/tables, and build a manual verification response. No LLM calls. No backend.</p>
+        </div>
+        <div class="badge-row">
+          <span id="taskTypeBadge" class="badge blue">Task: unparsed</span>
+          <span id="hitsBadge" class="badge">Hits: 0</span>
+          <span id="selectedBadge" class="badge green">Selected: 0</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="pasteBtn" class="btn secondary" type="button">📋 Paste</button>
+        <button id="parseBtn" class="btn" type="button">Parse Task</button>
+        <button id="clearBtn" class="btn secondary" type="button">Clear</button>
+        <button id="exportJsonBtn" class="btn secondary" type="button">Copy JSON Audit Trail</button>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Workflow tabs">
+        <button class="tab" role="tab" aria-selected="true" data-tab="inputPanel">Input</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="parsedPanel">Parsed</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="searchPanel">Search</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="evidencePanel">Evidence</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="responsePanel">Response</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="historyPanel">History</button>
+      </nav>
+      <div id="status" class="status" role="status">Paste an ADU-Bench task export and click Parse Task.</div>
+    </header>
+
+    <main>
+      <section id="inputPanel" class="panel" role="tabpanel">
+        <section class="card">
+          <div class="section-title">
+            <h2>Input</h2>
+            <button id="sampleBtn" class="btn secondary" type="button">Load Sample</button>
+          </div>
+          <label>ADU-Bench clipboard/bookmarklet payload
+            <textarea id="rawInput" class="mono input-area" placeholder="Paste ADU-Bench task export here..."></textarea>
+          </label>
+        </section>
+      </section>
+
+      <section id="parsedPanel" class="panel" role="tabpanel" hidden>
+        <div class="grid-2">
+          <section class="card">
+            <h2>Extracted Task</h2>
+            <div id="parsedFields" class="kv"></div>
+          </section>
+          <section class="card">
+            <h2>Evidence Tabs / Doc Map</h2>
+            <div id="docMap" class="list"></div>
+          </section>
+        </div>
+        <section class="card">
+          <h2>Detected Dates / Numbers / Tables</h2>
+          <div id="extractionSummary" class="grid-3"></div>
+        </section>
+      </section>
+
+      <section id="searchPanel" class="panel" role="tabpanel" hidden>
+        <div class="grid-2">
+          <section class="card">
+            <h2>Generated Search Bundles</h2>
+            <div id="searchBundles" class="list"></div>
+            <label>Manual search terms or regexes, one per line
+              <textarea id="manualTerms" class="mono" rows="6" placeholder="QE1&#10;August 15, 1971&#10;\\bconvertibility\\b"></textarea>
+            </label>
+            <div class="actions">
+              <button id="runSearchBtn" class="btn" type="button">Run Searches</button>
+            </div>
+          </section>
+          <section class="card">
+            <h2>Regex Lab</h2>
+            <label>Regex
+              <input id="regexLabInput" class="mono" placeholder="(?i is not JS; use normal JS regex syntax)" />
+            </label>
+            <div class="actions"><button id="regexLabBtn" class="btn secondary" type="button">Test Regex</button></div>
+            <pre id="regexLabOutput" class="mono help">Regex matches will appear here.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="evidencePanel" class="panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="section-title">
+            <h2>Candidate Evidence</h2>
+            <div class="actions">
+              <button id="autoSuggestBtn" class="btn secondary" type="button">Suggest Response From Selected</button>
+            </div>
+          </div>
+          <div id="hitsList" class="list"></div>
+        </section>
+      </section>
+
+      <section id="responsePanel" class="panel" role="tabpanel" hidden>
+        <div class="grid-2">
+          <section class="card">
+            <h2>Response Builder</h2>
+            <div class="actions">
+              <button class="btn good" data-verdict="Correct" type="button">Correct</button>
+              <button class="btn bad" data-verdict="Incorrect" type="button">Incorrect</button>
+              <button class="btn warn" data-verdict="Partially Correct" type="button">Partially Correct</button>
+              <button class="btn secondary" data-verdict="Insufficient Evidence" type="button">Insufficient Evidence</button>
+            </div>
+            <div class="response-grid">
+              <label>Verdict <textarea id="verdictOut" rows="2"></textarea></label>
+              <label>Evidence Quotes <textarea id="quotesOut" class="mono"></textarea></label>
+              <label>Evidence Pages Used <textarea id="pagesOut"></textarea></label>
+              <label>Notes <textarea id="notesOut"></textarea></label>
+            </div>
+            <div class="actions">
+              <button id="copyResponseBtn" class="btn" type="button">Copy Final Response</button>
+              <button id="saveRunBtn" class="btn secondary" type="button">Save Run</button>
+            </div>
+          </section>
+          <section class="card">
+            <h2>Comparison Panels</h2>
+            <div id="comparisonPanel" class="list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="historyPanel" class="panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="section-title">
+            <h2>Recent Runs</h2>
+            <button id="clearHistoryBtn" class="btn danger" type="button">Delete History</button>
+          </div>
+          <div id="historyList" class="list"></div>
+        </section>
+      </section>
+    </main>
+
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.06.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.06.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(82, 96, 116, 0.92); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · ADU-Bench Deterministic Verifier · version 2026.07.06.1
+    </footer>
+  </div>
+
+  <script>
+    const HISTORY_KEY = "aduBenchDeterministic.history.v1";
+    const DATE_RE = /\b(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},?\s+\d{4}|\d{4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{4})\b/g;
+    const NUMBER_RE = /[-+]?\d{1,3}(?:,\d{3})*(?:\.\d+)?%?|\b\d+(?:\.\d+)?%?/g;
+    const TEMPORAL_RE = /\b(?:occurred later|occurred earlier|came first|came before|came after|more recent|earlier|later)\b/i;
+    const STOP = new Set("the a an and or but to of in on for with by as from based which what when where who whose is are was were be been being this that these those event occurred later earlier came first after before".split(" "));
+
+    let state = { raw: "", parsed: null, terms: null, hits: [], selected: [], history: loadHistory() };
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(message, type = "") {
+      $("status").textContent = message;
+      $("status").className = `status ${type}`.trim();
+    }
+
+    function parseTask(rawText) {
+      const evidenceTabs = splitEvidenceTabs(rawText);
+      const qa = extractQuestionAnswer(rawText);
+      const metadata = extractMetadata(rawText);
+      const docMap = buildDocMap(qa.question + "\n" + qa.answer + "\n" + rawText, evidenceTabs);
+      const parsed = {
+        rawText,
+        evidenceTabs,
+        question: qa.question,
+        answer: qa.answer,
+        ...metadata,
+        docMap
+      };
+      parsed.dates = extractDates(rawText);
+      parsed.numbers = extractNumbers(rawText);
+      parsed.tables = evidenceTabs.flatMap((tab) => parseTables(tab.text).map((table) => ({ ...table, tabLabel: tab.label, pageHeader: tab.pageHeader })));
+      parsed.taskType = detectTaskType(parsed);
+      parsed.searchTerms = buildSearchTerms(parsed);
+      return parsed;
+    }
+
+    function splitEvidenceTabs(rawText) {
+      const sectionRe = /^===== ([^=]+?) =====$/gm;
+      const matches = [...rawText.matchAll(sectionRe)];
+      const tabs = [];
+      for (let i = 0; i < matches.length; i++) {
+        const title = matches[i][1].trim();
+        if (/question\s*\/\s*answer/i.test(title)) continue;
+        const start = matches[i].index + matches[i][0].length;
+        const end = matches[i + 1]?.index ?? rawText.length;
+        const text = rawText.slice(start, end).trim();
+        if (!text || /evidence tabs found/i.test(title)) continue;
+        const headerMatch = text.match(/^(Doc\d+):\s+(.+?)\s+—\s+Page\s+(\d+)/m);
+        const range = title.match(/^(Doc\d+)\s+(.+)$/i);
+        tabs.push({
+          label: title,
+          doc: headerMatch?.[1] || range?.[1] || "",
+          page: headerMatch?.[3] || "",
+          pageLabel: title.replace(/\s+/g, " "),
+          pageHeader: headerMatch ? `${headerMatch[1]}: ${headerMatch[2]} — Page ${headerMatch[3]}` : "",
+          filename: headerMatch?.[2] || "",
+          text
+        });
+      }
+      return tabs;
+    }
+
+    function extractQuestionAnswer(rawText) {
+      const match = rawText.match(/📝 Question\s*\n([\s\S]*?)\n✅ Answer\s*\n([\s\S]*?)(?:\n\nFormat:|\nFormat:|$)/);
+      if (match) return { question: match[1].trim(), answer: match[2].trim() };
+      return {
+        question: extractAfterHeading(rawText, "Question"),
+        answer: extractAfterHeading(rawText, "Answer")
+      };
+    }
+
+    function extractAfterHeading(text, label) {
+      const re = new RegExp(`${label}\\s*\\n([\\s\\S]*?)(?:\\n\\n[A-Z][^\\n]{0,40}:|$)`, "i");
+      return text.match(re)?.[1]?.trim() || "";
+    }
+
+    function extractMetadata(rawText) {
+      const fmt = rawText.match(/^Format:\s*(.*?)\s*\|\s*Verify:\s*(.*?)$/m);
+      return {
+        format: fmt?.[1]?.trim() || rawText.match(/^Format:\s*(.*?)$/m)?.[1]?.trim() || "",
+        verifyMode: fmt?.[2]?.trim() || rawText.match(/^Verify:\s*(.*?)$/m)?.[1]?.trim() || "",
+        tags: rawText.match(/^Tags:\s*(.*?)$/m)?.[1]?.trim() || "",
+        crossDoc: rawText.match(/^Cross-doc:\s*(.*?)$/m)?.[1]?.trim() || ""
+      };
+    }
+
+    function buildDocMap(text, tabs = []) {
+      const refs = [...new Set([...text.matchAll(/\bD(\d{3})\b/g)].map((m) => m[1]))];
+      const docs = [...new Set(tabs.map((t) => t.doc).filter(Boolean))];
+      const map = {};
+      refs.forEach((ref, i) => map[`D${ref}`] = docs[i] || `Doc${Number(ref)}`);
+      docs.forEach((doc, i) => {
+        const key = `D${String(i + 1).padStart(3, "0")}`;
+        if (!map[key]) map[key] = doc;
+      });
+      return map;
+    }
+
+    function detectTaskType(parsed) {
+      const q = parsed.question || "";
+      if (TEMPORAL_RE.test(q) || /\bdate|month|year|recent\b/i.test(q)) return "temporal comparison";
+      if ((parsed.tables || []).length || /\btable|row|entry|column\b/i.test(q)) return "table lookup";
+      if (/\bmore|less|greater|lower|higher|number|percent|%|amount\b/i.test(q)) return "numeric comparison";
+      if (/\bwho|which organization|which company|entity|person\b/i.test(q)) return "entity lookup";
+      if (/casefold_exact_match|exact|string/i.test(parsed.verifyMode + " " + parsed.format)) return "string match";
+      return "unknown/manual";
+    }
+
+    function buildSearchTerms(parsed) {
+      const question = parsed.question || "";
+      const answer = parsed.answer || "";
+      const terms = {
+        question: keywords(question),
+        answer: keywords(answer),
+        dates: [...new Set([...question.matchAll(DATE_RE), ...answer.matchAll(DATE_RE)].map((m) => m[0]))],
+        numbers: [...new Set([...question.matchAll(NUMBER_RE), ...answer.matchAll(NUMBER_RE)].map((m) => m[0]))],
+        docSpecific: Object.entries(parsed.docMap).map(([k, v]) => `${k} ${v}`),
+        tables: keywords(question).filter((t) => /QE|round|entry|table|row|rate|date|amount/i.test(t)),
+        phrases: capitalizedPhrases(question + " " + answer)
+      };
+      terms.all = [...new Set([...terms.answer, ...terms.dates, ...terms.numbers, ...terms.phrases, ...terms.question].filter((t) => t.length > 1))];
+      return terms;
+    }
+
+    function keywords(text) {
+      return [...new Set((text.match(/[A-Za-z][A-Za-z0-9'-]{2,}/g) || []).filter((w) => !STOP.has(w.toLowerCase())).slice(0, 40))];
+    }
+
+    function capitalizedPhrases(text) {
+      return [...new Set(text.match(/\b(?:[A-Z][A-Za-z0-9'()-]+(?:\s+|$)){2,}/g) || [])].map((s) => s.trim()).filter((s) => s.length > 3);
+    }
+
+    function searchEvidence(parsed, searchTerms) {
+      const manual = $("manualTerms").value.split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
+      const terms = [...new Set([...(searchTerms.all || []), ...manual])];
+      const hits = [];
+      parsed.evidenceTabs.forEach((tab) => {
+        terms.forEach((term) => {
+          const result = findTerm(tab.text, term);
+          result.forEach((match) => {
+            const scored = scoreHit({ tab, term, snippet: match.snippet, parsed });
+            hits.push({ id: crypto.randomUUID(), tab, term, ...match, ...scored, disposition: "" });
+          });
+        });
+        parseTables(tab.text).forEach((table) => {
+          table.rows.forEach((row) => {
+            const rowText = row.join(" | ");
+            const rowHit = terms.some((term) => rowText.toLowerCase().includes(term.toLowerCase()));
+            if (rowHit) hits.push({
+              id: crypto.randomUUID(),
+              tab,
+              term: "table row",
+              index: 0,
+              snippet: rowText,
+              score: 3,
+              reasons: ["+3 table row match"],
+              disposition: "",
+              tableRow: row
+            });
+          });
+        });
+      });
+      return hits.sort((a, b) => b.score - a.score || a.tab.pageLabel.localeCompare(b.tab.pageLabel)).slice(0, 250);
+    }
+
+    function findTerm(text, term) {
+      const hits = [];
+      let re;
+      try {
+        re = looksRegex(term) ? new RegExp(term, "giu") : new RegExp(escapeRegExp(term), "giu");
+      } catch {
+        re = new RegExp(escapeRegExp(term), "giu");
+      }
+      let match;
+      while ((match = re.exec(text)) !== null && hits.length < 20) {
+        hits.push({ index: match.index, snippet: snippetAround(text, match.index, match[0].length), matchedText: match[0] });
+        if (!match[0].length) re.lastIndex++;
+      }
+      return hits;
+    }
+
+    function looksRegex(term) {
+      return /[\\^$.*+?()[\]{}|]/.test(term);
+    }
+
+    function snippetAround(text, index, len) {
+      const start = Math.max(0, index - 160);
+      const end = Math.min(text.length, index + len + 220);
+      return text.slice(start, end).replace(/\s+/g, " ").trim();
+    }
+
+    function scoreHit({ tab, term, snippet, parsed }) {
+      let score = 0;
+      const reasons = [];
+      const answer = parsed.answer || "";
+      const question = parsed.question || "";
+      if (answer && snippet.toLowerCase().includes(answer.toLowerCase())) { score += 5; reasons.push("+5 exact proposed answer phrase"); }
+      if ((parsed.searchTerms.dates || []).some((d) => snippet.includes(d))) { score += 4; reasons.push("+4 exact date match"); }
+      if ((parsed.searchTerms.numbers || []).some((n) => snippet.includes(n))) { score += 4; reasons.push("+4 exact number match"); }
+      if (capitalizedPhrases(question + " " + answer).some((p) => snippet.includes(p))) { score += 3; reasons.push("+3 exact capitalized phrase match"); }
+      const requestedDocs = Object.values(parsed.docMap || {});
+      if (requestedDocs.includes(tab.doc)) { score += 2; reasons.push("+2 same doc requested by D001/D002"); }
+      if (TEMPORAL_RE.test(snippet) || NUMBER_RE.test(snippet)) { score += 1; reasons.push("+1 nearby temporal/numeric trigger"); }
+      if (requestedDocs.length && tab.doc && !requestedDocs.includes(tab.doc)) { score -= 3; reasons.push("-3 wrong doc when question references D001/D002"); }
+      if (term.length < 4 || STOP.has(term.toLowerCase())) { score -= 2; reasons.push("-2 very short/common term only"); }
+      return { score, reasons };
+    }
+
+    function extractDates(text) {
+      return [...text.matchAll(DATE_RE)].map((m) => ({ raw: m[0], normalized: normalizeDate(m[0]), index: m.index, context: snippetAround(text, m.index, m[0].length) }));
+    }
+
+    function normalizeDate(dateText) {
+      const months = { jan: "01", january: "01", feb: "02", february: "02", mar: "03", march: "03", apr: "04", april: "04", may: "05", jun: "06", june: "06", jul: "07", july: "07", aug: "08", august: "08", sep: "09", sept: "09", september: "09", oct: "10", october: "10", nov: "11", november: "11", dec: "12", december: "12" };
+      const s = dateText.replace(/\./g, "").trim();
+      const day = s.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+      if (day) return `${day[3]}-${months[day[1].toLowerCase()]}-${String(Number(day[2])).padStart(2, "0")}`;
+      const month = s.match(/^([A-Za-z]+)\s+(\d{4})$/);
+      if (month) return `${month[2]}-${months[month[1].toLowerCase()]}`;
+      const year = s.match(/^\d{4}$/);
+      return year ? s : "";
+    }
+
+    function extractNumbers(text) {
+      return [...text.matchAll(NUMBER_RE)].map((m) => ({ raw: m[0], index: m.index, context: snippetAround(text, m.index, m[0].length) }));
+    }
+
+    function parseTables(text) {
+      const tables = [];
+      const rowRe = /<tr>([\s\S]*?)<\/tr>/gi;
+      const cellRe = /<t[dh]>([\s\S]*?)<\/t[dh]>/gi;
+      const rows = [];
+      let row;
+      while ((row = rowRe.exec(text)) !== null) {
+        const cells = [];
+        let cell;
+        while ((cell = cellRe.exec(row[1])) !== null) cells.push(stripHtml(cell[1]).trim());
+        if (cells.length) rows.push(cells);
+      }
+      if (rows.length) tables.push({ rows });
+      return tables;
+    }
+
+    function buildResponse() {
+      const support = state.selected.filter((h) => h.disposition === "support");
+      const contra = state.selected.filter((h) => h.disposition === "contra");
+      const quotes = [...support, ...contra].map((h) => `${h.tab.pageLabel}: "${cleanQuote(h.snippet)}"`).join("\n");
+      const pages = [...new Set([...support, ...contra].map((h) => h.tab.pageLabel))].join("; ");
+      $("quotesOut").value = quotes;
+      $("pagesOut").value = pages;
+      if (!$("verdictOut").value.trim()) $("verdictOut").value = support.length && !contra.length ? "Correct" : "Insufficient Evidence";
+      $("notesOut").value = buildNotes();
+      updateBadges();
+    }
+
+    function buildNotes() {
+      const parsed = state.parsed;
+      if (!parsed) return "";
+      if (parsed.taskType === "temporal comparison") {
+        const cmp = temporalComparison(parsed);
+        if (cmp) return cmp.note;
+      }
+      return `Selected evidence from ${[...new Set(state.selected.map((h) => h.tab.pageLabel))].join(", ")} should be checked against the proposed answer: ${parsed.answer}`;
+    }
+
+    function temporalComparison(parsed) {
+      const candidates = parsed.evidenceTabs.flatMap((tab) => extractDates(tab.text).map((d) => ({ ...d, tab })));
+      const answerDates = extractDates(parsed.answer);
+      if (candidates.length < 2 && !answerDates.length) return null;
+      const sorted = candidates.filter((d) => d.normalized).sort((a, b) => a.normalized.localeCompare(b.normalized));
+      if (sorted.length < 2) return { candidates, note: "Date candidates were found, but there are not enough normalized dates for deterministic comparison." };
+      const earlier = sorted[0];
+      const later = sorted[sorted.length - 1];
+      return {
+        candidates,
+        earlier,
+        later,
+        note: `${earlier.tab.doc || earlier.tab.pageLabel} places one event at ${earlier.raw} (${earlier.normalized}). ${later.tab.doc || later.tab.pageLabel} places another event at ${later.raw} (${later.normalized}). ${later.raw} occurred later. Confidence: ${earlier.normalized.length === later.normalized.length ? "same date precision" : "mixed precision; compare manually if close"}.`
+      };
+    }
+
+    function renderParsed() {
+      const p = state.parsed;
+      $("parsedFields").innerHTML = [
+        ["Question", p.question], ["Proposed Answer", p.answer], ["Format", p.format], ["Verify mode", p.verifyMode],
+        ["Tags", p.tags], ["Cross-doc", p.crossDoc], ["Detected type", p.taskType]
+      ].map(([k, v]) => `<div><span>${escapeHtml(k)}</span><strong>${escapeHtml(v || "-")}</strong></div>`).join("");
+      $("docMap").innerHTML = `
+        <div>${Object.entries(p.docMap).map(([k, v]) => `<span class="badge blue">${escapeHtml(k)} → ${escapeHtml(v)}</span>`).join(" ") || "<span class='help'>No D001/D002 references mapped.</span>"}</div>
+        ${p.evidenceTabs.map((t) => `<div class="card"><strong>${escapeHtml(t.pageLabel)}</strong><p class="help">${escapeHtml(t.pageHeader || t.filename || "No page header")}</p></div>`).join("")}
+      `;
+      $("extractionSummary").innerHTML = [
+        ["Dates", p.dates.slice(0, 25).map((d) => `${d.raw} → ${d.normalized || "?"}`).join("\n") || "None"],
+        ["Numbers", p.numbers.slice(0, 35).map((n) => n.raw).join(", ") || "None"],
+        ["Tables", p.tables.length ? `${p.tables.length} table(s), ${p.tables.reduce((n, t) => n + t.rows.length, 0)} rows` : "None"]
+      ].map(([k, v]) => `<div class="card"><h3>${escapeHtml(k)}</h3><pre class="mono">${escapeHtml(v)}</pre></div>`).join("");
+      $("taskTypeBadge").textContent = `Task: ${p.taskType}`;
+      renderSearchBundles();
+      renderComparison();
+    }
+
+    function renderSearchBundles() {
+      const bundles = state.parsed?.searchTerms || {};
+      $("searchBundles").innerHTML = Object.entries(bundles).filter(([k]) => k !== "all").map(([k, terms]) => `
+        <details open><summary><strong>${escapeHtml(k)}</strong> <span class="badge">${terms.length}</span></summary>
+        <p class="help">${terms.map((t) => `<code>${escapeHtml(t)}</code>`).join(" ") || "None"}</p></details>
+      `).join("");
+    }
+
+    function renderHits() {
+      $("hitsList").innerHTML = state.hits.map((hit) => `
+        <article class="hit ${hit.disposition === "support" ? "support" : hit.disposition === "contra" ? "contra" : hit.disposition === "ignore" ? "ignore" : ""}">
+          <div class="hit-head">
+            <div><strong>${escapeHtml(hit.tab.pageLabel)}</strong> <span class="badge blue">score ${hit.score}</span> <span class="badge">${escapeHtml(hit.term)}</span></div>
+            <div class="actions">
+              <button class="btn small good" data-hit="${hit.id}" data-disposition="support">Use as Supporting Quote</button>
+              <button class="btn small bad" data-hit="${hit.id}" data-disposition="contra">Use as Contradicting Quote</button>
+              <button class="btn small secondary" data-hit="${hit.id}" data-disposition="ignore">Ignore</button>
+            </div>
+          </div>
+          <div>${highlight(hit.snippet, hit.matchedText || hit.term)}</div>
+          <details><summary>Why this was suggested</summary><pre>${escapeHtml(hit.reasons.join("\n") || "No score reasons.")}</pre></details>
+        </article>
+      `).join("") || "<p class='help'>No hits yet. Run searches from the Search tab.</p>";
+      document.querySelectorAll("[data-hit]").forEach((button) => button.addEventListener("click", () => setHitDisposition(button.dataset.hit, button.dataset.disposition)));
+      updateBadges();
+    }
+
+    function setHitDisposition(id, disposition) {
+      const hit = state.hits.find((h) => h.id === id);
+      if (!hit) return;
+      hit.disposition = disposition;
+      state.selected = state.hits.filter((h) => h.disposition === "support" || h.disposition === "contra");
+      renderHits();
+      buildResponse();
+    }
+
+    function renderComparison() {
+      const p = state.parsed;
+      if (!p) return;
+      const temporal = temporalComparison(p);
+      const tables = p.tables;
+      const numeric = p.numbers.slice(0, 30);
+      $("comparisonPanel").innerHTML = `
+        <div class="card"><h3>Temporal</h3><pre>${escapeHtml(temporal ? temporal.note : "No deterministic temporal comparison available.")}</pre></div>
+        <div class="card"><h3>Number candidates</h3><pre>${escapeHtml(numeric.map((n) => `${n.raw} — ${n.context}`).join("\n\n") || "None")}</pre></div>
+        <div class="card"><h3>Table rows</h3>${renderTables(tables)}</div>
+      `;
+    }
+
+    function renderTables(tables) {
+      if (!tables.length) return "<p class='help'>No HTML tables parsed.</p>";
+      return tables.map((table) => `<div class="table-wrap"><table>${table.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></div>`).join("<br>");
+    }
+
+    function saveRun() {
+      const response = collectResponse();
+      const run = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), question: state.parsed?.question || "", answer: state.parsed?.answer || "", verdict: response.verdict, pages: response.pages, selected: state.selected, response };
+      state.history.unshift(run);
+      state.history = state.history.slice(0, 30);
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(state.history));
+      renderHistory();
+      setStatus("Run saved locally.", "ok");
+    }
+
+    function loadHistory() {
+      try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch { return []; }
+    }
+
+    function renderHistory() {
+      $("historyList").innerHTML = state.history.map((run) => `
+        <article class="history-item">
+          <div><strong>${escapeHtml(new Date(run.createdAt).toLocaleString())}</strong> <span class="badge green">${escapeHtml(run.verdict || "-")}</span></div>
+          <div class="help">${escapeHtml(trim(run.question, 180))}</div>
+          <div class="actions"><button class="btn small secondary" data-copy-history="${run.id}">Copy Response</button><button class="btn small bad" data-delete-history="${run.id}">Delete</button></div>
+        </article>
+      `).join("") || "<p class='help'>No history yet.</p>";
+      document.querySelectorAll("[data-copy-history]").forEach((b) => b.addEventListener("click", () => {
+        const run = state.history.find((r) => r.id === b.dataset.copyHistory);
+        copyText(formatResponse(run.response));
+      }));
+      document.querySelectorAll("[data-delete-history]").forEach((b) => b.addEventListener("click", () => {
+        state.history = state.history.filter((r) => r.id !== b.dataset.deleteHistory);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(state.history));
+        renderHistory();
+      }));
+    }
+
+    function collectResponse() {
+      return { verdict: $("verdictOut").value, quotes: $("quotesOut").value, pages: $("pagesOut").value, notes: $("notesOut").value };
+    }
+
+    function formatResponse(r) {
+      return `Verdict:\n${r.verdict || ""}\n\nEvidence Quotes:\n${r.quotes || ""}\n\nEvidence Pages Used:\n${r.pages || ""}\n\nNotes:\n${r.notes || ""}`;
+    }
+
+    function copyText(text) {
+      navigator.clipboard.writeText(text).then(() => setStatus("Copied.", "ok")).catch(() => setStatus("Copy failed; select and copy manually.", "error"));
+    }
+
+    function runParse() {
+      const raw = $("rawInput").value;
+      if (!raw.trim()) return setStatus("Paste a task first.", "error");
+      state.raw = raw;
+      state.parsed = parseTask(raw);
+      state.terms = state.parsed.searchTerms;
+      state.hits = searchEvidence(state.parsed, state.terms);
+      state.selected = [];
+      renderParsed();
+      renderHits();
+      buildResponse();
+      activateTab("parsedPanel");
+      setStatus(`Parsed ${state.parsed.evidenceTabs.length} evidence tabs and generated ${state.terms.all.length} search terms.`, "ok");
+    }
+
+    function runSearch() {
+      if (!state.parsed) runParse();
+      state.hits = searchEvidence(state.parsed, state.terms);
+      renderHits();
+      activateTab("evidencePanel");
+      setStatus(`Found ${state.hits.length} candidate evidence hits.`, state.hits.length ? "ok" : "warn");
+    }
+
+    function activateTab(id) {
+      document.querySelectorAll(".tab").forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.tab === id)));
+      document.querySelectorAll("main > .panel").forEach((panel) => panel.hidden = panel.id !== id);
+    }
+
+    function loadSample() {
+      $("rawInput").value = `Evidence Tabs Found:\nDoc1 P83-84\nDoc2 P90-91\n\n===== Doc1 P83-84 =====\nDoc1: monetary-history.pdf — Page 83\nOn August 15, 1971, the United States ended convertibility of the dollar into gold, ending a core feature of the Bretton Woods system.\n\n===== Doc2 P90-91 =====\nDoc2: federal-reserve-qe.pdf — Page 90\n<table><tr><th>Date</th><th>Program</th><th>Description</th></tr><tr><td>November 2008</td><td>QE1</td><td>The 1st round of Quantitative Easing (QE1) began with large-scale asset purchases.</td></tr></table>\n\n===== QUESTION / ANSWER =====\n📝 Question\nBased on D001's date for the U.S. ending dollar convertibility and D002's table entry for QE1, which event occurred later?\n✅ Answer\nThe Federal Reserve's first round of Quantitative Easing (QE1) in November 2008\n\nFormat: Str | Verify: casefold_exact_match\nTags: temporal\nCross-doc: ⚠️ Yes`;
+      setStatus("Sample loaded.", "ok");
+    }
+
+    function exportAudit() {
+      copyText(JSON.stringify({ parsed: state.parsed, hits: state.hits, selected: state.selected, response: collectResponse() }, null, 2));
+    }
+
+    function clearAll() {
+      state = { raw: "", parsed: null, terms: null, hits: [], selected: [], history: state.history };
+      $("rawInput").value = "";
+      ["verdictOut", "quotesOut", "pagesOut", "notesOut", "manualTerms", "regexLabInput", "regexLabOutput"].forEach((id) => $(id).value !== undefined ? $(id).value = "" : $(id).textContent = "");
+      ["parsedFields", "docMap", "extractionSummary", "searchBundles", "hitsList", "comparisonPanel"].forEach((id) => $(id).innerHTML = "");
+      updateBadges();
+      setStatus("Cleared.", "ok");
+    }
+
+    function updateBadges() {
+      $("taskTypeBadge").textContent = `Task: ${state.parsed?.taskType || "unparsed"}`;
+      $("hitsBadge").textContent = `Hits: ${state.hits.length}`;
+      $("selectedBadge").textContent = `Selected: ${state.selected.length}`;
+    }
+
+    function regexLab() {
+      if (!state.parsed) return setStatus("Parse a task first.", "error");
+      try {
+        const re = new RegExp($("regexLabInput").value, "giu");
+        const text = state.parsed.evidenceTabs.map((t) => `\n### ${t.pageLabel}\n${t.text}`).join("\n");
+        const matches = [...text.matchAll(re)].slice(0, 100).map((m) => `${m[0]} — ${snippetAround(text, m.index, m[0].length)}`);
+        $("regexLabOutput").textContent = matches.join("\n\n") || "No matches.";
+      } catch (error) {
+        $("regexLabOutput").textContent = error.message;
+      }
+    }
+
+    function cleanQuote(text) { return text.replace(/\s+/g, " ").replace(/^["']|["']$/g, "").trim(); }
+    function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+    function stripHtml(s) { return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "); }
+    function trim(s, n) { s = (s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+    function escapeHtml(s) { return String(s ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"); }
+    function highlight(snippet, term) {
+      const escaped = escapeHtml(snippet);
+      if (!term) return escaped;
+      try { return escaped.replace(new RegExp(`(${escapeRegExp(term)})`, "gi"), "<mark>$1</mark>"); }
+      catch { return escaped; }
+    }
+
+    document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
+    $("pasteBtn").addEventListener("click", async () => {
+      try { $("rawInput").value = await navigator.clipboard.readText(); setStatus("Pasted from clipboard.", "ok"); }
+      catch { $("rawInput").focus(); setStatus("Clipboard blocked. Paste manually.", "warn"); }
+    });
+    $("parseBtn").addEventListener("click", runParse);
+    $("runSearchBtn").addEventListener("click", runSearch);
+    $("sampleBtn").addEventListener("click", loadSample);
+    $("clearBtn").addEventListener("click", clearAll);
+    $("exportJsonBtn").addEventListener("click", exportAudit);
+    $("autoSuggestBtn").addEventListener("click", buildResponse);
+    $("copyResponseBtn").addEventListener("click", () => copyText(formatResponse(collectResponse())));
+    $("saveRunBtn").addEventListener("click", saveRun);
+    $("regexLabBtn").addEventListener("click", regexLab);
+    $("clearHistoryBtn").addEventListener("click", () => { if (confirm("Delete local deterministic verifier history?")) { state.history = []; localStorage.removeItem(HISTORY_KEY); renderHistory(); } });
+    document.querySelectorAll("[data-verdict]").forEach((b) => b.addEventListener("click", () => $("verdictOut").value = b.dataset.verdict));
+    renderHistory();
+  </script>
+</body>
+</html>
