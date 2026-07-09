@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Colorado Springs Curiosity Map — Low-Hike Edition</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗺️</text></svg>" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root { --bg:#f7f4ed; --panel:#fffaf0; --ink:#202020; --muted:#67604f; --accent:#8d4f25; --line:#ded3bd; }
+    html, body { height:100%; margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+    .app { display:grid; grid-template-columns: 360px 1fr; height:100%; }
+    aside { overflow:auto; padding:18px; border-right:1px solid var(--line); background:var(--panel); box-shadow:0 0 20px rgba(0,0,0,.06); z-index:500; }
+    h1 { font-size:22px; line-height:1.05; margin:0 0 6px; }
+    .subtitle { color:var(--muted); font-size:13px; line-height:1.35; margin-bottom:14px; }
+    .fire { background:#fff0e8; border:1px solid #e8a978; border-radius:12px; padding:10px; font-size:13px; margin:12px 0; }
+    .controls { display:grid; gap:10px; margin:14px 0; }
+    label { display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:#eee4d1; color:#3d372d; margin-right:4px; }
+    .legend { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 14px; }
+    .btns { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; }
+    button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:8px 10px; cursor:pointer; font-weight:650; }
+    button:hover { border-color:var(--accent); }
+    #map { height:100%; width:100%; }
+    .list { margin-top:12px; }
+    .card { padding:10px; border:1px solid var(--line); border-radius:12px; background:#fff; margin-bottom:8px; cursor:pointer; }
+    .card:hover { border-color:var(--accent); }
+    .card b { font-size:14px; }
+    .card .meta { color:var(--muted); font-size:12px; margin-top:4px; }
+    .leaflet-popup-content { min-width:250px; max-width:330px; }
+    .pop h3 { margin:0 0 6px; font-size:17px; }
+    .pop p { margin:6px 0; line-height:1.35; }
+    .pop .warn { background:#fff2e9; border-left:4px solid #c66b2b; padding:6px 8px; }
+    .pop .tags { margin-top:8px; }
+    .icon { width:26px; height:26px; border-radius:50%; display:grid; place-items:center; border:2px solid white; box-shadow:0 1px 6px rgba(0,0,0,.35); font-size:15px; }
+    .geo { background:#b85c38; } .wild { background:#426b36; } .museum { background:#4e648f; } .quirk { background:#86538d; } .drive { background:#9a7a28; } .history { background:#5f4b32; }
+    .footer { color:var(--muted); font-size:12px; line-height:1.35; margin-top:16px; }
+    @media(max-width:800px){ .app{grid-template-columns:1fr; grid-template-rows:48% 52%;} aside{order:2; border-right:0; border-top:1px solid var(--line);} #map{order:1;} }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Colorado Springs Curiosity Map</h1>
+    <div class="subtitle">Low-hike day trips, oddball stops, wildlife scans, geology, museums, and drive-up viewpoints. Built for “interesting without a forced march.”</div>
+    <div class="fire"><b>Fire/smoke-aware routing:</b> southern options are intentionally flagged or de-emphasized because Pueblo / Cañon City / Wet Mountains conditions can change fast. Check official fire, road, and air-quality sources before committing.</div>
+    <div class="legend">
+      <span class="pill">🪨 geology</span><span class="pill">🦌 wildlife</span><span class="pill">🏛 museum</span><span class="pill">🛸 oddball</span><span class="pill">🚗 scenic drive</span><span class="pill">⛏ history</span>
+    </div>
+    <div class="btns"><button id="all">Show all</button><button id="easy">Only minimal walking</button><button id="north">North/West safer pivot</button></div>
+    <div class="controls" id="filters"></div>
+    <div class="list" id="list"></div>
+    <div class="footer">Walking burden is approximate and intentionally conservative. “Minimal” means mostly drive-up/visitor-center/pullout wandering; “short” means you can choose under a mile; “moderate” means optional longer walking exists.</div>
+  </aside>
+  <div id="map"></div>
+</div>
+<script>
+const places = [
+ {name:'Florissant Fossil Beds National Monument', cat:'geo', icon:'🪨', lat:38.9127, lon:-105.2808, walk:'short', pivot:'northwest', drive:'~55 min', why:'Huge petrified redwood stumps, fossil insects, visitor center, easy paved/packed paths. Great natural-history payoff without a big hike.', best:'Geology, fossils, photography, low-effort wandering.', caution:'High-elevation sun and wind. Check NPS hours before going.'},
+ {name:'South Park / Hartsel wildlife scan', cat:'wild', icon:'🦌', lat:39.0214, lon:-105.7956, walk:'minimal', pivot:'northwest', drive:'~1 hr 35 min', why:'Big empty basin, pronghorn, raptors, huge skies, and “stop anywhere and glass” exploration. Strong fit if you want road cruising and wildlife.', best:'Binoculars, sunset light, pronghorn, hawks.', caution:'Respect private land; use pullouts and county roads.'},
+ {name:'Eleven Mile Canyon Recreation Area', cat:'drive', icon:'🚗', lat:38.9606, lon:-105.3566, walk:'minimal', pivot:'northwest', drive:'~1 hr 10 min', why:'A narrow river canyon road on an old railroad grade, granite walls, pullouts, birds, fishing spots, and very little walking required.', best:'Drive-through scenery, picnic pullouts, photography.', caution:'Dirt road; fee area; check Forest Service access and fire restrictions.'},
+ {name:'Rocky Mountain Dinosaur Resource Center', cat:'museum', icon:'🏛', lat:38.9936, lon:-105.0525, walk:'minimal', pivot:'northwest', drive:'~35 min', why:'Compact but high-value dinosaur and marine reptile displays in Woodland Park. Good bad-weather or smoke-day option.', best:'Fossils, casts, indoor stop, kids/adults.', caution:'Check hours; easy to pair with Florissant.'},
+ {name:'Western Museum of Mining & Industry', cat:'museum', icon:'🏛', lat:39.0265, lon:-104.8248, walk:'minimal', pivot:'north', drive:'~25 min', why:'Working mining machinery, model mine drift, historic buildings, and engineering history on the north side of town.', best:'Machines, mining tech, old Colorado industry.', caution:'Great low-hike backup when smoke kills the views.'},
+ {name:'U.S. Air Force Academy overlook / visitor area', cat:'history', icon:'✈️', lat:39.0087, lon:-104.8903, walk:'minimal', pivot:'north', drive:'~25 min', why:'Architecture, overlooks, military-campus weirdness, and frequent deer/turkey sightings. Mostly drive-and-stop.', best:'Architecture, wildlife, views, gift shop.', caution:'Security/access rules can change; bring ID.'},
+ {name:'Palmer Lake & Monument backroads', cat:'wild', icon:'🦌', lat:39.1203, lon:-104.9172, walk:'minimal', pivot:'north', drive:'~35 min', why:'Easy north pivot with lake views, foothills, deer, raptors, and sunrise/sunset light without committing to a trail.', best:'Short scenic wander, wildlife, coffee stop.', caution:'Can be crowded around the lake; side streets are calmer.'},
+ {name:'Paint Mines Interpretive Park', cat:'geo', icon:'🪨', lat:39.0174, lon:-104.2732, walk:'short', pivot:'east', drive:'~45 min', why:'Colorful clay bands and hoodoos east of town. You can see worthwhile formations with a short, easy walk.', best:'Geology, weird landscape, photo stop.', caution:'No dogs, no climbing on formations, exposed to wind and heat.'},
+ {name:'May Natural History Museum', cat:'quirk', icon:'🛸', lat:38.6887, lon:-104.8379, walk:'minimal', pivot:'south', drive:'~20 min', why:'Giant private insect collection with roadside-attraction energy. Odd, memorable, and almost no walking.', best:'Bug nerds, weird Americana, rainy/smoky day.', caution:'South of town; check smoke and hours first.'},
+ {name:'Colorado Springs Pioneers Museum', cat:'museum', icon:'🏛', lat:38.8305, lon:-104.8242, walk:'minimal', pivot:'local', drive:'Downtown', why:'Local history in the old courthouse. Good indoor option when air quality is bad.', best:'Regional history, architecture, low-effort stop.', caution:'Downtown parking rhythm applies.'},
+ {name:'Penrose Heritage Museum', cat:'museum', icon:'🏛', lat:38.7915, lon:-104.8502, walk:'minimal', pivot:'local', drive:'~10 min', why:'Carriages, race cars, Pikes Peak hill-climb history, and Broadmoor-adjacent old-money weirdness.', best:'Vehicles, local racing history, quick indoor stop.', caution:'Pair with Cheyenne Mountain Zoo or Seven Falls area only if smoke is OK.'},
+ {name:'National Museum of WWII Aviation', cat:'museum', icon:'🏛', lat:38.8165, lon:-104.7054, walk:'minimal', pivot:'east', drive:'~20 min', why:'Restored aircraft, hangar tours, and mechanical history. Strong option even for non-aviation obsessives.', best:'Planes, restoration work, engineering.', caution:'Check tour times; some areas may require guided access.'},
+ {name:'Black Forest backroads', cat:'wild', icon:'🦉', lat:39.0130, lon:-104.7008, walk:'minimal', pivot:'north', drive:'~25 min', why:'A local wildlife cruise: deer, foxes, owls, turkeys, raptors, and moody pine-country roads at dusk.', best:'Low-key animal watching and photography.', caution:'Residential/private land; drive respectfully.'},
+ {name:'Manitou Springs arcade / mineral springs crawl', cat:'quirk', icon:'🛸', lat:38.8597, lon:-104.9172, walk:'short', pivot:'west', drive:'~15 min', why:'Not obscure, but still a good low-hike weird stop: old arcade, mineral springs, shops, people-watching.', best:'Quirky town energy, snacks, easy wandering.', caution:'Parking can be annoying; better off-peak.'},
+ {name:'Victor historic district', cat:'history', icon:'⛏', lat:38.7100, lon:-105.1408, walk:'short', pivot:'west/south', drive:'~1 hr 20 min', why:'Old mining town atmosphere, headframes, relics, brick buildings, and fewer casino vibes than Cripple Creek.', best:'Mining ruins, photography, ghost-town feel.', caution:'Route may be affected by smoke depending on winds; check before heading that direction.'},
+ {name:'Mollie Kathleen Gold Mine', cat:'history', icon:'⛏', lat:38.7481, lon:-105.1789, walk:'minimal', pivot:'west/south', drive:'~1 hr 15 min', why:'Underground mine tour with very little walking but lots of “what the hell, people worked down here?” energy.', best:'Mine engineering, odd experience, history.', caution:'Check operating status; direction may be smoky depending on fire conditions.'},
+ {name:'Peyton / Calhan prairie road cruise', cat:'wild', icon:'🐍', lat:38.9597, lon:-104.4830, walk:'minimal', pivot:'east', drive:'~35–50 min', why:'Open prairie, raptors, pronghorn possibilities, and reptile/road-cruise potential around warm dusk conditions.', best:'Raptors, snakes, sunset, open-country photos.', caution:'Private land everywhere; avoid stopping in unsafe road spots.'},
+ {name:'Rampart Range Road viewpoints', cat:'drive', icon:'🚗', lat:39.0321, lon:-105.0027, walk:'minimal', pivot:'northwest', drive:'~35 min to start', why:'Forest road views above the Springs and Woodland Park area; plenty of pullouts and optional short wanders.', best:'Views, forest drive, cooling off.', caution:'Dirt road, weather-dependent; fire restrictions may affect access.'}
+];
+const cats = {geo:'Geology / fossils', wild:'Wildlife / road cruise', museum:'Museums / indoor', quirk:'Oddball Americana', drive:'Scenic drive', history:'Mining / history'};
+const map = L.map('map').setView([38.92,-104.95], 9);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 18, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+let markers=[]; const active = new Set(Object.keys(cats));
+function divIcon(p){return L.divIcon({html:`<div class="icon ${p.cat}">${p.icon}</div>`, className:'', iconSize:[30,30], iconAnchor:[15,15]});}
+function popup(p){return `<div class="pop"><h3>${p.name}</h3><p><b>Drive:</b> ${p.drive} &nbsp; <b>Walking:</b> ${p.walk}</p><p>${p.why}</p><p><b>Best for:</b> ${p.best}</p><p class="warn"><b>Reality check:</b> ${p.caution}</p><div class="tags"><span class="pill">${cats[p.cat]}</span><span class="pill">${p.pivot}</span></div></div>`;}
+function render(filterFn=()=>true){ markers.forEach(m=>map.removeLayer(m)); markers=[]; document.getElementById('list').innerHTML='';
+ const shown = places.filter(p=>active.has(p.cat)).filter(filterFn);
+ shown.forEach(p=>{ const m=L.marker([p.lat,p.lon],{icon:divIcon(p)}).addTo(map).bindPopup(popup(p)); markers.push(m); const card=document.createElement('div'); card.className='card'; card.innerHTML=`<b>${p.icon} ${p.name}</b><div class="meta">${cats[p.cat]} · ${p.drive} · walking: ${p.walk}</div>`; card.onclick=()=>{map.setView([p.lat,p.lon],11); m.openPopup();}; document.getElementById('list').appendChild(card); });
+ if(shown.length){ const group=L.featureGroup(markers); map.fitBounds(group.getBounds().pad(.15)); }
+}
+const f=document.getElementById('filters'); Object.entries(cats).forEach(([k,v])=>{ const id='f_'+k; const row=document.createElement('label'); row.innerHTML=`<input type="checkbox" id="${id}" checked> ${v}`; f.appendChild(row); document.getElementById(id).onchange=e=>{ e.target.checked ? active.add(k) : active.delete(k); render(window.currentFilter||(()=>true)); }; });
+document.getElementById('all').onclick=()=>{window.currentFilter=()=>true; render(window.currentFilter)};
+document.getElementById('easy').onclick=()=>{window.currentFilter=p=>p.walk==='minimal'; render(window.currentFilter)};
+document.getElementById('north').onclick=()=>{window.currentFilter=p=>['north','northwest','east','local'].includes(p.pivot); render(window.currentFilter)};
+render();
+</script>
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.09.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.09.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(103, 96, 79, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Colorado Springs Curiosity Map · version 2026.07.09.1
+</footer>
+</body>
+</html>
