@@ -651,6 +651,7 @@
             <div class="button-row" style="margin-top:16px;">
               <button class="btn primary" id="saveSettingsBtn" type="button">Save Settings</button>
               <button class="btn" id="testKeyBtn" type="button">Test API Key</button>
+              <button class="btn" id="testImagesEndpointBtn" type="button">Test Images Endpoint</button>
               <button class="btn danger" id="resetSettingsBtn" type="button">Reset Settings</button>
             </div>
             <div class="status-line" id="adminStatus" role="status" aria-live="polite">No API key is shown outside Admin.</div>
@@ -659,9 +660,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.14.3" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.14.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(101, 112, 128, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt · OpenAI Image Batch Generator · version 2026.07.14.3
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.14.4" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.14.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(101, 112, 128, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · OpenAI Image Batch Generator · version 2026.07.14.4
     </footer>
   </div>
 
@@ -961,6 +962,36 @@
           return { ok: false, message: this.describeTestFailure(res.status, err), error: err };
         } catch (error) {
           return { ok: false, message: error.name === "AbortError" ? "Network timeout while testing the key." : "Network or browser/CORS failure while testing the key.", error: this.sanitizeThrown(error) };
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      async testImagesEndpoint(timeoutSeconds) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort("timeout"), timeoutSeconds * 1000);
+        try {
+          const res = await fetch(this.endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "gpt-image-2",
+              prompt: "connectivity test",
+              size: "1536x1024",
+              quality: "high",
+              output_format: "png",
+              background: "opaque"
+            }),
+            signal: controller.signal
+          });
+          if (res.status === 401) return { ok: true, message: "Images endpoint is reachable from this browser. It returned the expected no-key 401, so CORS/connectivity is working." };
+          if (res.ok) return { ok: true, message: "Images endpoint is reachable. Unexpectedly received a success response without an API key." };
+          const err = await this.parseError(res);
+          return { ok: true, message: `Images endpoint is reachable and returned HTTP ${res.status}: ${err.message}` };
+        } catch (error) {
+          const message = error.name === "AbortError"
+            ? "Images endpoint test timed out before an HTTP response."
+            : "Images endpoint is not reachable from this browser before an HTTP response. This points to browser, extension, privacy, network, or local-file restrictions.";
+          return { ok: false, message, error: this.sanitizeThrown(error) };
         } finally {
           clearTimeout(timer);
         }
@@ -1534,6 +1565,7 @@
         });
         $("saveSettingsBtn").addEventListener("click", () => this.saveSettings());
         $("testKeyBtn").addEventListener("click", () => this.testKey());
+        $("testImagesEndpointBtn").addEventListener("click", () => this.testImagesEndpoint());
         $("resetSettingsBtn").addEventListener("click", () => this.resetSettings());
         $("toggleKeyBtn").addEventListener("click", () => this.toggleKeyVisibility());
         $("clearKeyBtn").addEventListener("click", () => { $("apiKeyInput").value = ""; this.settingsStore.setApiKey("", false); $("rememberKeyToggle").checked = false; this.notifyAdmin("API key cleared."); });
@@ -1923,6 +1955,11 @@
         if (!key) { this.notifyAdmin("Missing key.", "error"); return; }
         this.notifyAdmin("Testing API key...");
         const result = await this.client.testKey(key, Number($("timeoutInput").value) || 60);
+        this.notifyAdmin(result.message, result.ok ? "good" : "error");
+      }
+      async testImagesEndpoint() {
+        this.notifyAdmin("Testing Images endpoint reachability without an API key. This cannot generate an image or spend credits.");
+        const result = await this.client.testImagesEndpoint(Number($("timeoutInput").value) || 60);
         this.notifyAdmin(result.message, result.ok ? "good" : "error");
       }
       async resetSettings() {
