@@ -566,12 +566,14 @@
             <span class="subtle" id="settingsStatus">Settings loaded.</span>
           </div>
           <div class="panel-body">
-            <p class="warning">This browser-only tool sends requests directly to OpenAI. Your API key is stored only in this browser when persistence is enabled, but any script running on this page could potentially access it. Use only on a trusted device and trusted copy of this file.</p>
+            <p class="warning">This browser-only tool sends requests directly to OpenAI at <code>api.openai.com</code>. It requires an OpenAI Platform API key, not an OpenRouter key. Your API key is stored only in this browser when persistence is enabled, but any script running on this page could potentially access it. Use only on a trusted device and trusted copy of this file.</p>
             <div class="settings-grid">
               <div class="full">
-                <label class="field" for="apiKeyInput">OpenAI API key</label>
+                <label class="field" for="apiKeyInput">OpenAI Platform API key
+                  <span class="hint">Use a key from platform.openai.com. OpenRouter keys such as sk-or-... do not work with api.openai.com.</span>
+                </label>
                 <div class="key-row">
-                  <input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-..." />
+                  <input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-proj-... or sk-..." />
                   <button class="btn" id="toggleKeyBtn" type="button">Show</button>
                   <button class="btn danger" id="clearKeyBtn" type="button">Clear</button>
                 </div>
@@ -660,9 +662,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.14.4" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.14.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(101, 112, 128, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt · OpenAI Image Batch Generator · version 2026.07.14.4
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.14.5" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.14.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(101, 112, 128, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · OpenAI Image Batch Generator · version 2026.07.14.5
     </footer>
   </div>
 
@@ -948,7 +950,16 @@
         this.logger = logger;
         this.endpoint = "https://api.openai.com/v1/images/generations";
       }
+      validateOpenAIKeyShape(apiKey) {
+        const key = String(apiKey || "").trim();
+        if (!key) return "Missing OpenAI Platform API key.";
+        if (/^sk-or-/i.test(key)) return "This looks like an OpenRouter key. This tool calls api.openai.com directly and requires an OpenAI Platform key from platform.openai.com.";
+        if (!/^sk-/i.test(key)) return "This does not look like an OpenAI Platform API key. Expected a key beginning with sk-.";
+        return "";
+      }
       async testKey(apiKey, timeoutSeconds) {
+        const shapeError = this.validateOpenAIKeyShape(apiKey);
+        if (shapeError) return { ok: false, message: shapeError, error: { type: "key_format", message: shapeError } };
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort("timeout"), timeoutSeconds * 1000);
         try {
@@ -1250,6 +1261,8 @@
         const settings = this.settingsStore.settings;
         const apiKey = this.settingsStore.getApiKey();
         if (!apiKey) throw new Error("Missing OpenAI API key. Add it in Admin.");
+        const keyShapeError = this.client.validateOpenAIKeyShape(apiKey);
+        if (keyShapeError) throw new Error(keyShapeError);
         this.abortController = new AbortController();
         this.items = items.map((item) => ({
           ...item,
@@ -1293,6 +1306,8 @@
         if (!failed.length) return;
         const apiKey = this.settingsStore.getApiKey();
         if (!apiKey) throw new Error("Missing OpenAI API key. Add it in Admin.");
+        const keyShapeError = this.client.validateOpenAIKeyShape(apiKey);
+        if (keyShapeError) throw new Error(keyShapeError);
         failed.forEach((item) => {
           item.status = "pending";
           item.error = null;
