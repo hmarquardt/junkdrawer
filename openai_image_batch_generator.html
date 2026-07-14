@@ -1,0 +1,2086 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenAI Image Batch Generator</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>" />
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f2ed;
+      --panel: #ffffff;
+      --panel-soft: #fbfaf7;
+      --ink: #1f252d;
+      --muted: #657080;
+      --line: #d8ddd9;
+      --line-strong: #b6c0bb;
+      --accent: #176b5f;
+      --accent-strong: #0f4f46;
+      --accent-soft: #dff1ed;
+      --danger: #a83232;
+      --danger-soft: #fde8e8;
+      --warn: #8a5a00;
+      --warn-soft: #fff1cc;
+      --ok: #1f7a45;
+      --ok-soft: #e3f4e9;
+      --blue: #255f99;
+      --blue-soft: #e3eef8;
+      --shadow: 0 18px 45px rgba(31, 37, 45, 0.08);
+      --radius: 8px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: var(--bg); }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 15px/1.5 var(--sans);
+    }
+    button, input, textarea, select { font: inherit; }
+    button, select, input[type="checkbox"] { cursor: pointer; }
+    button:disabled, select:disabled, input:disabled, textarea:disabled { cursor: not-allowed; opacity: 0.62; }
+    a { color: var(--accent-strong); }
+    :focus-visible { outline: 3px solid rgba(23, 107, 95, 0.34); outline-offset: 2px; }
+
+    .app-shell { max-width: 1480px; margin: 0 auto; padding: 24px; }
+    header.topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: clamp(1.7rem, 3vw, 2.65rem); line-height: 1.05; letter-spacing: 0; }
+    .lede { margin: 8px 0 0; color: var(--muted); max-width: 860px; }
+    .top-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      padding: 6px;
+      background: #e9ede8;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .tab-button {
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #3a444d;
+      padding: 10px 14px;
+      font-weight: 750;
+    }
+    .tab-button[aria-selected="true"] { background: var(--panel); color: var(--accent-strong); box-shadow: 0 1px 3px rgba(31, 37, 45, 0.08); }
+    .tab-panel[hidden] { display: none; }
+
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.28fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-header h2, .panel-header h3 { margin: 0; font-size: 1.05rem; }
+    .panel-body { padding: 16px; }
+    .subtle { color: var(--muted); font-size: 0.92rem; }
+    .warning {
+      border: 1px solid #e0c36f;
+      background: var(--warn-soft);
+      color: #4d3600;
+      border-radius: var(--radius);
+      padding: 12px;
+      margin: 0 0 14px;
+    }
+
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 38px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 11px;
+      font-weight: 720;
+      text-decoration: none;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--accent); background: #fbfffd; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
+    .btn.danger { border-color: #d8a1a1; color: var(--danger); background: #fffafa; }
+    .btn.ghost { background: transparent; }
+    .btn.icon-only { width: 40px; padding: 8px; }
+    .btn svg { width: 18px; height: 18px; flex: 0 0 auto; }
+
+    label.field { display: grid; gap: 6px; font-weight: 740; }
+    .field span.hint { color: var(--muted); font-size: 0.82rem; font-weight: 500; }
+    textarea, input[type="text"], input[type="password"], input[type="number"], select {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      padding: 10px 11px;
+    }
+    textarea {
+      min-height: 430px;
+      resize: vertical;
+      font: 0.92rem/1.45 var(--mono);
+      tab-size: 2;
+    }
+    .editor-wrap { display: grid; grid-template-columns: 52px minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 7px; overflow: hidden; background: #fff; }
+    .line-numbers {
+      margin: 0;
+      padding: 10px 8px;
+      text-align: right;
+      color: #8a949f;
+      background: #f0f2ef;
+      border-right: 1px solid var(--line);
+      font: 0.92rem/1.45 var(--mono);
+      user-select: none;
+      white-space: pre;
+      overflow: hidden;
+    }
+    .editor-wrap textarea { border: 0; border-radius: 0; min-height: 460px; }
+    .editor-stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; color: var(--muted); font-size: 0.86rem; }
+    .file-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+    .toolbar {
+      position: sticky;
+      top: 64px;
+      z-index: 12;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      margin-bottom: 14px;
+      box-shadow: 0 10px 32px rgba(31, 37, 45, 0.08);
+    }
+    .toolbar-main { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .queue-summary { color: var(--muted); font-weight: 650; }
+    .progress-shell { height: 12px; border-radius: 999px; background: #e8ece8; overflow: hidden; margin-top: 12px; border: 1px solid var(--line); }
+    .progress-bar { height: 100%; width: 0%; background: var(--accent); transition: width 180ms ease; }
+    .counter-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(78px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .counter {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      padding: 9px;
+      min-width: 0;
+    }
+    .counter b { display: block; font-size: 1.15rem; line-height: 1; }
+    .counter span { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .estimate-box {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .estimate-box div {
+      padding: 9px;
+      border-radius: 7px;
+      background: #f8faf8;
+      border: 1px solid var(--line);
+    }
+    .status-line {
+      min-height: 38px;
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 7px;
+      background: var(--blue-soft);
+      color: #153d66;
+      font-weight: 650;
+    }
+    .status-line.error { background: var(--danger-soft); color: var(--danger); }
+    .status-line.good { background: var(--ok-soft); color: var(--ok); }
+    details.error-panel {
+      margin-top: 10px;
+      border: 1px solid #e0a4a4;
+      background: #fffafa;
+      border-radius: 7px;
+      padding: 10px;
+    }
+    details.error-panel pre {
+      max-height: 230px;
+      overflow: auto;
+      white-space: pre-wrap;
+      color: #5b1f1f;
+      font: 0.82rem/1.4 var(--mono);
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      gap: 12px;
+    }
+    .result-card {
+      display: grid;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 10px;
+      min-width: 0;
+    }
+    .result-card.duplicate { border-style: dashed; }
+    .card-top { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+    .card-title { font-weight: 820; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 0.78rem;
+      font-weight: 820;
+      background: #eef1ef;
+      color: #3f4850;
+      white-space: nowrap;
+    }
+    .badge.completed { background: var(--ok-soft); color: var(--ok); }
+    .badge.failed { background: var(--danger-soft); color: var(--danger); }
+    .badge.generating, .badge.paused { background: var(--blue-soft); color: var(--blue); }
+    .badge.cancelled, .badge.skipped, .badge.interrupted { background: #ece8e1; color: #6b5844; }
+    .preview {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      min-height: 210px;
+      background: #f2f4f2;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .preview button { all: unset; cursor: zoom-in; display: grid; place-items: center; width: 100%; height: 100%; }
+    .preview img { display: block; max-width: 100%; max-height: 360px; width: auto; height: auto; object-fit: contain; }
+    .skeleton {
+      width: 100%;
+      height: 220px;
+      background: linear-gradient(90deg, #ecefec 20%, #f7f8f6 38%, #ecefec 60%);
+      background-size: 200% 100%;
+      animation: shimmer 1.2s infinite;
+    }
+    @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+    .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; color: var(--muted); font-size: 0.84rem; }
+    .meta-grid b { color: var(--ink); font-weight: 780; }
+    details.prompt-details { border-top: 1px solid var(--line); padding-top: 8px; }
+    .prompt-text { white-space: pre-wrap; word-break: break-word; color: #303942; }
+    .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .card-error { background: var(--danger-soft); color: var(--danger); border-radius: 6px; padding: 8px; font-size: 0.87rem; }
+    .duplicate-note { color: var(--warn); font-size: 0.82rem; font-weight: 720; }
+
+    .history-layout { display: grid; grid-template-columns: minmax(270px, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
+    .history-list { display: grid; gap: 8px; }
+    .history-run {
+      text-align: left;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      padding: 10px;
+    }
+    .history-run.active { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(23, 107, 95, 0.12); }
+    .history-run b { display: block; }
+    .history-run span { color: var(--muted); font-size: 0.86rem; }
+    .history-detail-grid { display: grid; gap: 12px; }
+    .summary-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #f8faf8;
+      padding: 12px;
+      margin-top: 12px;
+    }
+    .summary-panel[hidden] { display: none; }
+
+    .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 14px; }
+    .settings-grid .full { grid-column: 1 / -1; }
+    .inline-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: end; }
+    .check-row { display: flex; align-items: center; gap: 8px; font-weight: 740; }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(31, 37, 45, 0.54);
+      z-index: 60;
+      padding: 18px;
+    }
+    .modal-backdrop[hidden] { display: none; }
+    .modal {
+      max-width: 860px;
+      width: min(100%, 860px);
+      max-height: 88vh;
+      overflow: auto;
+      background: #fff;
+      color: var(--ink);
+      border-radius: var(--radius);
+      box-shadow: 0 28px 90px rgba(0,0,0,0.28);
+      border: 1px solid var(--line);
+    }
+    .modal header { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .modal header h2 { margin: 0; font-size: 1.12rem; }
+    .modal-body { padding: 16px; }
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      background: rgba(17, 23, 29, 0.88);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      color: #fff;
+    }
+    .lightbox[hidden] { display: none; }
+    .lightbox-bar { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px; }
+    .lightbox-stage { display: grid; place-items: center; min-height: 0; padding: 8px 18px; }
+    .lightbox-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .lightbox-meta { padding: 12px 18px; background: rgba(0,0,0,0.26); }
+    .lightbox .btn { color: #fff; border-color: rgba(255,255,255,0.44); background: rgba(255,255,255,0.12); }
+
+    .empty-state {
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      padding: 22px;
+      text-align: center;
+      color: var(--muted);
+      background: #fbfaf7;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      border: 0;
+    }
+
+    @media (max-width: 980px) {
+      .workspace-grid, .history-layout { grid-template-columns: 1fr; }
+      header.topbar { grid-template-columns: 1fr; }
+      .top-actions { justify-content: flex-start; }
+      .counter-grid { grid-template-columns: repeat(2, 1fr); }
+      .estimate-box, .settings-grid, .inline-inputs { grid-template-columns: 1fr; }
+      .settings-grid .full { grid-column: auto; }
+      .toolbar { top: 58px; }
+    }
+    @media (max-width: 620px) {
+      .app-shell { padding: 14px; }
+      .tabs { overflow-x: auto; }
+      .editor-wrap { grid-template-columns: 42px minmax(0, 1fr); }
+      .key-row { grid-template-columns: 1fr; }
+      .counter-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>OpenAI Image Batch Generator</h1>
+        <p class="lede">Paste a JSON prompt array, generate one image at a time, and keep prior runs in browser-local history.</p>
+      </div>
+      <div class="top-actions">
+        <button class="btn" id="openHelpBtn" type="button">Help / About</button>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Main sections">
+      <button class="tab-button" id="tabGenerate" type="button" role="tab" aria-selected="true" aria-controls="generatePanel" data-tab="generate">Generate</button>
+      <button class="tab-button" id="tabHistory" type="button" role="tab" aria-selected="false" aria-controls="historyPanel" data-tab="history">History</button>
+      <button class="tab-button" id="tabAdmin" type="button" role="tab" aria-selected="false" aria-controls="adminPanel" data-tab="admin">Admin</button>
+    </nav>
+
+    <main>
+      <section class="tab-panel" id="generatePanel" role="tabpanel" aria-labelledby="tabGenerate">
+        <div class="workspace-grid">
+          <section class="panel" aria-labelledby="inputHeading">
+            <div class="panel-header">
+              <h2 id="inputHeading">Prompt JSON</h2>
+              <span class="subtle" id="validationBadge">Not validated</span>
+            </div>
+            <div class="panel-body">
+              <label class="field" for="promptInput">
+                JSON prompt array
+                <span class="hint">Accepts an array of strings, an array of objects with <code>prompt</code>, or an object with <code>prompts</code> and <code>defaults</code>.</span>
+              </label>
+              <div class="editor-wrap" id="dropZone">
+                <pre class="line-numbers" id="lineNumbers" aria-hidden="true">1</pre>
+                <textarea id="promptInput" spellcheck="false" aria-describedby="jsonFeedback"></textarea>
+              </div>
+              <div class="editor-stats">
+                <span id="promptCount">0 prompts</span>
+                <span id="charCount">0 chars</span>
+                <span id="duplicateCount">0 duplicates</span>
+              </div>
+              <div class="file-row">
+                <input class="sr-only" id="jsonFileInput" type="file" accept="application/json,.json" />
+                <button class="btn" id="loadFileBtn" type="button">Load JSON File</button>
+                <button class="btn" id="exportInputBtn" type="button">Export Input</button>
+              </div>
+              <p class="subtle" id="jsonFeedback">Ready to accept JSON.</p>
+              <div class="button-row">
+                <button class="btn" id="loadExampleBtn" type="button">Load Example</button>
+                <button class="btn" id="formatJsonBtn" type="button">Format JSON</button>
+                <button class="btn" id="validateBtn" type="button">Validate</button>
+                <button class="btn danger" id="clearBtn" type="button">Clear</button>
+              </div>
+            </div>
+          </section>
+
+          <section aria-labelledby="resultsHeading">
+            <div class="toolbar" aria-label="Queue controls">
+              <div class="toolbar-main">
+                <div>
+                  <strong id="queueSummary">No active queue.</strong>
+                  <div class="subtle" id="costSummary">Estimated planned cost: $0.000</div>
+                </div>
+                <div class="button-row">
+                  <button class="btn primary" id="generateBtn" type="button">Generate Images</button>
+                  <button class="btn" id="pauseBtn" type="button" disabled>Pause</button>
+                  <button class="btn" id="resumeBtn" type="button" disabled>Resume</button>
+                  <button class="btn" id="retryFailedBtn" type="button" disabled>Retry Failed</button>
+                  <button class="btn danger" id="cancelBtn" type="button" disabled>Cancel Remaining</button>
+                </div>
+              </div>
+              <div class="progress-shell" aria-label="Generation progress">
+                <div class="progress-bar" id="progressBar"></div>
+              </div>
+              <div class="counter-grid" aria-label="Queue counters">
+                <div class="counter"><b id="countTotal">0</b><span>Total</span></div>
+                <div class="counter"><b id="countPending">0</b><span>Pending</span></div>
+                <div class="counter"><b id="countGenerating">0</b><span>Generating</span></div>
+                <div class="counter"><b id="countCompleted">0</b><span>Completed</span></div>
+                <div class="counter"><b id="countFailed">0</b><span>Failed</span></div>
+                <div class="counter"><b id="countSkipped">0</b><span>Skipped</span></div>
+                <div class="counter"><b id="countCancelled">0</b><span>Cancelled</span></div>
+              </div>
+              <div class="estimate-box">
+                <div><strong id="plannedCost">$0.000</strong><br><span class="subtle">Planned estimate</span></div>
+                <div><strong id="attemptedCost">$0.000</strong><br><span class="subtle">Attempted estimate</span></div>
+                <div><strong id="successCost">$0.000</strong><br><span class="subtle">Successful estimate</span></div>
+              </div>
+              <label class="check-row" style="margin-top:10px;">
+                <input id="autoScrollToggle" type="checkbox" checked />
+                Auto-scroll to completed images
+              </label>
+              <div class="status-line" id="liveStatus" role="status" aria-live="polite">Ready to generate.</div>
+              <details class="error-panel" id="rawErrorPanel" hidden>
+                <summary>Raw sanitized error</summary>
+                <pre id="rawErrorText"></pre>
+              </details>
+            </div>
+
+            <div class="summary-panel" id="completionSummary" hidden>
+              <strong>Run summary</strong>
+              <div id="completionSummaryText" class="subtle"></div>
+              <div class="button-row" style="margin-top:10px;">
+                <button class="btn" id="summaryDownloadAllBtn" type="button">Download All</button>
+                <button class="btn" id="summaryRerunFailedBtn" type="button">Re-run Failed</button>
+                <button class="btn" id="summaryViewHistoryBtn" type="button">View in History</button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <h2 id="resultsHeading">Results</h2>
+                <span class="subtle" id="resultsHint">Completed images stay visible as the queue advances.</span>
+              </div>
+              <div class="panel-body">
+                <div class="results-grid" id="resultsGrid"></div>
+                <div class="empty-state" id="resultsEmpty">Generated images will appear here.</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="historyPanel" role="tabpanel" aria-labelledby="tabHistory" hidden>
+        <div class="history-layout">
+          <section class="panel" aria-labelledby="historyHeading">
+            <div class="panel-header">
+              <h2 id="historyHeading">Prior Runs</h2>
+              <button class="btn danger" id="deleteAllHistoryBtn" type="button">Delete All</button>
+            </div>
+            <div class="panel-body">
+              <p class="warning" id="storageWarning" hidden></p>
+              <div class="history-list" id="historyList"></div>
+              <div class="empty-state" id="historyEmpty">No saved runs yet.</div>
+            </div>
+          </section>
+          <section class="panel" aria-labelledby="historyDetailHeading">
+            <div class="panel-header">
+              <h2 id="historyDetailHeading">Run Details</h2>
+              <span class="subtle" id="historySize">Stored size: n/a</span>
+            </div>
+            <div class="panel-body">
+              <div id="historyDetail" class="history-detail-grid">
+                <div class="empty-state">Select a run to inspect images, metadata, and actions.</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="adminPanel" role="tabpanel" aria-labelledby="tabAdmin" hidden>
+        <section class="panel" aria-labelledby="adminHeading">
+          <div class="panel-header">
+            <h2 id="adminHeading">Admin</h2>
+            <span class="subtle" id="settingsStatus">Settings loaded.</span>
+          </div>
+          <div class="panel-body">
+            <p class="warning">This browser-only tool sends requests directly to OpenAI. Your API key is stored only in this browser when persistence is enabled, but any script running on this page could potentially access it. Use only on a trusted device and trusted copy of this file.</p>
+            <div class="settings-grid">
+              <div class="full">
+                <label class="field" for="apiKeyInput">OpenAI API key</label>
+                <div class="key-row">
+                  <input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-..." />
+                  <button class="btn" id="toggleKeyBtn" type="button">Show</button>
+                  <button class="btn danger" id="clearKeyBtn" type="button">Clear</button>
+                </div>
+                <label class="check-row" style="margin-top:8px;">
+                  <input id="rememberKeyToggle" type="checkbox" />
+                  Remember API key in localStorage
+                </label>
+              </div>
+              <label class="field" for="modelInput">Image model
+                <span class="hint">Editable because model IDs and capabilities can change.</span>
+                <input id="modelInput" type="text" />
+              </label>
+              <label class="field" for="sizeInput">Default size
+                <input id="sizeInput" type="text" list="sizeOptions" />
+              </label>
+              <datalist id="sizeOptions">
+                <option value="auto"></option>
+                <option value="1024x1024"></option>
+                <option value="1536x1024"></option>
+                <option value="1024x1536"></option>
+                <option value="2048x2048"></option>
+                <option value="2048x1152"></option>
+                <option value="3840x2160"></option>
+                <option value="2160x3840"></option>
+              </datalist>
+              <label class="field" for="qualityInput">Default quality
+                <select id="qualityInput">
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="auto">auto</option>
+                </select>
+              </label>
+              <label class="field" for="formatInput">Default output format
+                <select id="formatInput">
+                  <option value="png">png</option>
+                  <option value="jpeg">jpeg</option>
+                  <option value="webp">webp</option>
+                </select>
+              </label>
+              <label class="field" for="backgroundInput">Default background
+                <select id="backgroundInput">
+                  <option value="auto">auto</option>
+                  <option value="opaque">opaque</option>
+                  <option value="transparent">transparent</option>
+                  <option value="">omit</option>
+                </select>
+              </label>
+              <label class="field" for="compressionInput">Output compression
+                <span class="hint">Only sent for JPEG/WebP when a value is provided.</span>
+                <input id="compressionInput" type="number" min="0" max="100" step="1" placeholder="0-100 or blank" />
+              </label>
+              <label class="field" for="timeoutInput">Request timeout seconds
+                <input id="timeoutInput" type="number" min="10" max="600" step="1" />
+              </label>
+              <label class="field" for="maxRetriesInput">Maximum automatic retries
+                <input id="maxRetriesInput" type="number" min="0" max="8" step="1" />
+              </label>
+              <label class="field" for="retryDelayInput">Initial retry delay ms
+                <input id="retryDelayInput" type="number" min="250" max="60000" step="250" />
+              </label>
+              <div class="full">
+                <strong>Editable cost estimate per image</strong>
+                <div class="inline-inputs" style="margin-top:8px;">
+                  <label class="field" for="costLowInput">Low quality
+                    <input id="costLowInput" type="number" min="0" step="0.001" />
+                  </label>
+                  <label class="field" for="costMediumInput">Medium quality
+                    <input id="costMediumInput" type="number" min="0" step="0.001" />
+                  </label>
+                  <label class="field" for="costHighInput">High quality
+                    <input id="costHighInput" type="number" min="0" step="0.001" />
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="button-row" style="margin-top:16px;">
+              <button class="btn primary" id="saveSettingsBtn" type="button">Save Settings</button>
+              <button class="btn" id="testKeyBtn" type="button">Test API Key</button>
+              <button class="btn danger" id="resetSettingsBtn" type="button">Reset Settings</button>
+            </div>
+            <div class="status-line" id="adminStatus" role="status" aria-live="polite">No API key is shown outside Admin.</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.14.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.14.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(101, 112, 128, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · OpenAI Image Batch Generator · version 2026.07.14.1
+    </footer>
+  </div>
+
+  <div class="modal-backdrop" id="helpModal" hidden role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div class="modal">
+      <header>
+        <h2 id="helpTitle">Help / About</h2>
+        <button class="btn icon-only" id="closeHelpBtn" type="button" aria-label="Close help">×</button>
+      </header>
+      <div class="modal-body">
+        <p>This is a browser-only tool. Closing or reloading the page stops active generation; active requests cannot survive a closed page.</p>
+        <p>API keys in browser applications carry risk. Generated images may consume substantial local storage, and browser download protections may ask for permission when downloading many files.</p>
+        <p>Pricing estimates may be outdated because image pricing can change. Model IDs and API capabilities can also change, so the Admin model field lets you update the model without editing source code.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="confirmModal" hidden role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal">
+      <header><h2 id="confirmTitle">Confirm</h2></header>
+      <div class="modal-body">
+        <p id="confirmMessage"></p>
+        <div class="button-row">
+          <button class="btn danger" id="confirmYesBtn" type="button">Confirm</button>
+          <button class="btn" id="confirmNoBtn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox" hidden aria-modal="true" role="dialog" aria-label="Image preview">
+    <div class="lightbox-bar">
+      <div class="button-row">
+        <button class="btn" id="lightboxPrevBtn" type="button">Previous</button>
+        <button class="btn" id="lightboxNextBtn" type="button">Next</button>
+      </div>
+      <div class="button-row">
+        <button class="btn" id="lightboxDownloadBtn" type="button">Download</button>
+        <button class="btn" id="lightboxCloseBtn" type="button">Close</button>
+      </div>
+    </div>
+    <div class="lightbox-stage"><img id="lightboxImage" alt="" /></div>
+    <div class="lightbox-meta" id="lightboxMeta"></div>
+  </div>
+
+  <script type="module">
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+    const nowIso = () => new Date().toISOString();
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const STATES = ["pending", "generating", "completed", "failed", "paused", "cancelled", "skipped", "interrupted"];
+    const TERMINAL = new Set(["completed", "failed", "cancelled", "skipped"]);
+    const MIME_BY_FORMAT = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
+    const FORMAT_BY_MIME = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+    const EXAMPLE_JSON = [
+      "A cinematic photograph of a red fox standing in fresh snow at dawn.",
+      "A retro-futurist illustration of a lunar roadside diner.",
+      {
+        prompt: "A macro photograph of a jumping spider covered in morning dew.",
+        filename: "dew-covered-jumping-spider",
+        size: "1536x1024",
+        quality: "high",
+        background: "opaque",
+        output_format: "png"
+      }
+    ];
+
+    class DiagnosticsLogger {
+      constructor() { this.entries = []; }
+      add(level, message, detail = {}) {
+        const scrubbed = JSON.parse(JSON.stringify(detail, (key, value) => {
+          const lower = String(key).toLowerCase();
+          if (lower.includes("key") || lower.includes("authorization") || lower.includes("b64") || lower.includes("base64")) return "[redacted]";
+          if (typeof value === "string" && value.length > 700) return value.slice(0, 700) + "...";
+          return value;
+        }));
+        this.entries.unshift({ at: nowIso(), level, message, detail: scrubbed });
+        this.entries = this.entries.slice(0, 200);
+      }
+    }
+
+    class SettingsStore {
+      constructor() {
+        this.prefix = "openaiImageBatch.";
+        this.memoryKey = "";
+        // gpt-image-2 was the current requested/default image model when this artifact was written; change it in Admin if OpenAI updates model IDs.
+        this.defaults = {
+          rememberKey: false,
+          model: "gpt-image-2",
+          size: "1024x1024",
+          quality: "medium",
+          output_format: "png",
+          background: "auto",
+          output_compression: "",
+          timeoutSeconds: 180,
+          maxRetries: 2,
+          initialRetryDelayMs: 1500,
+          costLow: 0.006,
+          costMedium: 0.053,
+          costHigh: 0.211,
+          autoScroll: true
+        };
+        this.settings = this.load();
+      }
+      load() {
+        const out = { ...this.defaults };
+        for (const key of Object.keys(this.defaults)) {
+          const raw = localStorage.getItem(this.prefix + key);
+          if (raw === null) continue;
+          if (typeof this.defaults[key] === "boolean") out[key] = raw === "true";
+          else if (typeof this.defaults[key] === "number") out[key] = Number(raw);
+          else out[key] = raw;
+        }
+        if (out.rememberKey) this.memoryKey = localStorage.getItem(this.prefix + "apiKey") || "";
+        return out;
+      }
+      save(settings, apiKey) {
+        this.settings = { ...this.settings, ...settings };
+        for (const [key, value] of Object.entries(this.settings)) localStorage.setItem(this.prefix + key, String(value));
+        this.setApiKey(apiKey, this.settings.rememberKey);
+      }
+      setApiKey(key, remember) {
+        this.memoryKey = key || "";
+        this.settings.rememberKey = Boolean(remember);
+        localStorage.setItem(this.prefix + "rememberKey", String(this.settings.rememberKey));
+        if (this.settings.rememberKey && this.memoryKey) localStorage.setItem(this.prefix + "apiKey", this.memoryKey);
+        else localStorage.removeItem(this.prefix + "apiKey");
+      }
+      getApiKey() { return this.memoryKey; }
+      reset() {
+        for (const key of Object.keys(localStorage)) {
+          if (key.startsWith(this.prefix)) localStorage.removeItem(key);
+        }
+        this.memoryKey = "";
+        this.settings = this.load();
+      }
+    }
+
+    class HistoryDB {
+      constructor(logger) {
+        this.logger = logger;
+        this.db = null;
+        this.memory = { runs: new Map(), items: new Map() };
+        this.available = false;
+        this.storageWarning = "";
+      }
+      async init() {
+        if (!("indexedDB" in window)) {
+          this.storageWarning = "IndexedDB is unavailable. Current session data will remain in memory only.";
+          return false;
+        }
+        return new Promise((resolve) => {
+          const request = indexedDB.open("junkdrawer-openai-image-batch", 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains("runs")) {
+              const runs = db.createObjectStore("runs", { keyPath: "id" });
+              runs.createIndex("createdAt", "createdAt");
+              runs.createIndex("status", "status");
+            }
+            if (!db.objectStoreNames.contains("items")) {
+              const items = db.createObjectStore("items", { keyPath: "id" });
+              items.createIndex("runId", "runId");
+              items.createIndex("createdAt", "createdAt");
+              items.createIndex("runCreated", ["runId", "createdAt"]);
+            }
+          };
+          request.onsuccess = () => {
+            this.db = request.result;
+            this.available = true;
+            resolve(true);
+          };
+          request.onerror = () => {
+            this.storageWarning = "IndexedDB could not be opened. Current session data will remain in memory only.";
+            this.logger.add("error", "IndexedDB open failed", { name: request.error?.name, message: request.error?.message });
+            resolve(false);
+          };
+        });
+      }
+      tx(store, mode = "readonly") {
+        return this.db.transaction(store, mode).objectStore(store);
+      }
+      req(request) {
+        return new Promise((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      }
+      async putRun(run) {
+        if (!this.available) { this.memory.runs.set(run.id, structuredClone(run)); return; }
+        await this.req(this.tx("runs", "readwrite").put(structuredClone(run)));
+      }
+      async putItem(item) {
+        if (!this.available) { this.memory.items.set(item.id, structuredClone(item)); return; }
+        await this.req(this.tx("items", "readwrite").put(structuredClone(item)));
+      }
+      async listRuns() {
+        if (!this.available) return Array.from(this.memory.runs.values()).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        const runs = await this.req(this.tx("runs").getAll());
+        return runs.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      }
+      async getRun(id) {
+        if (!this.available) return this.memory.runs.get(id) || null;
+        return await this.req(this.tx("runs").get(id));
+      }
+      async getItems(runId) {
+        if (!this.available) return Array.from(this.memory.items.values()).filter((item) => item.runId === runId).sort((a, b) => a.index - b.index);
+        const index = this.tx("items").index("runId");
+        const items = await this.req(index.getAll(runId));
+        return items.sort((a, b) => a.index - b.index);
+      }
+      async deleteRun(id) {
+        if (!this.available) {
+          this.memory.runs.delete(id);
+          for (const [key, item] of this.memory.items) if (item.runId === id) this.memory.items.delete(key);
+          return;
+        }
+        const items = await this.getItems(id);
+        const tx = this.db.transaction(["runs", "items"], "readwrite");
+        tx.objectStore("runs").delete(id);
+        for (const item of items) tx.objectStore("items").delete(item.id);
+        await new Promise((resolve, reject) => {
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+      }
+      async clear() {
+        if (!this.available) { this.memory.runs.clear(); this.memory.items.clear(); return; }
+        await Promise.all([this.req(this.tx("runs", "readwrite").clear()), this.req(this.tx("items", "readwrite").clear())]);
+      }
+      async markInterrupted() {
+        const runs = await this.listRuns();
+        for (const run of runs.filter((r) => ["running", "paused"].includes(r.status))) {
+          const items = await this.getItems(run.id);
+          let changed = false;
+          for (const item of items) {
+            if (item.status === "generating") {
+              item.status = "interrupted";
+              item.completedAt = nowIso();
+              changed = true;
+              await this.putItem(item);
+            }
+          }
+          run.status = "fatal_error";
+          run.interrupted = true;
+          run.completedAt = run.completedAt || nowIso();
+          await this.putRun(run);
+          if (changed) return run.id;
+        }
+        return null;
+      }
+    }
+
+    class RunRepository {
+      constructor(db, logger) { this.db = db; this.logger = logger; }
+      async saveRun(run) {
+        try { await this.db.putRun(run); }
+        catch (error) { this.logger.add("error", "Run metadata save failed", { name: error.name, message: error.message }); }
+      }
+      async saveItem(item) {
+        try { await this.db.putItem(item); return true; }
+        catch (error) {
+          this.logger.add("error", "Item save failed", { name: error.name, message: error.message });
+          if (item.blob) {
+            const clone = { ...item, blob: null, blobPersisted: false, storageError: error.name || "StorageError" };
+            try { await this.db.putItem(clone); return false; }
+            catch (second) { this.logger.add("error", "Text-only item save failed", { name: second.name, message: second.message }); }
+          }
+          return false;
+        }
+      }
+      async loadRuns() { return await this.db.listRuns(); }
+      async loadRun(id) { return await this.db.getRun(id); }
+      async loadItems(id) { return await this.db.getItems(id); }
+      async deleteRun(id) { await this.db.deleteRun(id); }
+      async clearHistory() { await this.db.clear(); }
+    }
+
+    class OpenAIImageClient {
+      constructor(logger) {
+        this.logger = logger;
+        this.endpoint = "https://api.openai.com/v1/images/generations";
+      }
+      async testKey(apiKey, timeoutSeconds) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort("timeout"), timeoutSeconds * 1000);
+        try {
+          const res = await fetch("https://api.openai.com/v1/models", {
+            method: "GET",
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: controller.signal
+          });
+          if (res.ok) return { ok: true, message: "API key authenticated." };
+          const err = await this.parseError(res);
+          return { ok: false, message: this.describeTestFailure(res.status, err), error: err };
+        } catch (error) {
+          return { ok: false, message: error.name === "AbortError" ? "Network timeout while testing the key." : "Network or browser/CORS failure while testing the key.", error: this.sanitizeThrown(error) };
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      describeTestFailure(status, err) {
+        if (status === 401) return "Authentication failure. Check the API key.";
+        if (status === 403) return "Permission failure. The key authenticated but lacks required access.";
+        if (status === 429) return "Rate limited while testing the key.";
+        return err.message || `API key test failed with HTTP ${status}.`;
+      }
+      buildPayload(settings) {
+        const payload = {
+          model: settings.model,
+          prompt: settings.prompt,
+          size: settings.size,
+          quality: settings.quality,
+          output_format: settings.output_format
+        };
+        if (settings.background) payload.background = settings.background;
+        const compression = Number(settings.output_compression);
+        if (["jpeg", "webp"].includes(settings.output_format) && Number.isFinite(compression)) payload.output_compression = compression;
+        return payload;
+      }
+      async generate({ apiKey, settings, signal, timeoutSeconds }) {
+        const timeoutController = new AbortController();
+        const timer = setTimeout(() => timeoutController.abort("timeout"), timeoutSeconds * 1000);
+        const combinedSignal = this.combineSignals(signal, timeoutController.signal);
+        try {
+          const res = await fetch(this.endpoint, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(this.buildPayload(settings)),
+            signal: combinedSignal
+          });
+          const requestId = res.headers.get("x-request-id") || res.headers.get("openai-request-id") || "";
+          if (!res.ok) {
+            const error = await this.parseError(res);
+            error.httpStatus = res.status;
+            error.requestId = requestId;
+            error.retryAfter = res.headers.get("retry-after") || "";
+            throw error;
+          }
+          const json = await res.json();
+          const first = json.data?.[0];
+          if (!first?.b64_json && !first?.url) throw { type: "api_response", message: "API response did not include image data.", requestId };
+          const blob = first.b64_json ? this.base64ToBlob(first.b64_json, MIME_BY_FORMAT[settings.output_format] || "image/png") : await this.urlToBlob(first.url, combinedSignal);
+          return {
+            blob,
+            mimeType: blob.type || MIME_BY_FORMAT[settings.output_format] || "image/png",
+            requestId,
+            responseCreated: json.created || null,
+            responseMetadata: {
+              model: settings.model,
+              background: json.background || settings.background || "",
+              output_format: json.output_format || settings.output_format,
+              quality: json.quality || settings.quality,
+              size: json.size || settings.size,
+              usage: json.usage || null,
+              revised_prompt: first.revised_prompt || ""
+            }
+          };
+        } catch (error) {
+          if (error.name === "AbortError" || error === "timeout") {
+            throw { type: "timeout_or_abort", message: timeoutController.signal.aborted ? "Request timed out." : "Request was cancelled.", temporary: timeoutController.signal.aborted };
+          }
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      combineSignals(...signals) {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        for (const signal of signals) {
+          if (!signal) continue;
+          if (signal.aborted) controller.abort();
+          else signal.addEventListener("abort", abort, { once: true });
+        }
+        return controller.signal;
+      }
+      async parseError(res) {
+        let parsed = {};
+        try { parsed = await res.json(); } catch { parsed = {}; }
+        const err = parsed.error || parsed;
+        return {
+          httpStatus: res.status,
+          status: res.status,
+          code: err.code || "",
+          type: err.type || "",
+          message: err.message || res.statusText || "OpenAI request failed.",
+          param: err.param || ""
+        };
+      }
+      base64ToBlob(base64, mimeType) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        return new Blob([bytes], { type: mimeType });
+      }
+      async urlToBlob(url, signal) {
+        const res = await fetch(url, { signal });
+        if (!res.ok) throw { type: "image_download", message: `Could not retrieve image URL. HTTP ${res.status}` };
+        return await res.blob();
+      }
+      sanitizeThrown(error) {
+        return { name: error.name || "Error", message: error.message || String(error) };
+      }
+    }
+
+    class DownloadManager {
+      constructor() { this.used = new Set(); }
+      resetRunNames() { this.used.clear(); }
+      slug(text) {
+        return String(text || "image").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 54) || "image";
+      }
+      filename(item, runId) {
+        const ext = FORMAT_BY_MIME[item.mimeType] || item.settings.output_format || "png";
+        const baseSlug = this.slug(item.filename || item.prompt);
+        const shortRun = String(runId || item.runId || "run").slice(0, 8);
+        let name = `${String(item.index + 1).padStart(3, "0")}-${baseSlug}-${shortRun}.${ext}`;
+        let n = 2;
+        while (this.used.has(name)) {
+          name = `${String(item.index + 1).padStart(3, "0")}-${baseSlug}-${shortRun}-${n}.${ext}`;
+          n += 1;
+        }
+        this.used.add(name);
+        return name;
+      }
+      downloadBlob(blob, filename) {
+        if (!blob) throw new Error("No image Blob is available for download.");
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      downloadJson(data, filename) {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        this.downloadBlob(blob, filename);
+      }
+    }
+
+    class JsonInputController {
+      constructor(ui) { this.ui = ui; }
+      parse(text, savedDefaults) {
+        let parsed;
+        try { parsed = JSON.parse(text); }
+        catch (error) { return { ok: false, errors: [`Malformed JSON: ${error.message}`] }; }
+        const errors = [];
+        let prompts = parsed;
+        const runName = parsed && !Array.isArray(parsed) && typeof parsed === "object" ? parsed.name || "" : "";
+        const runDefaults = parsed && !Array.isArray(parsed) && typeof parsed === "object" ? parsed.defaults || {} : {};
+        if (parsed && !Array.isArray(parsed) && typeof parsed === "object" && Array.isArray(parsed.prompts)) prompts = parsed.prompts;
+        if (!Array.isArray(prompts)) errors.push("Input must be a JSON array or an object containing a prompts array.");
+        if (Array.isArray(prompts) && prompts.length === 0) errors.push("Prompt array cannot be empty.");
+        const normalized = [];
+        const seen = new Map();
+        if (Array.isArray(prompts)) {
+          prompts.forEach((entry, index) => {
+            let item = {};
+            if (typeof entry === "string") item.prompt = entry.trim();
+            else if (entry && typeof entry === "object" && !Array.isArray(entry)) item = { ...entry, prompt: String(entry.prompt || "").trim() };
+            else errors.push(`[${index}] must be a string or an object with a prompt field.`);
+            if (!item.prompt) errors.push(`[${index}] prompt must be a non-empty string.`);
+            if (item.prompt && item.prompt.length > 32000) errors.push(`[${index}] prompt is very long (${item.prompt.length} characters). Shorten it before generating.`);
+            const settings = this.mergeSettings(savedDefaults, runDefaults, item);
+            const settingError = this.validateSettings(settings, index);
+            if (settingError) errors.push(settingError);
+            const duplicateOf = seen.has(item.prompt) ? seen.get(item.prompt) : null;
+            if (!seen.has(item.prompt)) seen.set(item.prompt, index);
+            if (item.prompt) normalized.push({
+              index,
+              id: crypto.randomUUID(),
+              prompt: item.prompt,
+              filename: item.filename || "",
+              settings,
+              status: "pending",
+              retryCount: 0,
+              duplicateOf
+            });
+          });
+        }
+        return { ok: errors.length === 0, errors, items: normalized, runDefaults, runName, originalInput: parsed };
+      }
+      mergeSettings(saved, runDefaults, item) {
+        return {
+          model: item.model || runDefaults.model || saved.model,
+          size: item.size || runDefaults.size || saved.size,
+          quality: item.quality || runDefaults.quality || saved.quality,
+          output_format: item.output_format || runDefaults.output_format || saved.output_format,
+          background: item.background ?? runDefaults.background ?? saved.background,
+          output_compression: item.output_compression ?? runDefaults.output_compression ?? saved.output_compression
+        };
+      }
+      validateSettings(settings, index) {
+        if (!settings.model) return `[${index}] model is required.`;
+        if (!settings.prompt && settings.prompt !== undefined) return `[${index}] prompt is required.`;
+        if (!/^(auto|[1-9][0-9]{2,4}x[1-9][0-9]{2,4})$/.test(settings.size)) return `[${index}] size must be auto or WIDTHxHEIGHT.`;
+        if (settings.size !== "auto") {
+          const [width, height] = settings.size.split("x").map(Number);
+          const longEdge = Math.max(width, height);
+          const shortEdge = Math.min(width, height);
+          const pixels = width * height;
+          if (longEdge > 3840 || width % 16 !== 0 || height % 16 !== 0 || longEdge / shortEdge > 3 || pixels < 655360 || pixels > 8294400) {
+            return `[${index}] size must follow GPT image constraints: edges at most 3840px, both multiples of 16, ratio no more than 3:1, and 655,360-8,294,400 pixels.`;
+          }
+        }
+        if (!["low", "medium", "high", "auto"].includes(settings.quality)) return `[${index}] quality must be low, medium, high, or auto.`;
+        if (!["png", "jpeg", "webp"].includes(settings.output_format)) return `[${index}] output_format must be png, jpeg, or webp.`;
+        if (!["", "auto", "opaque", "transparent"].includes(String(settings.background))) return `[${index}] background must be auto, opaque, transparent, or omitted.`;
+        if (settings.model === "gpt-image-2" && settings.background === "transparent") return `[${index}] gpt-image-2 does not currently support transparent backgrounds.`;
+        const compression = settings.output_compression;
+        if (compression !== "" && compression !== null && compression !== undefined) {
+          const value = Number(compression);
+          if (!Number.isFinite(value) || value < 0 || value > 100) return `[${index}] output_compression must be 0-100.`;
+        }
+        return "";
+      }
+    }
+
+    class QueueRunner extends EventTarget {
+      constructor({ settingsStore, client, repository, logger }) {
+        super();
+        this.settingsStore = settingsStore;
+        this.client = client;
+        this.repository = repository;
+        this.logger = logger;
+        this.run = null;
+        this.items = [];
+        this.state = "ready";
+        this.abortController = null;
+        this.running = false;
+      }
+      async start(items, originalJsonText, runDefaults, runName = "") {
+        if (this.running) throw new Error("A run is already in progress.");
+        const settings = this.settingsStore.settings;
+        const apiKey = this.settingsStore.getApiKey();
+        if (!apiKey) throw new Error("Missing OpenAI API key. Add it in Admin.");
+        this.abortController = new AbortController();
+        this.items = items.map((item) => ({
+          ...item,
+          runId: null,
+          createdAt: nowIso(),
+          elapsedMs: 0,
+          attempted: false,
+          blob: null,
+          objectUrl: "",
+          mimeType: MIME_BY_FORMAT[item.settings.output_format] || "image/png",
+          error: null
+        }));
+        this.run = {
+          id: crypto.randomUUID(),
+          name: runName,
+          createdAt: nowIso(),
+          startedAt: nowIso(),
+          completedAt: "",
+          status: "running",
+          model: settings.model,
+          globalSettings: this.safeSettings(settings),
+          runDefaults,
+          originalJson: originalJsonText,
+          completedCount: 0,
+          failedCount: 0,
+          cancelledCount: 0,
+          retryTotal: 0,
+          storageWarning: ""
+        };
+        this.items.forEach((item) => { item.runId = this.run.id; });
+        await this.repository.saveRun(this.run);
+        for (const item of this.items) await this.repository.saveItem(this.persistableItem(item));
+        this.running = true;
+        this.state = "running";
+        this.emit("run-started");
+        await this.loop();
+      }
+      async retryFailed() {
+        if (!this.run || this.running) return;
+        const failed = this.items.filter((item) => ["failed", "interrupted"].includes(item.status));
+        if (!failed.length) return;
+        const apiKey = this.settingsStore.getApiKey();
+        if (!apiKey) throw new Error("Missing OpenAI API key. Add it in Admin.");
+        failed.forEach((item) => {
+          item.status = "pending";
+          item.error = null;
+          item.elapsedMs = 0;
+          item.startedAt = "";
+          item.completedAt = "";
+        });
+        this.run.status = "running";
+        this.run.completedAt = "";
+        this.abortController = new AbortController();
+        this.running = true;
+        this.state = "running";
+        this.emit("run-updated");
+        await this.loop();
+      }
+      pause() {
+        if (this.state === "running") {
+          this.state = "paused";
+          this.run.status = "paused";
+          this.emit("status", { message: "Paused. The current request will finish before the next begins." });
+          this.emit("run-updated");
+        }
+      }
+      resume() {
+        if (this.state !== "paused" || this.running) return;
+        this.state = "running";
+        this.run.status = "running";
+        this.abortController = new AbortController();
+        this.running = true;
+        this.emit("status", { message: "Resumed." });
+        this.loop();
+      }
+      async cancel() {
+        if (!this.run) return;
+        this.state = "cancelled";
+        this.run.status = "cancelled";
+        if (this.abortController) this.abortController.abort();
+        for (const item of this.items) {
+          if (["pending", "paused"].includes(item.status)) {
+            item.status = "cancelled";
+            item.completedAt = nowIso();
+          }
+        }
+        if (!this.running) {
+          const counts = this.counts();
+          this.run.completedCount = counts.completed;
+          this.run.failedCount = counts.failed;
+          this.run.cancelledCount = counts.cancelled;
+          this.run.completedAt = nowIso();
+          for (const item of this.items) await this.repository.saveItem(this.persistableItem(item));
+          await this.repository.saveRun(this.run);
+        }
+        this.emit("run-updated");
+      }
+      async loop() {
+        try {
+          while (this.state === "running") {
+            const next = this.items.find((item) => item.status === "pending");
+            if (!next) break;
+            await this.processItem(next);
+            if (this.state === "paused") break;
+            if (this.state === "cancelled") break;
+          }
+          await this.finishIfDone();
+        } finally {
+          this.running = false;
+          await this.repository.saveRun(this.run);
+          this.emit("run-updated");
+        }
+      }
+      async processItem(item) {
+        const settings = this.settingsStore.settings;
+        const apiKey = this.settingsStore.getApiKey();
+        item.status = "generating";
+        item.startedAt = nowIso();
+        item.attempted = true;
+        item.error = null;
+        this.emit("item-updated", { item });
+        await this.repository.saveItem(this.persistableItem(item));
+        const started = performance.now();
+        let attempt = 0;
+        while (attempt <= settings.maxRetries) {
+          try {
+            if (attempt > 0) item.retryCount = attempt;
+            this.emit("status", { message: attempt ? `Retrying item ${item.index + 1}, attempt ${attempt + 1}.` : `Generating item ${item.index + 1}.` });
+            const result = await this.client.generate({
+              apiKey,
+              settings: { ...item.settings, prompt: item.prompt },
+              signal: this.abortController.signal,
+              timeoutSeconds: settings.timeoutSeconds
+            });
+            item.status = "completed";
+            item.completedAt = nowIso();
+            item.elapsedMs = Math.round(performance.now() - started);
+            item.blob = result.blob;
+            item.mimeType = result.mimeType;
+            item.objectUrl = URL.createObjectURL(result.blob);
+            item.requestId = result.requestId;
+            item.responseMetadata = result.responseMetadata;
+            const savedBlob = await this.repository.saveItem(this.persistableItem(item));
+            if (!savedBlob) {
+              item.blobPersisted = false;
+              this.run.storageWarning = "Storage quota prevented saving one or more image Blobs. Text metadata was still saved.";
+            }
+            this.emit("item-completed", { item });
+            return;
+          } catch (error) {
+            const normalized = this.normalizeError(error);
+            if (this.state === "cancelled") {
+              item.status = "cancelled";
+              item.error = normalized;
+              item.completedAt = nowIso();
+              item.elapsedMs = Math.round(performance.now() - started);
+              await this.repository.saveItem(this.persistableItem(item));
+              this.emit("item-updated", { item });
+              return;
+            }
+            if (this.shouldPauseRun(normalized)) {
+              item.status = "failed";
+              item.error = normalized;
+              item.completedAt = nowIso();
+              item.elapsedMs = Math.round(performance.now() - started);
+              this.state = "paused";
+              this.run.status = "paused";
+              await this.repository.saveItem(this.persistableItem(item));
+              this.emit("fatal-item", { item, error: normalized });
+              return;
+            }
+            if (attempt < settings.maxRetries && this.isTransient(normalized)) {
+              attempt += 1;
+              this.run.retryTotal += 1;
+              const delay = this.retryDelay(normalized, attempt, settings.initialRetryDelayMs);
+              this.emit("status", { message: `Retrying item ${item.index + 1} in ${Math.round(delay / 1000)}s after a transient failure.` });
+              await sleep(delay);
+              continue;
+            }
+            item.status = "failed";
+            item.error = normalized;
+            item.completedAt = nowIso();
+            item.elapsedMs = Math.round(performance.now() - started);
+            await this.repository.saveItem(this.persistableItem(item));
+            this.emit("item-updated", { item });
+            return;
+          }
+        }
+      }
+      retryDelay(error, attempt, base) {
+        if (error.retryAfter) {
+          const seconds = Number(error.retryAfter);
+          if (Number.isFinite(seconds)) return seconds * 1000;
+          const date = Date.parse(error.retryAfter);
+          if (Number.isFinite(date)) return Math.max(0, date - Date.now());
+        }
+        const jitter = Math.random() * base;
+        return Math.min(120000, base * (2 ** (attempt - 1)) + jitter);
+      }
+      isTransient(error) {
+        return [429, 500, 502, 503, 504].includes(Number(error.httpStatus || error.status)) || error.temporary || error.type === "timeout_or_abort" || error.name === "TypeError";
+      }
+      shouldPauseRun(error) {
+        const status = Number(error.httpStatus || error.status);
+        const text = `${error.code || ""} ${error.type || ""} ${error.message || ""}`.toLowerCase();
+        return status === 401 || status === 403 || text.includes("billing") || text.includes("quota") || text.includes("insufficient_quota");
+      }
+      normalizeError(error) {
+        return {
+          status: error.status || error.httpStatus || "",
+          httpStatus: error.httpStatus || error.status || "",
+          code: error.code || "",
+          type: error.type || error.name || "request_error",
+          message: error.message || String(error),
+          param: error.param || "",
+          retryAfter: error.retryAfter || "",
+          requestId: error.requestId || ""
+        };
+      }
+      async finishIfDone() {
+        const counts = this.counts();
+        this.run.completedCount = counts.completed;
+        this.run.failedCount = counts.failed;
+        this.run.cancelledCount = counts.cancelled;
+        if (this.state === "cancelled") {
+          for (const item of this.items) await this.repository.saveItem(this.persistableItem(item));
+          this.run.status = "cancelled";
+          this.run.completedAt = nowIso();
+          return;
+        }
+        if (this.state === "paused") return;
+        if (counts.pending === 0 && counts.generating === 0) {
+          this.run.status = counts.failed > 0 ? "completed_with_errors" : "completed";
+          this.run.completedAt = nowIso();
+          this.state = this.run.status;
+          this.emit("run-completed", { run: this.run });
+        }
+      }
+      counts() {
+        const counts = { total: this.items.length, pending: 0, generating: 0, completed: 0, failed: 0, skipped: 0, cancelled: 0, interrupted: 0 };
+        for (const item of this.items) counts[item.status] = (counts[item.status] || 0) + 1;
+        return counts;
+      }
+      safeSettings(settings) {
+        const { rememberKey, ...safe } = settings;
+        return safe;
+      }
+      persistableItem(item) {
+        const { objectUrl, ...copy } = item;
+        return copy;
+      }
+      emit(name, detail = {}) { this.dispatchEvent(new CustomEvent(name, { detail })); }
+    }
+
+    class UIController {
+      constructor() {
+        this.logger = new DiagnosticsLogger();
+        this.settingsStore = new SettingsStore();
+        this.db = new HistoryDB(this.logger);
+        this.repository = new RunRepository(this.db, this.logger);
+        this.client = new OpenAIImageClient(this.logger);
+        this.downloads = new DownloadManager();
+        this.jsonInput = new JsonInputController(this);
+        this.runner = new QueueRunner({ settingsStore: this.settingsStore, client: this.client, repository: this.repository, logger: this.logger });
+        this.currentValidation = null;
+        this.selectedHistoryRun = null;
+        this.lightboxItems = [];
+        this.lightboxIndex = 0;
+        this.confirmResolver = null;
+        this.objectUrls = new Set();
+      }
+      async init() {
+        this.bindEvents();
+        this.loadSettingsIntoForm();
+        $("promptInput").value = JSON.stringify(EXAMPLE_JSON, null, 2);
+        this.updateLineNumbers();
+        this.updateEditorStats();
+        const idbOk = await this.db.init();
+        if (!idbOk) this.showStorageWarning(this.db.storageWarning);
+        const interruptedRunId = await this.db.markInterrupted();
+        await this.refreshHistory();
+        if (interruptedRunId) this.notify("A previous run was interrupted by page closure. It was marked interrupted in History; it will not resume automatically.", "error");
+        this.bindRunner();
+        this.setControls();
+      }
+      bindEvents() {
+        document.querySelectorAll(".tab-button").forEach((btn) => btn.addEventListener("click", () => this.switchTab(btn.dataset.tab)));
+        $("openHelpBtn").addEventListener("click", () => $("helpModal").hidden = false);
+        $("closeHelpBtn").addEventListener("click", () => $("helpModal").hidden = true);
+        $("loadExampleBtn").addEventListener("click", () => { $("promptInput").value = JSON.stringify(EXAMPLE_JSON, null, 2); this.onInputChanged(); });
+        $("formatJsonBtn").addEventListener("click", () => this.formatJson());
+        $("validateBtn").addEventListener("click", () => this.validateInput(true));
+        $("clearBtn").addEventListener("click", () => { $("promptInput").value = ""; this.onInputChanged(); });
+        $("generateBtn").addEventListener("click", () => this.generate());
+        $("pauseBtn").addEventListener("click", () => this.runner.pause());
+        $("resumeBtn").addEventListener("click", () => this.resume());
+        $("retryFailedBtn").addEventListener("click", () => this.retryFailed());
+        $("cancelBtn").addEventListener("click", () => this.runner.cancel());
+        $("summaryDownloadAllBtn").addEventListener("click", () => this.downloadAll(this.runner.items, this.runner.run?.id));
+        $("summaryRerunFailedBtn").addEventListener("click", () => this.retryFailed());
+        $("summaryViewHistoryBtn").addEventListener("click", () => { this.switchTab("history"); this.openHistoryRun(this.runner.run?.id); });
+        $("promptInput").addEventListener("input", () => this.onInputChanged());
+        $("promptInput").addEventListener("keydown", (event) => this.handleEditorKeydown(event));
+        $("promptInput").addEventListener("scroll", () => { $("lineNumbers").scrollTop = $("promptInput").scrollTop; });
+        $("loadFileBtn").addEventListener("click", () => $("jsonFileInput").click());
+        $("jsonFileInput").addEventListener("change", (event) => this.loadFile(event.target.files?.[0]));
+        $("exportInputBtn").addEventListener("click", () => this.downloads.downloadJson(this.safeParseForExport(), "openai-image-prompts.json"));
+        $("dropZone").addEventListener("dragover", (event) => { event.preventDefault(); });
+        $("dropZone").addEventListener("drop", (event) => { event.preventDefault(); this.loadFile(event.dataTransfer.files?.[0]); });
+        $("autoScrollToggle").addEventListener("change", () => {
+          this.settingsStore.settings.autoScroll = $("autoScrollToggle").checked;
+          localStorage.setItem(this.settingsStore.prefix + "autoScroll", String($("autoScrollToggle").checked));
+        });
+        $("saveSettingsBtn").addEventListener("click", () => this.saveSettings());
+        $("testKeyBtn").addEventListener("click", () => this.testKey());
+        $("resetSettingsBtn").addEventListener("click", () => this.resetSettings());
+        $("toggleKeyBtn").addEventListener("click", () => this.toggleKeyVisibility());
+        $("clearKeyBtn").addEventListener("click", () => { $("apiKeyInput").value = ""; this.settingsStore.setApiKey("", false); $("rememberKeyToggle").checked = false; this.notifyAdmin("API key cleared."); });
+        $("deleteAllHistoryBtn").addEventListener("click", () => this.deleteAllHistory());
+        $("confirmNoBtn").addEventListener("click", () => this.resolveConfirm(false));
+        $("confirmYesBtn").addEventListener("click", () => this.resolveConfirm(true));
+        $("lightboxCloseBtn").addEventListener("click", () => this.closeLightbox());
+        $("lightboxPrevBtn").addEventListener("click", () => this.moveLightbox(-1));
+        $("lightboxNextBtn").addEventListener("click", () => this.moveLightbox(1));
+        $("lightboxDownloadBtn").addEventListener("click", () => {
+          const item = this.lightboxItems[this.lightboxIndex];
+          if (item) this.downloadItem(item, item.runId);
+        });
+        window.addEventListener("keydown", (event) => {
+          if (!$("lightbox").hidden && event.key === "Escape") this.closeLightbox();
+          if (!$("lightbox").hidden && event.key === "ArrowLeft") this.moveLightbox(-1);
+          if (!$("lightbox").hidden && event.key === "ArrowRight") this.moveLightbox(1);
+          if (!$("helpModal").hidden && event.key === "Escape") $("helpModal").hidden = true;
+        });
+        window.addEventListener("beforeunload", (event) => {
+          if (this.runner.running || ["running", "paused"].includes(this.runner.state)) {
+            event.preventDefault();
+            event.returnValue = "";
+          }
+          this.revokeObjectUrls();
+        });
+      }
+      bindRunner() {
+        this.runner.addEventListener("run-started", () => {
+          $("completionSummary").hidden = true;
+          this.renderResults();
+          this.notify("Request in progress.");
+          this.setControls();
+        });
+        this.runner.addEventListener("run-updated", () => { this.renderResults(); this.setControls(); this.refreshHistory(); });
+        this.runner.addEventListener("item-updated", () => { this.renderResults(); this.setControls(); });
+        this.runner.addEventListener("item-completed", (event) => {
+          if (event.detail.item.objectUrl) this.objectUrls.add(event.detail.item.objectUrl);
+          this.renderResults();
+          this.notify(`Image completed for item ${event.detail.item.index + 1}.`, "good");
+          this.setControls();
+          if (this.settingsStore.settings.autoScroll) this.scrollNewest(event.detail.item.id);
+        });
+        this.runner.addEventListener("fatal-item", (event) => {
+          this.renderRawError(event.detail.error);
+          this.notify("Authentication, permission, billing, or quota problem. Queue paused; check Admin.", "error");
+          this.setControls();
+        });
+        this.runner.addEventListener("status", (event) => this.notify(event.detail.message));
+        this.runner.addEventListener("run-completed", () => { this.showCompletionSummary(); this.refreshHistory(); });
+      }
+      switchTab(name) {
+        for (const btn of document.querySelectorAll(".tab-button")) btn.setAttribute("aria-selected", String(btn.dataset.tab === name));
+        $("generatePanel").hidden = name !== "generate";
+        $("historyPanel").hidden = name !== "history";
+        $("adminPanel").hidden = name !== "admin";
+        if (name === "history") this.refreshHistory();
+      }
+      onInputChanged() {
+        this.currentValidation = null;
+        $("validationBadge").textContent = "Not validated";
+        $("jsonFeedback").textContent = "JSON changed. Validate before generating.";
+        this.updateLineNumbers();
+        this.updateEditorStats();
+      }
+      updateLineNumbers() {
+        const count = $("promptInput").value.split("\n").length || 1;
+        $("lineNumbers").textContent = Array.from({ length: count }, (_, i) => i + 1).join("\n");
+      }
+      updateEditorStats() {
+        const text = $("promptInput").value;
+        $("charCount").textContent = `${text.length.toLocaleString()} chars`;
+        const validation = this.jsonInput.parse(text || "[]", this.settingsStore.settings);
+        if (validation.items) {
+          const duplicateCount = validation.items.filter((item) => item.duplicateOf !== null).length;
+          $("promptCount").textContent = `${validation.items.length} prompts`;
+          $("duplicateCount").textContent = `${duplicateCount} duplicates`;
+        } else {
+          $("promptCount").textContent = "0 prompts";
+          $("duplicateCount").textContent = "0 duplicates";
+        }
+      }
+      handleEditorKeydown(event) {
+        if (event.key !== "Tab") return;
+        event.preventDefault();
+        const input = event.target;
+        const start = input.selectionStart;
+        const end = input.selectionEnd;
+        input.value = input.value.slice(0, start) + "  " + input.value.slice(end);
+        input.selectionStart = input.selectionEnd = start + 2;
+        this.onInputChanged();
+      }
+      formatJson() {
+        try {
+          const parsed = JSON.parse($("promptInput").value);
+          $("promptInput").value = JSON.stringify(parsed, null, 2);
+          this.onInputChanged();
+          this.notify("JSON formatted.", "good");
+        } catch (error) {
+          $("jsonFeedback").textContent = `Malformed JSON: ${error.message}`;
+          this.notify("Invalid JSON.", "error");
+        }
+      }
+      validateInput(showMessages) {
+        const validation = this.jsonInput.parse($("promptInput").value, this.settingsStore.settings);
+        this.currentValidation = validation.ok ? validation : null;
+        if (validation.ok) {
+          $("validationBadge").textContent = "Valid";
+          $("jsonFeedback").textContent = `${validation.items.length} prompt(s) validated. Duplicate prompts are allowed and will be marked.`;
+          if (showMessages) this.notify("Ready to generate.", "good");
+        } else {
+          $("validationBadge").textContent = "Invalid";
+          $("jsonFeedback").textContent = validation.errors.join(" ");
+          if (showMessages) this.notify("Invalid JSON or prompt entries.", "error");
+        }
+        this.updateEstimates(validation.items || []);
+        return validation;
+      }
+      safeParseForExport() {
+        try { return JSON.parse($("promptInput").value || "[]"); }
+        catch { return $("promptInput").value; }
+      }
+      async loadFile(file) {
+        if (!file) return;
+        if (!file.name.endsWith(".json") && file.type !== "application/json") this.notify("Only .json files are accepted.", "error");
+        $("promptInput").value = await file.text();
+        this.onInputChanged();
+        this.validateInput(false);
+      }
+      async generate() {
+        if (this.runner.running) { this.notify("Request in progress.", "error"); return; }
+        const validation = this.validateInput(true);
+        if (!validation.ok) return;
+        try {
+          this.downloads.resetRunNames();
+          await this.runner.start(validation.items, $("promptInput").value, validation.runDefaults, validation.runName);
+        } catch (error) {
+          this.notify(error.message, "error");
+          if (error.message.includes("API key")) this.switchTab("admin");
+        }
+      }
+      async resume() {
+        try { this.runner.resume(); }
+        catch (error) { this.notify(error.message, "error"); }
+      }
+      async retryFailed() {
+        try { await this.runner.retryFailed(); }
+        catch (error) {
+          this.notify(error.message, "error");
+          if (error.message.includes("API key")) this.switchTab("admin");
+        }
+      }
+      renderResults() {
+        const grid = $("resultsGrid");
+        grid.replaceChildren();
+        $("resultsEmpty").hidden = this.runner.items.length > 0;
+        this.lightboxItems = this.runner.items.filter((item) => item.blob || item.objectUrl);
+        for (const item of this.runner.items) grid.append(this.resultCard(item, this.runner.run?.id));
+        this.setCounters(this.runner.counts());
+        this.updateEstimates(this.runner.items);
+      }
+      resultCard(item, runId) {
+        const card = document.createElement("article");
+        card.className = "result-card" + (item.duplicateOf !== null ? " duplicate" : "");
+        card.id = `item-${item.id}`;
+        const top = document.createElement("div");
+        top.className = "card-top";
+        const title = document.createElement("div");
+        title.className = "card-title";
+        title.textContent = `#${item.index + 1}`;
+        const badge = document.createElement("span");
+        badge.className = `badge ${item.status}`;
+        badge.textContent = item.status;
+        top.append(title, badge);
+        card.append(top);
+        if (item.duplicateOf !== null) {
+          const dup = document.createElement("div");
+          dup.className = "duplicate-note";
+          dup.textContent = `Duplicate of item #${item.duplicateOf + 1}`;
+          card.append(dup);
+        }
+        const preview = document.createElement("div");
+        preview.className = "preview";
+        if (item.objectUrl || item.blob) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.setAttribute("aria-label", `Open image ${item.index + 1} preview`);
+          const img = document.createElement("img");
+          img.alt = `Generated image for item ${item.index + 1}`;
+          img.src = item.objectUrl || this.createObjectUrl(item.blob);
+          if (!item.objectUrl && item.blob) item.objectUrl = img.src;
+          btn.append(img);
+          btn.addEventListener("click", () => this.openLightbox(item));
+          preview.append(btn);
+        } else if (item.status === "generating") {
+          const skel = document.createElement("div");
+          skel.className = "skeleton";
+          skel.setAttribute("aria-label", "Image is generating");
+          preview.append(skel);
+        } else {
+          const p = document.createElement("p");
+          p.className = "subtle";
+          p.textContent = item.status === "failed" ? "No image generated." : "Waiting for generation.";
+          preview.append(p);
+        }
+        card.append(preview);
+        const meta = document.createElement("div");
+        meta.className = "meta-grid";
+        [["Model", item.settings.model], ["Size", item.settings.size], ["Quality", item.settings.quality], ["Format", item.settings.output_format], ["Elapsed", this.formatMs(item.elapsedMs)], ["Retries", item.retryCount || 0]].forEach(([k, v]) => {
+          const div = document.createElement("div");
+          const b = document.createElement("b");
+          b.textContent = `${k}: `;
+          div.append(b, document.createTextNode(String(v || "n/a")));
+          meta.append(div);
+        });
+        card.append(meta);
+        const details = document.createElement("details");
+        details.className = "prompt-details";
+        const summary = document.createElement("summary");
+        summary.textContent = "Prompt";
+        const text = document.createElement("div");
+        text.className = "prompt-text";
+        text.textContent = item.prompt;
+        details.append(summary, text);
+        card.append(details);
+        if (item.error) {
+          const err = document.createElement("div");
+          err.className = "card-error";
+          err.textContent = item.error.message || "Image rejected.";
+          card.append(err);
+        }
+        const actions = document.createElement("div");
+        actions.className = "card-actions";
+        const dl = this.buttonWithIcon("Download", "download");
+        dl.disabled = !item.blob;
+        dl.addEventListener("click", () => this.downloadItem(item, runId));
+        const copy = document.createElement("button");
+        copy.className = "btn";
+        copy.type = "button";
+        copy.textContent = "Copy Prompt";
+        copy.addEventListener("click", async () => { await navigator.clipboard.writeText(item.prompt); this.notify("Prompt copied.", "good"); });
+        const retry = document.createElement("button");
+        retry.className = "btn";
+        retry.type = "button";
+        retry.textContent = "Retry";
+        retry.disabled = !["failed", "interrupted"].includes(item.status) || this.runner.running;
+        retry.addEventListener("click", async () => { item.status = "failed"; await this.retryFailed(); });
+        const remove = document.createElement("button");
+        remove.className = "btn danger";
+        remove.type = "button";
+        remove.textContent = "Remove From View";
+        remove.addEventListener("click", () => { card.remove(); });
+        actions.append(dl, copy, retry, remove);
+        card.append(actions);
+        return card;
+      }
+      buttonWithIcon(label) {
+        const btn = document.createElement("button");
+        btn.className = "btn";
+        btn.type = "button";
+        btn.setAttribute("aria-label", label);
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("aria-hidden", "true");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "currentColor");
+        path.setAttribute("stroke-linecap", "round");
+        path.setAttribute("stroke-linejoin", "round");
+        path.setAttribute("stroke-width", "2");
+        path.setAttribute("d", "M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2");
+        svg.append(path);
+        btn.append(svg, document.createTextNode(label));
+        return btn;
+      }
+      setCounters(counts) {
+        $("countTotal").textContent = counts.total || 0;
+        $("countPending").textContent = counts.pending || 0;
+        $("countGenerating").textContent = counts.generating || 0;
+        $("countCompleted").textContent = counts.completed || 0;
+        $("countFailed").textContent = counts.failed || 0;
+        $("countSkipped").textContent = counts.skipped || 0;
+        $("countCancelled").textContent = counts.cancelled || 0;
+        const done = (counts.completed || 0) + (counts.failed || 0) + (counts.cancelled || 0) + (counts.skipped || 0);
+        $("progressBar").style.width = counts.total ? `${Math.round((done / counts.total) * 100)}%` : "0%";
+        $("queueSummary").textContent = counts.total ? `${done} of ${counts.total} items finished.` : "No active queue.";
+      }
+      updateEstimates(items) {
+        const settings = this.settingsStore.settings;
+        const price = (quality) => {
+          if (quality === "low") return settings.costLow;
+          if (quality === "high") return settings.costHigh;
+          return settings.costMedium;
+        };
+        const planned = items.reduce((sum, item) => sum + price(item.settings?.quality || settings.quality), 0);
+        const attempted = items.filter((item) => item.attempted).reduce((sum, item) => sum + price(item.settings.quality), 0);
+        const success = items.filter((item) => item.status === "completed").reduce((sum, item) => sum + price(item.settings.quality), 0);
+        $("plannedCost").textContent = this.money(planned);
+        $("attemptedCost").textContent = this.money(attempted);
+        $("successCost").textContent = this.money(success);
+        $("costSummary").textContent = `Estimated planned cost: ${this.money(planned)}. This is editable and not a guarantee.`;
+      }
+      money(value) { return `$${Number(value || 0).toFixed(3)}`; }
+      formatMs(ms) {
+        if (!ms) return "n/a";
+        if (ms < 1000) return `${ms}ms`;
+        const seconds = Math.round(ms / 1000);
+        return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+      }
+      setControls() {
+        const state = this.runner.state;
+        const running = this.runner.running || state === "running";
+        $("generateBtn").disabled = running || state === "paused";
+        $("pauseBtn").disabled = !running;
+        $("resumeBtn").disabled = state !== "paused" || this.runner.running;
+        $("cancelBtn").disabled = !["running", "paused"].includes(state);
+        $("retryFailedBtn").disabled = this.runner.running || !this.runner.items.some((item) => ["failed", "interrupted"].includes(item.status));
+      }
+      notify(message, tone = "") {
+        $("liveStatus").textContent = message;
+        $("liveStatus").className = `status-line ${tone}`;
+      }
+      notifyAdmin(message, tone = "") {
+        $("adminStatus").textContent = message;
+        $("adminStatus").className = `status-line ${tone}`;
+      }
+      renderRawError(error) {
+        $("rawErrorPanel").hidden = false;
+        $("rawErrorText").textContent = JSON.stringify(error, null, 2);
+      }
+      scrollNewest(id) { setTimeout(() => $(`item-${id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60); }
+      showCompletionSummary() {
+        const counts = this.runner.counts();
+        $("completionSummary").hidden = false;
+        $("completionSummaryText").textContent = `Total elapsed: ${this.elapsedRun(this.runner.run)}. Completed: ${counts.completed}. Failed: ${counts.failed}. Cancelled: ${counts.cancelled}. Retries: ${this.runner.run.retryTotal}. Estimated successful-image cost: ${$("successCost").textContent}.`;
+        this.notify(counts.failed ? "Run completed with errors." : "Entire run completed.", counts.failed ? "error" : "good");
+      }
+      elapsedRun(run) {
+        if (!run?.startedAt) return "n/a";
+        const end = run.completedAt ? Date.parse(run.completedAt) : Date.now();
+        return this.formatMs(end - Date.parse(run.startedAt));
+      }
+      loadSettingsIntoForm() {
+        const s = this.settingsStore.settings;
+        $("apiKeyInput").value = this.settingsStore.getApiKey();
+        $("rememberKeyToggle").checked = s.rememberKey;
+        $("modelInput").value = s.model;
+        $("sizeInput").value = s.size;
+        $("qualityInput").value = s.quality;
+        $("formatInput").value = s.output_format;
+        $("backgroundInput").value = s.background;
+        $("compressionInput").value = s.output_compression;
+        $("timeoutInput").value = s.timeoutSeconds;
+        $("maxRetriesInput").value = s.maxRetries;
+        $("retryDelayInput").value = s.initialRetryDelayMs;
+        $("costLowInput").value = s.costLow;
+        $("costMediumInput").value = s.costMedium;
+        $("costHighInput").value = s.costHigh;
+        $("autoScrollToggle").checked = s.autoScroll;
+      }
+      readSettingsForm() {
+        return {
+          rememberKey: $("rememberKeyToggle").checked,
+          model: $("modelInput").value.trim() || "gpt-image-2",
+          size: $("sizeInput").value.trim() || "auto",
+          quality: $("qualityInput").value,
+          output_format: $("formatInput").value,
+          background: $("backgroundInput").value,
+          output_compression: $("compressionInput").value === "" ? "" : Number($("compressionInput").value),
+          timeoutSeconds: Number($("timeoutInput").value) || 180,
+          maxRetries: Number($("maxRetriesInput").value) || 0,
+          initialRetryDelayMs: Number($("retryDelayInput").value) || 1500,
+          costLow: Number($("costLowInput").value) || 0,
+          costMedium: Number($("costMediumInput").value) || 0,
+          costHigh: Number($("costHighInput").value) || 0,
+          autoScroll: $("autoScrollToggle").checked
+        };
+      }
+      saveSettings() {
+        this.settingsStore.save(this.readSettingsForm(), $("apiKeyInput").value.trim());
+        this.notifyAdmin("Settings saved.", "good");
+        this.updateEstimates(this.runner.items);
+      }
+      async testKey() {
+        const key = $("apiKeyInput").value.trim() || this.settingsStore.getApiKey();
+        if (!key) { this.notifyAdmin("Missing key.", "error"); return; }
+        this.notifyAdmin("Testing API key...");
+        const result = await this.client.testKey(key, Number($("timeoutInput").value) || 60);
+        this.notifyAdmin(result.message, result.ok ? "good" : "error");
+      }
+      async resetSettings() {
+        if (!(await this.confirm("Reset all settings and clear the remembered API key?"))) return;
+        this.settingsStore.reset();
+        this.loadSettingsIntoForm();
+        this.notifyAdmin("Settings reset.", "good");
+      }
+      toggleKeyVisibility() {
+        const input = $("apiKeyInput");
+        input.type = input.type === "password" ? "text" : "password";
+        $("toggleKeyBtn").textContent = input.type === "password" ? "Show" : "Hide";
+      }
+      async refreshHistory() {
+        const runs = await this.repository.loadRuns();
+        const list = $("historyList");
+        list.replaceChildren();
+        $("historyEmpty").hidden = runs.length > 0;
+        for (const run of runs) {
+          const btn = document.createElement("button");
+          btn.className = "history-run" + (run.id === this.selectedHistoryRun ? " active" : "");
+          btn.type = "button";
+          const title = document.createElement("b");
+          title.textContent = run.name || run.id;
+          const meta = document.createElement("span");
+          meta.textContent = `${new Date(run.createdAt).toLocaleString()} · ${run.status} · ${run.completedCount || 0} completed · ${run.failedCount || 0} failed`;
+          btn.append(title, meta);
+          btn.addEventListener("click", () => this.openHistoryRun(run.id));
+          list.append(btn);
+        }
+      }
+      async openHistoryRun(id) {
+        if (!id) return;
+        this.selectedHistoryRun = id;
+        const run = await this.repository.loadRun(id);
+        const items = await this.repository.loadItems(id);
+        const detail = $("historyDetail");
+        detail.replaceChildren();
+        if (!run) { detail.textContent = "Run not found."; return; }
+        $("historySize").textContent = `Stored size: ${this.approxSize(items)}`;
+        const summary = document.createElement("div");
+        summary.className = "summary-panel";
+        summary.append(this.metaLine("Run ID", run.id), this.metaLine("Started", new Date(run.createdAt).toLocaleString()), this.metaLine("Status", run.status), this.metaLine("Model", run.model || run.globalSettings?.model || "n/a"));
+        const actions = document.createElement("div");
+        actions.className = "button-row";
+        const load = this.simpleButton("Open in Generate", () => this.loadRunIntoGenerate(run, items, false));
+        const rerunAll = this.simpleButton("Re-run Prompt Set", () => this.loadRunIntoGenerate(run, items, false));
+        const rerunFailed = this.simpleButton("Re-run Failed", () => this.loadRunIntoGenerate(run, items, true));
+        const copy = this.simpleButton("Copy Original JSON", async () => { await navigator.clipboard.writeText(run.originalJson || "[]"); this.notify("Original JSON copied.", "good"); });
+        const exportMeta = this.simpleButton("Export Metadata", () => this.downloads.downloadJson(this.exportRun(run, items), `${run.id}-metadata.json`));
+        const downloadAll = this.simpleButton("Download All Images", () => this.downloadAll(items, run.id));
+        const del = this.simpleButton("Delete Run", async () => { if (await this.confirm("Delete this run and its stored images?")) { await this.repository.deleteRun(run.id); this.selectedHistoryRun = null; await this.refreshHistory(); $("historyDetail").replaceChildren(this.empty("Select a run to inspect images, metadata, and actions.")); } }, "danger");
+        actions.append(load, rerunAll, rerunFailed, copy, exportMeta, downloadAll, del);
+        summary.append(actions);
+        detail.append(summary);
+        const grid = document.createElement("div");
+        grid.className = "results-grid";
+        for (const item of items) {
+          if (item.blob && !item.objectUrl) item.objectUrl = this.createObjectUrl(item.blob);
+          grid.append(this.resultCard(item, run.id));
+        }
+        detail.append(grid);
+        await this.refreshHistory();
+      }
+      metaLine(label, value) {
+        const p = document.createElement("p");
+        p.className = "subtle";
+        const b = document.createElement("b");
+        b.textContent = `${label}: `;
+        p.append(b, document.createTextNode(value));
+        return p;
+      }
+      simpleButton(text, fn, tone = "") {
+        const btn = document.createElement("button");
+        btn.className = `btn ${tone}`;
+        btn.type = "button";
+        btn.textContent = text;
+        btn.addEventListener("click", fn);
+        return btn;
+      }
+      empty(text) {
+        const div = document.createElement("div");
+        div.className = "empty-state";
+        div.textContent = text;
+        return div;
+      }
+      loadRunIntoGenerate(run, items, failedOnly) {
+        const selected = failedOnly ? items.filter((item) => ["failed", "interrupted"].includes(item.status)) : items;
+        const prompts = selected.map((item) => ({ prompt: item.prompt, filename: item.filename || "", ...item.settings }));
+        $("promptInput").value = JSON.stringify({ name: run.name || "Re-run image batch", defaults: run.runDefaults || {}, prompts }, null, 2);
+        this.onInputChanged();
+        this.validateInput(false);
+        this.switchTab("generate");
+        this.notify("Run loaded into Generate. It has not been submitted.", "good");
+      }
+      exportRun(run, items) {
+        const strip = ({ blob, objectUrl, ...rest }) => rest;
+        return { ...run, apiKey: undefined, items: items.map(strip) };
+      }
+      approxSize(items) {
+        const bytes = items.reduce((sum, item) => sum + (item.blob?.size || 0), 0);
+        if (!bytes) return "text metadata only or unavailable";
+        if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      }
+      downloadItem(item, runId) {
+        try { this.downloads.downloadBlob(item.blob, this.downloads.filename(item, runId)); }
+        catch (error) { this.notify(`Download failed: ${error.message}`, "error"); }
+      }
+      async downloadAll(items, runId) {
+        this.downloads.resetRunNames();
+        const downloadable = items.filter((item) => item.blob);
+        if (!downloadable.length) { this.notify("No stored images are available to download.", "error"); return; }
+        for (const item of downloadable) {
+          this.downloadItem(item, runId);
+          await sleep(250);
+        }
+      }
+      async deleteAllHistory() {
+        if (!(await this.confirm("Delete all saved run history and image Blobs?"))) return;
+        await this.repository.clearHistory();
+        this.selectedHistoryRun = null;
+        $("historyDetail").replaceChildren(this.empty("Select a run to inspect images, metadata, and actions."));
+        await this.refreshHistory();
+      }
+      openLightbox(item) {
+        const index = this.lightboxItems.findIndex((candidate) => candidate.id === item.id);
+        this.lightboxIndex = Math.max(0, index);
+        this.renderLightbox();
+        $("lightbox").hidden = false;
+      }
+      renderLightbox() {
+        const item = this.lightboxItems[this.lightboxIndex];
+        if (!item) return;
+        $("lightboxImage").src = item.objectUrl || this.createObjectUrl(item.blob);
+        $("lightboxImage").alt = `Generated image ${item.index + 1}`;
+        $("lightboxMeta").textContent = `#${item.index + 1} · ${item.settings.model} · ${item.settings.size} · ${item.settings.quality} · ${item.prompt}`;
+      }
+      moveLightbox(delta) {
+        if (!this.lightboxItems.length) return;
+        this.lightboxIndex = (this.lightboxIndex + delta + this.lightboxItems.length) % this.lightboxItems.length;
+        this.renderLightbox();
+      }
+      closeLightbox() {
+        $("lightbox").hidden = true;
+        $("lightboxImage").removeAttribute("src");
+      }
+      createObjectUrl(blob) {
+        const url = URL.createObjectURL(blob);
+        this.objectUrls.add(url);
+        return url;
+      }
+      revokeObjectUrls() {
+        for (const url of this.objectUrls) URL.revokeObjectURL(url);
+        this.objectUrls.clear();
+      }
+      confirm(message) {
+        $("confirmMessage").textContent = message;
+        $("confirmModal").hidden = false;
+        return new Promise((resolve) => { this.confirmResolver = resolve; });
+      }
+      resolveConfirm(value) {
+        $("confirmModal").hidden = true;
+        if (this.confirmResolver) this.confirmResolver(value);
+        this.confirmResolver = null;
+      }
+      showStorageWarning(message) {
+        $("storageWarning").hidden = false;
+        $("storageWarning").textContent = message;
+      }
+    }
+
+    const app = new UIController();
+    app.init();
+  </script>
+</body>
+</html>
