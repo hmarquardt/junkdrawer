@@ -659,9 +659,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.14.2" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.14.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(101, 112, 128, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt · OpenAI Image Batch Generator · version 2026.07.14.2
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.14.3" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.14.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(101, 112, 128, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt · OpenAI Image Batch Generator · version 2026.07.14.3
     </footer>
   </div>
 
@@ -674,6 +674,7 @@
       <div class="modal-body">
         <p>This is a browser-only tool. Closing or reloading the page stops active generation; active requests cannot survive a closed page.</p>
         <p>API keys in browser applications carry risk. Generated images may consume substantial local storage, and browser download protections may ask for permission when downloading many files.</p>
+        <p>If every request reports “Failed to fetch,” the browser is blocking or failing the direct request before OpenAI returns an API error. Use Test API Key in Admin; if that also fails with a network/CORS message, this copy of the page cannot reach OpenAI directly from the current browser/network.</p>
         <p>Pricing estimates may be outdated because image pricing can change. Model IDs and API capabilities can also change, so the Admin model field lets you update the model without editing source code.</p>
       </div>
     </div>
@@ -1027,6 +1028,13 @@
         } catch (error) {
           if (error.name === "AbortError" || error === "timeout") {
             throw { type: "timeout_or_abort", message: timeoutController.signal.aborted ? "Request timed out." : "Request was cancelled.", temporary: timeoutController.signal.aborted };
+          }
+          if (error.name === "TypeError" && /failed to fetch|network/i.test(error.message || "")) {
+            throw {
+              type: "browser_network_or_cors",
+              message: "Browser request failed before OpenAI returned a response. This is usually CORS, offline/network blocking, a privacy extension, or a local-file origin restriction. Try Test API Key in Admin from the same page.",
+              temporary: false
+            };
           }
           throw error;
         } finally {
@@ -1411,12 +1419,12 @@
         return Math.min(120000, base * (2 ** (attempt - 1)) + jitter);
       }
       isTransient(error) {
-        return [429, 500, 502, 503, 504].includes(Number(error.httpStatus || error.status)) || error.temporary || error.type === "timeout_or_abort" || error.name === "TypeError";
+        return [429, 500, 502, 503, 504].includes(Number(error.httpStatus || error.status)) || error.temporary || error.type === "timeout_or_abort";
       }
       shouldPauseRun(error) {
         const status = Number(error.httpStatus || error.status);
         const text = `${error.code || ""} ${error.type || ""} ${error.message || ""}`.toLowerCase();
-        return status === 401 || status === 403 || text.includes("billing") || text.includes("quota") || text.includes("insufficient_quota");
+        return status === 401 || status === 403 || text.includes("billing") || text.includes("quota") || text.includes("insufficient_quota") || error.type === "browser_network_or_cors";
       }
       normalizeError(error) {
         return {
@@ -1571,7 +1579,7 @@
         });
         this.runner.addEventListener("fatal-item", (event) => {
           this.renderRawError(event.detail.error);
-          this.notify("Authentication, permission, billing, or quota problem. Queue paused; check Admin.", "error");
+          this.notify("Queue paused for an authentication, permission, billing, quota, network, or browser/CORS problem. Check Admin and the raw error details.", "error");
           this.setControls();
         });
         this.runner.addEventListener("status", (event) => this.notify(event.detail.message));
