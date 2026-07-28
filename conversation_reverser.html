@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Conversation Reverser — Junkdrawer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔃</text></svg>" />
+<script
+  src="analytics-lite.js"
+  data-site-id="junkdrawer"
+  data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+  defer>
+</script>
+<style>
+  :root {
+    --bg: #0c1018;
+    --panel: #141b29;
+    --panel-inset: #0e1420;
+    --border: #26324a;
+    --border-strong: #35445f;
+    --text: #e8eef8;
+    --muted: #93a4c0;
+    --accent: #5b8cff;
+    --accent-hover: #6f9bff;
+    --accent-contrast: #0c1018;
+    --danger: #ff7b72;
+    --ok: #38d9a9;
+    --warn: #ffd166;
+    --focus: #a8c1ff;
+    --shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #eef1f7;
+      --panel: #ffffff;
+      --panel-inset: #f5f7fb;
+      --border: #d5dcea;
+      --border-strong: #b9c4d9;
+      --text: #1b2432;
+      --muted: #5d6b82;
+      --accent: #3467e0;
+      --accent-hover: #2a57c4;
+      --accent-contrast: #ffffff;
+      --danger: #c93c33;
+      --ok: #0e9f76;
+      --warn: #9c7a1a;
+      --focus: #3467e0;
+      --shadow: 0 14px 34px rgba(27, 36, 50, 0.12);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2.5rem) 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 1rem/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    flex-wrap: wrap;
+    max-width: 90rem;
+    width: 100%;
+    margin: 0 auto 1rem;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(1.4rem, 3.5vw, 1.9rem);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  .privacy-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .options-bar {
+    max-width: 90rem;
+    width: 100%;
+    margin: 0 auto 1.1rem;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.7rem 1.4rem;
+    padding: 0.75rem 1rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0.8rem;
+    box-shadow: var(--shadow);
+  }
+
+  .checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  input[type="checkbox"] { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; }
+
+  .labels-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex: 1 1 18rem;
+    min-width: 14rem;
+  }
+
+  .labels-field label { font-size: 0.9rem; color: var(--muted); white-space: nowrap; }
+
+  .labels-field input {
+    flex: 1;
+    min-width: 8rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--panel-inset);
+    color: var(--text);
+    font: 400 0.9rem/1.3 var(--mono);
+  }
+
+  .hint-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--panel-inset);
+    font-size: 0.82rem;
+    color: var(--muted);
+    cursor: help;
+  }
+
+  .hint-chip strong { font-weight: 700; }
+  .hint-chip[data-state="newest"] strong { color: var(--warn); }
+  .hint-chip[data-state="oldest"] strong { color: var(--ok); }
+  .hint-chip[data-state="unknown"] strong { color: var(--muted); }
+
+  .ghost-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.8rem;
+    border-radius: 0.55rem;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font: 600 0.85rem/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  .ghost-button:hover:not(:disabled) { background: var(--panel-inset); border-color: var(--border-strong); }
+  .ghost-button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .ghost-button.danger { color: var(--danger); }
+  .ghost-button svg { flex: none; }
+
+  .layout {
+    max-width: 90rem;
+    width: 100%;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 1.1rem;
+    align-items: stretch;
+    flex: 1;
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-header h2 {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 700;
+  }
+
+  .panel-actions { display: flex; align-items: center; gap: 0.45rem; }
+
+  .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.15rem;
+    height: 2.15rem;
+    border-radius: 0.55rem;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .icon-button:hover:not(:disabled) { background: var(--panel-inset); color: var(--text); border-color: var(--border-strong); }
+  .icon-button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .icon-button.copied { color: var(--ok); border-color: var(--ok); }
+
+  .panel textarea {
+    flex: 1;
+    width: 100%;
+    min-height: 52vh;
+    padding: 1rem 1.1rem;
+    border: none;
+    background: var(--panel-inset);
+    color: var(--text);
+    font: 400 0.9rem/1.55 var(--mono);
+    resize: none;
+  }
+
+  .panel textarea:focus { outline: none; box-shadow: inset 0 0 0 2px var(--focus); }
+
+  .panel-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 1.1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--muted);
+    min-height: 2.4rem;
+  }
+
+  .inline-error { color: var(--danger); font-weight: 600; margin: 0; }
+
+  .controls {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 0.7rem;
+    min-width: 13rem;
+  }
+
+  .reverse-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 0.9rem 1.3rem;
+    border-radius: 0.7rem;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-contrast);
+    font: 700 1rem/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+  }
+
+  .reverse-button:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .reverse-button:active:not(:disabled) { transform: translateY(1px); }
+  .reverse-button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .shortcut-hint {
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
+  kbd {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--border-strong);
+    border-bottom-width: 2px;
+    border-radius: 0.3rem;
+    background: var(--panel-inset);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  [hidden] { display: none !important; }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 0.35rem;
+  }
+
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+    .controls {
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: center;
+      min-width: 0;
+    }
+    .reverse-button { flex: 1 1 100%; }
+    .shortcut-hint { flex: 1 1 100%; }
+    .panel textarea { min-height: 32vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Conversation Reverser</h1>
+  <span class="privacy-note">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    Everything stays in this browser.
+  </span>
+</header>
+
+<div class="options-bar">
+  <label class="checkbox-label" for="keepIntro">
+    <input type="checkbox" id="keepIntro" checked />
+    Keep introductory text at top
+  </label>
+  <label class="checkbox-label" for="normalizeSpacing">
+    <input type="checkbox" id="normalizeSpacing" />
+    Normalize spacing between blocks
+  </label>
+  <div class="labels-field">
+    <label for="customLabels">Additional role labels</label>
+    <input type="text" id="customLabels" placeholder="SYSTEM, TOOL, DEVELOPER" autocomplete="off" spellcheck="false" />
+  </div>
+  <span class="hint-chip" id="orderHint" data-state="unknown" title="Simple text heuristics only — not a guaranteed conclusion.">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    Heuristic hint: <strong id="orderHintText">Order could not be determined</strong>
+  </span>
+  <button type="button" class="ghost-button danger" id="forgetBtn" title="Delete the saved input, output, and options from this browser" aria-label="Forget saved text">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    Forget Saved Text
+  </button>
+</div>
+
+<main class="layout">
+  <section class="panel" aria-labelledby="inputHeading">
+    <div class="panel-header">
+      <h2 id="inputHeading">Original Conversation</h2>
+      <div class="panel-actions">
+        <button type="button" class="icon-button" id="pasteBtn" title="Paste from clipboard" aria-label="Paste from clipboard into input">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+        </button>
+        <button type="button" class="ghost-button" id="clearBtn" title="Clear the input box" aria-label="Clear input">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          Clear
+        </button>
+      </div>
+    </div>
+    <label class="sr-only" for="inputText">Original conversation text</label>
+    <textarea id="inputText" spellcheck="false" placeholder="Paste a conversation containing USER: and ASSISTANT: message blocks — for example:&#10;&#10;USER: Third message&#10;&#10;ASSISTANT: Second reply&#10;&#10;USER: Second message&#10;&#10;…then press Reverse Conversation to flip the block order."></textarea>
+    <div class="panel-footer">
+      <p class="inline-error" id="pasteError" role="alert" hidden></p>
+      <span id="inputStats" aria-hidden="true"></span>
+    </div>
+  </section>
+
+  <div class="controls">
+    <button type="button" class="reverse-button" id="reverseBtn" disabled>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="21" x2="8" y2="7"/><polyline points="4 11 8 7 12 11"/><line x1="16" y1="3" x2="16" y2="17"/><polyline points="12 13 16 17 20 13"/></svg>
+      Reverse Conversation
+    </button>
+    <p class="shortcut-hint"><kbd>⌘/Ctrl</kbd> + <kbd>Enter</kbd> to reverse</p>
+    <button type="button" class="ghost-button" id="reverseAgainBtn" hidden title="Move the output back into the input and reverse it again" aria-label="Reverse again">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+      Reverse again
+    </button>
+    <button type="button" class="ghost-button" id="swapBtn" title="Swap the input and output panels" aria-label="Swap panels">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="21" y1="8" x2="7" y2="8"/><polyline points="11 4 7 8 11 12"/><line x1="3" y1="16" x2="17" y2="16"/><polyline points="13 12 17 16 13 20"/></svg>
+      Swap panels
+    </button>
+  </div>
+
+  <section class="panel" aria-labelledby="outputHeading">
+    <div class="panel-header">
+      <h2 id="outputHeading">Reversed Conversation</h2>
+      <div class="panel-actions">
+        <button type="button" class="icon-button" id="copyBtn" title="Copy output to clipboard (⌘/Ctrl+Shift+C)" aria-label="Copy reversed conversation to clipboard">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        <button type="button" class="ghost-button" id="downloadBtn" title="Download the reversed conversation as a text file" aria-label="Download reversed conversation as TXT">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download TXT
+        </button>
+      </div>
+    </div>
+    <label class="sr-only" for="outputText">Reversed conversation text</label>
+    <textarea id="outputText" readonly spellcheck="false" placeholder="The reversed conversation will appear here."></textarea>
+    <div class="panel-footer">
+      <span id="countText"></span>
+      <span class="shortcut-hint"><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> to copy</span>
+    </div>
+  </section>
+</main>
+
+<div class="sr-only" id="liveRegion" aria-live="polite"></div>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.27.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.07.27.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Conversation Reverser · version 2026.07.27.2
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  // -------------------------------------------------------------------
+  // Persistence: most recent input, output, options, and custom labels.
+  // Conversation text never leaves this browser.
+  // -------------------------------------------------------------------
+  var STORAGE_KEY = 'conversationReverser.v1';
+
+  function loadState() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (!raw || typeof raw !== 'object') return null;
+      return {
+        input: typeof raw.input === 'string' ? raw.input : '',
+        output: typeof raw.output === 'string' ? raw.output : '',
+        keepIntro: raw.keepIntro !== false,
+        normalize: raw.normalize === true,
+        customLabels: typeof raw.customLabels === 'string' ? raw.customLabels : ''
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        v: 1,
+        input: inputEl.value,
+        output: outputEl.value,
+        keepIntro: keepIntroEl.checked,
+        normalize: normalizeEl.checked,
+        customLabels: customLabelsEl.value
+      }));
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  function $(id) { return document.getElementById(id); }
+
+  var inputEl = $('inputText');
+  var outputEl = $('outputText');
+  var reverseBtn = $('reverseBtn');
+  var reverseAgainBtn = $('reverseAgainBtn');
+  var swapBtn = $('swapBtn');
+  var pasteBtn = $('pasteBtn');
+  var copyBtn = $('copyBtn');
+  var clearBtn = $('clearBtn');
+  var downloadBtn = $('downloadBtn');
+  var forgetBtn = $('forgetBtn');
+  var keepIntroEl = $('keepIntro');
+  var normalizeEl = $('normalizeSpacing');
+  var customLabelsEl = $('customLabels');
+  var pasteErrorEl = $('pasteError');
+  var inputStatsEl = $('inputStats');
+  var countTextEl = $('countText');
+  var orderHintEl = $('orderHint');
+  var orderHintTextEl = $('orderHintText');
+  var liveRegion = $('liveRegion');
+
+  var copyBtnDefaultHTML = copyBtn.innerHTML;
+  var copyFeedbackTimer = null;
+
+  function announce(message) {
+    liveRegion.textContent = '';
+    setTimeout(function () { liveRegion.textContent = message; }, 30);
+  }
+
+  function debounce(fn, ms) {
+    var t = null;
+    return function () {
+      var args = arguments;
+      clearTimeout(t);
+      t = setTimeout(function () { fn.apply(null, args); }, ms);
+    };
+  }
+
+  // -------------------------------------------------------------------
+  // Block parsing.
+  // A new message block starts at any line beginning with a role marker:
+  // USER: or ASSISTANT: (plus any custom labels), matched
+  // case-insensitively, allowing leading whitespace and optional spaces
+  // before the colon. Everything after a marker stays attached to that
+  // block until the next marker, so multiline messages, blank lines,
+  // tags, JSON, and punctuation are preserved byte-for-byte.
+  // -------------------------------------------------------------------
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // -------------------------------------------------------------------
+  // Generated-output header: every reversed conversation begins with
+  // exactly one "model: maiba_prod" line followed by exactly one blank
+  // line. The header goes on the output only — it is never treated as a
+  // conversation block and never reversed. Any copy already sitting on
+  // the input (e.g. a previously generated output pasted back in) is
+  // stripped before processing, so re-reversing never duplicates it.
+  // -------------------------------------------------------------------
+  var MODEL_LINE = 'model: maiba_prod';
+  var MODEL_LINE_RE = /^\s*model\s*:\s*maiba_prod[ \t]*(\r?\n|$)/i;
+
+  function stripModelLine(text) {
+    var s = String(text);
+    if (!MODEL_LINE_RE.test(s)) return s;
+    return s.replace(MODEL_LINE_RE, '').replace(/^\s+/, '');
+  }
+
+  function buildMarkerRegex(customLabels) {
+    var labels = ['USER', 'ASSISTANT'];
+    String(customLabels || '').split(',').forEach(function (piece) {
+      var label = piece.trim();
+      if (!label) return;
+      var exists = labels.some(function (l) { return l.toLowerCase() === label.toLowerCase(); });
+      if (!exists) labels.push(label);
+    });
+    // Longest-first so overlapping labels match correctly.
+    labels.sort(function (a, b) { return b.length - a.length; });
+    var alternation = labels.map(escapeRegExp).join('|');
+    return new RegExp('^\\s*(?:' + alternation + ')\\s*:', 'i');
+  }
+
+  // Split text into contiguous units. Each unit keeps its content lines
+  // and its trailing run of blank lines (the separator that followed it),
+  // so the original text can be reconstructed exactly.
+  function parseUnits(text, markerRe) {
+    var lines = String(text).split('\n');
+    var raw = [];
+    var cur = null;
+    for (var i = 0; i < lines.length; i += 1) {
+      var line = lines[i];
+      if (markerRe.test(line)) {
+        if (cur) raw.push(cur);
+        cur = { isMessage: true, lines: [line] };
+      } else {
+        if (!cur) cur = { isMessage: false, lines: [] };
+        cur.lines.push(line);
+      }
+    }
+    if (cur) raw.push(cur);
+    return raw.map(function (u) {
+      var sep = [];
+      while (u.lines.length && u.lines[u.lines.length - 1].trim() === '') {
+        sep.unshift(u.lines.pop());
+      }
+      return { isMessage: u.isMessage, content: u.lines, sep: sep };
+    });
+  }
+
+  function unitString(u) {
+    return u.content.join('\n') + (u.sep.length ? '\n' + u.sep.join('\n') : '');
+  }
+
+  // Reverse complete blocks. Separators (blank-line runs) stay in their
+  // original positions; only block contents change order. The preamble
+  // (text before the first role marker) either keeps its place at the top
+  // or travels to the bottom with the reversal.
+  function buildOutput(units, keepIntro, normalize) {
+    var msgCount = units.filter(function (u) { return u.isMessage; }).length;
+    if (msgCount === 0) {
+      return { text: units.map(unitString).join('\n'), count: 0 };
+    }
+    var hasPreamble = units.length > 0 && !units[0].isMessage &&
+      units[0].content.join('\n').trim() !== '';
+    var ordered = (keepIntro && hasPreamble)
+      ? [units[0]].concat(units.slice(1).reverse())
+      : units.slice().reverse();
+
+    if (normalize) {
+      // Exactly one blank line between blocks; block interiors untouched.
+      var parts = [];
+      ordered.forEach(function (u) {
+        var content = u.content.slice();
+        while (content.length && content[0].trim() === '') content.shift();
+        if (content.length) parts.push(content.join('\n'));
+      });
+      return { text: parts.join('\n\n'), count: msgCount };
+    }
+
+    // gap after original unit i (i < last), and the file's trailing blanks.
+    function gapAfter(i) {
+      return (units[i].sep.length ? '\n' + units[i].sep.join('\n') : '') + '\n';
+    }
+    var tail = units[units.length - 1].sep.length
+      ? '\n' + units[units.length - 1].sep.join('\n')
+      : '';
+    var out = '';
+    ordered.forEach(function (u, idx) {
+      out += u.content.join('\n');
+      out += idx < ordered.length - 1 ? gapAfter(idx) : tail;
+    });
+    return { text: out, count: msgCount };
+  }
+
+  // -------------------------------------------------------------------
+  // Reverse-detection helper: simple text heuristics only — deliberately
+  // non-authoritative. No AI model, no network.
+  // -------------------------------------------------------------------
+  var REFERENCE_PHRASES = [
+    'as mentioned earlier', 'as i mentioned', 'as mentioned above',
+    'since you asked', 'you are currently', 'as discussed', 'as we discussed',
+    'earlier you', 'previously', 'as i said', 'like i said', 'your earlier',
+    'the above', 'as noted earlier', 'as promised', 'going back to'
+  ];
+  var INITIATING_RE = /\b(hi|hello|hey|greetings|good morning|good afternoon|good evening)\b|^\s*(can you|could you|would you|please|help|how do i|how can i|what is|what's|why|when|where|i need|i want|i'm trying|is there|are there|do you|explain|write|create|make|list|show me|tell me)/i;
+
+  function roleOf(unit) {
+    var m = unit.content[0] && unit.content[0].match(/^\s*([A-Za-z][A-Za-z0-9 _-]*?)\s*:/);
+    return m ? m[1].toUpperCase() : '';
+  }
+
+  function detectOrder(units) {
+    var msgs = units.filter(function (u) { return u.isMessage; });
+    if (msgs.length < 2) return 'Order could not be determined';
+    var score = 0; // positive => oldest-first, negative => newest-first
+    var first = msgs[0];
+    var last = msgs[msgs.length - 1];
+    var firstRole = roleOf(first);
+    var lastRole = roleOf(last);
+
+    // Conversations usually open with the user and end with the assistant;
+    // reversed exports flip both of those signals.
+    if (firstRole === 'USER') score += 1; else score -= 1;
+    if (lastRole === 'ASSISTANT') score += 1;
+    else if (lastRole === 'USER') score -= 1;
+
+    // An initiating-looking USER block at the very bottom is a strong hint
+    // the export starts with the newest message.
+    var firstText = first.content.join('\n').slice(0, 300);
+    var lastText = last.content.join('\n').slice(0, 300);
+    if (firstRole === 'USER' && INITIATING_RE.test(firstText)) score += 1;
+    if (lastRole === 'USER' && INITIATING_RE.test(lastText)) score -= 1;
+    if (firstRole === 'USER' && lastRole === 'USER') score -= 1; // bottom USER likely the opener
+
+    // Backward references ("as mentioned earlier", "since you asked")
+    // accumulate in LATER messages; if they cluster near the top, the top
+    // is probably the newest end of the conversation.
+    function countRefs(blocks) {
+      return blocks.reduce(function (total, u) {
+        var t = u.content.join('\n').toLowerCase();
+        return total + REFERENCE_PHRASES.reduce(function (n, p) {
+          return n + (t.indexOf(p) !== -1 ? 1 : 0);
+        }, 0);
+      }, 0);
+    }
+    var third = Math.max(1, Math.floor(msgs.length / 3));
+    var topRefs = countRefs(msgs.slice(0, third));
+    var bottomRefs = countRefs(msgs.slice(-third));
+    if (topRefs > bottomRefs) score -= 1;
+    else if (bottomRefs > topRefs) score += 1;
+
+    if (score >= 1) return 'Likely oldest-first order';
+    if (score <= -1) return 'Likely newest-first order';
+    return 'Order could not be determined';
+  }
+
+  // -------------------------------------------------------------------
+  // UI state helpers
+  // -------------------------------------------------------------------
+  function currentMarkerRe() {
+    return buildMarkerRegex(customLabelsEl.value);
+  }
+
+  function updateReverseButton() {
+    reverseBtn.disabled = inputEl.value.trim().length === 0;
+  }
+
+  function updateHint() {
+    var units = parseUnits(inputEl.value, currentMarkerRe());
+    var label = detectOrder(units);
+    orderHintTextEl.textContent = label;
+    orderHintEl.dataset.state =
+      label === 'Likely newest-first order' ? 'newest' :
+      label === 'Likely oldest-first order' ? 'oldest' : 'unknown';
+  }
+
+  function updateInputStats() {
+    var text = inputEl.value;
+    if (!text) { inputStatsEl.textContent = ''; return; }
+    var units = parseUnits(text, currentMarkerRe());
+    var msgs = units.filter(function (u) { return u.isMessage; }).length;
+    inputStatsEl.textContent = msgs
+      ? msgs + ' message block' + (msgs === 1 ? '' : 's') + ' detected'
+      : '';
+  }
+
+  function updateCount(text, suffix) {
+    // Strip the generated header first so it is never counted as a block.
+    var units = parseUnits(stripModelLine(text), currentMarkerRe());
+    var msgs = units.filter(function (u) { return u.isMessage; }).length;
+    countTextEl.textContent = msgs
+      ? msgs + ' message block' + (msgs === 1 ? '' : 's') + suffix
+      : 'No message blocks found';
+  }
+
+  function showPasteError(message) {
+    pasteErrorEl.textContent = message;
+    pasteErrorEl.hidden = false;
+  }
+
+  function hidePasteError() {
+    pasteErrorEl.hidden = true;
+    pasteErrorEl.textContent = '';
+  }
+
+  // -------------------------------------------------------------------
+  // Actions
+  // -------------------------------------------------------------------
+  function reverseConversation() {
+    // Strip any existing model header before parsing so it never takes
+    // part in the block reversal and never gets duplicated.
+    var text = stripModelLine(inputEl.value);
+    if (!text.trim()) {
+      outputEl.value = '';
+      countTextEl.textContent = '';
+      announce('Nothing to reverse.');
+      return;
+    }
+    var result = buildOutput(parseUnits(text, currentMarkerRe()), keepIntroEl.checked, normalizeEl.checked);
+    // Prepend exactly one clean header line plus exactly one blank line.
+    outputEl.value = MODEL_LINE + '\n\n' + result.text;
+    countTextEl.textContent = result.count
+      ? result.count + ' message block' + (result.count === 1 ? '' : 's') + ' reversed'
+      : 'No message blocks found';
+    reverseAgainBtn.hidden = false;
+    saveState();
+    announce(result.count
+      ? 'Conversation reversed: ' + result.count + ' message blocks.'
+      : 'No USER: or ASSISTANT: blocks found; text passed through unchanged.');
+  }
+
+  // Reverse again: feed the output back through the reverser.
+  function reverseAgain() {
+    if (!outputEl.value) return;
+    inputEl.value = outputEl.value;
+    onInputChanged();
+    reverseConversation();
+  }
+
+  function swapPanels() {
+    var a = inputEl.value;
+    inputEl.value = outputEl.value;
+    outputEl.value = a;
+    onInputChanged();
+    if (outputEl.value) updateCount(outputEl.value, ' reversed');
+    else countTextEl.textContent = '';
+    reverseAgainBtn.hidden = outputEl.value.length === 0;
+    saveState();
+    announce('Panels swapped.');
+  }
+
+  function clearInput() {
+    inputEl.value = '';
+    onInputChanged();
+    inputEl.focus();
+    announce('Input cleared.');
+  }
+
+  function pasteFromClipboard() {
+    hidePasteError();
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      showPasteError('Clipboard access is unavailable here — paste manually with Ctrl/Cmd+V.');
+      inputEl.focus();
+      return;
+    }
+    navigator.clipboard.readText().then(function (text) {
+      if (!text) { showPasteError('Clipboard is empty.'); return; }
+      inputEl.value = text;
+      onInputChanged();
+      announce('Pasted ' + text.length + ' characters into the input.');
+    }).catch(function () {
+      showPasteError('Clipboard permission denied — paste manually with Ctrl/Cmd+V.');
+      inputEl.focus();
+    });
+  }
+
+  function showCopiedFeedback() {
+    copyBtn.classList.add('copied');
+    copyBtn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+    copyBtn.setAttribute('aria-label', 'Copied!');
+    copyBtn.title = 'Copied!';
+    if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = setTimeout(function () {
+      copyBtn.classList.remove('copied');
+      copyBtn.innerHTML = copyBtnDefaultHTML;
+      copyBtn.setAttribute('aria-label', 'Copy reversed conversation to clipboard');
+      copyBtn.title = 'Copy output to clipboard (⌘/Ctrl+Shift+C)';
+    }, 1600);
+  }
+
+  function copyOutput() {
+    var text = outputEl.value;
+    if (!text) { announce('Nothing to copy yet.'); return; }
+    function fallbackCopy() {
+      outputEl.focus();
+      outputEl.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      if (window.getSelection) window.getSelection().removeAllRanges();
+      return ok;
+    }
+    function finish(ok) {
+      if (ok) {
+        showCopiedFeedback();
+        announce('Reversed conversation copied to clipboard.');
+      } else {
+        announce('Copy failed — select the output text and copy it manually.');
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { finish(true); }, function () { finish(fallbackCopy()); });
+    } else {
+      finish(fallbackCopy());
+    }
+  }
+
+  function downloadTxt() {
+    var text = outputEl.value;
+    if (!text) { announce('Nothing to download yet.'); return; }
+    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'reversed-conversation.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    announce('Downloaded reversed conversation as a text file.');
+  }
+
+  // Forget Saved Text: wipe stored conversation data (and options) from
+  // this browser and clear both panels. Updates the UI directly rather
+  // than via onInputChanged so the debounced save does not resurrect the
+  // just-deleted storage key.
+  function forgetSavedText() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+    inputEl.value = '';
+    outputEl.value = '';
+    countTextEl.textContent = '';
+    reverseAgainBtn.hidden = true;
+    updateReverseButton();
+    updateHint();
+    updateInputStats();
+    hidePasteError();
+    announce('Saved text forgotten. Nothing about your conversation remains in this browser.');
+  }
+
+  var debouncedHint = debounce(function () { updateHint(); updateInputStats(); }, 250);
+  var debouncedSave = debounce(saveState, 300);
+
+  function onInputChanged() {
+    updateReverseButton();
+    debouncedHint();
+    debouncedSave();
+    hidePasteError();
+  }
+
+  // -------------------------------------------------------------------
+  // Events
+  // -------------------------------------------------------------------
+  inputEl.addEventListener('input', onInputChanged);
+  reverseBtn.addEventListener('click', reverseConversation);
+  reverseAgainBtn.addEventListener('click', reverseAgain);
+  swapBtn.addEventListener('click', swapPanels);
+  clearBtn.addEventListener('click', clearInput);
+  pasteBtn.addEventListener('click', pasteFromClipboard);
+  copyBtn.addEventListener('click', copyOutput);
+  downloadBtn.addEventListener('click', downloadTxt);
+  forgetBtn.addEventListener('click', forgetSavedText);
+
+  // Option changes re-run the reversal immediately when there is output.
+  function onOptionChanged() {
+    saveState();
+    updateHint();
+    updateInputStats();
+    if (inputEl.value.trim() && outputEl.value) reverseConversation();
+  }
+  keepIntroEl.addEventListener('change', onOptionChanged);
+  normalizeEl.addEventListener('change', onOptionChanged);
+  customLabelsEl.addEventListener('input', debounce(onOptionChanged, 350));
+
+  // Keyboard shortcuts: Cmd/Ctrl+Enter reverses, Cmd/Ctrl+Shift+C copies.
+  document.addEventListener('keydown', function (e) {
+    var mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    if (e.key === 'Enter') {
+      if (!reverseBtn.disabled) {
+        e.preventDefault();
+        reverseConversation();
+      }
+    } else if (e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+      e.preventDefault();
+      copyOutput();
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // Init: restore the most recent session from localStorage.
+  // -------------------------------------------------------------------
+  function init() {
+    var saved = loadState();
+    if (saved) {
+      inputEl.value = saved.input;
+      outputEl.value = saved.output;
+      keepIntroEl.checked = saved.keepIntro;
+      normalizeEl.checked = saved.normalize;
+      customLabelsEl.value = saved.customLabels;
+      if (saved.output) {
+        updateCount(saved.output, ' reversed');
+        reverseAgainBtn.hidden = false;
+      }
+    }
+    updateReverseButton();
+    updateHint();
+    updateInputStats();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
