@@ -478,8 +478,8 @@
           <p id="sourceCount" class="status" aria-live="polite"></p><div class="cards" id="sourceList"></div>
         </section>
 
-        <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.29.4" bump="Update this version whenever this file changes in a commit." -->
-        <footer class="footer" data-junkdrawer-deploy-footer data-deploy-version="2026.07.29.4" style="margin:2rem auto 1rem;padding:1rem;text-align:center;color:rgba(86,96,88,.88);font:.85rem/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">&copy; 2026 Hank Marquardt · Ground, Grid and Growth · version 2026.07.29.4</footer>
+        <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.07.29.5" bump="Update this version whenever this file changes in a commit." -->
+        <footer class="footer" data-junkdrawer-deploy-footer data-deploy-version="2026.07.29.5" style="margin:2rem auto 1rem;padding:1rem;text-align:center;color:rgba(86,96,88,.88);font:.85rem/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">&copy; 2026 Hank Marquardt · Ground, Grid and Growth · version 2026.07.29.5</footer>
       </main>
     </div>
   </div>
@@ -487,7 +487,7 @@
   <dialog id="sourceDialog" class="app-dialog" aria-labelledby="sourceDialogTitle"><div class="dialog-head"><h2 id="sourceDialogTitle">Sources for this statement</h2><button class="btn" data-close-dialog="sourceDialog">Close</button></div><div id="sourceDialogBody"></div></dialog>
   <dialog id="feedbackDialog" class="app-dialog wide" aria-labelledby="feedbackTitle">
     <div class="dialog-head"><div><span class="eyebrow">Local feedback formatter</span><h2 id="feedbackTitle">Suggest a correction or source</h2></div><button class="btn" data-close-dialog="feedbackDialog">Close</button></div>
-    <p class="privacy-note">Nothing is transmitted automatically. This form only formats your feedback for copying or download.</p>
+    <p class="privacy-note">Nothing is transmitted automatically. This form only formats your feedback for copying, download, or email.</p>
     <form id="feedbackForm">
       <div class="feedback-grid">
         <label>Name <span class="muted">(optional)</span><input id="feedbackName" autocomplete="name"></label>
@@ -498,7 +498,8 @@
         <label class="wide-field">Source URL <span class="muted">(optional)</span><input id="feedbackSource" type="url" inputmode="url" placeholder="https://…"></label>
         <label class="wide-field">Local experience or professional background <span class="muted">(optional)</span><textarea id="feedbackBackground"></textarea></label>
       </div>
-      <div class="toolbar"><button type="button" class="btn primary" id="copyFeedback">Copy feedback</button><button type="button" class="btn" id="downloadFeedback">Download as text</button></div>
+      <div class="toolbar"><button type="button" class="btn primary" id="copyFeedback">Copy feedback</button><button type="button" class="btn" id="downloadFeedback">Download as text</button><button type="button" class="btn" id="emailFeedback" aria-label="Email feedback using your default email application">Email feedback</button></div>
+      <p class="privacy-note">Email feedback opens your default email application with the message prefilled. Nothing is sent automatically. If no email application opens, use Copy feedback instead.</p>
       <p id="feedbackStatus" class="status" role="status" aria-live="polite"></p>
       <h3>Formatted feedback</h3><pre id="feedbackOutput" class="feedback-output" tabindex="0"></pre>
     </form>
@@ -514,7 +515,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script>
   "use strict";
-  const APP_VERSION = "2026.07.29.4";
+  const APP_VERSION = "2026.07.29.5";
   const SCHEMA_VERSION = 1;
   const SEED_VERSION = 4;
   const DB_NAME = "ground-grid-growth";
@@ -1194,26 +1195,36 @@
   }
 
   function formatFeedback(requireValid=false){
-    const form=q("#feedbackForm");
-    if(requireValid&&!form.reportValidity())return "";
-    const name=q("#feedbackName").value.trim(),section=q("#feedbackSection").value,comment=q("#feedbackComment").value.trim(),source=q("#feedbackSource").value.trim(),background=q("#feedbackBackground").value.trim();
+    const form=q("#feedbackForm"),commentField=q("#feedbackComment"),status=q("#feedbackStatus"),comment=commentField.value.trim();
+    if(requireValid&&!comment){
+      commentField.setAttribute("aria-invalid","true");status.textContent="Enter a correction or comment before choosing a feedback action.";commentField.focus();return "";
+    }
+    commentField.removeAttribute("aria-invalid");
+    if(requireValid&&!form.reportValidity()){
+      status.textContent="Check the highlighted feedback field and try again.";q(":invalid",form)?.focus();return "";
+    }
+    const name=q("#feedbackName").value.trim(),section=q("#feedbackSection").value,source=q("#feedbackSource").value.trim(),background=q("#feedbackBackground").value.trim();
     return [
-      "Ground, Grid and Growth — correction or source suggestion",
+      "Ground, Grid and Growth feedback",
+      "",
       `Date: ${today()}`,
       `Name: ${name||"Not provided"}`,
-      `Relevant section: ${section}`,
+      `Section: ${section}`,
       "",
-      "Correction or comment:",
+      "Comment or correction:",
       comment||"Not entered",
       "",
-      `Source URL: ${source||"Not provided"}`,
+      "Supporting source:",
+      source||"None provided",
       "",
-      "Local experience or professional background:",
-      background||"Not provided",
+      "Relevant experience or background:",
+      background||"None provided",
       "",
-      `Current page URL: ${location.href}`
+      "Page:",
+      location.href
     ].join("\n");
   }
+  function feedbackMailto(body){const subject="Ground, Grid and Growth feedback";return `mailto:hmarquardt@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`}
   function updateFeedbackOutput(){q("#feedbackOutput").textContent=formatFeedback()}
   async function copyLocalText(text){
     try{
@@ -1229,7 +1240,7 @@
     opener.addEventListener("click",()=>{
       returnFocus=document.activeElement;status.textContent="";updateFeedbackOutput();dialog.showModal();q("#feedbackName").focus();
     });
-    q("#feedbackForm").addEventListener("input",()=>{status.textContent="";updateFeedbackOutput()});
+    q("#feedbackForm").addEventListener("input",e=>{status.textContent="";if(e.target===q("#feedbackComment"))e.target.removeAttribute("aria-invalid");updateFeedbackOutput()});
     q("#copyFeedback").addEventListener("click",async()=>{
       const text=formatFeedback(true);if(!text)return;
       try{await copyLocalText(text);status.textContent="Feedback copied. Nothing was transmitted."}catch(_){status.textContent="Copy was blocked by the browser. Select the formatted feedback and copy it manually.";q("#feedbackOutput").focus()}
@@ -1237,6 +1248,11 @@
     q("#downloadFeedback").addEventListener("click",()=>{
       const text=formatFeedback(true);if(!text)return;
       download(`ground-grid-growth-feedback-${today()}.txt`,text,"text/plain");status.textContent="Feedback downloaded as a text file. Nothing was transmitted.";
+    });
+    q("#emailFeedback").addEventListener("click",()=>{
+      const text=formatFeedback(true);if(!text)return;
+      status.textContent="Opening your default email application with the feedback prefilled. Nothing has been sent automatically.";
+      window.location.href=feedbackMailto(text);
     });
     dialog.addEventListener("keydown",e=>{
       if(e.key==="Escape"){e.preventDefault();dialog.close();return}
@@ -1354,7 +1370,7 @@
     try{db=await openDB()}catch(err){toast(`IndexedDB unavailable; this session will use temporary memory: ${err.message}`,true)}
     await seedIfEmpty();
     const hash=location.hash.slice(1);navigate(hash&&q(`#${CSS.escape(hash)}`)?hash:state.currentSection);
-    window.__GGG_TEST__={state,vals,navigate,requestNavigation,saveScenario,idbAll,updateFarmSale,updateFiscal,updateGrade,readiness,APP_VERSION};
+    window.__GGG_TEST__={state,vals,navigate,requestNavigation,saveScenario,idbAll,updateFarmSale,feedbackMailto,formatFeedback,updateFiscal,updateGrade,readiness,APP_VERSION};
   }
   init().catch(err=>{console.error(err);toast(`The app could not finish loading: ${err.message}`,true)});
   </script>
