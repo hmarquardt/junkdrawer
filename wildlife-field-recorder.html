@@ -537,6 +537,16 @@ th { color: var(--text-muted); font-weight: 600; }
       <div id="diag-storage" style="font-size:0.85rem;color:var(--text-muted);"></div>
     </div>
     <div class="card">
+      <div class="card-title">Invalid Audio Recovery</div>
+      <p style="font-size:0.82rem;color:var(--text-muted);">Analyzes non-submitted observations rejected as an invalid audio format. Scanning decodes in the browser but does not change stored data.</p>
+      <div class="btn-group">
+        <button id="invalid-audio-scan" class="btn">Scan Invalid Audio</button>
+        <button id="invalid-audio-recover" class="btn btn-danger" disabled>Recover Decodable Audio</button>
+      </div>
+      <div id="invalid-audio-status" role="status" aria-live="polite" style="font-size:0.82rem;color:var(--text-muted);"></div>
+      <pre id="invalid-audio-result" style="margin-top:8px;font-size:0.78rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);overflow:auto;white-space:pre-wrap;display:none;"></pre>
+    </div>
+    <div class="card">
       <div class="card-title">Duplicate Capture Repair</div>
       <div id="diag-duplicates" role="status" style="font-size:0.85rem;color:var(--text-muted);">Checking local observations…</div>
       <p style="font-size:0.82rem;color:var(--text-muted);margin-top:8px;">Dry run inspects local, non-submitted observations only. Nothing is changed until you explicitly confirm repair.</p>
@@ -560,9 +570,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.01.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.01.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.01.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.01.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.01.2
 </footer>
 </div>
 
@@ -570,7 +580,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.01.1';
+const APP_VERSION = '2026.08.01.2';
 
 /* ========================
    DB (Dexie)
@@ -952,8 +962,9 @@ async function onCaptureStop(sessionId) {
   const durationSec = Math.round((stoppedAt - session.startedAt) / 1000);
   const mime = session.recorder && session.recorder.mimeType ? session.recorder.mimeType : 'audio/webm';
   const blob = session.chunks.length ? new Blob(session.chunks, { type: mime }) : null;
+  const audioLooksPlausible = !blob || blob.size >= 44;
   const localId = uuid();
-  const audioBlobId = blob ? ('audio-' + localId) : null;
+  const audioBlobId = blob && blob.size > 0 ? ('audio-' + localId) : null;
   if (blob && audioBlobId) {
     try { await db.audioBlobs.put({ blobId: audioBlobId, blob, mimeType: mime, sizeBytes: blob.size, createdAt: Date.now() }); }
     catch(e) { logError('Audio blob save failed: ' + e.message); }
@@ -990,7 +1001,9 @@ async function onCaptureStop(sessionId) {
     audioMimeType: mime,
     audioSizeBytes: blob ? blob.size : 0,
     userNoteText: $('capture-note').value.trim() || null,
-    transcriptionStatus: 'pending',
+    transcriptionStatus: audioBlobId && !audioLooksPlausible ? 'error' : 'pending',
+    transcriptionError: audioBlobId && !audioLooksPlausible ? `Recorded audio is unexpectedly small (${blob.size} bytes).` : null,
+    transcriptionErrorType: audioBlobId && !audioLooksPlausible ? 'capture_audio_too_small' : null,
     transcript: null,
     classificationStatus: 'pending',
     subjectCommonName: null,
@@ -1026,6 +1039,7 @@ async function onCaptureStop(sessionId) {
     else summary.push('Location: unavailable');
     summary.push('Weather: ' + observationWeather(obs));
     summary.push('Audio: ' + (obs.audioSizeBytes > 0 ? fmtDuration(obs.durationSeconds) : 'none'));
+    if (!audioLooksPlausible) summary.push('Audio warning: recording is unexpectedly small; review before processing');
     if (photoLocalIds.length) summary.push('Photos: ' + photoLocalIds.length);
     summary.push('Status: ' + obs.submitStatus);
     $('capture-summary').innerHTML = summary.map(s => '<div>' + escapeHtml(s) + '</div>').join('');
@@ -1225,10 +1239,26 @@ async function loadProcess() {
   $('process-buckets').innerHTML = Object.entries(buckets).map(([k,v]) => `<span class="chip">${k}: ${v}</span>`).join(' ');
 }
 
+function needsProcessing(obs) {
+  return obs.submitStatus !== 'submitted' && (obs.transcriptionStatus !== 'done' || obs.classificationStatus !== 'done');
+}
+
+function hasDeterministicInvalidAudio(obs) {
+  const legacyInvalidDetail = /HTTP 400[\s\S]*invalid file format/i.test(obs.transcriptionError || '');
+  return obs.submitStatus !== 'submitted' && obs.transcriptionStatus === 'error' && (obs.transcriptionErrorType === 'invalid_audio_format' || legacyInvalidDetail);
+}
+
 $('process-next').addEventListener('click', async () => {
   $('process-log').textContent = 'Finding next unprocessed observation...';
-  const obs = await db.observations.filter(o => o.transcriptionStatus !== 'done' || o.classificationStatus !== 'done').first();
-  if (!obs) { $('process-log').textContent = 'Nothing to process'; return; }
+  const pending = await db.observations.filter(needsProcessing).toArray();
+  const invalidCount = pending.filter(hasDeterministicInvalidAudio).length;
+  const obs = pending.find(o => !hasDeterministicInvalidAudio(o));
+  if (!obs) {
+    $('process-log').textContent = invalidCount
+      ? `Nothing processable remains. ${invalidCount} observation(s) have invalid stored audio. Use Admin → Invalid Audio Recovery.`
+      : 'Nothing to process';
+    return;
+  }
   const label = obs.subjectCommonName || obs.localId.slice(0, 8);
   $('process-log').textContent = `Processing "${label}"...`;
   try { await processObservation(obs); }
@@ -1237,15 +1267,22 @@ $('process-next').addEventListener('click', async () => {
 });
 $('process-all').addEventListener('click', async () => {
   $('process-log').textContent = 'Finding all unprocessed observations...';
-  const list = await db.observations.filter(o => o.transcriptionStatus !== 'done' || o.classificationStatus !== 'done').toArray();
-  if (!list.length) { $('process-log').textContent = 'Nothing to process'; return; }
+  const pending = await db.observations.filter(needsProcessing).toArray();
+  const skippedInvalid = pending.filter(hasDeterministicInvalidAudio).length;
+  const list = pending.filter(o => !hasDeterministicInvalidAudio(o));
+  if (!list.length) {
+    $('process-log').textContent = skippedInvalid
+      ? `Nothing processable remains. ${skippedInvalid} observation(s) skipped because their stored audio is invalid. Use Admin → Invalid Audio Recovery.`
+      : 'Nothing to process';
+    return;
+  }
   $('process-log').textContent = `Processing ${list.length} observation(s)...`;
   let done = 0, errs = 0;
   for (const obs of list) {
     try { await processObservation(obs); done++; }
     catch (e) { errs++; logError('Batch process: ' + e.message); }
   }
-  $('process-log').textContent = `Batch complete. ${done} succeeded, ${errs} failed.`;
+  $('process-log').textContent = `Batch complete. ${done} succeeded, ${errs} failed.${skippedInvalid ? ` ${skippedInvalid} observation(s) skipped because their stored audio is invalid. Use Admin → Invalid Audio Recovery.` : ''}`;
 });
 $('build-trips').addEventListener('click', async () => {
   $('process-log').textContent = 'Building trips...';
@@ -1299,6 +1336,7 @@ async function processObservation(obs) {
       obs.classificationStatus = 'done';
       obs.submitStatus = 'ready';
       obs.transcriptionError = null;
+      obs.transcriptionErrorType = null;
       obs.classificationError = null;
       obs.updatedAt = Date.now();
       await db.observations.put(obs);
@@ -1309,6 +1347,7 @@ async function processObservation(obs) {
       obs.classificationStatus = 'done';
       obs.submitStatus = 'ready';
       obs.transcriptionError = null;
+      obs.transcriptionErrorType = null;
       obs.classificationError = null;
       obs.updatedAt = Date.now();
       await db.observations.put(obs);
@@ -1322,6 +1361,7 @@ async function processObservation(obs) {
           obs.transcript = trans;
           obs.transcriptionStatus = 'done';
           obs.transcriptionError = null;
+          obs.transcriptionErrorType = null;
           obs.updatedAt = Date.now();
           await db.observations.put(obs);
           logInfo('Transcribed ' + obs.localId);
@@ -1329,6 +1369,7 @@ async function processObservation(obs) {
         } catch(e) {
           obs.transcriptionStatus = 'error';
           obs.transcriptionError = e.message;
+          obs.transcriptionErrorType = e.errorType || null;
           obs.submitStatus = 'local';
           obs.updatedAt = Date.now();
           await db.observations.put(obs);
@@ -1385,7 +1426,9 @@ async function transcribeAudio(blob, mime) {
   const r = await fetch(base + '/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
   if (!r.ok) {
     const error = await httpError(r);
-    throw new Error('Transcription ' + error.message);
+    error.message = 'Transcription ' + error.message;
+    if (r.status === 400 && /invalid file format/i.test(error.message)) error.errorType = 'invalid_audio_format';
+    throw error;
   }
   const data = await r.json();
   return data.text || '';
@@ -2635,6 +2678,294 @@ $('clear-all').addEventListener('click', async () => {
   if (!confirm('This will erase ALL local data including observations, audio, trips, and photos. This cannot be undone. Continue?')) return;
   await db.delete();
   location.reload();
+});
+
+/* ========================
+   Invalid audio recovery
+   ======================== */
+let latestInvalidAudioScan = null;
+
+function createAudioContext(sampleRate) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) throw new Error('Web Audio decoding is not supported in this browser.');
+  return sampleRate ? new AudioContextClass({ sampleRate }) : new AudioContextClass();
+}
+
+function inferSourceSampleRate(bytes, mimeType) {
+  const data = new Uint8Array(bytes);
+  const asciiAt = (offset, text) => text.split('').every((char, index) => data[offset + index] === char.charCodeAt(0));
+  if (data.length >= 28 && asciiAt(0, 'RIFF') && asciiAt(8, 'WAVE')) {
+    const rate = new DataView(bytes).getUint32(24, true);
+    if (rate >= 8000 && rate <= 384000) return rate;
+  }
+  for (let offset = 0; offset <= data.length - 16; offset++) {
+    if (!asciiAt(offset, 'OpusHead')) continue;
+    const rate = new DataView(bytes, offset + 12, 4).getUint32(0, true);
+    if (rate >= 8000 && rate <= 384000) return rate;
+    return 48000;
+  }
+  if (/opus/i.test(mimeType || '')) return 48000;
+  return null;
+}
+
+async function decodeAudioBlob(blob, context) {
+  const bytes = await blob.arrayBuffer();
+  if (!bytes.byteLength) throw new Error('Audio Blob is empty.');
+  return context.decodeAudioData(bytes.slice(0));
+}
+
+function writeAscii(view, offset, text) {
+  for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+}
+
+function encodeAudioBufferAsWav(audioBuffer) {
+  const channelCount = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const frameCount = audioBuffer.length;
+  if (!Number.isInteger(channelCount) || channelCount < 1 || channelCount > 32) throw new Error('Unsupported decoded channel count: ' + channelCount);
+  if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 384000) throw new Error('Invalid decoded sample rate: ' + sampleRate);
+  if (!Number.isInteger(frameCount) || frameCount < 1) throw new Error('Decoded audio contains no frames.');
+  const bytesPerSample = 2;
+  const dataBytes = frameCount * channelCount * bytesPerSample;
+  if (!Number.isSafeInteger(dataBytes) || dataBytes > 0xffffffff - 44) throw new Error('Decoded audio is too large for a standard WAV file.');
+  const buffer = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channelCount * bytesPerSample, true);
+  view.setUint16(32, channelCount * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, dataBytes, true);
+  const channels = Array.from({ length: channelCount }, (_, index) => audioBuffer.getChannelData(index));
+  let offset = 44;
+  for (let frame = 0; frame < frameCount; frame++) {
+    for (let channel = 0; channel < channelCount; channel++) {
+      const sample = Math.max(-1, Math.min(1, channels[channel][frame] || 0));
+      view.setInt16(offset, sample < 0 ? Math.round(sample * 0x8000) : Math.round(sample * 0x7fff), true);
+      offset += bytesPerSample;
+    }
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function validateRecoveredWav(blob, expectedDuration, context) {
+  if (!blob || blob.size <= 44) throw new Error('Generated WAV is empty or has no PCM data.');
+  const header = await blob.slice(0, 44).arrayBuffer();
+  if (header.byteLength !== 44) throw new Error('Generated WAV header is incomplete.');
+  const view = new DataView(header);
+  const ascii = (offset, length) => String.fromCharCode(...new Uint8Array(header, offset, length));
+  const channels = view.getUint16(22, true);
+  const sampleRate = view.getUint32(24, true);
+  const byteRate = view.getUint32(28, true);
+  const blockAlign = view.getUint16(32, true);
+  const bitsPerSample = view.getUint16(34, true);
+  const dataBytes = view.getUint32(40, true);
+  if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE' || ascii(12, 4) !== 'fmt ' || ascii(36, 4) !== 'data') throw new Error('Generated WAV magic/header markers are invalid.');
+  if (view.getUint16(20, true) !== 1 || channels < 1 || channels > 32 || sampleRate < 8000 || sampleRate > 384000 || bitsPerSample !== 16) throw new Error('Generated WAV format fields are not sane PCM values.');
+  if (blockAlign !== channels * 2 || byteRate !== sampleRate * blockAlign || dataBytes !== blob.size - 44) throw new Error('Generated WAV size/rate fields are inconsistent.');
+  const headerDuration = dataBytes / byteRate;
+  if (expectedDuration > 0 && Math.abs(headerDuration - expectedDuration) > Math.max(5, expectedDuration * 0.5)) throw new Error(`Recovered duration ${headerDuration.toFixed(2)}s is not plausible for the recorded ${expectedDuration}s duration.`);
+  const decoded = await decodeAudioBlob(blob, context);
+  if (!decoded.duration || Math.abs(decoded.duration - headerDuration) > 0.1) throw new Error('Generated WAV did not decode back to its expected duration.');
+  return { duration: decoded.duration, sampleRate, channels, dataBytes };
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('');
+}
+
+async function analyzeInvalidAudio() {
+  const observations = await db.observations.filter(hasDeterministicInvalidAudio).toArray();
+  const entries = [];
+  for (const obs of observations.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))) {
+    const audio = obs.audioBlobId ? await db.audioBlobs.get(obs.audioBlobId) : null;
+    const entry = {
+      localId: obs.localId,
+      createdAt: obs.createdAt,
+      durationSeconds: Number(obs.durationSeconds) || 0,
+      mimeType: obs.audioMimeType || (audio && audio.mimeType) || 'unknown',
+      blobId: obs.audioBlobId || null,
+      blobSize: audio && audio.blob ? audio.blob.size : 0,
+      blobExists: !!(audio && audio.blob),
+      observationUpdatedAt: obs.updatedAt || null,
+      transcriptionError: obs.transcriptionError || null,
+      browserDecodable: false,
+      recoverable: false,
+      decodedDuration: null,
+      sampleRate: null,
+      channels: null,
+      sha256: null,
+      error: null
+    };
+    if (entry.blobExists) {
+      let context = null;
+      try {
+        const bytes = await audio.blob.arrayBuffer();
+        entry.sha256 = await sha256Hex(bytes);
+        context = createAudioContext(inferSourceSampleRate(bytes, entry.mimeType));
+        const decoded = await context.decodeAudioData(bytes.slice(0));
+        entry.browserDecodable = true;
+        entry.decodedDuration = decoded.duration;
+        entry.sampleRate = decoded.sampleRate;
+        entry.channels = decoded.numberOfChannels;
+        const wav = encodeAudioBufferAsWav(decoded);
+        await validateRecoveredWav(wav, entry.durationSeconds, context);
+        entry.recoverable = true;
+      } catch(e) {
+        entry.error = String(e.message || e).slice(0, 300);
+      } finally {
+        if (context) await context.close().catch(() => {});
+      }
+    } else {
+      entry.error = 'Referenced audio Blob is missing.';
+    }
+    entries.push(entry);
+  }
+  const signature = JSON.stringify(entries.map(entry => [entry.localId, entry.blobId, entry.blobSize, entry.sha256, entry.observationUpdatedAt, entry.recoverable]));
+  return {
+    analyzed: entries.length,
+    recoverable: entries.filter(entry => entry.recoverable).length,
+    browserUndecodable: entries.filter(entry => entry.blobExists && !entry.browserDecodable).length,
+    entries,
+    signature
+  };
+}
+
+function formatInvalidAudioScan(scan) {
+  const lines = [
+    'SCAN ONLY — no data changed',
+    `Affected observations analyzed: ${scan.analyzed}`,
+    `Recoverable by browser decoding: ${scan.recoverable}`,
+    `Browser-undecodable: ${scan.browserUndecodable}`
+  ];
+  for (const entry of scan.entries) {
+    lines.push('', entry.localId,
+      `  created: ${entry.createdAt ? fmtDate(entry.createdAt) : 'unknown'}`,
+      `  duration: ${entry.durationSeconds}s`,
+      `  MIME type: ${entry.mimeType}`,
+      `  Blob: ${entry.blobExists ? `${entry.blobSize} bytes` : 'missing'}`,
+      `  browser decode: ${entry.browserDecodable ? `yes (${entry.decodedDuration.toFixed(2)}s, ${entry.sampleRate} Hz, ${entry.channels} channel(s))` : 'no'}`,
+      `  recovery possible: ${entry.recoverable ? 'yes' : 'no'}`);
+    if (entry.transcriptionError) lines.push('  latest transcription failure: ' + entry.transcriptionError);
+    if (entry.error) lines.push('  diagnostic: ' + entry.error);
+  }
+  return lines.join('\n');
+}
+
+function hasMeaningfulCompletedClassification(obs) {
+  return obs.classificationStatus === 'done' && [obs.category, obs.subjectCommonName, obs.subjectScientificName, obs.summary, obs.behavior, obs.habitat].some(hasValue);
+}
+
+async function recoverInvalidAudioEntry(entry) {
+  const originalAudio = await db.audioBlobs.get(entry.blobId);
+  if (!originalAudio || !originalAudio.blob) throw new Error('Original audio Blob is missing.');
+  const bytes = await originalAudio.blob.arrayBuffer();
+  if (await sha256Hex(bytes) !== entry.sha256) throw new Error('Original audio changed after the scan.');
+  const context = createAudioContext(inferSourceSampleRate(bytes, entry.mimeType));
+  let wavBlob;
+  let validation;
+  try {
+    const decoded = await context.decodeAudioData(bytes.slice(0));
+    wavBlob = encodeAudioBufferAsWav(decoded);
+    validation = await validateRecoveredWav(wavBlob, entry.durationSeconds, context);
+  } finally {
+    await context.close().catch(() => {});
+  }
+  const recoveredBlobId = `audio-recovered-${entry.localId}-${Date.now()}`;
+  await db.transaction('rw', db.observations, db.audioBlobs, async () => {
+    const obs = await db.observations.get(entry.localId);
+    if (!obs || obs.submitStatus === 'submitted' || !hasDeterministicInvalidAudio(obs) || obs.audioBlobId !== entry.blobId) throw new Error('Observation changed or is no longer eligible for recovery.');
+    const retainedOriginal = await db.audioBlobs.get(entry.blobId);
+    if (!retainedOriginal || !retainedOriginal.blob || retainedOriginal.blob.size !== entry.blobSize) throw new Error('Original audio is no longer intact.');
+    await db.audioBlobs.put({ blobId: recoveredBlobId, blob: wavBlob, mimeType: 'audio/wav', sizeBytes: wavBlob.size, createdAt: Date.now(), recoverySourceBlobId: entry.blobId });
+    obs.audioRecoveryOriginalBlobId = entry.blobId;
+    obs.audioRecoveryAt = Date.now();
+    obs.audioRecoveryValidation = validation;
+    obs.audioBlobId = recoveredBlobId;
+    obs.audioMimeType = 'audio/wav';
+    obs.audioSizeBytes = wavBlob.size;
+    obs.transcriptionStatus = 'pending';
+    obs.transcriptionError = null;
+    obs.transcriptionErrorType = null;
+    if (!hasMeaningfulCompletedClassification(obs)) {
+      obs.classificationStatus = 'pending';
+      obs.classificationError = null;
+    }
+    obs.submitStatus = 'local';
+    obs.submitError = null;
+    obs.updatedAt = Date.now();
+    await db.observations.put(obs);
+  });
+  return { recoveredBlobId, sizeBytes: wavBlob.size };
+}
+
+$('invalid-audio-scan').addEventListener('click', async () => {
+  const status = $('invalid-audio-status');
+  const result = $('invalid-audio-result');
+  const recover = $('invalid-audio-recover');
+  recover.disabled = true;
+  status.textContent = 'Analyzing invalid audio in this browser…';
+  try {
+    latestInvalidAudioScan = await analyzeInvalidAudio();
+    result.style.display = 'block';
+    result.textContent = formatInvalidAudioScan(latestInvalidAudioScan);
+    recover.disabled = latestInvalidAudioScan.recoverable === 0;
+    status.textContent = `Scan complete. ${latestInvalidAudioScan.recoverable} of ${latestInvalidAudioScan.analyzed} observation(s) can be recovered.`;
+  } catch(e) {
+    latestInvalidAudioScan = null;
+    status.textContent = 'Invalid audio scan failed: ' + e.message;
+    logError('Invalid audio scan failed: ' + e.message);
+  }
+});
+
+$('invalid-audio-recover').addEventListener('click', async () => {
+  const status = $('invalid-audio-status');
+  const result = $('invalid-audio-result');
+  const recover = $('invalid-audio-recover');
+  if (!latestInvalidAudioScan || !latestInvalidAudioScan.recoverable) return;
+  const expected = latestInvalidAudioScan.recoverable;
+  if (!confirm(`Convert exactly ${expected} browser-decodable observation(s) to validated PCM WAV? Original audio Blobs will be retained.`)) return;
+  recover.disabled = true;
+  status.textContent = 'Revalidating audio before recovery…';
+  let freshScan;
+  try {
+    freshScan = await analyzeInvalidAudio();
+  } catch(e) {
+    latestInvalidAudioScan = null;
+    status.textContent = 'Recovery validation failed: ' + e.message;
+    logError('Invalid audio recovery validation failed: ' + e.message);
+    return;
+  }
+  if (freshScan.signature !== latestInvalidAudioScan.signature || freshScan.recoverable !== expected) {
+    latestInvalidAudioScan = null;
+    status.textContent = 'Audio data changed since the scan. Recovery aborted; scan again.';
+    return;
+  }
+  let recovered = 0;
+  const failures = [];
+  for (const entry of freshScan.entries.filter(item => item.recoverable)) {
+    try {
+      await recoverInvalidAudioEntry(entry);
+      recovered++;
+    } catch(e) {
+      failures.push(`${entry.localId}: ${e.message}`);
+      logError('Invalid audio recovery failed ' + entry.localId + ': ' + e.message);
+    }
+  }
+  latestInvalidAudioScan = null;
+  await Promise.all([refreshStorageStats(), updateQueueChip(), loadProcess()]);
+  result.style.display = 'block';
+  result.textContent = `Audio recovery results\nAnalyzed: ${freshScan.analyzed}\nRecoverable: ${freshScan.recoverable}\nRecovered: ${recovered}\nBrowser-undecodable: ${freshScan.browserUndecodable}\nFailures: ${failures.length}${failures.length ? '\n\n' + failures.join('\n') : ''}`;
+  status.textContent = 'Audio recovery complete. Recovered records are pending transcription. Run Process All when ready.';
+  logInfo(`Invalid audio recovery complete: ${recovered} recovered, ${freshScan.browserUndecodable} browser-undecodable, ${failures.length} failures`);
 });
 
 /* ========================
