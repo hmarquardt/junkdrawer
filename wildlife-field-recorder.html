@@ -537,6 +537,17 @@ th { color: var(--text-muted); font-weight: 600; }
       <div id="diag-storage" style="font-size:0.85rem;color:var(--text-muted);"></div>
     </div>
     <div class="card">
+      <div class="card-title">Duplicate Capture Repair</div>
+      <div id="diag-duplicates" role="status" style="font-size:0.85rem;color:var(--text-muted);">Checking local observations…</div>
+      <p style="font-size:0.82rem;color:var(--text-muted);margin-top:8px;">Dry run inspects local, non-submitted observations only. Nothing is changed until you explicitly confirm repair.</p>
+      <div class="btn-group">
+        <button id="duplicate-repair-dry-run" class="btn">Dry Run Duplicate Repair</button>
+        <button id="duplicate-repair-apply" class="btn btn-danger" disabled>Repair Duplicate Captures</button>
+      </div>
+      <div id="duplicate-repair-status" role="status" aria-live="polite" style="font-size:0.82rem;color:var(--text-muted);"></div>
+      <pre id="duplicate-repair-result" style="margin-top:8px;font-size:0.78rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);overflow:auto;white-space:pre-wrap;display:none;"></pre>
+    </div>
+    <div class="card">
       <div class="card-title">App Logs</div>
       <div class="btn-group">
         <button id="copy-diag" class="btn btn-small">Copy diagnostics to clipboard</button>
@@ -549,9 +560,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.06.01.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.01.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.01.1
 </footer>
 </div>
 
@@ -559,7 +570,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.06.01.1';
+const APP_VERSION = '2026.08.01.1';
 
 /* ========================
    DB (Dexie)
@@ -636,10 +647,16 @@ async function httpError(response) {
   let detail = '';
   try {
     const body = await response.clone().json();
-    if (body && body.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+    const value = body && (body.detail || body.error || body.message);
+    if (value) detail = typeof value === 'string' ? value : JSON.stringify(value);
+    else if (body) detail = JSON.stringify(body);
   } catch(e) {
     try { detail = (await response.text()).slice(0, 240); } catch(_e) {}
   }
+  detail = detail.slice(0, 500)
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [redacted]')
+    .replace(/(["']?(?:api[_-]?key|authorization|access[_-]?token|token)["']?\s*[:=]\s*["']?)[^"'\s,}]+/gi, '$1[redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, '[redacted key]');
   return new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
 }
 function weatherCodeLabel(code) {
@@ -738,18 +755,12 @@ document.addEventListener('click', e => {
    Capture
    ======================== */
 let recorder = null;
-let audioChunks = [];
-let captureStartTime = 0;
-let captureTimerId = null;
-let captureGPS = null;
-let captureWeather = null;
-let captureContextPromise = null;
-let currentStream = null;
+let activeCapture = null;
+let captureDisplayTimerId = null;
+let captureAutoStopTimerId = null;
 let lastCapturedLocalId = null;
 let cameraStream = null;
 let cameraTrack = null;
-let sessionPhoto = null;   // { blob, mimeType, url } or null
-let discarding = false;    // true when user taps Discard
 
 function updateNetChip() {
   const chip = $('net-chip');
@@ -797,29 +808,49 @@ function getCurrentPosition() {
   });
 }
 
-function startCaptureTimer() {
-  captureStartTime = Date.now();
+function clearCaptureTimers() {
+  if (captureDisplayTimerId) { clearInterval(captureDisplayTimerId); captureDisplayTimerId = null; }
+  if (captureAutoStopTimerId) { clearTimeout(captureAutoStopTimerId); captureAutoStopTimerId = null; }
+}
+
+function startCaptureTimers(session) {
+  clearCaptureTimers();
   const el = $('capture-timer');
   el.style.display = 'block';
+  el.textContent = '0:00';
   const maxSec = (settings.maxAudioSeconds || 120);
-  captureTimerId = setInterval(() => {
-    const sec = Math.floor((Date.now() - captureStartTime) / 1000);
+  captureDisplayTimerId = setInterval(() => {
+    if (!activeCapture || activeCapture.id !== session.id) return;
+    const sec = Math.floor((Date.now() - session.startedAt) / 1000);
     el.textContent = fmtDuration(sec);
-    if (settings.autoStop && sec >= maxSec) stopCapture();
   }, 1000);
+  if (settings.autoStop) {
+    captureAutoStopTimerId = setTimeout(() => stopCapture(session.id), maxSec * 1000);
+  }
 }
 function stopCaptureTimer() {
-  if (captureTimerId) { clearInterval(captureTimerId); captureTimerId = null; }
+  clearCaptureTimers();
   $('capture-timer').style.display = 'none';
 }
 
 async function startCapture(opts = {}) {
-  if (recorder && recorder.state === 'recording') return;
-  audioChunks = [];
-  captureGPS = null;
-  captureWeather = null;
-  captureContextPromise = null;
-  discarding = false;
+  if (activeCapture) return;
+  clearCaptureTimers();
+  const session = {
+    id: uuid(),
+    startedAt: Date.now(),
+    chunks: [],
+    recorder: null,
+    stream: null,
+    gps: null,
+    weather: null,
+    contextPromise: null,
+    photo: null,
+    discarding: false,
+    stopping: false,
+    finalizationStarted: false
+  };
+  activeCapture = session;
   $('capture-result').style.display = 'none';
   $('capture-status').textContent = 'Starting...';
   const btn = $('capture-btn');
@@ -835,34 +866,47 @@ async function startCapture(opts = {}) {
   }
   $('capture-discard-wrap').style.display = 'block';
 
-  captureContextPromise = getCurrentPosition().then(async gps => {
-    captureGPS = gps;
-    if (captureGPS.status === 'ok') {
+  session.contextPromise = getCurrentPosition().then(async gps => {
+    if (!activeCapture || activeCapture.id !== session.id) return;
+    session.gps = gps;
+    if (session.gps.status === 'ok') {
       $('gps-chip').textContent = 'GPS ok'; $('gps-chip').className = 'status-chip ok';
-      captureWeather = navigator.onLine ? await fetchWeather(captureGPS.latitude, captureGPS.longitude) : { status: 'skipped' };
+      const weather = navigator.onLine ? await fetchWeather(session.gps.latitude, session.gps.longitude) : { status: 'skipped' };
+      if (activeCapture && activeCapture.id === session.id) session.weather = weather;
     } else {
-      $('gps-chip').textContent = captureGPS.status === 'unsupported' ? 'GPS n/a' : 'GPS err';
+      $('gps-chip').textContent = session.gps.status === 'unsupported' ? 'GPS n/a' : 'GPS err';
       $('gps-chip').className = 'status-chip warn';
-      captureWeather = { status: 'skipped' };
+      session.weather = { status: 'skipped' };
     }
   });
 
   // Audio
   try {
-    currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!activeCapture || activeCapture.id !== session.id || session.stopping || session.finalizationStarted) {
+      stream.getTracks().forEach(t => t.stop());
+      return;
+    }
+    session.stream = stream;
     const mime = getSupportedMimeType();
-    recorder = new MediaRecorder(currentStream, mime ? { mimeType: mime } : undefined);
-    recorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-    recorder.onstop = () => onCaptureStop();
-    recorder.onerror = e => { logError('Recorder error: ' + e.message); stopCaptureTimer(); resetCaptureBtn(); };
-    recorder.start(1000);
-    startCaptureTimer();
+    const mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    session.recorder = mediaRecorder;
+    recorder = mediaRecorder;
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) session.chunks.push(e.data); };
+    mediaRecorder.onstop = () => onCaptureStop(session.id);
+    mediaRecorder.onerror = e => { logError('Recorder error: ' + e.message); stopCapture(session.id); };
+    mediaRecorder.start(1000);
+    startCaptureTimers(session);
     $('capture-status').textContent = 'Recording...';
     logInfo('Capture started');
   } catch(e) {
+    if (!activeCapture || activeCapture.id !== session.id) return;
     logError('Audio start failed: ' + e.message);
     $('capture-status').textContent = 'Audio error: ' + e.message;
     stopCaptureTimer();
+    if (session.stream) session.stream.getTracks().forEach(t => t.stop());
+    activeCapture = null;
+    recorder = null;
     resetCaptureBtn();
   }
 }
@@ -879,29 +923,35 @@ function resetCaptureBtn() {
   $('capture-photo-preview').innerHTML = '';
 }
 
-async function onCaptureStop() {
+async function onCaptureStop(sessionId) {
+  const session = activeCapture;
+  // MediaRecorder shutdown is asynchronous; this guard makes saving exactly-once per capture token.
+  if (!session || session.id !== sessionId || session.finalizationStarted) return;
+  session.finalizationStarted = true;
+  session.stopping = true;
   stopCaptureTimer();
-  resetCaptureBtn();
-  if (discarding) {
-    if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
-    // clean up audio blob
-    audioChunks = [];
-    if (sessionPhoto && sessionPhoto.url) { URL.revokeObjectURL(sessionPhoto.url); sessionPhoto = null; }
+  if (session.stream) session.stream.getTracks().forEach(t => t.stop());
+  if (session.discarding) {
+    session.chunks = [];
+    if (session.photo && session.photo.url) URL.revokeObjectURL(session.photo.url);
     $('capture-status').textContent = 'Discarded';
     logInfo('Capture discarded');
+    if (activeCapture && activeCapture.id === session.id) {
+      activeCapture = null;
+      recorder = null;
+      resetCaptureBtn();
+    }
     return;
   }
   $('capture-status').textContent = 'Saving...';
-  if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
-  if (captureContextPromise) {
-    try { await captureContextPromise; } catch(e) { logWarn('Capture context failed: ' + e.message); }
+  if (session.contextPromise) {
+    try { await session.contextPromise; } catch(e) { logWarn('Capture context failed: ' + e.message); }
   }
 
-  const durationSec = captureStartTime ? Math.round((Date.now() - captureStartTime) / 1000) : 0;
-  const mime = recorder && recorder.mimeType ? recorder.mimeType : 'audio/webm';
-  recorder = null;
-
-  const blob = audioChunks.length ? new Blob(audioChunks, { type: mime }) : null;
+  const stoppedAt = Date.now();
+  const durationSec = Math.round((stoppedAt - session.startedAt) / 1000);
+  const mime = session.recorder && session.recorder.mimeType ? session.recorder.mimeType : 'audio/webm';
+  const blob = session.chunks.length ? new Blob(session.chunks, { type: mime }) : null;
   const localId = uuid();
   const audioBlobId = blob ? ('audio-' + localId) : null;
   if (blob && audioBlobId) {
@@ -911,31 +961,31 @@ async function onCaptureStop() {
 
   // Attach session photo if present
   let photoLocalIds = [];
-  if (sessionPhoto && sessionPhoto.blob) {
-    const photoId = await handlePhotoBlob(localId, sessionPhoto.blob, sessionPhoto.mimeType || 'image/jpeg', 'sighting.jpg');
+  if (session.photo && session.photo.blob) {
+    const photoId = await handlePhotoBlob(localId, session.photo.blob, session.photo.mimeType || 'image/jpeg', 'sighting.jpg');
     if (photoId) photoLocalIds.push(photoId);
-    if (sessionPhoto.url) { URL.revokeObjectURL(sessionPhoto.url); }
-    sessionPhoto = null;
+    if (session.photo.url) URL.revokeObjectURL(session.photo.url);
+    session.photo = null;
   }
 
   const obs = {
     localId,
     createdAt: Date.now(),
-    startedAt: captureStartTime || Date.now(),
-    stoppedAt: Date.now(),
+    startedAt: session.startedAt,
+    stoppedAt,
     durationSeconds: durationSec,
-    latitude: captureGPS && captureGPS.status === 'ok' ? captureGPS.latitude : null,
-    longitude: captureGPS && captureGPS.status === 'ok' ? captureGPS.longitude : null,
-    accuracyMeters: captureGPS && captureGPS.status === 'ok' ? captureGPS.accuracyMeters : null,
-    altitude: captureGPS && captureGPS.status === 'ok' ? captureGPS.altitude : null,
-    heading: captureGPS && captureGPS.status === 'ok' ? captureGPS.heading : null,
-    speed: captureGPS && captureGPS.status === 'ok' ? captureGPS.speed : null,
-    gpsStatus: captureGPS ? captureGPS.status : 'unknown',
-    gpsError: captureGPS && captureGPS.error ? captureGPS.error : null,
-    weatherStatus: captureWeather ? captureWeather.status : 'unknown',
-    weatherApiUrl: captureWeather ? captureWeather.apiUrl : null,
-    weatherFetchedAt: captureWeather ? captureWeather.fetchedAt : null,
-    weatherRaw: captureWeather ? captureWeather.raw : null,
+    latitude: session.gps && session.gps.status === 'ok' ? session.gps.latitude : null,
+    longitude: session.gps && session.gps.status === 'ok' ? session.gps.longitude : null,
+    accuracyMeters: session.gps && session.gps.status === 'ok' ? session.gps.accuracyMeters : null,
+    altitude: session.gps && session.gps.status === 'ok' ? session.gps.altitude : null,
+    heading: session.gps && session.gps.status === 'ok' ? session.gps.heading : null,
+    speed: session.gps && session.gps.status === 'ok' ? session.gps.speed : null,
+    gpsStatus: session.gps ? session.gps.status : 'unknown',
+    gpsError: session.gps && session.gps.error ? session.gps.error : null,
+    weatherStatus: session.weather ? session.weather.status : 'unknown',
+    weatherApiUrl: session.weather ? session.weather.apiUrl : null,
+    weatherFetchedAt: session.weather ? session.weather.fetchedAt : null,
+    weatherRaw: session.weather ? session.weather.raw : null,
     audioBlobId,
     audioMimeType: mime,
     audioSizeBytes: blob ? blob.size : 0,
@@ -983,19 +1033,31 @@ async function onCaptureStop() {
   } catch(e) {
     logError('Observation save failed: ' + e.message);
     $('capture-status').textContent = 'Save failed';
+  } finally {
+    if (activeCapture && activeCapture.id === session.id) {
+      session.chunks = [];
+      activeCapture = null;
+      recorder = null;
+      resetCaptureBtn();
+    }
   }
 }
 
-function stopCapture() {
-  if (recorder && recorder.state === 'recording') { recorder.stop(); }
-  else { onCaptureStop(); }
+function stopCapture(sessionId = activeCapture && activeCapture.id) {
+  const session = activeCapture;
+  if (!session || session.id !== sessionId || session.stopping || session.finalizationStarted) return false;
+  session.stopping = true;
+  clearCaptureTimers();
+  if (session.recorder && session.recorder.state === 'recording') session.recorder.stop();
+  else onCaptureStop(session.id);
+  return true;
 }
 
 function discardCaptureSession() {
-  discarding = true;
+  if (!activeCapture) return;
+  activeCapture.discarding = true;
   stopCameraOnly();
-  if (recorder && recorder.state === 'recording') { stopCapture(); }
-  else { onCaptureStop(); }
+  stopCapture(activeCapture.id);
 }
 
 /* ========================
@@ -1119,11 +1181,14 @@ $('capture-add-photo').addEventListener('click', () => {
 
 // Camera overlay controls
 $('camera-shutter').addEventListener('click', async () => {
+  const sessionId = activeCapture && activeCapture.id;
+  if (!sessionId) return;
   try {
     const blob = await capturePhotoFromCamera();
-    sessionPhoto = { blob, mimeType: blob.type || 'image/jpeg', url: URL.createObjectURL(blob) };
+    if (!activeCapture || activeCapture.id !== sessionId || activeCapture.finalizationStarted) return;
+    activeCapture.photo = { blob, mimeType: blob.type || 'image/jpeg', url: URL.createObjectURL(blob) };
     stopCameraOnly();
-    $('capture-photo-preview').innerHTML = `<img src="${sessionPhoto.url}" alt="Captured photo">`;
+    $('capture-photo-preview').innerHTML = `<img src="${activeCapture.photo.url}" alt="Captured photo">`;
     $('capture-photo-preview').style.display = 'block';
     $('capture-status').textContent = 'Photo captured. Audio still recording…';
     logInfo('Photo captured during session');
@@ -1140,7 +1205,7 @@ $('camera-cancel').addEventListener('click', () => {
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
   stopCameraOnly();
-  if (recorder && recorder.state === 'recording') recorder.stop();
+  if (activeCapture && activeCapture.recorder && activeCapture.recorder.state === 'recording') activeCapture.recorder.stop();
 });
 
 /* ========================
@@ -1151,7 +1216,7 @@ async function loadProcess() {
   const buckets = { local: 0, transcribed: 0, classified: 0, ready: 0, submitted: 0, failed: 0 };
   for (const o of all) {
     if (o.submitStatus === 'submitted') buckets.submitted++;
-    else if (o.submitStatus === 'failed') buckets.failed++;
+    else if (o.submitStatus === 'failed' || o.transcriptionStatus === 'error' || o.classificationStatus === 'error') buckets.failed++;
     else if (o.submitStatus === 'ready') buckets.ready++;
     else if (o.classificationStatus === 'done') buckets.classified++;
     else if (o.transcriptionStatus === 'done') buckets.transcribed++;
@@ -1232,13 +1297,20 @@ async function processObservation(obs) {
     if (!obs.audioBlobId) {
       obs.transcriptionStatus = 'done';
       obs.classificationStatus = 'done';
+      obs.submitStatus = 'ready';
+      obs.transcriptionError = null;
+      obs.classificationError = null;
+      obs.updatedAt = Date.now();
       await db.observations.put(obs);
-      statusMsg = 'No audio — marked done';
+      statusMsg = 'No audio — marked ready';
     } else if (settings.llmProvider === 'manual') {
       obs.transcriptionStatus = 'done';
       obs.transcript = obs.transcript || '';
       obs.classificationStatus = 'done';
       obs.submitStatus = 'ready';
+      obs.transcriptionError = null;
+      obs.classificationError = null;
+      obs.updatedAt = Date.now();
       await db.observations.put(obs);
       statusMsg = 'Manual mode — marked ready';
     } else {
@@ -1249,12 +1321,16 @@ async function processObservation(obs) {
           const trans = await transcribeAudio(audioRec.blob, obs.audioMimeType);
           obs.transcript = trans;
           obs.transcriptionStatus = 'done';
+          obs.transcriptionError = null;
           obs.updatedAt = Date.now();
           await db.observations.put(obs);
           logInfo('Transcribed ' + obs.localId);
           statusMsg = 'Transcribed';
         } catch(e) {
           obs.transcriptionStatus = 'error';
+          obs.transcriptionError = e.message;
+          obs.submitStatus = 'local';
+          obs.updatedAt = Date.now();
           await db.observations.put(obs);
           throw e;
         }
@@ -1265,15 +1341,24 @@ async function processObservation(obs) {
           Object.assign(obs, cls);
           obs.classificationStatus = 'done';
           obs.submitStatus = 'ready';
+          obs.classificationError = null;
           obs.updatedAt = Date.now();
           await db.observations.put(obs);
           logInfo('Classified ' + obs.localId);
           statusMsg = 'Classified';
         } catch(e) {
           obs.classificationStatus = 'error';
+          obs.classificationError = e.message;
+          obs.submitStatus = 'local';
+          obs.updatedAt = Date.now();
           await db.observations.put(obs);
           throw e;
         }
+      }
+      if (obs.transcriptionStatus === 'done' && obs.classificationStatus === 'done' && obs.submitStatus !== 'submitted') {
+        obs.submitStatus = 'ready';
+        obs.updatedAt = Date.now();
+        await db.observations.put(obs);
       }
     }
   } catch(e) {
@@ -1293,11 +1378,15 @@ async function transcribeAudio(blob, mime) {
   const key = settings.llmKey;
   if (!key) throw new Error('No LLM key');
   const fd = new FormData();
-  const ext = mime.includes('mp4') ? '.m4a' : mime.includes('ogg') ? '.ogg' : mime.includes('wav') ? '.wav' : '.webm';
-  fd.append('file', new File([blob], 'recording' + ext, { type: mime }));
+  const audioMime = mime || blob.type || 'audio/webm';
+  const ext = audioMime.includes('mp4') ? '.m4a' : audioMime.includes('ogg') ? '.ogg' : audioMime.includes('wav') ? '.wav' : '.webm';
+  fd.append('file', new File([blob], 'recording' + ext, { type: audioMime }));
   fd.append('model', settings.transModel || 'whisper-1');
   const r = await fetch(base + '/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
-  if (!r.ok) throw new Error('Transcription HTTP ' + r.status);
+  if (!r.ok) {
+    const error = await httpError(r);
+    throw new Error('Transcription ' + error.message);
+  }
   const data = await r.json();
   return data.text || '';
 }
@@ -2549,6 +2638,305 @@ $('clear-all').addEventListener('click', async () => {
 });
 
 /* ========================
+   Duplicate capture repair
+   ======================== */
+let latestDuplicateRepairPlan = null;
+
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function sameRepairValue(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function uniqueValues(observations, field) {
+  const values = observations.map(o => o[field]).filter(hasValue);
+  return values.filter((value, index) => values.findIndex(other => sameRepairValue(value, other)) === index);
+}
+
+function mergeUniqueArray(observations, field) {
+  return [...new Set(observations.flatMap(o => Array.isArray(o[field]) ? o[field] : []).filter(hasValue))];
+}
+
+function summarizeDuplicateGroup(group, audioById, photosByObservation) {
+  const created = group.map(o => Number(o.createdAt) || 0).sort((a, b) => a - b);
+  const durations = group.map(o => Number(o.durationSeconds) || 0);
+  const mimes = [...new Set(group.map(o => o.audioMimeType).filter(Boolean))];
+  const states = [...new Set(group.map(o => `${o.transcriptionStatus || '?'} / ${o.classificationStatus || '?'} / ${o.submitStatus || '?'}`))];
+  const photoCount = group.reduce((sum, o) => sum + (photosByObservation.get(o.localId) || []).length, 0);
+  return {
+    startedAt: group[0].startedAt,
+    size: group.length,
+    earliestCreatedAt: created[0] ? new Date(created[0]).toISOString() : 'unknown',
+    latestCreatedAt: created[created.length - 1] ? new Date(created[created.length - 1]).toISOString() : 'unknown',
+    durationRangeSeconds: `${Math.min(...durations)}–${Math.max(...durations)}`,
+    mimeTypes: mimes.length ? mimes : ['unknown'],
+    states,
+    notesPresent: group.filter(o => hasValue(o.userNoteText)).length,
+    photosPresent: photoCount,
+    audioRecordsPresent: group.filter(o => o.audioBlobId && audioById.has(o.audioBlobId)).length
+  };
+}
+
+async function analyzeDuplicateCaptures() {
+  const [observations, audioRows, photos] = await Promise.all([
+    db.observations.toArray(), db.audioBlobs.toArray(), db.photos.toArray()
+  ]);
+  // Submitted observations are backend history and are never candidates for local duplicate repair.
+  const candidates = observations.filter(o => o.submitStatus !== 'submitted' && o.startedAt !== null && o.startedAt !== undefined);
+  const groupsByStart = new Map();
+  for (const obs of candidates) {
+    // The corruption re-finalized one capture, so exact startedAt is the conservative session key.
+    const group = groupsByStart.get(obs.startedAt) || [];
+    group.push(obs);
+    groupsByStart.set(obs.startedAt, group);
+  }
+  const duplicateGroups = [...groupsByStart.values()].filter(group => group.length > 1);
+  const audioById = new Map(audioRows.map(row => [row.blobId, row]));
+  const photosById = new Map(photos.map(photo => [photo.localPhotoId, photo]));
+  const photosByObservation = new Map();
+  for (const photo of photos) {
+    const list = photosByObservation.get(photo.observationLocalId) || [];
+    list.push(photo);
+    photosByObservation.set(photo.observationLocalId, list);
+  }
+  const observationAudioRefs = new Map();
+  for (const obs of observations) {
+    if (!obs.audioBlobId) continue;
+    const refs = observationAudioRefs.get(obs.audioBlobId) || new Set();
+    refs.add(obs.localId);
+    observationAudioRefs.set(obs.audioBlobId, refs);
+  }
+  const photoBlobIds = new Set(photos.map(photo => photo.blobId).filter(Boolean));
+  const safeGroups = [];
+  const skippedGroups = [];
+
+  for (const unsortedGroup of duplicateGroups) {
+    const group = [...unsortedGroup].sort((a, b) => ((Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)) || String(a.localId).localeCompare(String(b.localId)));
+    const detail = summarizeDuplicateGroup(group, audioById, photosByObservation);
+    const errors = [];
+    const notes = [];
+    if (!group[0] || !group[0].localId) errors.push('Canonical observation cannot be determined safely.');
+    const validCreatedTimes = group.filter(o => hasValue(o.createdAt)).map(o => Number(o.createdAt)).filter(Number.isFinite);
+    if (validCreatedTimes.length !== group.length) errors.push('One or more records has no valid createdAt value.');
+    else if (validCreatedTimes.filter(value => value === Math.min(...validCreatedTimes)).length > 1) errors.push('Multiple records tie for earliest createdAt.');
+    const backendIds = uniqueValues(group, 'backendObservationId');
+    if (backendIds.length > 1) errors.push('Conflicting backendObservationId values: ' + backendIds.join(', '));
+
+    const canonical = { ...group[0] };
+    const protectedFields = [
+      'userNoteText', 'transcript', 'subjectCommonName', 'subjectScientificName', 'category',
+      'subjectConfidence', 'categoryConfidence', 'behavior', 'habitat', 'count', 'summary',
+      'llmRaw', 'needsHumanReview', 'reviewReason',
+      'tripLocalId', 'backendTripId', 'backendObservationId'
+    ];
+    for (const field of protectedFields) {
+      const values = uniqueValues(group, field);
+      if (values.length > 1) {
+        errors.push(`Conflicting meaningful ${field} values.`);
+      } else if (!hasValue(canonical[field]) && values.length === 1) {
+        canonical[field] = values[0];
+        notes.push(`Merged ${field} into the earliest observation.`);
+      }
+    }
+    for (const field of ['tags', 'backendFileIds', 'photoFileIds']) canonical[field] = mergeUniqueArray(group, field);
+
+    const groupIds = new Set(group.map(o => o.localId));
+    const groupPhotos = group.flatMap(o => photosByObservation.get(o.localId) || []);
+    const declaredPhotoIds = mergeUniqueArray(group, 'photoLocalIds');
+    for (const photoId of declaredPhotoIds) {
+      const photo = photosById.get(photoId);
+      if (!photo) errors.push(`Photo ${photoId} is referenced but its photo record is missing.`);
+      else if (!groupIds.has(photo.observationLocalId)) errors.push(`Photo ${photoId} is owned by an observation outside this group.`);
+    }
+    const allPhotoIds = [...new Set([...declaredPhotoIds, ...groupPhotos.map(photo => photo.localPhotoId)])];
+    canonical.photoLocalIds = allPhotoIds;
+    for (const photo of groupPhotos) {
+      if (photo.backendObservationId && photo.backendObservationId !== canonical.backendObservationId) {
+        errors.push(`Photo ${photo.localPhotoId} has a backend observation relationship that cannot be safely reassociated.`);
+      }
+    }
+
+    const audioChoices = group
+      .filter(o => o.audioBlobId && audioById.has(o.audioBlobId))
+      .sort((a, b) => ((audioById.get(b.audioBlobId).sizeBytes || 0) - (audioById.get(a.audioBlobId).sizeBytes || 0)) || ((b.durationSeconds || 0) - (a.durationSeconds || 0)));
+    if (audioChoices.length) {
+      const bestAudio = audioChoices[0];
+      if (bestAudio.audioBlobId !== canonical.audioBlobId) notes.push('Reassociated the largest available capture audio with the canonical observation.');
+      canonical.audioBlobId = bestAudio.audioBlobId;
+      canonical.audioMimeType = bestAudio.audioMimeType || audioById.get(bestAudio.audioBlobId).mimeType || canonical.audioMimeType;
+      canonical.audioSizeBytes = audioById.get(bestAudio.audioBlobId).sizeBytes || bestAudio.audioSizeBytes || 0;
+      canonical.durationSeconds = Math.max(...group.filter(o => o.audioBlobId === bestAudio.audioBlobId).map(o => Number(o.durationSeconds) || 0));
+    }
+
+    const audioExists = !!(canonical.audioBlobId && audioById.has(canonical.audioBlobId));
+    const anyTranscriptionDone = group.some(o => o.transcriptionStatus === 'done');
+    const anyClassificationDone = group.some(o => o.classificationStatus === 'done');
+    if (anyTranscriptionDone && group.some(o => hasValue(o.transcript))) canonical.transcriptionStatus = 'done';
+    const meaningfulCompletedClassification = anyClassificationDone && group.some(o => hasValue(o.category) || hasValue(o.subjectCommonName) || hasValue(o.subjectScientificName) || hasValue(o.summary) || hasValue(o.behavior) || hasValue(o.habitat));
+    if (meaningfulCompletedClassification) canonical.classificationStatus = 'done';
+    if (canonical.transcriptionStatus === 'error' && audioExists) canonical.transcriptionStatus = 'pending';
+    if (canonical.transcriptionStatus !== 'done' && !meaningfulCompletedClassification) canonical.classificationStatus = 'pending';
+    canonical.transcriptionError = canonical.transcriptionStatus === 'error' ? canonical.transcriptionError : null;
+    canonical.classificationError = canonical.classificationStatus === 'error' ? canonical.classificationError : null;
+    canonical.submitStatus = canonical.transcriptionStatus === 'done' && canonical.classificationStatus === 'done' ? 'ready' : 'local';
+    if (canonical.submitStatus === 'local') canonical.submitError = null;
+    canonical.updatedAt = Date.now();
+
+    const removedIds = group.slice(1).map(o => o.localId);
+    const removedSet = new Set(removedIds);
+    const removableAudioIds = [...new Set(group.map(o => o.audioBlobId).filter(Boolean))].filter(audioId => {
+      if (audioId === canonical.audioBlobId || photoBlobIds.has(audioId)) return false;
+      const refs = observationAudioRefs.get(audioId) || new Set();
+      return [...refs].every(localId => removedSet.has(localId) || localId === canonical.localId);
+    });
+    const planGroup = { startedAt: group[0].startedAt, ids: group.map(o => o.localId), canonical, removedIds, photoIds: allPhotoIds, removableAudioIds, detail, notes, errors };
+    if (errors.length) skippedGroups.push(planGroup); else safeGroups.push(planGroup);
+  }
+
+  const duplicateIds = new Set(duplicateGroups.flatMap(group => group.map(o => o.localId)));
+  const duplicateAudioIds = new Set(duplicateGroups.flatMap(group => group.map(o => o.audioBlobId).filter(Boolean)));
+  const duplicatePhotoIds = new Set(duplicateGroups.flatMap(group => group.flatMap(o => Array.isArray(o.photoLocalIds) ? o.photoLocalIds : [])));
+  const signature = JSON.stringify({
+    observations: duplicateGroups.flat().sort((a, b) => String(a.localId).localeCompare(String(b.localId))),
+    audio: audioRows.filter(row => duplicateAudioIds.has(row.blobId)).map(({ blob, ...metadata }) => metadata).sort((a, b) => String(a.blobId).localeCompare(String(b.blobId))),
+    photos: photos.filter(photo => duplicateIds.has(photo.observationLocalId) || duplicatePhotoIds.has(photo.localPhotoId)).sort((a, b) => String(a.localPhotoId).localeCompare(String(b.localPhotoId)))
+  });
+  return {
+    scanned: candidates.length,
+    distinctSessions: groupsByStart.size,
+    duplicateGroupCount: duplicateGroups.length,
+    canonicalCount: safeGroups.length,
+    removableObservationCount: safeGroups.reduce((sum, group) => sum + group.removedIds.length, 0),
+    removableAudioCount: new Set(safeGroups.flatMap(group => group.removableAudioIds)).size,
+    preservedPhotoCount: safeGroups.reduce((sum, group) => sum + group.photoIds.length, 0),
+    ambiguousGroupCount: skippedGroups.length,
+    safeGroups,
+    skippedGroups,
+    signature
+  };
+}
+
+function formatDuplicateRepairPlan(plan) {
+  const lines = [
+    'DRY RUN — no data changed',
+    `Local/non-submitted observations scanned: ${plan.scanned}`,
+    `Distinct capture sessions: ${plan.distinctSessions}`,
+    `Duplicate capture groups: ${plan.duplicateGroupCount}`,
+    `Canonical observations that will remain: ${plan.canonicalCount}`,
+    `Duplicate observations that would be removed: ${plan.removableObservationCount}`,
+    `Audio blobs that appear orphaned/removable: ${plan.removableAudioCount}`,
+    `Photos/files to preserve or reassociate: ${plan.preservedPhotoCount}`,
+    `Ambiguous groups that will be skipped: ${plan.ambiguousGroupCount}`
+  ];
+  for (const group of [...plan.safeGroups, ...plan.skippedGroups]) {
+    const d = group.detail;
+    lines.push('', `${group.errors.length ? 'SKIP' : 'SAFE'} — startedAt ${d.startedAt}`, `  group size: ${d.size}`, `  createdAt: ${d.earliestCreatedAt} → ${d.latestCreatedAt}`, `  duration: ${d.durationRangeSeconds}s`, `  MIME types: ${d.mimeTypes.join(', ')}`, `  states: ${d.states.join(' | ')}`, `  notes present: ${d.notesPresent}; photos present: ${d.photosPresent}; audio records present: ${d.audioRecordsPresent}`, `  canonical: ${group.canonical.localId}; remove: ${group.removedIds.length}`);
+    for (const note of group.notes) lines.push('  note: ' + note);
+    for (const error of group.errors) lines.push('  WARNING: ' + error);
+  }
+  return lines.join('\n');
+}
+
+async function refreshDuplicateDiagnostic() {
+  const plan = await analyzeDuplicateCaptures();
+  $('diag-duplicates').textContent = `Duplicate capture sessions detected: ${plan.duplicateGroupCount} groups / ${plan.safeGroups.reduce((sum, group) => sum + group.removedIds.length, 0) + plan.skippedGroups.reduce((sum, group) => sum + group.removedIds.length, 0)} extra observations`;
+  return plan;
+}
+
+$('duplicate-repair-dry-run').addEventListener('click', async () => {
+  const status = $('duplicate-repair-status');
+  const result = $('duplicate-repair-result');
+  const apply = $('duplicate-repair-apply');
+  apply.disabled = true;
+  status.textContent = 'Inspecting local IndexedDB data…';
+  try {
+    latestDuplicateRepairPlan = await analyzeDuplicateCaptures();
+    result.style.display = 'block';
+    result.textContent = formatDuplicateRepairPlan(latestDuplicateRepairPlan);
+    apply.disabled = latestDuplicateRepairPlan.removableObservationCount === 0;
+    status.textContent = latestDuplicateRepairPlan.ambiguousGroupCount
+      ? `Dry run complete. ${latestDuplicateRepairPlan.ambiguousGroupCount} ambiguous group(s) will be skipped.`
+      : 'Dry run complete. Review every group before repairing.';
+    await refreshDuplicateDiagnostic();
+  } catch(e) {
+    latestDuplicateRepairPlan = null;
+    status.textContent = 'Dry run failed: ' + e.message;
+    logError('Duplicate repair dry run failed: ' + e.message);
+  }
+});
+
+$('duplicate-repair-apply').addEventListener('click', async () => {
+  const status = $('duplicate-repair-status');
+  const apply = $('duplicate-repair-apply');
+  if (!latestDuplicateRepairPlan || !latestDuplicateRepairPlan.removableObservationCount) return;
+  const expected = latestDuplicateRepairPlan.removableObservationCount;
+  if (!confirm(`Repair duplicate captures and remove exactly ${expected} local observation record(s)? Submitted observations will not be changed.`)) return;
+  apply.disabled = true;
+  status.textContent = 'Revalidating data before repair…';
+  const freshPlan = await analyzeDuplicateCaptures();
+  if (freshPlan.signature !== latestDuplicateRepairPlan.signature || freshPlan.removableObservationCount !== expected) {
+    latestDuplicateRepairPlan = null;
+    status.textContent = 'Data changed since the dry run. Repair aborted; run the dry run again.';
+    return;
+  }
+
+  let repairedGroups = 0;
+  let removedObservations = 0;
+  let removedAudio = 0;
+  const failures = [];
+  for (const group of freshPlan.safeGroups) {
+    try {
+      await db.transaction('rw', db.observations, db.audioBlobs, db.photos, db.trips, async () => {
+        const current = await db.observations.bulkGet(group.ids);
+        if (current.some(obs => !obs || obs.submitStatus === 'submitted' || obs.startedAt !== group.startedAt)) throw new Error('Group changed or now includes a submitted observation.');
+        const currentIds = (await db.observations.filter(obs => obs.submitStatus !== 'submitted' && obs.startedAt === group.startedAt).toArray()).map(obs => obs.localId).sort();
+        if (!sameRepairValue(currentIds, [...group.ids].sort())) throw new Error('Duplicate membership changed after validation.');
+
+        await db.observations.put(group.canonical);
+        for (const photoId of group.photoIds) {
+          const photo = await db.photos.get(photoId);
+          if (!photo || !group.ids.includes(photo.observationLocalId)) throw new Error(`Photo ${photoId} cannot be safely reassociated.`);
+          photo.observationLocalId = group.canonical.localId;
+          photo.updatedAt = Date.now();
+          await db.photos.put(photo);
+        }
+        await db.observations.bulkDelete(group.removedIds);
+
+        const trips = await db.trips.toArray();
+        for (const trip of trips) {
+          if (!Array.isArray(trip.observationLocalIds) || !trip.observationLocalIds.some(id => group.removedIds.includes(id))) continue;
+          trip.observationLocalIds = [...new Set(trip.observationLocalIds.map(id => group.removedIds.includes(id) ? group.canonical.localId : id))];
+          trip.updatedAt = Date.now();
+          await db.trips.put(trip);
+        }
+        for (const audioId of group.removableAudioIds) {
+          const observationRefs = await db.observations.filter(obs => obs.audioBlobId === audioId).count();
+          const photoRefs = await db.photos.filter(photo => photo.blobId === audioId).count();
+          if (!observationRefs && !photoRefs) {
+            await db.audioBlobs.delete(audioId);
+            removedAudio++;
+          }
+        }
+      });
+      repairedGroups++;
+      removedObservations += group.removedIds.length;
+    } catch(e) {
+      failures.push(`startedAt ${group.startedAt}: ${e.message}`);
+      logError('Duplicate repair group skipped: ' + e.message);
+    }
+  }
+  latestDuplicateRepairPlan = null;
+  await Promise.all([refreshDuplicateDiagnostic(), refreshStorageStats(), updateQueueChip()]);
+  const result = $('duplicate-repair-result');
+  result.style.display = 'block';
+  result.textContent = `Repair results\nGroups repaired: ${repairedGroups}\nObservations removed: ${removedObservations}\nAudio blobs removed: ${removedAudio}\nGroups failed/skipped: ${failures.length}${failures.length ? '\n\n' + failures.join('\n') : ''}`;
+  status.textContent = 'Repair complete. Review the counts, then use Process All when ready.';
+  logInfo(`Duplicate repair complete: ${repairedGroups} groups, ${removedObservations} observations removed, ${removedAudio} audio blobs removed, ${failures.length} failures`);
+});
+
+/* ========================
    Diagnostics
    ======================== */
 function renderDiagnostics() {
@@ -2576,6 +2964,9 @@ function renderDiagnostics() {
   db.logs.orderBy('timestamp').reverse().limit(200).toArray().then(rows => {
     $('diag-logs').innerHTML = rows.map(r => `<div class="log-line ${r.level}"><span class="time">${new Date(r.timestamp).toLocaleTimeString()}</span>${escapeHtml(r.message)}</div>`).join('');
   });
+  if ($('tab-admin').classList.contains('active')) {
+    refreshDuplicateDiagnostic().catch(e => { $('diag-duplicates').textContent = 'Duplicate diagnostic failed: ' + e.message; });
+  }
 }
 
 $('copy-diag').addEventListener('click', async () => {
