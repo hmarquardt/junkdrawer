@@ -513,9 +513,9 @@ ul.caveats li { color: var(--warn); }
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.05.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.05.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · UI Jerry Evaluator · version 2026.08.05.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.05.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.05.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · UI Jerry Evaluator · version 2026.08.05.3
 </footer>
 
 <script>
@@ -2896,8 +2896,33 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
     }
   }
 
-  function setAiStatus(msg, kind) {
-    state.aiStatus = { msg, kind };
+  /* ascending 3-tone chime played when an AI evaluation completes */
+  let chimeCtx = null;
+  function playCompletionChime() {
+    try {
+      const AC = root.AudioContext || root.webkitAudioContext;
+      if (!AC) return;
+      chimeCtx = chimeCtx || new AC();
+      if (chimeCtx.state === 'suspended') chimeCtx.resume();
+      const notes = [523.25, 659.25, 783.99]; // C5 -> E5 -> G5
+      const t0 = chimeCtx.currentTime + 0.02;
+      notes.forEach((freq, i) => {
+        const osc = chimeCtx.createOscillator();
+        const gain = chimeCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const start = t0 + i * 0.16;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.12, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.34);
+        osc.connect(gain).connect(chimeCtx.destination);
+        osc.start(start);
+        osc.stop(start + 0.36);
+      });
+    } catch (e) { /* audio unavailable — never block the workflow */ }
+  }
+
+  function setAiStatus(msg, kind) {    state.aiStatus = { msg, kind };
     const el = $('#aiStatus');
     if (el) statusMsg(el, msg, kind);
     const q = $('#quickEvalStatus');
@@ -2946,6 +2971,7 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
         (out.usage.prompt_tokens ? ' Tokens: ' + out.usage.prompt_tokens.toLocaleString() + ' in / ' + out.usage.completion_tokens.toLocaleString() + ' out.' : '') +
         (out.repairs.length ? ' ' + out.repairs.join(' ') : ''),
         out.valid ? 'ok' : 'warn');
+      playCompletionChime();
     } catch (e) {
       setAiStatus('AI evaluation failed: ' + e.message, 'error');
     }
