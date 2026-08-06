@@ -11,6 +11,10 @@
   data-api="https://lab.aismallbizguru.com/api/analytics/collect"
   defer>
 </script>
+<script>
+/* theme: apply before first paint to avoid flash */
+try { document.documentElement.dataset.theme = localStorage.getItem('uje-theme') || 'dark'; } catch (e) {}
+</script>
 <style>
 :root {
   --bg: #0c0f14;
@@ -28,6 +32,37 @@
   --bad: #e06c5f;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+/* ---- light theme ---- */
+html[data-theme="light"] {
+  --bg: #eef0f4;
+  --bg2: #f7f8fa;
+  --panel: #ffffff;
+  --panel2: #e9edf3;
+  --border: #d3dae4;
+  --border2: #b4c0d0;
+  --text: #1c2635;
+  --dim: #55647a;
+  --accent: #96660f;
+  --accent2: #1f4fb0;
+  --good: #177047;
+  --warn: #8a6413;
+  --bad: #b3372a;
+}
+html[data-theme="light"] body { background: var(--bg); }
+html[data-theme="light"] .btn.primary { background: #f4e3bd; color: #6d4a08; }
+html[data-theme="light"] .btn.copied { background: #d6efe0; }
+html[data-theme="light"] #dropZone.drag { background: #f3e8cd; }
+html[data-theme="light"] .badge { background: var(--panel2); }
+html[data-theme="light"] .badge.good { border-color: #8fc7aa; }
+html[data-theme="light"] .badge.warn { border-color: #d8bd7a; }
+html[data-theme="light"] .badge.bad { border-color: #dd9a90; }
+html[data-theme="light"] .privacy { border-color: #8fc7aa; background: #e4f4ea; color: #14532d; }
+html[data-theme="light"] #diagnosticsDrawer { box-shadow: -12px 0 40px rgba(30,40,60,.25); }
+html[data-theme="light"] .kv { border-bottom-color: #e2e7ee; }
+html[data-theme="light"] .req-table td { border-bottom-color: #e2e7ee; }
+html[data-theme="light"] #pasteModal { background: rgba(240,242,246,.8); }
+html[data-theme="light"] .topbar { border-bottom-color: var(--border2); }
+html[data-theme="light"] .panel.flash { outline-color: var(--accent); }
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -135,6 +170,17 @@ main { max-width: 1500px; margin: 0 auto; padding: 14px 16px 40px; }
   padding: 8px 10px; border-radius: 4px; margin: 8px 0; font-size: 12.5px;
 }
 .note.warn { border-left-color: var(--warn); }
+
+/* ---- quick eval bar ---- */
+.quickbar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  position: sticky; top: 46px; z-index: 20;
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+html[data-theme="light"] .quickbar { box-shadow: 0 6px 18px rgba(30,40,60,.18); }
+.btn.big { padding: 10px 24px; font-size: 15px; }
+.quickbar .status { margin-top: 0; }
 
 /* ---- task panel ---- */
 .req-edit {
@@ -288,6 +334,7 @@ ul.caveats li { color: var(--warn); }
     <button class="top-tab" data-view="admin">Admin</button>
   </nav>
   <div class="spacer"></div>
+  <button class="btn small" id="themeToggle" aria-label="Toggle light/dark theme" title="Toggle light/dark theme">☀️</button>
   <button class="btn small" id="diagnosticsToggle">⚙ Diagnostics</button>
 </header>
 
@@ -310,6 +357,10 @@ ul.caveats li { color: var(--warn); }
     </div>
 
     <div id="workspace" hidden>
+      <div class="panel quickbar" id="quickEvalBar">
+        <button class="btn primary big" id="quickEvalBtn">⚖️ EVALUATE WITH AI</button>
+        <span id="quickEvalStatus" class="status" role="status"></span>
+      </div>
       <section class="panel" id="taskPanel"></section>
 
       <div class="ab-grid">
@@ -462,9 +513,9 @@ ul.caveats li { color: var(--warn); }
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.05.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.05.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · UI Jerry Evaluator · version 2026.08.05.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.05.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.05.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · UI Jerry Evaluator · version 2026.08.05.2
 </footer>
 
 <script>
@@ -2412,6 +2463,7 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
     const has = !!state.archive;
     $('#workspace').hidden = !has;
     if (!has) return;
+    renderQuickBar();
     renderTaskPanel();
     renderCandidatePanel('A');
     renderCandidatePanel('B');
@@ -2421,6 +2473,22 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
     renderResults();
     renderOutputs();
     renderDiagnostics();
+  }
+
+  function renderQuickBar() {
+    const bar = $('#quickEvalBar');
+    if (!state.task) { bar.hidden = true; return; }
+    bar.hidden = false;
+    const s = state.settings;
+    const configured = !!(s.apiBaseUrl && s.apiKey && s.model);
+    const btn = $('#quickEvalBtn');
+    btn.disabled = !configured;
+    btn.textContent = state.aiResult ? '⚖️ RE-EVALUATE WITH AI' : '⚖️ EVALUATE WITH AI';
+    if (configured) {
+      statusMsg($('#quickEvalStatus'), state.aiStatus.msg || '', state.aiStatus.kind || '');
+    } else {
+      statusMsg($('#quickEvalStatus'), 'AI not configured — set endpoint, key and model in Admin. Nothing is sent automatically.', 'warn');
+    }
   }
 
   function confBadge(c) {
@@ -2832,6 +2900,8 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
     state.aiStatus = { msg, kind };
     const el = $('#aiStatus');
     if (el) statusMsg(el, msg, kind);
+    const q = $('#quickEvalStatus');
+    if (q && state.settings.apiBaseUrl && state.settings.apiKey && state.settings.model) statusMsg(q, msg, kind);
   }
 
   async function runEvaluation(withNotes) {
@@ -2855,6 +2925,7 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
 
     const btn = $('#evalBtn');
     btn.disabled = true;
+    $('#quickEvalBtn').disabled = true;
     setAiStatus('Evaluating with ' + s.model + '…');
     try {
       const out = await UJE.AiClient.evaluateTask({
@@ -2882,6 +2953,7 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
     renderAiPanel();
     renderResults();
     renderOutputs();
+    renderQuickBar();
     saveHistorySoon();
   }
 
@@ -3260,6 +3332,7 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
       el.addEventListener('change', () => {
         s[key] = parse ? parse(el.value) : el.value;
         UJE.Storage.saveSettings(s);
+        renderQuickBar();
         statusMsg($('#adminStatus'), 'Settings saved.', 'ok');
         setTimeout(() => statusMsg($('#adminStatus'), ''), 1500);
       });
@@ -3352,6 +3425,16 @@ document.getElementById('signupForm').addEventListener('submit', function (e) {
 
   function init() {
     $$('.top-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+    const themeBtn = $('#themeToggle');
+    const applyThemeIcon = () => { themeBtn.textContent = document.documentElement.dataset.theme === 'light' ? '🌙' : '☀️'; };
+    applyThemeIcon();
+    themeBtn.addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem('uje-theme', next); } catch (e) {}
+      applyThemeIcon();
+    });
+    $('#quickEvalBtn').addEventListener('click', () => runEvaluation(false));
     bindInputs();
     bindDiagnostics();
     bindHistory();
