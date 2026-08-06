@@ -1,0 +1,3367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Jerry Evaluator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>" />
+<script
+  src="analytics-lite.js"
+  data-site-id="junkdrawer"
+  data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+  defer>
+</script>
+<style>
+:root {
+  --bg: #0c0f14;
+  --bg2: #11151c;
+  --panel: #151a23;
+  --panel2: #1a2130;
+  --border: #272f3d;
+  --border2: #33405a;
+  --text: #d6dee9;
+  --dim: #8b98ab;
+  --accent: #d9a441;
+  --accent2: #6ea8fe;
+  --good: #4fc38a;
+  --warn: #e0b34c;
+  --bad: #e06c5f;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+a { color: var(--accent2); }
+code, .mono, pre { font-family: var(--mono); font-size: 12.5px; }
+h2 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+h3 { font-size: 13px; margin: 14px 0 4px; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; }
+h4 { font-size: 12px; margin: 10px 0 4px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+
+/* ---- top bar ---- */
+.topbar {
+  display: flex; align-items: center; gap: 18px;
+  padding: 8px 16px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 30;
+}
+.brand { font-weight: 650; letter-spacing: .02em; white-space: nowrap; }
+.brand .ver { color: var(--dim); font-weight: 400; font-size: 11px; margin-left: 6px; }
+.top-tabs { display: flex; gap: 4px; }
+.top-tab {
+  background: none; border: 1px solid transparent; color: var(--dim);
+  padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.top-tab:hover { color: var(--text); }
+.top-tab.active { color: var(--text); background: var(--panel2); border-color: var(--border); }
+.topbar .spacer { flex: 1; }
+
+main { max-width: 1500px; margin: 0 auto; padding: 14px 16px 40px; }
+.view[hidden] { display: none; }
+
+/* ---- panels ---- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.panel-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin-bottom: 8px;
+}
+.panel-head h2 { color: var(--text); }
+.panel.flash { outline: 2px solid var(--accent); transition: outline-color 1.2s; }
+.meta { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+
+/* ---- drop zone / inputs ---- */
+#dropZone {
+  border: 2px dashed var(--border2);
+  border-radius: 10px;
+  padding: 34px 16px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--bg2);
+  transition: border-color .15s, background .15s;
+}
+#dropZone.drag { border-color: var(--accent); background: #1a2233; }
+#dropZone.loaded { border-color: var(--good); border-style: solid; padding: 18px 16px; }
+#dropZoneMain { font: 700 20px/1.3 var(--mono); letter-spacing: .04em; color: var(--text); overflow-wrap: anywhere; }
+#dropZone.loaded #dropZoneMain { font-size: 15px; color: var(--good); }
+#dropZoneSub { color: var(--dim); font-size: 12px; margin-top: 6px; }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; justify-content: center; }
+
+.btn {
+  background: var(--panel2); color: var(--text);
+  border: 1px solid var(--border2); border-radius: 6px;
+  padding: 6px 14px; font-size: 13px; cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: #2a3547; border-color: var(--accent); color: #f4d9a0; font-weight: 600; }
+.btn.small { padding: 3px 10px; font-size: 12px; }
+.btn.tiny { padding: 1px 7px; font-size: 11px; }
+.btn.danger:hover { border-color: var(--bad); color: var(--bad); }
+.btn.copied { background: #1d3a2c; border-color: var(--good); color: var(--good); }
+
+.status { min-height: 18px; font-size: 12.5px; margin-top: 8px; color: var(--dim); }
+.status.ok { color: var(--good); }
+.status.warn { color: var(--warn); }
+.status.error, .error { color: var(--bad); }
+.dim { color: var(--dim); }
+.row { display: flex; align-items: center; }
+.row.gap { gap: 10px; }
+.row.wrap { flex-wrap: wrap; }
+.small-row { margin: 4px 0; font-size: 12px; }
+.small-row select { max-width: 100%; }
+
+/* ---- badges ---- */
+.badge {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; border: 1px solid var(--border2); color: var(--dim);
+  background: var(--bg2); white-space: nowrap;
+}
+.badge.good { color: var(--good); border-color: #2c5c43; }
+.badge.warn { color: var(--warn); border-color: #5c4c2c; }
+.badge.bad { color: var(--bad); border-color: #5c322c; }
+
+.note {
+  background: var(--bg2); border-left: 3px solid var(--accent2);
+  padding: 8px 10px; border-radius: 4px; margin: 8px 0; font-size: 12.5px;
+}
+.note.warn { border-left-color: var(--warn); }
+
+/* ---- task panel ---- */
+.req-edit {
+  width: 100%; background: var(--bg2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+  resize: vertical; line-height: 1.45; white-space: pre-wrap;
+}
+details.existing, details.warnings, details.src { margin: 8px 0; font-size: 12.5px; }
+details summary { cursor: pointer; color: var(--dim); }
+details summary:hover { color: var(--text); }
+
+/* ---- A/B grid ---- */
+.ab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 1000px) { .ab-grid { grid-template-columns: 1fr; } }
+.cand-title.cand-a { color: var(--accent2); }
+.cand-title.cand-b { color: var(--accent); }
+.cand-url { font-family: var(--mono); font-size: 11.5px; color: var(--dim); overflow-wrap: anywhere; margin-bottom: 4px; }
+.cand-tabs { display: flex; flex-wrap: wrap; gap: 3px; border-bottom: 1px solid var(--border); margin: 8px 0 0; }
+.cand-tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--dim); padding: 5px 9px; font-size: 12px; cursor: pointer;
+}
+.cand-tab:hover { color: var(--text); }
+.cand-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.cand-body { padding-top: 10px; max-height: 640px; overflow: auto; }
+.cand-frame { width: 100%; height: 560px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.render-note { font-size: 11px; color: var(--dim); margin-bottom: 6px; }
+
+pre.code {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px; overflow: auto; max-height: 560px; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: 11.5px; line-height: 1.45;
+}
+.kv { display: grid; grid-template-columns: 190px 1fr; gap: 8px; padding: 3px 0; font-size: 12.5px; border-bottom: 1px dotted #1f2632; }
+.kv > span:first-child { color: var(--dim); }
+.kv > span:last-child { overflow-wrap: anywhere; }
+ul.inv { margin: 4px 0; padding-left: 18px; font-size: 12.5px; }
+ul.inv li { margin: 2px 0; overflow-wrap: anywhere; }
+.quote {
+  background: var(--bg2); border-left: 3px solid var(--border2);
+  padding: 6px 10px; border-radius: 4px; font-size: 12.5px; margin: 6px 0; overflow-wrap: anywhere;
+}
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.swatch { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.swatch i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border2); display: inline-block; }
+.hidden-list li { margin-bottom: 8px; }
+ul.evidence li.linked { cursor: pointer; }
+ul.evidence li.linked:hover { color: var(--accent2); text-decoration: underline; }
+ul.caveats li { color: var(--warn); }
+
+/* ---- requirements table ---- */
+.req-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 8px; }
+.req-table th { text-align: left; color: var(--dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.req-table td { padding: 3px 6px; border-bottom: 1px dotted #1f2632; }
+.req-table input[type="text"] { width: 100%; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px 6px; }
+.req-table select { background: var(--bg2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px; }
+
+/* ---- observations ---- */
+.obs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px) { .obs-grid { grid-template-columns: 1fr; } }
+.obs-col h3 { margin-top: 0; }
+.obs-col label { display: block; font-size: 12px; color: var(--dim); margin: 8px 0 2px; }
+.obs-col textarea {
+  width: 100%; background: var(--bg2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px; resize: vertical;
+}
+
+/* ---- AI / results / outputs ---- */
+.ai-controls { margin-top: 10px; }
+.ai-controls select, .out-field select {
+  background: var(--bg2); color: var(--text); border: 1px solid var(--border2);
+  border-radius: 6px; padding: 5px 8px; font-size: 13px;
+}
+.result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px) { .result-grid { grid-template-columns: 1fr; } }
+.result-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.result-card h3 { margin-top: 0; }
+.conf { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--dim); margin: 6px 0; }
+.conf-bar { width: 130px; height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
+.conf-bar i { display: block; height: 100%; background: var(--accent2); }
+.out-field { margin-bottom: 14px; }
+.out-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
+.out-head label { font-weight: 600; font-size: 13px; }
+.out-field textarea {
+  width: 100%; background: var(--bg2); color: var(--text);
+  border: 1px solid var(--border2); border-radius: 6px; padding: 9px;
+  font-size: 13px; line-height: 1.5; resize: vertical;
+}
+.out-field textarea.invalid { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.wc { font-size: 11.5px; }
+.wc.ok { color: var(--good); }
+.wc.bad { color: var(--bad); font-weight: 600; }
+
+/* ---- history ---- */
+.hist-row {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.hist-main { min-width: 260px; flex: 1; }
+.hist-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---- admin ---- */
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px) { .admin-grid { grid-template-columns: 1fr; } }
+.admin-grid label { display: block; font-size: 12.5px; color: var(--dim); margin: 10px 0 2px; }
+.admin-grid input[type="text"], .admin-grid input[type="password"], .admin-grid input[type="number"],
+.admin-grid select, .admin-grid textarea {
+  width: 100%; background: var(--bg2); color: var(--text);
+  border: 1px solid var(--border2); border-radius: 6px; padding: 6px 8px; font-size: 13px;
+}
+.admin-grid input[type="checkbox"] { transform: scale(1.15); margin-right: 6px; }
+.privacy {
+  border: 1px solid #2c5c43; background: #12241b; color: #9ad7b8;
+  border-radius: 8px; padding: 12px 14px; font-size: 13px;
+}
+
+/* ---- diagnostics drawer ---- */
+#diagnosticsDrawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 94vw);
+  background: var(--bg2); border-left: 1px solid var(--border2);
+  z-index: 50; display: flex; flex-direction: column;
+  box-shadow: -12px 0 40px rgba(0,0,0,.5);
+}
+#diagnosticsDrawer[hidden] { display: none; }
+.diag-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.diag-head h2 { flex: 1; }
+#diagContent { flex: 1; overflow: auto; padding: 12px 14px; font-family: var(--mono); font-size: 11.5px; }
+.diag-line { padding: 1px 0; overflow-wrap: anywhere; }
+
+/* ---- paste modal ---- */
+#pasteModal {
+  position: fixed; inset: 0; background: rgba(4,6,10,.75); z-index: 60;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+#pasteModal[hidden] { display: none; }
+.paste-box { background: var(--panel); border: 1px solid var(--border2); border-radius: 10px; padding: 16px; width: min(760px, 94vw); }
+.paste-box textarea {
+  width: 100%; height: 300px; background: var(--bg2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: var(--mono); font-size: 11.5px;
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">⚖️ UI Jerry Evaluator <span class="ver">local-first · MHTML forensic review</span></div>
+  <nav class="top-tabs" aria-label="Views">
+    <button class="top-tab active" data-view="evaluate">Evaluate</button>
+    <button class="top-tab" data-view="history">History</button>
+    <button class="top-tab" data-view="admin">Admin</button>
+  </nav>
+  <div class="spacer"></div>
+  <button class="btn small" id="diagnosticsToggle">⚙ Diagnostics</button>
+</header>
+
+<main>
+  <!-- ================= EVALUATE ================= -->
+  <section id="view-evaluate" class="view">
+    <div class="panel">
+      <div id="dropZone" role="button" tabindex="0" aria-label="Drop a UI Jerry MHTML file here, or click to choose a file">
+        <div id="dropZoneMain">DROP UI JERRY MHTML HERE</div>
+        <div id="dropZoneSub">.mhtml / .mht / multipart/related — or use the buttons below</div>
+      </div>
+      <div class="btnrow">
+        <button class="btn" id="chooseFileBtn">Choose File</button>
+        <button class="btn" id="pasteBtn">Paste Raw MHTML</button>
+        <button class="btn" id="demoBtn">Load Demo</button>
+        <button class="btn" id="clearBtn">Clear</button>
+        <input type="file" id="fileInput" accept=".mhtml,.mht,.mhtm,multipart/related" hidden>
+      </div>
+      <div id="inputStatus" class="status" role="status"></div>
+    </div>
+
+    <div id="workspace" hidden>
+      <section class="panel" id="taskPanel"></section>
+
+      <div class="ab-grid">
+        <section class="panel" id="candAPanel" aria-label="Website A"></section>
+        <section class="panel" id="candBPanel" aria-label="Website B"></section>
+      </div>
+
+      <section class="panel" id="observationsPanel">
+        <div class="panel-head">
+          <h2>What did you observe while using the sites?</h2>
+          <span class="dim">first-class evidence — stronger than static source analysis; included in AI context</span>
+        </div>
+        <div class="obs-grid">
+          <div class="obs-col">
+            <h3 style="color:var(--accent2)">Website A</h3>
+            <label for="obsAVisual">Visual notes</label>
+            <textarea id="obsAVisual" rows="3" placeholder="What did Website A actually look like when rendered?"></textarea>
+            <label for="obsAInteraction">Interaction notes</label>
+            <textarea id="obsAInteraction" rows="3" placeholder="What happened when you clicked, scrolled, waited, resized?"></textarea>
+          </div>
+          <div class="obs-col">
+            <h3 style="color:var(--accent)">Website B</h3>
+            <label for="obsBVisual">Visual notes</label>
+            <textarea id="obsBVisual" rows="3" placeholder="What did Website B actually look like when rendered?"></textarea>
+            <label for="obsBInteraction">Interaction notes</label>
+            <textarea id="obsBInteraction" rows="3" placeholder="What happened when you clicked, scrolled, waited, resized?"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="reqPanel"></section>
+      <section class="panel" id="aiPanel" hidden></section>
+      <section class="panel" id="resultsPanel" hidden></section>
+      <section class="panel" id="outputPanel" hidden></section>
+    </div>
+  </section>
+
+  <!-- ================= HISTORY ================= -->
+  <section id="view-history" class="view" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Evaluation history</h2>
+        <div class="row gap">
+          <button class="btn small" id="histExportAll">Export all JSON</button>
+          <button class="btn small danger" id="histClear">Clear history</button>
+        </div>
+      </div>
+      <div id="historyList"></div>
+    </div>
+  </section>
+
+  <!-- ================= ADMIN ================= -->
+  <section id="view-admin" class="view" hidden>
+    <div class="panel">
+      <h2>Privacy</h2>
+      <div class="privacy">
+        <strong>All parsing and analysis is local.</strong> Uploaded task files are not transmitted anywhere.
+        Nothing is sent to an AI endpoint until you explicitly click <strong>EVALUATE WITH AI</strong> — and then only the
+        extracted evidence context is sent to the endpoint you configure below. Credentials are stored only in this
+        browser's localStorage. Raw archive persistence into IndexedDB is optional and off by default.
+      </div>
+    </div>
+    <div class="admin-grid">
+      <div class="panel">
+        <h2>Evaluation</h2>
+        <label for="setTone">Default decision style</label>
+        <select id="setTone">
+          <option value="conservative">Conservative</option>
+          <option value="balanced">Balanced</option>
+          <option value="decisive">Decisive</option>
+        </select>
+        <label for="setMinWords">Minimum reason words</label>
+        <input type="number" id="setMinWords" min="1" max="500">
+        <label for="setMaxWords">Maximum reason words</label>
+        <input type="number" id="setMaxWords" min="10" max="1000">
+        <label><input type="checkbox" id="setShowConfidence"> Show AI confidence</label>
+        <label><input type="checkbox" id="setPreserveNotes"> Preserve manual notes when re-analyzing</label>
+      </div>
+      <div class="panel">
+        <h2>Parsing</h2>
+        <label><input type="checkbox" id="setDiagnostics"> Diagnostics mode (show AI payload preview before first send)</label>
+        <label><input type="checkbox" id="setPreserveRaw"> Preserve raw archive in IndexedDB (enables lossless reopen; uses more storage)</label>
+        <label for="setSensitivity">Candidate matching sensitivity</label>
+        <select id="setSensitivity">
+          <option value="balanced">Balanced (label match, then document-order fallback)</option>
+          <option value="strict">Strict (label match only; ask me otherwise)</option>
+        </select>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>AI — OpenAI-compatible endpoint</h2>
+      <div class="admin-grid">
+        <div>
+          <label for="setApiBase">API base URL</label>
+          <input type="text" id="setApiBase" placeholder="https://openrouter.ai/api/v1" spellcheck="false">
+          <label for="setApiKey">API key (stored locally only)</label>
+          <input type="password" id="setApiKey" autocomplete="off" spellcheck="false">
+          <label for="setModel">Model</label>
+          <select id="setModel"></select>
+          <div class="row gap" style="margin-top:6px">
+            <button class="btn small" id="refreshModels">Refresh models</button>
+            <span id="modelStatus" class="dim" style="font-size:12px"></span>
+          </div>
+        </div>
+        <div>
+          <label for="setTemperature">Temperature</label>
+          <input type="number" id="setTemperature" min="0" max="2" step="0.1">
+          <label for="setMaxTokens">Max output tokens</label>
+          <input type="number" id="setMaxTokens" min="100" step="100">
+          <label for="setBudget">Context budget (estimated tokens)</label>
+          <input type="number" id="setBudget" min="4000" step="1000">
+        </div>
+      </div>
+      <label for="setSystemPrompt" style="display:block;font-size:12.5px;color:var(--dim);margin:12px 0 2px">Custom system prompt (leave empty for built-in default; {MIN} and {MAX} are replaced with word limits)</label>
+      <textarea id="setSystemPrompt" rows="5" style="width:100%;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:8px;font-family:var(--mono);font-size:11.5px"></textarea>
+      <div class="row gap" style="margin-top:8px">
+        <button class="btn small" id="showDefaultPrompt">Show built-in default prompt</button>
+        <button class="btn small" id="resetSystemPrompt">Reset to default</button>
+      </div>
+      <pre id="defaultPromptView" class="code" hidden></pre>
+      <div id="adminStatus" class="status"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ================= DIAGNOSTICS DRAWER ================= -->
+<aside id="diagnosticsDrawer" hidden aria-label="Parser diagnostics">
+  <div class="diag-head">
+    <h2>Diagnostics</h2>
+    <button class="btn tiny" id="diagCopyDiag">Copy Diagnostics</button>
+    <button class="btn tiny" id="diagCopyTask">Copy Parsed Task JSON</button>
+    <button class="btn tiny" id="diagCopyA">Copy Candidate A Summary</button>
+    <button class="btn tiny" id="diagCopyB">Copy Candidate B Summary</button>
+    <button class="btn tiny danger" id="diagClose">✕</button>
+  </div>
+  <div id="diagStatus" class="status" style="padding:0 14px"></div>
+  <div id="diagContent"></div>
+</aside>
+
+<!-- ================= PASTE MODAL ================= -->
+<div id="pasteModal" hidden role="dialog" aria-label="Paste raw MHTML">
+  <div class="paste-box">
+    <h2 style="margin-bottom:8px">Paste raw MHTML</h2>
+    <textarea id="pasteArea" placeholder="From: &lt;Saved by Blink&gt;&#10;MIME-Version: 1.0&#10;Content-Type: multipart/related; …" spellcheck="false"></textarea>
+    <div class="row gap" style="margin-top:10px">
+      <button class="btn primary" id="pasteParse">Parse</button>
+      <button class="btn" id="pasteCancel">Cancel</button>
+    </div>
+    <div id="pasteStatus" class="status"></div>
+  </div>
+</div>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.05.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.05.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · UI Jerry Evaluator · version 2026.08.05.1
+</footer>
+
+<script>
+'use strict';
+/* ============================================================
+   MODULE: mhtml-parser
+   Real MIME/MHTML parser for Chrome/Edge "Webpage, Single File"
+   archives. Byte-level: quoted-printable, base64, 7bit/8bit.
+   Attaches to root.UJE.MhtmlParser (browser + Node testable).
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  const te = new TextEncoder();
+  const td = (charset) => {
+    try { return new TextDecoder(charset || 'utf-8'); }
+    catch (e) { return new TextDecoder('utf-8'); }
+  };
+
+  function strToBytes(s) { return te.encode(s); }
+
+  function bytesToLatin1(bytes) {
+    let s = '';
+    const CH = 0x8000;
+    for (let i = 0; i < bytes.length; i += CH) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    }
+    return s;
+  }
+
+  /* ---- quoted-printable body decode (RFC 2045) ---- */
+  function decodeQP(bytes) {
+    const out = [];
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (b === 61 /* = */) {
+        const n1 = bytes[i + 1], n2 = bytes[i + 2];
+        if (n1 === 13 && n2 === 10) { i += 2; continue; }      // soft break CRLF
+        if (n1 === 10) { i += 1; continue; }                   // soft break LF
+        if (n1 === 13) { i += 1; continue; }                   // soft break CR
+        const h = hexVal(n1), l = hexVal(n2);
+        if (h >= 0 && l >= 0) { out.push(h * 16 + l); i += 2; continue; }
+        out.push(b); // literal '='
+      } else {
+        out.push(b);
+      }
+    }
+    return new Uint8Array(out);
+  }
+  function hexVal(c) {
+    if (c >= 48 && c <= 57) return c - 48;
+    if (c >= 65 && c <= 70) return c - 55;
+    if (c >= 97 && c <= 102) return c - 87;
+    return -1;
+  }
+
+  /* ---- base64 decode (environment agnostic) ---- */
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const B64T = new Int16Array(128).fill(-1);
+  for (let i = 0; i < B64.length; i++) B64T[B64.charCodeAt(i)] = i;
+  function decodeBase64(bytes) {
+    const clean = [];
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (b === 61 || B64T[b] >= 0) clean.push(b); // keep data + '=' pad
+    }
+    const out = [];
+    let acc = 0, bits = 0;
+    for (let i = 0; i < clean.length; i++) {
+      const b = clean[i];
+      if (b === 61) break;
+      acc = (acc << 6) | B64T[b];
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        out.push((acc >> bits) & 0xff);
+      }
+    }
+    return new Uint8Array(out);
+  }
+
+  /* ---- header block parsing with unfolding ---- */
+  function parseHeaders(raw) {
+    const headers = {};
+    const order = [];
+    const lines = raw.split(/\r\n|\n/);
+    let cur = null;
+    for (const line of lines) {
+      if (!line) continue;
+      if ((line[0] === ' ' || line[0] === '\t') && cur) {
+        headers[cur] += ' ' + line.trim();
+        continue;
+      }
+      const ci = line.indexOf(':');
+      if (ci < 0) continue;
+      const k = line.slice(0, ci).trim().toLowerCase();
+      const v = line.slice(ci + 1).trim();
+      if (headers[k] !== undefined) { headers[k] += ', ' + v; }
+      else { headers[k] = v; order.push(k); }
+      cur = k;
+    }
+    return { headers, order };
+  }
+
+  function headerParams(v) {
+    // "multipart/related; type=\"text/html\"; boundary=\"...\"" -> {type, value, params}
+    const out = { value: '', params: {} };
+    if (!v) return out;
+    const segs = v.split(';');
+    out.value = segs[0].trim().toLowerCase();
+    for (let i = 1; i < segs.length; i++) {
+      const eq = segs[i].indexOf('=');
+      if (eq < 0) continue;
+      const k = segs[i].slice(0, eq).trim().toLowerCase();
+      let val = segs[i].slice(eq + 1).trim();
+      if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) val = val.slice(1, -1);
+      out.params[k] = val;
+    }
+    return out;
+  }
+
+  function findSequence(hay, needle, from) {
+    // naive byte search; adequate for boundary scanning
+    outer: for (let i = from || 0; i + needle.length <= hay.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (hay[i + j] !== needle[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  /**
+   * parse(bytesOrString, filename) -> archive
+   */
+  function parse(input, filename) {
+    const warnings = [];
+    const bytes = typeof input === 'string' ? strToBytes(input) : input;
+    const archive = {
+      filename: filename || 'pasted.mhtml',
+      size: bytes.length,
+      headers: {},
+      boundary: null,
+      parts: [],
+      warnings,
+      htmlParts: [],
+      byCid: new Map(),
+      byLocation: new Map(),
+    };
+
+    // -- top-level headers: up to first blank line
+    let headEnd = findSequence(bytes, [13, 10, 13, 10], 0);
+    let sepLen = 4;
+    if (headEnd < 0) { headEnd = findSequence(bytes, [10, 10], 0); sepLen = 2; }
+    if (headEnd < 0) {
+      warnings.push('Could not find end of MHTML header block — not an MHTML archive?');
+      return archive;
+    }
+    const topParsed = parseHeaders(bytesToLatin1(bytes.subarray(0, headEnd)));
+    archive.headers = {
+      raw: topParsed.headers,
+      from: topParsed.headers['from'] || '',
+      subject: topParsed.headers['subject'] || '',
+      date: topParsed.headers['date'] || '',
+      snapshotContentLocation: topParsed.headers['snapshot-content-location'] || '',
+    };
+
+    const ct = headerParams(topParsed.headers['content-type']);
+    if (!ct.value.startsWith('multipart/')) {
+      warnings.push('Top-level Content-Type is "' + (ct.value || 'missing') + '", expected multipart/related.');
+    }
+    let boundary = ct.params['boundary'];
+    if (!boundary) {
+      // fallback: first line that looks like a boundary after headers
+      const m = bytesToLatin1(bytes.subarray(headEnd, headEnd + 4000)).match(/\r?\n(--[^\r\n]{10,80})\r?\n/);
+      if (m) {
+        boundary = m[1].slice(2); // store without leading --
+        warnings.push('Boundary missing from Content-Type; guessed "' + boundary + '" from body.');
+      } else {
+        warnings.push('MIME boundary not found. Cannot split archive into parts.');
+        return archive;
+      }
+    }
+    archive.boundary = boundary;
+
+    const delim = strToBytes('--' + boundary);
+    // -- scan delimiter positions
+    const marks = [];
+    let pos = headEnd + sepLen;
+    while (pos < bytes.length) {
+      const idx = findSequence(bytes, delim, pos);
+      if (idx < 0) break;
+      // must be at line start (or file start)
+      if (idx > 0 && bytes[idx - 1] !== 10 && bytes[idx - 1] !== 13) { pos = idx + 1; continue; }
+      const after = idx + delim.length;
+      const isFinal = bytes[after] === 45 && bytes[after + 1] === 45;
+      marks.push({ idx, after, isFinal });
+      pos = after;
+      if (isFinal) break;
+    }
+    if (marks.length === 0) {
+      warnings.push('Boundary "' + boundary + '" never appears in body — archive may be truncated or malformed.');
+      return archive;
+    }
+
+    // -- slice parts between marks
+    for (let m = 0; m < marks.length; m++) {
+      if (marks[m].isFinal) break;
+      const bodyStart = marks[m].after;
+      const next = marks[m + 1];
+      if (!next) { warnings.push('Part ' + m + ' has no terminating boundary (truncated archive).'); break; }
+      let seg = bytes.subarray(bodyStart, next.idx);
+      // strip leading CRLF and trailing CRLF
+      if (seg[0] === 13 && seg[1] === 10) seg = seg.subarray(2);
+      else if (seg[0] === 10) seg = seg.subarray(1);
+      let end = seg.length;
+      while (end > 0 && (seg[end - 1] === 13 || seg[end - 1] === 10)) end--;
+      seg = seg.subarray(0, end);
+
+      let hEnd = findSequence(seg, [13, 10, 13, 10], 0);
+      let hSep = 4;
+      if (hEnd < 0) { hEnd = findSequence(seg, [10, 10], 0); hSep = 2; }
+      const partWarnings = [];
+      if (hEnd < 0) { partWarnings.push('No header/body separator in part ' + m); hEnd = 0; hSep = 0; }
+      const ph = parseHeaders(bytesToLatin1(seg.subarray(0, hEnd)));
+      const body = seg.subarray(hEnd + hSep);
+
+      const pct = headerParams(ph.headers['content-type']);
+      const encoding = (ph.headers['content-transfer-encoding'] || '7bit').trim().toLowerCase();
+      let decoded = body;
+      try {
+        if (encoding === 'quoted-printable') decoded = decodeQP(body);
+        else if (encoding === 'base64') decoded = decodeBase64(body);
+        // 7bit/8bit/binary: as-is
+      } catch (e) {
+        partWarnings.push(encoding + ' decoding failed: ' + e.message);
+        decoded = body;
+      }
+
+      let cid = (ph.headers['content-id'] || '').trim();
+      if (cid.startsWith('<') && cid.endsWith('>')) cid = cid.slice(1, -1);
+
+      const part = {
+        index: m,
+        headers: ph.headers,
+        contentType: pct.value || 'application/octet-stream',
+        charset: pct.params['charset'] || '',
+        contentLocation: (ph.headers['content-location'] || '').trim(),
+        contentId: cid,
+        encoding,
+        bytes: decoded,
+        size: decoded.length,
+        text: null,
+        warnings: partWarnings,
+      };
+      const isText = /^(text\/|application\/(javascript|json|xml|xhtml))/.test(part.contentType);
+      if (isText) {
+        try { part.text = td(part.charset || 'utf-8').decode(decoded); }
+        catch (e) { partWarnings.push('Text decode failed: ' + e.message); }
+      }
+      archive.parts.push(part);
+      if (part.contentId) archive.byCid.set(part.contentId.toLowerCase(), part);
+      if (part.contentLocation) archive.byLocation.set(part.contentLocation, part);
+      partWarnings.forEach(w => warnings.push('[part ' + m + '] ' + w));
+    }
+
+    archive.htmlParts = archive.parts.filter(p => p.contentType === 'text/html');
+    if (archive.htmlParts.length === 0) warnings.push('No HTML documents found in archive.');
+
+    /**
+     * Resolve a reference found inside an HTML/CSS document to an archived part.
+     * Handles: cid: URIs (vs Content-ID or cid-style Content-Location), absolute URLs,
+     * and (weakly) protocol-relative URLs.
+     */
+    archive.resolveRef = function (ref) {
+      if (!ref) return null;
+      ref = ref.trim();
+      if (!ref || ref.startsWith('data:') || ref.startsWith('#') || ref.startsWith('blob:')) return null;
+      if (ref.toLowerCase().startsWith('cid:')) {
+        const id = ref.slice(4);
+        let p = archive.byCid.get(id.toLowerCase());
+        if (p) return p;
+        // some producers put the cid: URI itself in Content-Location
+        p = archive.byLocation.get(ref) || archive.byLocation.get(ref.toLowerCase());
+        if (p) return p;
+        for (const [loc, part] of archive.byLocation) {
+          if (loc.toLowerCase() === ref.toLowerCase()) return part;
+        }
+        return null;
+      }
+      let p = archive.byLocation.get(ref);
+      if (p) return p;
+      if (ref.startsWith('//')) p = archive.byLocation.get('https:' + ref) || archive.byLocation.get('http:' + ref);
+      if (p) return p;
+      // try without hash
+      const noHash = ref.split('#')[0];
+      if (noHash !== ref) { p = archive.byLocation.get(noHash); if (p) return p; }
+      return null;
+    };
+
+    return archive;
+  }
+
+  UJE.MhtmlParser = { parse, decodeQP, decodeBase64, parseHeaders, headerParams };
+})(typeof window !== 'undefined' ? window : globalThis);
+/* ============================================================
+   MODULE: task-extractor
+   Finds the outer UI Jerry task shell inside an archive and
+   extracts: user request, Website A/B assignment, existing
+   answers, hidden tab state, task metadata.
+   Strategy-driven with confidence values; tolerant of host
+   markup changes (no reliance on generated CSS class names).
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  const OPTION_VALUES = ['A is better', 'B is better', 'Both are good', 'Both are bad'];
+
+  function norm(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
+
+  function parseDoc(html) {
+    return new DOMParser().parseFromString(html, 'text/html');
+  }
+
+  /* Serialize an element's contents to text, but keep pre/code/svg
+     as markup so requested source (e.g. SVG path data) survives. */
+  function evidenceText(el) {
+    let out = '';
+    const walk = (node) => {
+      if (node.nodeType === 3) { out += node.nodeValue; return; }
+      if (node.nodeType !== 1) return;
+      const tag = node.tagName.toLowerCase();
+      if (tag === 'script' || tag === 'style') return;
+      if (tag === 'pre' || tag === 'svg') { out += '\n' + node.outerHTML + '\n'; return; }
+      if (tag === 'code') {
+        // inline code: keep text; block-level code keeps markup
+        const t = norm(node.textContent);
+        if (t.length > 0 && t.length < 200 && !/<[a-z]/i.test(node.innerHTML)) { out += '`' + t + '`'; return; }
+        out += '\n' + node.outerHTML + '\n'; return;
+      }
+      const block = /^(p|div|li|ul|ol|h[1-6]|br|section|article|table|tr|blockquote|header|footer)$/.test(tag);
+      if (block && out && !out.endsWith('\n')) out += '\n';
+      if (tag === 'li') out += '- ';
+      for (const child of node.childNodes) walk(child);
+      if (block) out += '\n';
+    };
+    walk(el);
+    return out.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+  }
+
+  /* ---- locate the task shell part ---- */
+  function findShell(archive, log) {
+    const snap = archive.headers.snapshotContentLocation;
+    if (snap) {
+      const p = archive.byLocation.get(snap);
+      if (p && p.contentType === 'text/html') {
+        log.push({ what: 'task shell', how: 'matched Snapshot-Content-Location header', confidence: 0.99 });
+        return { part: p, confidence: 0.99, method: 'snapshot-content-location' };
+      }
+    }
+    // heuristic: an html part whose text mentions UI Jerry wording
+    for (const p of archive.htmlParts) {
+      const t = p.text || '';
+      if (/user request/i.test(t) && /website a/i.test(t) && /website b/i.test(t)) {
+        log.push({ what: 'task shell', how: 'contains "User request" + "Website A" + "Website B"', confidence: 0.9 });
+        return { part: p, confidence: 0.9, method: 'uijerry-wording' };
+      }
+    }
+    if (archive.htmlParts.length) {
+      log.push({ what: 'task shell', how: 'fell back to first HTML part', confidence: 0.4 });
+      return { part: archive.htmlParts[0], confidence: 0.4, method: 'first-html-part' };
+    }
+    return { part: null, confidence: 0, method: 'none' };
+  }
+
+  /* ---- user request ---- */
+  function extractUserRequest(doc, log) {
+    // strategy 1: heading/label element whose text is exactly "User request"
+    const candidates = Array.from(doc.querySelectorAll('h1,h2,h3,h4,h5,h6,strong,label,legend,div,p,span'));
+    for (const el of candidates) {
+      if (/^user request\s*:?$/i.test(norm(el.textContent)) && el.children.length <= 1) {
+        // collect following siblings until another heading
+        const chunks = [];
+        let node = el.nextElementSibling;
+        while (node) {
+          if (/^H[1-6]$/.test(node.tagName)) break;
+          chunks.push(evidenceText(node));
+          node = node.nextElementSibling;
+        }
+        // heading may be wrapped: climb to a container that has more content
+        if (!chunks.join('').trim() && el.parentElement) {
+          let anc = el.parentElement;
+          let sib = anc.nextElementSibling;
+          while (sib && chunks.join('\n').length < 40) {
+            chunks.push(evidenceText(sib));
+            sib = sib.nextElementSibling;
+          }
+        }
+        const text = chunks.join('\n').trim();
+        if (text.length > 10) {
+          log.push({ what: 'user request', how: '"User request" heading + following sibling content', confidence: 0.95 });
+          return { text, confidence: 0.95, method: 'heading-siblings' };
+        }
+      }
+    }
+    // strategy 2: regex over visible body text
+    const bodyText = evidenceText(doc.body || doc.documentElement);
+    const m = bodyText.match(/user request\s*:?\s*\n([\s\S]*?)(?:\n\s*how to review|\n\s*captured states|\n\s*separate preference|$)/i);
+    if (m && m[1].trim().length > 10) {
+      log.push({ what: 'user request', how: 'regex over visible shell text', confidence: 0.7 });
+      return { text: m[1].trim(), confidence: 0.7, method: 'visible-text-regex' };
+    }
+    log.push({ what: 'user request', how: 'NOT FOUND', confidence: 0 });
+    return { text: '', confidence: 0, method: 'none' };
+  }
+
+  /* ---- "How to review" / evaluation instructions (for AI context) ---- */
+  function extractReviewInstructions(doc) {
+    const hs = Array.from(doc.querySelectorAll('h1,h2,h3,h4,h5,h6,p,div'));
+    for (const el of hs) {
+      if (/^how to review\s*:?$/i.test(norm(el.textContent)) && el.children.length <= 1) {
+        const chunks = [];
+        let node = el.nextElementSibling;
+        while (node && !/^H[1-6]$/.test(node.tagName)) { chunks.push(evidenceText(node)); node = node.nextElementSibling; }
+        const t = chunks.join('\n').trim();
+        if (t) return t;
+      }
+    }
+    return '';
+  }
+
+  /* ---- candidate identification via tabs + iframes + cid resolution ---- */
+  function labelFromText(text) {
+    const m = text.match(/website\s*([ab])\b/i);
+    return m ? m[1].toUpperCase() : null;
+  }
+
+  function labelForIframe(doc, iframe) {
+    // strategy A: tab structure (role=tab aria-controls -> panel id)
+    let node = iframe;
+    while (node && node !== doc.body) {
+      if (node.id) {
+        const tab = doc.querySelector('[role="tab"][aria-controls="' + cssEscape(node.id) + '"], [aria-controls="' + cssEscape(node.id) + '"]');
+        if (tab) {
+          const lbl = labelFromText(norm(tab.textContent));
+          if (lbl) return { label: lbl, confidence: 0.95, method: 'tab-aria-controls' };
+        }
+        const ariaPanel = node.getAttribute && node.getAttribute('role');
+        if (ariaPanel === 'tabpanel') {
+          const lblBy = node.getAttribute('aria-labelledby');
+          if (lblBy) {
+            const trigger = doc.getElementById(lblBy);
+            if (trigger) {
+              const lbl = labelFromText(norm(trigger.textContent));
+              if (lbl) return { label: lbl, confidence: 0.95, method: 'tabpanel-aria-labelledby' };
+            }
+          }
+        }
+      }
+      // strategy B: a nearby heading/label in the same container
+      const heading = node.querySelector && Array.from(node.querySelectorAll('h1,h2,h3,h4,h5,h6,label,legend'))
+        .map(h => labelFromText(norm(h.textContent))).find(Boolean);
+      if (heading) return { label: heading, confidence: 0.8, method: 'nearby-heading' };
+      node = node.parentElement;
+    }
+    return { label: null, confidence: 0, method: 'none' };
+  }
+
+  function cssEscape(s) {
+    if (root.CSS && CSS.escape) return CSS.escape(s);
+    return s.replace(/["\\\]]/g, '\\$&');
+  }
+
+  function identifyCandidates(archive, doc, shellPart, log, warnings, sensitivity) {
+    const iframes = Array.from(doc.querySelectorAll('iframe'));
+    const result = { A: null, B: null };
+    const used = new Set([shellPart.index]);
+
+    for (const iframe of iframes) {
+      const src = iframe.getAttribute('src') || '';
+      const part = archive.resolveRef(src);
+      const lbl = labelForIframe(doc, iframe);
+      if (part && part.contentType === 'text/html' && lbl.label) {
+        if (!result[lbl.label]) {
+          result[lbl.label] = {
+            label: lbl.label, part, url: part.contentLocation,
+            iframeSrc: src, confidence: Math.min(lbl.confidence, 0.97),
+            method: 'iframe ' + lbl.method + ' + archive part #' + part.index,
+          };
+          used.add(part.index);
+          log.push({ what: 'Website ' + lbl.label, how: 'iframe ' + lbl.method + ' -> ' + (src.slice(0, 60)) + ' -> part #' + part.index, confidence: result[lbl.label].confidence });
+        }
+      } else if (part && part.contentType === 'text/html') {
+        // known iframe, unknown label: hold for order-based fallback
+        iframe._ujePart = part;
+      }
+    }
+
+    // fallback: document order of iframes / remaining html parts
+    const missing = ['A', 'B'].filter(k => !result[k]);
+    if (missing.length && sensitivity !== 'strict') {
+      const pool = iframes
+        .map(f => f._ujePart || archive.resolveRef(f.getAttribute('src') || ''))
+        .filter(p => p && p.contentType === 'text/html' && !used.has(p.index));
+      const leftovers = archive.htmlParts.filter(p => !used.has(p.index) && !pool.includes(p));
+      const ordered = pool.concat(leftovers);
+      for (const k of missing) {
+        const p = ordered.shift();
+        if (p) {
+          result[k] = {
+            label: k, part: p, url: p.contentLocation, iframeSrc: '',
+            confidence: 0.55, method: 'document-order fallback',
+          };
+          used.add(p.index);
+          log.push({ what: 'Website ' + k, how: 'document-order fallback -> part #' + p.index, confidence: 0.55 });
+          warnings.push('Website ' + k + ' was assigned by document order — please verify manually.');
+        }
+      }
+    }
+    for (const k of ['A', 'B']) {
+      if (!result[k]) warnings.push('Website ' + k + ' could not be identified. Assign it manually from the HTML resources list.');
+    }
+    const unassigned = archive.htmlParts.filter(p => !used.has(p.index));
+    return { candidates: result, unassigned };
+  }
+
+  /* ---- resources related to a candidate (css/js/media via cid & url refs) ---- */
+  function relatedResources(part, archive) {
+    const related = new Map();
+    const addFrom = (text, fromPart) => {
+      if (!text) return;
+      const refRe = /(?:href|src)\s*=\s*["']([^"']+)["']|url\(\s*['"]?([^'")]+)['"]?\s*\)/gi;
+      let m;
+      while ((m = refRe.exec(text))) {
+        const ref = m[1] || m[2];
+        const rp = archive.resolveRef(ref);
+        if (rp && rp.index !== part.index && !related.has(rp.index)) {
+          related.set(rp.index, rp);
+          if (rp.contentType === 'text/css' && rp.text && rp !== fromPart) addFrom(rp.text, rp);
+        }
+      }
+    };
+    addFrom(part.text, part);
+    return Array.from(related.values());
+  }
+
+  /* ---- existing answers (MUI toggles / radios / pressed buttons + textareas) ---- */
+  function extractExistingAnswers(doc, log) {
+    const out = {
+      aestheticsOption: '', aestheticsReason: '',
+      functionalityOption: '', functionalityReason: '',
+    };
+    const pressed = Array.from(doc.querySelectorAll('[aria-pressed="true"], [aria-checked="true"], input[type="radio"]:checked'));
+    for (const el of pressed) {
+      const value = el.getAttribute('value') || norm(el.textContent);
+      if (!OPTION_VALUES.includes(value)) continue;
+      // dimension from nearest labeled ancestor / id / name
+      let dim = null;
+      let node = el;
+      for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+        const hay = ((node.id || '') + ' ' + (node.getAttribute && (node.getAttribute('name') || '')) + ' ' + (node.getAttribute && (node.getAttribute('aria-label') || ''))).toLowerCase();
+        const labelEl = node.querySelector && node.querySelector('label, legend, h1,h2,h3,h4,h5,h6');
+        const labelTxt = labelEl ? norm(labelEl.textContent).toLowerCase() : '';
+        const text = (hay + ' ' + labelTxt);
+        if (/aesthetic/.test(text)) { dim = 'aesthetics'; break; }
+        if (/functionality/.test(text)) { dim = 'functionality'; break; }
+      }
+      if (dim && !out[dim + 'Option']) {
+        out[dim + 'Option'] = value;
+        log.push({ what: dim + ' option (existing)', how: 'pressed/selected control with value "' + value + '"', confidence: 0.85 });
+      }
+    }
+    for (const ta of Array.from(doc.querySelectorAll('textarea'))) {
+      const key = ((ta.getAttribute('aria-label') || '') + ' ' + (ta.name || '') + ' ' + (ta.id || '')).toLowerCase();
+      const val = ta.value || ta.textContent || '';
+      if (!val.trim()) continue;
+      if (/aesthetic.*reason|reason.*aesthetic/.test(key)) { out.aestheticsReason = val.trim(); }
+      else if (/functionality.*reason|reason.*functionality/.test(key)) { out.functionalityReason = val.trim(); }
+    }
+    if (out.aestheticsReason) log.push({ what: 'aesthetics reason (existing)', how: 'textarea aria-label/name match', confidence: 0.85 });
+    if (out.functionalityReason) log.push({ what: 'functionality reason (existing)', how: 'textarea aria-label/name match', confidence: 0.85 });
+    return out;
+  }
+
+  /* ---- hidden / inactive shell state ---- */
+  function shellHiddenState(doc, candidates) {
+    const notes = [];
+    const panels = Array.from(doc.querySelectorAll('[role="tabpanel"], [data-state]'));
+    for (const p of panels) {
+      const state = (p.getAttribute('data-state') || '').toLowerCase();
+      const hidden = p.hasAttribute('hidden') || state === 'inactive' || /display\s*:\s*none/.test(p.getAttribute('style') || '');
+      if (!hidden) continue;
+      const iframe = p.querySelector && p.querySelector('iframe');
+      if (!iframe) continue;
+      const src = iframe.getAttribute('src') || '';
+      for (const k of ['A', 'B']) {
+        if (candidates[k] && candidates[k].iframeSrc === src) {
+          notes.push('Website ' + k + ' was inside an INACTIVE tab panel when the page was saved (its document is still archived).');
+        }
+      }
+    }
+    return notes;
+  }
+
+  /**
+   * extract(archive, opts) -> task
+   */
+  function extract(archive, opts) {
+    opts = opts || {};
+    const warnings = [];
+    const log = [];
+    const shell = findShell(archive, log);
+    const task = {
+      taskId: '',
+      taskTitle: archive.headers.subject || '',
+      sourceUrl: archive.headers.snapshotContentLocation || '',
+      userRequest: { text: '', confidence: 0, method: 'none' },
+      reviewInstructions: '',
+      websiteA: null,
+      websiteB: null,
+      unassignedHtmlParts: [],
+      existingAnswers: {},
+      shellHiddenNotes: [],
+      shell: shell,
+      warnings,
+      log,
+    };
+    if (!shell.part) {
+      warnings.push('Task shell document not found.');
+      return task;
+    }
+    const doc = parseDoc(shell.part.text || '');
+    task.taskTitle = norm(doc.title) || task.taskTitle;
+    if (task.sourceUrl) {
+      const seg = task.sourceUrl.split('/').filter(Boolean).pop();
+      if (seg) task.taskId = seg;
+    }
+    task.userRequest = extractUserRequest(doc, log);
+    task.reviewInstructions = extractReviewInstructions(doc);
+
+    const { candidates, unassigned } = identifyCandidates(archive, doc, shell.part, log, warnings, opts.matchingSensitivity);
+    for (const k of ['A', 'B']) {
+      if (candidates[k]) {
+        candidates[k].relatedResources = relatedResources(candidates[k].part, archive);
+        task['website' + k] = candidates[k];
+      }
+    }
+    task.unassignedHtmlParts = unassigned;
+    task.existingAnswers = extractExistingAnswers(doc, log);
+    task.shellHiddenNotes = shellHiddenState(doc, candidates);
+    return task;
+  }
+
+  UJE.TaskExtractor = { extract, evidenceText, OPTION_VALUES };
+})(typeof window !== 'undefined' ? window : globalThis);
+/* ============================================================
+   MODULE: candidate-parser
+   Static inspection of one candidate website (never executes
+   candidate code). Produces DOM / CSS / JS inventories and
+   hidden-or-inactive content findings.
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  function norm(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
+  function clip(s, n) { s = s || ''; return s.length > n ? s.slice(0, n) + '…' : s; }
+
+  /* ---------- CSS helpers ---------- */
+  function extractBlocks(css, atRule) {
+    // returns [{name, body}] for @name <ident> { ...balanced... }
+    const out = [];
+    const re = new RegExp('@' + atRule + '\\s+([^{]+)\\{', 'gi');
+    let m;
+    while ((m = re.exec(css))) {
+      let depth = 1, i = m.index + m[0].length;
+      const start = i;
+      while (i < css.length && depth > 0) {
+        if (css[i] === '{') depth++;
+        else if (css[i] === '}') depth--;
+        i++;
+      }
+      out.push({ name: norm(m[1]), body: css.slice(start, i - 1) });
+      re.lastIndex = i;
+    }
+    return out;
+  }
+
+  function parseRules(css) {
+    // top-level selector{decls} rules (skips @-blocks' contents except keyframes handled separately)
+    const stripped = css
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/@keyframes[^{]+\{(?:[^{}]|\{[^{}]*\})*\}/gi, '')
+      .replace(/@[^{\n]+\{/g, ''); // open other at-rules (media/supports) - keep inner rules
+    const rules = [];
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m;
+    while ((m = re.exec(stripped))) {
+      rules.push({ selector: norm(m[1]), declarations: m[2].trim() });
+    }
+    return rules;
+  }
+
+  function analyzeCss(cssSources) {
+    const all = cssSources.map(s => s.text).join('\n');
+    const colors = new Map();
+    const fonts = new Map();
+    const animations = [];
+    const transitions = [];
+    const transforms = [];
+    const mediaQueries = [];
+    const hiddenRules = [];
+
+    const colorRe = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)|hwb\([^)]*\)/g;
+    let m;
+    while ((m = colorRe.exec(all))) {
+      const c = m[0].toLowerCase();
+      colors.set(c, (colors.get(c) || 0) + 1);
+    }
+    const fontRe = /font-family\s*:\s*([^;}]+)/gi;
+    while ((m = fontRe.exec(all))) {
+      const f = norm(m[1]).toLowerCase();
+      fonts.set(f, (fonts.get(f) || 0) + 1);
+    }
+    const rules = parseRules(all);
+    for (const r of rules) {
+      if (/(^|;)\s*animation(-name)?\s*:/.test(r.declarations)) animations.push({ selector: r.selector, declarations: clip(norm(r.declarations), 220) });
+      if (/transition\s*:/.test(r.declarations)) transitions.push({ selector: r.selector, declarations: clip(norm(r.declarations), 200) });
+      if (/transform\s*:/.test(r.declarations)) transforms.push({ selector: r.selector, declarations: clip(norm(r.declarations), 200) });
+      if (/display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?![.\d])/.test(r.declarations)
+        || /(left|right|top)\s*:\s*-\d{3,}|text-indent\s*:\s*-\d{3,}|clip\s*:\s*rect\(\s*0/.test(r.declarations)) {
+        hiddenRules.push({ selector: r.selector, declarations: clip(norm(r.declarations), 200) });
+      }
+    }
+    const keyframes = extractBlocks(all, 'keyframes').map(k => ({
+      name: k.name,
+      steps: (k.body.match(/[^{]+\{[^{}]*\}/g) || []).map(s => clip(norm(s), 180)),
+    }));
+    const media = extractBlocks(all, 'media').map(b => b.name);
+    const reducedMotion = /@media[^{]*prefers-reduced-motion/i.test(all);
+
+    return {
+      colors: Array.from(colors.entries()).sort((a, b) => b[1] - a[1]).map(([color, count]) => ({ color, count })),
+      fonts: Array.from(fonts.entries()).map(([family, count]) => ({ family, count })),
+      keyframes, animations, transitions, transforms,
+      mediaQueries: media,
+      reducedMotion,
+      hiddenRules,
+      ruleCount: rules.length,
+    };
+  }
+
+  /* ---------- JS static scan ---------- */
+  function analyzeJs(jsSources, htmlText) {
+    const all = jsSources.map(s => s.text).join('\n');
+    const html = htmlText || '';
+    const count = (re, s) => { const m = s.match(re); return m ? m.length : 0; };
+    const find = (re, s, n) => (s.match(re) || []).slice(0, n || 12);
+    const report = {
+      hasJavaScript: all.trim().length > 0 || /<(script)[^>]*>[^<]/i.test(html),
+      inlineHandlerAttrs: find(/\son(click|change|input|submit|mouseover|mouseenter|keydown|keyup|load|animationend|transitionend)\s*=/gi, html),
+      eventListeners: find(/addEventListener\(\s*['"]([\w:-]+)['"]/g, all).map(s => s.replace(/addEventListener\(\s*['"]/i, '').replace(/['"]$/, '')),
+      eventListenerCount: count(/addEventListener\(/g, all),
+      timers: { setTimeout: count(/setTimeout\s*\(/g, all), setInterval: count(/setInterval\s*\(/g, all), requestAnimationFrame: count(/requestAnimationFrame\s*\(/g, all) },
+      domQueries: count(/querySelector(All)?\s*\(|getElementById\s*\(|getElementsBy/g, all),
+      domMutations: {
+        innerHTML: count(/\.innerHTML\s*=/g, all),
+        classList: count(/classList\./g, all),
+        setAttribute: count(/setAttribute\s*\(/g, all),
+        styleChanges: count(/\.style\./g, all),
+        appendInsert: count(/append(Child)?\s*\(|insertBefore\s*\(|prepend\s*\(/g, all),
+      },
+      formBehavior: count(/preventDefault\s*\(/g, all) + count(/\.submit\s*\(/g, all) + count(/checkValidity|setCustomValidity/g, all),
+      navigation: count(/location\.(href|assign|replace)|history\.(pushState|replaceState)|window\.open/g, all),
+      storage: count(/localStorage|sessionStorage|indexedDB/g, all),
+      network: count(/fetch\s*\(|XMLHttpRequest|sendBeacon/g, all),
+      animationApis: {
+        webAnimations: count(/\.animate\s*\(/g, all),
+        gsap: count(/gsap\.|TweenMax|TimelineMax/g, all),
+        animationFrame: count(/requestAnimationFrame/g, all),
+      },
+      suspicious: find(/eval\s*\(|new\s+Function\s*\(|document\.write\s*\(/g, all),
+      stateHints: count(/useState|createStore|redux|zustand|observable|reactive\s*\(/gi, all),
+    };
+    return report;
+  }
+
+  /* ---------- hidden content detection ---------- */
+  function detectHidden(doc, cssAnalysis) {
+    const findings = [];
+    const describe = (el) => {
+      const tag = el.tagName.toLowerCase();
+      const id = el.id ? '#' + el.id : '';
+      const cls = (el.getAttribute('class') || '').trim().split(/\s+/).slice(0, 3).join('.');
+      return tag + id + (cls ? '.' + cls : '');
+    };
+    const excerpt = (el) => clip(norm(el.textContent), 140);
+
+    doc.querySelectorAll('[hidden]').forEach(el =>
+      findings.push({ kind: 'hidden attribute', target: describe(el), excerpt: excerpt(el) }));
+    doc.querySelectorAll('[aria-hidden="true"]').forEach(el =>
+      findings.push({ kind: 'aria-hidden', target: describe(el), excerpt: excerpt(el) }));
+    doc.querySelectorAll('[style]').forEach(el => {
+      const st = el.getAttribute('style') || '';
+      const why = [];
+      if (/display\s*:\s*none/i.test(st)) why.push('display:none');
+      if (/visibility\s*:\s*hidden/i.test(st)) why.push('visibility:hidden');
+      if (/opacity\s*:\s*0(?![.\d])/.test(st)) why.push('opacity:0');
+      if (/(^|;)\s*(left|right|top)\s*:\s*-\d{3,}/.test(st)) why.push('offscreen position');
+      if (why.length) findings.push({ kind: 'inline style: ' + why.join(', '), target: describe(el), excerpt: excerpt(el) });
+    });
+    doc.querySelectorAll('[role="tabpanel"], [data-state="inactive"], [data-state="closed"]').forEach(el => {
+      const state = (el.getAttribute('data-state') || '').toLowerCase();
+      if (el.hasAttribute('hidden') || state === 'inactive' || state === 'closed') {
+        findings.push({ kind: 'inactive tab/panel', target: describe(el), excerpt: excerpt(el) });
+      }
+    });
+    doc.querySelectorAll('details:not([open])').forEach(el =>
+      findings.push({ kind: 'collapsed <details>', target: describe(el), excerpt: excerpt(el) }));
+    doc.querySelectorAll('dialog:not([open])').forEach(el =>
+      findings.push({ kind: 'closed <dialog>', target: describe(el), excerpt: excerpt(el) }));
+    doc.querySelectorAll('template').forEach(el =>
+      findings.push({ kind: '<template> (inert content)', target: describe(el), excerpt: clip(norm(el.innerHTML.replace(/<[^>]+>/g, ' ')), 140) }));
+
+    // CSS rules that hide elements — count matches in this document
+    for (const rule of cssAnalysis.hiddenRules) {
+      let matched = 0, sample = '';
+      for (const sel of rule.selector.split(',')) {
+        try {
+          const els = doc.querySelectorAll(sel.trim());
+          matched += els.length;
+          if (els.length && !sample) sample = excerpt(els[0]);
+        } catch (e) { /* selector unsupported — skip */ }
+      }
+      findings.push({
+        kind: 'CSS rule hides content' + (matched ? ' (' + matched + ' element' + (matched > 1 ? 's' : '') + ' match)' : ' (no current DOM match)'),
+        target: rule.selector + ' { ' + rule.declarations + ' }',
+        excerpt: sample,
+      });
+    }
+    return findings;
+  }
+
+  /* ---------- main ---------- */
+  function analyze(candidate, archive) {
+    const part = candidate.part;
+    const html = part.text || '';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const observations = [];
+
+    // gather CSS sources: inline <style> + linked stylesheets resolved from archive
+    const cssSources = [];
+    doc.querySelectorAll('style').forEach((el, i) => {
+      cssSources.push({ origin: 'inline <style> #' + (i + 1), text: el.textContent || '' });
+    });
+    doc.querySelectorAll('link[rel~="stylesheet"][href], link[href]').forEach(el => {
+      const href = el.getAttribute('href');
+      const rp = archive.resolveRef(href);
+      if (rp && rp.contentType === 'text/css' && rp.text) {
+        cssSources.push({ origin: 'archived stylesheet (' + clip(rp.contentLocation || rp.contentId, 60) + ')', text: rp.text, part: rp });
+      } else if (href && !href.startsWith('data:')) {
+        observations.push('Stylesheet reference not found in archive: ' + clip(href, 80));
+      }
+    });
+    // also: related css parts discovered by the task extractor
+    for (const rp of candidate.relatedResources || []) {
+      if (rp.contentType === 'text/css' && rp.text && !cssSources.some(s => s.part === rp)) {
+        cssSources.push({ origin: 'related archived CSS (part #' + rp.index + ')', text: rp.text, part: rp });
+      }
+    }
+
+    // gather JS sources
+    const jsSources = [];
+    doc.querySelectorAll('script').forEach((el, i) => {
+      const src = el.getAttribute('src');
+      if (src) {
+        const rp = archive.resolveRef(src);
+        if (rp && rp.text) jsSources.push({ origin: 'archived script (' + clip(rp.contentLocation || rp.contentId, 60) + ')', text: rp.text, part: rp });
+        else observations.push('Script reference not found in archive: ' + clip(src, 80));
+      } else if ((el.textContent || '').trim()) {
+        jsSources.push({ origin: 'inline <script> #' + (i + 1), text: el.textContent });
+      }
+    });
+    for (const rp of candidate.relatedResources || []) {
+      if (/javascript|ecmascript/.test(rp.contentType) && rp.text && !jsSources.some(s => s.part === rp)) {
+        jsSources.push({ origin: 'related archived JS (part #' + rp.index + ')', text: rp.text, part: rp });
+      }
+    }
+
+    const css = analyzeCss(cssSources);
+    const js = analyzeJs(jsSources, html);
+    const hidden = detectHidden(doc, css);
+
+    // DOM inventory
+    const q = (sel) => Array.from(doc.querySelectorAll(sel));
+    const txt = (el) => clip(norm(el.textContent), 90);
+    const dom = {
+      title: norm(doc.title),
+      lang: doc.documentElement.getAttribute('lang') || '',
+      headings: q('h1,h2,h3,h4,h5,h6').map(h => ({ level: h.tagName.toLowerCase(), text: txt(h) })),
+      links: q('a[href]').map(a => ({ text: txt(a), href: clip(a.getAttribute('href'), 120) })),
+      buttons: q('button, [role="button"], input[type="button"], input[type="submit"]').map(b => txt(b) || norm(b.getAttribute('value')) || '(icon/unlabeled)'),
+      forms: q('form').map(f => ({
+        action: f.getAttribute('action') || '', method: (f.getAttribute('method') || 'get'),
+        fields: Array.from(f.querySelectorAll('input,select,textarea')).map(i => (i.type || i.tagName.toLowerCase()) + (i.name ? '[' + i.name + ']' : '')),
+      })),
+      inputs: q('input,select,textarea').map(i => (i.type || i.tagName.toLowerCase()) + (i.getAttribute('aria-label') ? ' "' + i.getAttribute('aria-label') + '"' : '')),
+      images: q('img').map(i => ({ alt: i.getAttribute('alt') || '', src: clip(i.getAttribute('src') || '', 90) })),
+      svgs: q('svg').map(s => ({
+        viewBox: s.getAttribute('viewBox') || '',
+        paths: s.querySelectorAll('path').length,
+        pathClasses: Array.from(s.querySelectorAll('[class]')).map(p => p.getAttribute('class')).slice(0, 12),
+        inlineStyles: s.querySelectorAll('[style]').length,
+        role: s.getAttribute('role') || '',
+        ariaLabel: s.getAttribute('aria-label') || '',
+      })),
+      canvases: q('canvas').length,
+      media: q('video,audio').map(v => v.tagName.toLowerCase()),
+      dialogs: q('dialog, [role="dialog"], [role="alertdialog"]').length,
+      navs: q('nav, [role="navigation"]').length,
+      menus: q('[role="menu"], [role="menubar"], select').length,
+      tabs: q('[role="tab"]').length,
+      tabPanels: q('[role="tabpanel"]').length,
+      ariaRoles: q('[role]').reduce((acc, el) => { const r = el.getAttribute('role'); acc[r] = (acc[r] || 0) + 1; return acc; }, {}),
+      details: q('details').length,
+      iframes: q('iframe').map(f => clip(f.getAttribute('src') || '', 100)),
+      textExcerpt: clip(norm((doc.body && doc.body.textContent) || ''), 600),
+      elementCount: doc.querySelectorAll('*').length,
+    };
+
+    // observations
+    if (!js.hasJavaScript && css.keyframes.length) observations.push('No JavaScript detected — animation appears to be pure CSS (' + css.keyframes.length + ' @keyframes).');
+    if (js.hasJavaScript) observations.push('JavaScript present: ' + jsSources.length + ' source(s), ' + js.eventListenerCount + ' addEventListener call(s).');
+    if (dom.svgs.length) observations.push(dom.svgs.length + ' inline SVG(s); ' + dom.svgs.reduce((a, s) => a + s.paths, 0) + ' path(s) total.');
+    if (dom.svgs.some(s => s.inlineStyles)) observations.push('SVG elements carry inline style state (e.g. stroke-dasharray/dashoffset captured mid-animation).');
+    if (css.reducedMotion) observations.push('Honors prefers-reduced-motion.');
+    if (hidden.length) observations.push(hidden.length + ' hidden/inactive content finding(s).');
+    if (css.mediaQueries.length) observations.push(css.mediaQueries.length + ' @media block(s): ' + css.mediaQueries.slice(0, 4).join('; '));
+
+    return {
+      url: candidate.url || part.contentLocation,
+      partIndex: part.index,
+      title: dom.title,
+      html,
+      htmlSize: html.length,
+      dom, css, js, hidden, observations,
+      cssSources: cssSources.map(s => ({ origin: s.origin, size: s.text.length, text: s.text })),
+      jsSources: jsSources.map(s => ({ origin: s.origin, size: s.text.length, text: s.text })),
+      mediaResources: (candidate.relatedResources || []).filter(p => /^image\/|video\/|audio\/|font\//.test(p.contentType))
+        .map(p => ({ type: p.contentType, location: p.contentLocation || p.contentId, size: p.size })),
+    };
+  }
+
+  UJE.CandidateParser = { analyze, analyzeCss, analyzeJs };
+})(typeof window !== 'undefined' ? window : globalThis);
+/* ============================================================
+   MODULE: evaluator-prompt
+   Editable default system prompt for the AI evaluator.
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  const DEFAULT_SYSTEM_PROMPT = `You are evaluating two generated websites, A and B, created from the same user request. You are the evaluator for a paired website-preference task. Judge two dimensions INDEPENDENTLY.
+
+AESTHETICS
+Evaluate the result visually. Consider the specific requested design, composition, polish, hierarchy, spacing, typography, colors, consistency, visual defects, unnecessary visual additions, and other visual qualities relevant to THIS request. Do not penalize or reward complexity by itself. Do not consider whether interactions work.
+
+FUNCTIONALITY
+Evaluate whether each candidate works and satisfies what the user requested. Consider requested content, behavior, interactions, animation, controls, responsiveness, omissions, implementation errors, broken references, and unwanted behavior. Do not treat aesthetics as functionality.
+
+OPTIONS
+For each dimension choose exactly one of: "A is better", "B is better", "Both are good", "Both are bad". A and B do not have to receive the same result in both dimensions.
+
+EVIDENCE
+Base judgments on the evidence supplied from the archived websites. The archive may contain DOM, CSS, JavaScript, hidden content, inactive panes, and other resources that were not visible in the task's currently selected tab. Use those materials when relevant. Do not claim runtime behavior has been verified merely because code appears to implement it — qualify such findings (e.g. "the CSS defines...", "the markup suggests..."). Human observations, when provided, are stronger evidence of actual runtime behavior than source inspection.
+
+REASONS
+Each reason must:
+- be {MIN}-{MAX} words (hard requirement)
+- use plain English
+- identify concrete differences between the two candidates
+- explain why those differences matter for this specific request
+- avoid generic filler such as "looks better" or "more professional" without concrete observations
+- stay focused on its dimension (visual evidence for aesthetics; behavior/requirements for functionality)
+- mention both candidates when that helps explain the choice
+
+Return structured JSON only, with exactly this shape:
+{
+  "aesthetics":     { "option": "...", "reason": "...", "confidence": 0.0, "evidence": ["..."], "caveats": ["..."] },
+  "functionality":  { "option": "...", "reason": "...", "confidence": 0.0, "evidence": ["..."], "caveats": ["..."] }
+}`;
+
+  const TONE_INSTRUCTIONS = {
+    conservative: 'DECISION STYLE: Conservative. Prefer "Both are good" or "Both are bad" unless the evidence shows a clear, concrete difference between the candidates. Only pick A or B when the difference is well supported.',
+    balanced: 'DECISION STYLE: Balanced. Pick A or B when the evidence shows a meaningful difference; use "Both are good" or "Both are bad" when the candidates are genuinely equivalent.',
+    decisive: 'DECISION STYLE: Decisive. Commit to A or B whenever there is any real, articulable difference. Reserve "Both are good/bad" for candidates that are truly indistinguishable.',
+  };
+
+  function buildSystemPrompt(settings) {
+    const min = settings.minReasonWords ?? 40;
+    const max = settings.maxReasonWords ?? 140;
+    const custom = (settings.customSystemPrompt || '').trim();
+    const base = (custom || DEFAULT_SYSTEM_PROMPT).replace(/\{MIN\}/g, min).replace(/\{MAX\}/g, max);
+    const tone = TONE_INSTRUCTIONS[settings.tone] || TONE_INSTRUCTIONS.balanced;
+    return base + '\n\n' + tone;
+  }
+
+  const STAGE1_SYSTEM_PROMPT = `You are analyzing one archived website that was generated from a user request. You will receive the original request and the complete archived evidence for ONE candidate (HTML, CSS, JavaScript, hidden content, parser observations). Produce a structured factual report covering:
+1. What the candidate implements (content, structure, styling, behavior) — mapped against the user request.
+2. How it implements it (key CSS/JS mechanisms, animation approach, interactions).
+3. Anything requested that is missing or altered.
+4. Anything present that was NOT requested (additions, decorative extras).
+5. Hidden or inactive content found in the archive.
+6. Defects or risks visible from static source (unresolved references, suspicious code, likely errors).
+Do not compare against any other candidate. Do not make a preference judgment. Be concrete and cite the evidence. Plain text with clear sections.`;
+
+  UJE.EvaluatorPrompt = { DEFAULT_SYSTEM_PROMPT, STAGE1_SYSTEM_PROMPT, TONE_INSTRUCTIONS, buildSystemPrompt };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ============================================================
+   MODULE: ai-context-builder
+   Transforms parsed task + candidate reports into a model-
+   friendly context package with an explicit token budget.
+   Never silently truncates: every omission/truncation is
+   recorded and surfaced.
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  const estTokens = (s) => Math.ceil((s || '').length / 4);
+
+  function clipMiddle(text, maxChars, note) {
+    if (text.length <= maxChars) return { text, truncated: false };
+    const head = Math.floor(maxChars * 0.6);
+    const tail = maxChars - head;
+    const omitted = text.length - head - tail;
+    return {
+      text: text.slice(0, head) +
+        '\n\n[... ' + omitted.toLocaleString() + ' characters omitted from the middle of this resource' +
+        (note ? ' — ' + note : '') + ' ...]\n\n' +
+        text.slice(text.length - tail),
+      truncated: true,
+      omitted,
+    };
+  }
+
+  function summarizeDom(dom) {
+    const lines = [];
+    if (dom.title) lines.push('Title: ' + dom.title);
+    if (dom.headings.length) lines.push('Headings: ' + dom.headings.map(h => h.level + ' "' + h.text + '"').join(' | '));
+    if (dom.textExcerpt) lines.push('Visible text excerpt: ' + dom.textExcerpt);
+    if (dom.links.length) lines.push('Links (' + dom.links.length + '): ' + dom.links.slice(0, 12).map(l => '"' + l.text + '" -> ' + l.href).join('; '));
+    if (dom.buttons.length) lines.push('Buttons (' + dom.buttons.length + '): ' + dom.buttons.slice(0, 15).join(' | '));
+    if (dom.forms.length) lines.push('Forms: ' + dom.forms.map(f => f.method.toUpperCase() + ' ' + (f.action || '(no action)') + ' fields: ' + f.fields.join(', ')).join(' ;; '));
+    if (dom.inputs.length && !dom.forms.length) lines.push('Inputs: ' + dom.inputs.join(', '));
+    if (dom.images.length) lines.push('Images (' + dom.images.length + '): ' + dom.images.slice(0, 8).map(i => (i.alt || '(no alt)') + ' ' + i.src).join('; '));
+    if (dom.svgs.length) lines.push('SVGs (' + dom.svgs.length + '): ' + dom.svgs.map(s => s.paths + ' paths, viewBox ' + s.viewBox + (s.pathClasses.length ? ', classes ' + s.pathClasses.join('/') : '') + (s.inlineStyles ? ', inline style state on ' + s.inlineStyles + ' element(s)' : '')).join(' ;; '));
+    if (dom.canvases) lines.push('Canvas elements: ' + dom.canvases);
+    if (dom.media.length) lines.push('Media: ' + dom.media.join(', '));
+    if (dom.dialogs) lines.push('Dialogs: ' + dom.dialogs);
+    if (dom.navs) lines.push('Nav landmarks: ' + dom.navs);
+    if (dom.tabs) lines.push('Tabs: ' + dom.tabs + ', tab panels: ' + dom.tabPanels);
+    if (dom.details) lines.push('<details> elements: ' + dom.details);
+    if (dom.iframes.length) lines.push('Nested iframes: ' + dom.iframes.join('; '));
+    const roles = Object.entries(dom.ariaRoles).map(([r, n]) => r + '×' + n).join(', ');
+    if (roles) lines.push('ARIA roles: ' + roles);
+    lines.push('Total elements: ' + dom.elementCount);
+    return lines.join('\n');
+  }
+
+  function summarizeCss(css) {
+    const lines = [];
+    if (css.colors.length) lines.push('Colors: ' + css.colors.slice(0, 20).map(c => c.color + (c.count > 1 ? '×' + c.count : '')).join(', '));
+    if (css.fonts.length) lines.push('Font families: ' + css.fonts.map(f => f.family).join(' | '));
+    if (css.keyframes.length) lines.push('Keyframes: ' + css.keyframes.map(k => k.name).join(', '));
+    for (const k of css.keyframes.slice(0, 8)) lines.push('  @keyframes ' + k.name + ': ' + k.steps.slice(0, 6).join(' ;; '));
+    if (css.animations.length) lines.push('Animation rules: ' + css.animations.slice(0, 12).map(a => a.selector + ' { ' + a.declarations + ' }').join('\n'));
+    if (css.transitions.length) lines.push('Transitions: ' + css.transitions.slice(0, 10).map(t => t.selector + ' { ' + t.declarations + ' }').join('\n'));
+    if (css.transforms.length) lines.push('Transforms: ' + css.transforms.slice(0, 10).map(t => t.selector + ' { ' + t.declarations + ' }').join('\n'));
+    if (css.mediaQueries.length) lines.push('Media queries: ' + css.mediaQueries.join(' | '));
+    lines.push('prefers-reduced-motion support: ' + (css.reducedMotion ? 'yes' : 'no'));
+    lines.push('CSS rule count: ' + css.ruleCount);
+    return lines.join('\n');
+  }
+
+  function summarizeJs(js) {
+    if (!js.hasJavaScript) return 'No JavaScript in this candidate.';
+    const lines = [];
+    lines.push('addEventListener calls: ' + js.eventListenerCount + (js.eventListeners.length ? ' (events: ' + Array.from(new Set(js.eventListeners)).join(', ') + ')' : ''));
+    if (js.inlineHandlerAttrs.length) lines.push('Inline on* handler attributes: ' + js.inlineHandlerAttrs.join(', '));
+    const t = js.timers;
+    if (t.setTimeout || t.setInterval || t.requestAnimationFrame) lines.push('Timers: setTimeout×' + t.setTimeout + ', setInterval×' + t.setInterval + ', requestAnimationFrame×' + t.requestAnimationFrame);
+    lines.push('DOM queries: ' + js.domQueries + '; mutations: innerHTML×' + js.domMutations.innerHTML + ', classList×' + js.domMutations.classList + ', setAttribute×' + js.domMutations.setAttribute + ', style×' + js.domMutations.styleChanges);
+    if (js.formBehavior) lines.push('Form behavior signals (preventDefault/submit/validity): ' + js.formBehavior);
+    if (js.navigation) lines.push('Navigation calls: ' + js.navigation);
+    if (js.storage) lines.push('Web storage usage: ' + js.storage);
+    if (js.network) lines.push('Network calls: ' + js.network);
+    const a = js.animationApis;
+    if (a.webAnimations || a.gsap || a.animationFrame) lines.push('Animation APIs: element.animate×' + a.webAnimations + ', GSAP refs×' + a.gsap + ', rAF×' + a.animationFrame);
+    if (js.suspicious.length) lines.push('Suspicious constructs: ' + js.suspicious.join(', '));
+    return lines.join('\n');
+  }
+
+  function summarizeHidden(hidden) {
+    if (!hidden.length) return 'No hidden or inactive content detected.';
+    return hidden.map((h, i) => (i + 1) + '. [' + h.kind + '] ' + h.target + (h.excerpt ? '\n   content: "' + h.excerpt + '"' : '')).join('\n');
+  }
+
+  function candidateSection(label, report, opts) {
+    opts = opts || {};
+    const sections = [];
+    const push = (id, title, content, priority, opts2) => {
+      sections.push(Object.assign({ id, title, content, priority, estTokens: estTokens(content), included: true, omitReason: '', truncated: false }, opts2));
+    };
+    push('cand' + label + '-html', 'WEBSITE ' + label + ' — full archived HTML', report.html, 20);
+    report.cssSources.forEach((s, i) => {
+      push('cand' + label + '-css-' + i, 'WEBSITE ' + label + ' — CSS: ' + s.origin, s.text, 40);
+    });
+    report.jsSources.forEach((s, i) => {
+      push('cand' + label + '-js-' + i, 'WEBSITE ' + label + ' — JS: ' + s.origin, s.text, 50);
+    });
+    push('cand' + label + '-hidden', 'WEBSITE ' + label + ' — hidden/inactive content findings', summarizeHidden(report.hidden), 30);
+    push('cand' + label + '-dom', 'WEBSITE ' + label + ' — DOM inventory (static parse)', summarizeDom(report.dom), 60);
+    push('cand' + label + '-csssum', 'WEBSITE ' + label + ' — CSS inventory summary', summarizeCss(report.css), 70);
+    push('cand' + label + '-jssum', 'WEBSITE ' + label + ' — JavaScript static-analysis summary', summarizeJs(report.js), 70);
+    if (report.observations.length) {
+      push('cand' + label + '-obs', 'WEBSITE ' + label + ' — parser observations', report.observations.map(o => '- ' + o).join('\n'), 35);
+    }
+    if (report.mediaResources.length) {
+      push('cand' + label + '-media', 'WEBSITE ' + label + ' — archived media resources',
+        report.mediaResources.map(mr => mr.type + ' ' + mr.location + ' (' + mr.size + ' bytes)').join('\n'), 80);
+    }
+    return sections;
+  }
+
+  /**
+   * build({task, reportA, reportB, observations, settings}) -> contextPackage
+   */
+  function build(args) {
+    const { task, reportA, reportB, observations, settings } = args;
+    const budgetTokens = settings.contextBudgetTokens || 100000;
+    const sections = [];
+    const push = (id, title, content, priority, opts2) => {
+      sections.push(Object.assign({ id, title, content: content || '', priority, estTokens: estTokens(content || ''), included: true, omitReason: '', truncated: false }, opts2));
+    };
+
+    push('task-request', 'ORIGINAL USER REQUEST', task.userRequest.text || '(user request could not be extracted — check diagnostics)', 10);
+    push('task-meta', 'TASK METADATA',
+      'Task title: ' + (task.taskTitle || '?') + '\nSource URL: ' + (task.sourceUrl || '?') +
+      (task.websiteA ? '\nWebsite A URL: ' + task.websiteA.url : '') +
+      (task.websiteB ? '\nWebsite B URL: ' + task.websiteB.url : '') +
+      (task.shellHiddenNotes.length ? '\nCapture state: ' + task.shellHiddenNotes.join(' ') : ''), 15);
+    if (task.reviewInstructions) {
+      push('task-instructions', 'EVALUATION INSTRUCTIONS GIVEN TO HUMAN REVIEWERS', task.reviewInstructions, 75);
+    }
+    if (reportA) candidateSection('A', reportA).forEach(s => sections.push(s));
+    if (reportB) candidateSection('B', reportB).forEach(s => sections.push(s));
+
+    const obsText = [
+      'WEBSITE A — visual notes: ' + (observations.aVisual || '(none)'),
+      'WEBSITE A — interaction notes: ' + (observations.aInteraction || '(none)'),
+      'WEBSITE B — visual notes: ' + (observations.bVisual || '(none)'),
+      'WEBSITE B — interaction notes: ' + (observations.bInteraction || '(none)'),
+    ].join('\n');
+    push('human-obs', 'HUMAN OBSERVATIONS (the evaluator actually used both sites — treat as strong runtime evidence)', obsText, 25);
+
+    // existing answers (context only)
+    const ea = task.existingAnswers || {};
+    if (ea.aestheticsOption || ea.functionalityOption) {
+      push('existing-answers', 'ANSWERS ALREADY ENTERED ON THE TASK PAGE (may be incomplete drafts)',
+        'Aesthetics: ' + (ea.aestheticsOption || '(unset)') + ' — ' + (ea.aestheticsReason || '(no reason)') +
+        '\nFunctionality: ' + (ea.functionalityOption || '(unset)') + ' — ' + (ea.functionalityReason || '(no reason)'), 85);
+    }
+
+    // ---- budget enforcement: omit lowest priority first, then truncate large survivors
+    const omitted = [];
+    let total = sections.reduce((a, s) => a + s.estTokens, 0);
+
+    const droppable = sections.filter(s => s.priority >= 60).sort((a, b) => b.priority - a.priority);
+    for (const s of droppable) {
+      if (total <= budgetTokens) break;
+      s.included = false;
+      s.omitReason = 'over context budget (lowest-priority summary section; primary source already included)';
+      total -= s.estTokens;
+      omitted.push(s);
+    }
+    // truncate individual big sections (keep priority order: truncate lowest priority first)
+    const big = sections.filter(s => s.included && s.estTokens > 8000).sort((a, b) => b.priority - a.priority);
+    for (const s of big) {
+      if (total <= budgetTokens) break;
+      const maxChars = 24000;
+      const res = clipMiddle(s.content, maxChars, 'truncated to fit context budget');
+      if (res.truncated) {
+        const before = s.estTokens;
+        s.content = res.text;
+        s.estTokens = estTokens(s.content);
+        s.truncated = true;
+        total -= (before - s.estTokens);
+      }
+    }
+    const staged = total > budgetTokens;
+
+    return {
+      sections,
+      omitted,
+      estTotalTokens: total,
+      budgetTokens,
+      staged,
+      toPromptText() {
+        return sections.filter(s => s.included)
+          .map(s => '===== ' + s.title + (s.truncated ? ' (TRUNCATED — middle omitted) ' : '') + ' =====\n' + s.content)
+          .join('\n\n');
+      },
+      includedList() {
+        return sections.filter(s => s.included).map(s => ({ title: s.title, estTokens: s.estTokens, truncated: s.truncated }));
+      },
+    };
+  }
+
+  UJE.AiContextBuilder = { build, estTokens, summarizeDom, summarizeCss, summarizeJs, summarizeHidden, clipMiddle };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ============================================================
+   MODULE: ai-client
+   OpenAI-compatible endpoint client + deterministic response
+   validation + targeted reason-repair loop + optional two-
+   stage (summarize-then-compare) workflow for large contexts.
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  const OPTIONS = ['A is better', 'B is better', 'Both are good', 'Both are bad'];
+  const wordCount = (s) => (s || '').trim().split(/\s+/).filter(Boolean).length;
+
+  function baseUrl(settings) {
+    return (settings.apiBaseUrl || '').replace(/\/+$/, '');
+  }
+
+  async function chat(settings, messages, opts) {
+    opts = opts || {};
+    const url = baseUrl(settings) + '/chat/completions';
+    const body = {
+      model: settings.model,
+      messages,
+      temperature: settings.temperature ?? 0.2,
+      max_tokens: settings.maxOutputTokens ?? 4000,
+    };
+    if (opts.json) body.response_format = { type: 'json_object' };
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (settings.apiKey || ''),
+          ...( /^https:\/\/openrouter\.ai/.test(baseUrl(settings)) ? { 'HTTP-Referer': location.href, 'X-Title': 'UI Jerry Evaluator (local)' } : {} ),
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error('Network error contacting ' + url + ': ' + e.message);
+    }
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error('API error ' + res.status + ': ' + text.slice(0, 500));
+    }
+    let data;
+    try { data = JSON.parse(text); }
+    catch (e) { throw new Error('Non-JSON API response: ' + text.slice(0, 300)); }
+    const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!content) throw new Error('API response contained no message content.');
+    return { content, usage: data.usage || null, model: data.model || settings.model };
+  }
+
+  async function fetchModels(settings) {
+    const url = baseUrl(settings) + '/models';
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + (settings.apiKey || '') } });
+    if (!res.ok) throw new Error('Model list failed: HTTP ' + res.status);
+    const data = await res.json();
+    const ids = (data.data || []).map(m => m.id).filter(Boolean).sort();
+    return ids;
+  }
+
+  function extractJson(text) {
+    try { return JSON.parse(text); } catch (e) { /* fall through */ }
+    // find first balanced {...}
+    const start = text.indexOf('{');
+    if (start < 0) throw new Error('No JSON object found in model response.');
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}') { depth--; if (depth === 0) return JSON.parse(text.slice(start, i + 1)); }
+    }
+    throw new Error('Unbalanced JSON in model response.');
+  }
+
+  function validateEvaluation(obj, settings) {
+    const issues = [];
+    const min = settings.minReasonWords ?? 40;
+    const max = settings.maxReasonWords ?? 140;
+    if (!obj || typeof obj !== 'object') return { valid: false, issues: ['Response is not an object.'] };
+    for (const dim of ['aesthetics', 'functionality']) {
+      const d = obj[dim];
+      if (!d || typeof d !== 'object') { issues.push(dim + ': missing section.'); continue; }
+      if (!OPTIONS.includes(d.option)) issues.push(dim + ': invalid option "' + d.option + '".');
+      const wc = wordCount(d.reason);
+      if (wc < min) issues.push(dim + ': reason too short (' + wc + ' words, minimum ' + min + ').');
+      if (wc > max) issues.push(dim + ': reason too long (' + wc + ' words, maximum ' + max + ').');
+      if (typeof d.confidence !== 'number' || d.confidence < 0 || d.confidence > 1) {
+        d.confidence = Math.max(0, Math.min(1, Number(d.confidence) || 0));
+      }
+      if (!Array.isArray(d.evidence)) d.evidence = d.evidence ? [String(d.evidence)] : [];
+      if (!Array.isArray(d.caveats)) d.caveats = d.caveats ? [String(d.caveats)] : [];
+      d.evidence = d.evidence.map(String);
+      d.caveats = d.caveats.map(String);
+    }
+    return { valid: issues.length === 0, issues };
+  }
+
+  async function reviseReason(settings, dim, current, issue, contextExcerpt) {
+    const messages = [
+      { role: 'system', content: 'You rewrite evaluation reasons to satisfy strict word-count limits while preserving concrete evidence and meaning. Return JSON only.' },
+      { role: 'user', content:
+        'The ' + dim + ' reason below has a problem: ' + issue + '\n\n' +
+        'Rewrite ONLY this reason so it is within the required word range, keeps its concrete observations, and stays in plain English. ' +
+        'Return JSON: { "reason": "..." }\n\nCURRENT REASON:\n' + current },
+    ];
+    const { content } = await chat(settings, messages, { json: true });
+    const obj = extractJson(content);
+    if (!obj.reason) throw new Error('Repair response missing "reason".');
+    return String(obj.reason).trim();
+  }
+
+  /**
+   * evaluateTask({settings, systemPrompt, contextPackage, task, reportA, reportB, observations, onProgress})
+   * Handles single-call vs staged workflow, validation, and reason repair.
+   */
+  async function evaluateTask(args) {
+    const { settings, systemPrompt, contextPackage, task, reportA, reportB, observations, onProgress } = args;
+    const progress = (msg) => onProgress && onProgress(msg);
+    const repairs = [];
+    let usageTotal = { prompt_tokens: 0, completion_tokens: 0 };
+    const addUsage = (u) => { if (u) { usageTotal.prompt_tokens += u.prompt_tokens || 0; usageTotal.completion_tokens += u.completion_tokens || 0; } };
+
+    const USER_INTRO = 'Evaluate the two archived websites below against the original user request. ' +
+      'The evidence was extracted from a saved-page archive; hidden/inactive content sections describe material not necessarily visible in the active tab. ' +
+      'Return the required JSON object only.';
+
+    let evalMessages;
+    let stagedReports = null;
+
+    if (contextPackage.staged) {
+      // ---- two-stage workflow
+      progress('Context exceeds budget — running two-stage workflow (candidate reports first).');
+      stagedReports = {};
+      for (const [label, report] of [['A', reportA], ['B', reportB]]) {
+        if (!report) continue;
+        progress('Stage 1: summarizing Website ' + label + '…');
+        const candSections = contextPackage.sections.filter(s => s.included && s.id.startsWith('cand' + label));
+        const candText = candSections.map(s => '===== ' + s.title + ' =====\n' + s.content).join('\n\n');
+        const reqSec = contextPackage.sections.find(s => s.id === 'task-request');
+        const r = await chat(settings, [
+          { role: 'system', content: UJE.EvaluatorPrompt.STAGE1_SYSTEM_PROMPT },
+          { role: 'user', content: '===== ORIGINAL USER REQUEST =====\n' + (reqSec ? reqSec.content : '') + '\n\n' + candText },
+        ]);
+        addUsage(r.usage);
+        stagedReports[label] = r.content;
+      }
+      progress('Stage 2: final comparison…');
+      const obsSec = contextPackage.sections.find(s => s.id === 'human-obs');
+      const reqSec = contextPackage.sections.find(s => s.id === 'task-request');
+      const metaSec = contextPackage.sections.find(s => s.id === 'task-meta');
+      const hiddenA = contextPackage.sections.find(s => s.id === 'candA-hidden');
+      const hiddenB = contextPackage.sections.find(s => s.id === 'candB-hidden');
+      evalMessages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: USER_INTRO + '\n\n' +
+          '===== ORIGINAL USER REQUEST =====\n' + (reqSec ? reqSec.content : '') + '\n\n' +
+          (metaSec ? '===== TASK METADATA =====\n' + metaSec.content + '\n\n' : '') +
+          '===== WEBSITE A — STRUCTURED ANALYST REPORT =====\n' + (stagedReports.A || '(missing)') + '\n\n' +
+          '===== WEBSITE B — STRUCTURED ANALYST REPORT =====\n' + (stagedReports.B || '(missing)') + '\n\n' +
+          (hiddenA && hiddenA.included ? '===== WEBSITE A — HIDDEN CONTENT =====\n' + hiddenA.content + '\n\n' : '') +
+          (hiddenB && hiddenB.included ? '===== WEBSITE B — HIDDEN CONTENT =====\n' + hiddenB.content + '\n\n' : '') +
+          (obsSec ? '===== HUMAN OBSERVATIONS =====\n' + obsSec.content : '') },
+      ];
+    } else {
+      evalMessages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: USER_INTRO + '\n\n' + contextPackage.toPromptText() },
+      ];
+    }
+
+    progress('Calling ' + settings.model + '…');
+    const r1 = await chat(settings, evalMessages, { json: true });
+    addUsage(r1.usage);
+    const result = extractJson(r1.content);
+
+    // ---- deterministic validation + targeted repair
+    let check = validateEvaluation(result, settings);
+    for (const dim of ['aesthetics', 'functionality']) {
+      const d = result[dim];
+      if (!d) continue;
+      for (const issue of check.issues.filter(i => i.startsWith(dim + ': reason'))) {
+        progress('Repairing ' + dim + ' reason (' + issue + ')…');
+        try {
+          d.reason = await reviseReason(settings, dim, d.reason, issue);
+          repairs.push(dim + ': ' + issue + ' -> revised to ' + wordCount(d.reason) + ' words.');
+        } catch (e) {
+          repairs.push(dim + ': repair failed — ' + e.message);
+        }
+      }
+    }
+    check = validateEvaluation(result, settings);
+
+    return {
+      result,
+      valid: check.valid,
+      issues: check.issues,
+      repairs,
+      staged: contextPackage.staged,
+      stagedReports,
+      usage: usageTotal,
+      model: r1.model,
+      sentMessages: evalMessages,
+    };
+  }
+
+  UJE.AiClient = { chat, fetchModels, extractJson, validateEvaluation, evaluateTask, wordCount, OPTIONS };
+})(typeof window !== 'undefined' ? window : globalThis);
+/* ============================================================
+   MODULE: storage
+   localStorage for small settings; IndexedDB for evaluation
+   history (+ optional raw-archive persistence, off by default).
+   History records keep the data a future "learning" feature
+   would need: task, AI recommendation, final human answers,
+   overrides, and (later) QA feedback.
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  const SETTINGS_KEY = 'uje.settings.v1';
+
+  const DEFAULT_SETTINGS = {
+    // evaluation
+    tone: 'balanced',                 // conservative | balanced | decisive
+    minReasonWords: 40,
+    maxReasonWords: 140,
+    showConfidence: true,
+    preserveNotesOnReevaluate: true,
+    // parsing
+    diagnosticsMode: true,
+    preserveRawArchive: false,
+    matchingSensitivity: 'balanced',  // strict | balanced
+    // ai
+    apiBaseUrl: 'https://openrouter.ai/api/v1',
+    apiKey: '',
+    model: 'openai/gpt-4.1-mini',
+    temperature: 0.2,
+    maxOutputTokens: 4000,
+    contextBudgetTokens: 100000,
+    customSystemPrompt: '',
+  };
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return Object.assign({}, DEFAULT_SETTINGS);
+      return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw));
+    } catch (e) {
+      return Object.assign({}, DEFAULT_SETTINGS);
+    }
+  }
+  function saveSettings(s) {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  }
+
+  /* ---- IndexedDB history ---- */
+  const DB_NAME = 'uje-evaluator';
+  const DB_VERSION = 1;
+  let dbPromise = null;
+
+  function db() {
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = () => {
+          const d = req.result;
+          if (!d.objectStoreNames.contains('evaluations')) {
+            const st = d.createObjectStore('evaluations', { keyPath: 'id', autoIncrement: true });
+            st.createIndex('createdAt', 'createdAt');
+          }
+          if (!d.objectStoreNames.contains('archives')) {
+            d.createObjectStore('archives', { keyPath: 'evalId' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    return dbPromise;
+  }
+
+  function tx(store, mode, fn) {
+    return db().then(d => new Promise((resolve, reject) => {
+      const t = d.transaction(store, mode);
+      const req = fn(t.objectStore(store));
+      t.oncomplete = () => resolve(req && req.result);
+      t.onerror = () => reject(t.error);
+    }));
+  }
+
+  async function addHistory(record) {
+    record.createdAt = record.createdAt || new Date().toISOString();
+    record.updatedAt = new Date().toISOString();
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const t = d.transaction('evaluations', 'readwrite');
+      const req = t.objectStore('evaluations').add(record);
+      req.onsuccess = () => resolve(req.result);
+      t.onerror = () => reject(t.error);
+    });
+  }
+  function updateHistory(record) {
+    record.updatedAt = new Date().toISOString();
+    return tx('evaluations', 'readwrite', st => st.put(record));
+  }
+  function getHistory(id) { return tx('evaluations', 'readonly', st => st.get(id)); }
+  function deleteHistory(id) {
+    return tx('evaluations', 'readwrite', st => st.delete(id))
+      .then(() => tx('archives', 'readwrite', st => st.delete(id)).catch(() => {}));
+  }
+  function clearHistory() {
+    return tx('evaluations', 'readwrite', st => st.clear())
+      .then(() => tx('archives', 'readwrite', st => st.clear()).catch(() => {}));
+  }
+  async function listHistory() {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const t = d.transaction('evaluations', 'readonly');
+      const req = t.objectStore('evaluations').getAll();
+      req.onsuccess = () => resolve((req.result || []).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+      req.onerror = () => reject(req.error);
+    });
+  }
+  function saveArchiveBlob(evalId, bytes, filename) {
+    return tx('archives', 'readwrite', st => st.put({ evalId, filename, bytes }));
+  }
+  function getArchiveBlob(evalId) { return tx('archives', 'readonly', st => st.get(evalId)); }
+
+  UJE.Storage = {
+    DEFAULT_SETTINGS, loadSettings, saveSettings,
+    addHistory, updateHistory, getHistory, deleteHistory, clearHistory, listHistory,
+    saveArchiveBlob, getArchiveBlob,
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+/* ============================================================
+   MODULE: demo-archive
+   Builds a small synthetic MHTML archive in memory so the
+   "Load Demo" button exercises the full pipeline without
+   needing a real UI Jerry capture.
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  function buildDemoArchive() {
+    const B = '----MultipartBoundary--UjeDemoBoundary0123456789abcdef----';
+    const parts = [];
+    const add = (headers, body) => {
+      parts.push('--' + B + '\r\n' + headers.map(h => h[0] + ': ' + h[1]).join('\r\n') + '\r\n\r\n' + body + '\r\n');
+    };
+
+    const cssA = `body{margin:0;font-family:Georgia,serif;background:#0f1220;color:#e8e8f0}
+.hero{min-height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(180deg,#171b30,#0f1220)}
+.hero h1{font-size:3rem;letter-spacing:.02em}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;padding:2rem}
+.card{background:#1a1f36;border-radius:10px;padding:1.25rem}
+@media (max-width:700px){.cards{grid-template-columns:1fr}}
+.signup{padding:2rem;text-align:center}
+.signup input{padding:.6rem;border-radius:6px;border:1px solid #333a55;background:#0b0e18;color:#eee}`;
+
+    const htmlA = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Nimbus Notes</title>
+<link rel="stylesheet" href="cid:css-demo-a@uje.demo"></head>
+<body>
+<header class="hero"><h1>Nimbus Notes</h1><p>Your thoughts, synced everywhere.</p><a class="cta" href="#signup">Get started</a></header>
+<main><section class="cards">
+<div class="card"><h2>Fast</h2><p>Instant local search.</p></div>
+<div class="card"><h2>Private</h2><p>End-to-end encrypted.</p></div>
+<div class="card"><h2>Free</h2><p>Core features forever.</p></div>
+</section>
+<section class="signup" id="signup"><h2>Sign up</h2>
+<form id="signupForm" novalidate>
+<input type="email" name="email" placeholder="you@example.com" required aria-label="Email address">
+<button type="submit">Create account</button>
+<p class="err" role="alert"></p>
+</form></section></main>
+<script>
+document.getElementById('signupForm').addEventListener('submit', function (e) {
+  e.preventDefault();
+  var input = this.querySelector('input[type=email]');
+  var err = this.querySelector('.err');
+  if (!/^\\S+@\\S+\\.\\S+$/.test(input.value)) { err.textContent = 'Please enter a valid email address.'; return; }
+  err.textContent = '';
+  this.querySelector('button').textContent = 'Welcome aboard!';
+});
+<\/script>
+</body></html>`;
+
+    const cssB = `body{margin:0;font-family:system-ui;background:#101418;color:#dfe6ee}
+.hero{padding:4rem 1rem;text-align:center}
+.hero h1{font-size:2rem}
+.cards{display:flex;flex-direction:column;gap:.5rem;padding:1rem}
+.card{border:1px solid #2a323c;padding:1rem}
+.signup{padding:1rem}
+.promo{display:none}
+.modal{position:fixed;left:-9999px;top:0}`;
+
+    const htmlB = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Nimbus Notes - Cloud Notes</title>
+<link rel="stylesheet" href="cid:css-demo-b@uje.demo"></head>
+<body>
+<header class="hero"><h1>Nimbus Notes — Cloud Notes for Teams</h1><p>Trusted by 10,000 teams.</p></header>
+<main><section class="cards">
+<div class="card"><h2>Fast</h2><p>Instant search.</p></div>
+<div class="card"><h2>Private</h2><p>Encrypted.</p></div>
+</section>
+<section class="signup"><h2>Sign up</h2>
+<form action="/subscribe" method="post">
+<input type="email" placeholder="Email">
+<button type="submit">Subscribe</button>
+</form></section>
+<aside class="promo">Limited offer: 3 months free with code NIMBUS3.</aside>
+<div class="modal" role="dialog" aria-label="Upgrade prompt"><p>Upgrade to Pro for unlimited devices.</p></div>
+</main></body></html>`;
+
+    const shell = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Aesthetics/Functionality Website Preference - DEMO</title></head>
+<body>
+<h1>Aesthetics/Functionality Website Preference - DEMO</h1>
+<div role="tablist">
+<button role="tab" aria-selected="true" aria-controls="panel-instructions" data-state="active">Instructions</button>
+<button role="tab" aria-selected="false" aria-controls="panel-a" data-state="inactive">Website A</button>
+<button role="tab" aria-selected="false" aria-controls="panel-b" data-state="inactive">Website B</button>
+</div>
+<div role="tabpanel" id="panel-instructions" data-state="active">
+<h3>User request</h3>
+<p><strong>Landing page for "Nimbus Notes"</strong></p>
+<p>Build a single-page marketing site for a note-taking app called Nimbus Notes.</p>
+<ul>
+<li>Dark theme with a large hero section containing the product name and a short tagline.</li>
+<li>Exactly three feature cards laid out side by side on desktop.</li>
+<li>A signup section with an email field and a submit button, with client-side email validation.</li>
+<li>No pricing section and no promotional banners.</li>
+</ul>
+<h3>How to review</h3>
+<p>Use the tabs to inspect Website A and Website B separately before answering both question sets.</p>
+<p>Aesthetics question: Judge only visual quality. Functionality question: Judge only functionality and prompt-following behavior.</p>
+</div>
+<div role="tabpanel" id="panel-a" data-state="inactive">
+<iframe title="Website A" src="cid:frame-demo-a@uje.demo"></iframe>
+</div>
+<div role="tabpanel" id="panel-b" data-state="inactive">
+<iframe title="Website B" src="cid:frame-demo-b@uje.demo"></iframe>
+</div>
+<h3>Aesthetics: which website is better?</h3>
+<div role="group" id="root_aesthetics_preference">
+<button type="button" value="A is better" aria-pressed="false">A is better</button>
+<button type="button" value="B is better" aria-pressed="false">B is better</button>
+<button type="button" value="Both are good" aria-pressed="false">Both are good</button>
+<button type="button" value="Both are bad" aria-pressed="false">Both are bad</button>
+</div>
+<label>Aesthetics reason</label>
+<textarea aria-label="Aesthetics reason" name="aesthetics_scoring_reason"></textarea>
+<h3>Functionality: which website is better?</h3>
+<div role="group" id="root_functionality_preference">
+<button type="button" value="A is better" aria-pressed="false">A is better</button>
+<button type="button" value="B is better" aria-pressed="false">B is better</button>
+<button type="button" value="Both are good" aria-pressed="false">Both are good</button>
+<button type="button" value="Both are bad" aria-pressed="false">Both are bad</button>
+</div>
+<label>Functionality reason</label>
+<textarea aria-label="Functionality reason" name="functionality_scoring_reason"></textarea>
+</body></html>`;
+
+    add([['Content-Type', 'text/html'], ['Content-ID', '<frame-shell@uje.demo>'], ['Content-Transfer-Encoding', '8bit'], ['Content-Location', 'https://demo.ujerry.local/tasks/demo-0001']], shell);
+    add([['Content-Type', 'text/html'], ['Content-ID', '<frame-demo-a@uje.demo>'], ['Content-Transfer-Encoding', '8bit'], ['Content-Location', 'https://candidate-a.ujerry.local/']], htmlA);
+    add([['Content-Type', 'text/css'], ['Content-Transfer-Encoding', '8bit'], ['Content-Location', 'cid:css-demo-a@uje.demo']], cssA);
+    add([['Content-Type', 'text/html'], ['Content-ID', '<frame-demo-b@uje.demo>'], ['Content-Transfer-Encoding', '8bit'], ['Content-Location', 'https://candidate-b.ujerry.local/']], htmlB);
+    add([['Content-Type', 'text/css'], ['Content-Transfer-Encoding', '8bit'], ['Content-Location', 'cid:css-demo-b@uje.demo']], cssB);
+
+    const head =
+      'From: <Saved by UI Jerry Evaluator demo>\r\n' +
+      'Snapshot-Content-Location: https://demo.ujerry.local/tasks/demo-0001\r\n' +
+      'Subject: Aesthetics/Functionality Website Preference - DEMO\r\n' +
+      'MIME-Version: 1.0\r\n' +
+      'Content-Type: multipart/related;\r\n\ttype="text/html";\r\n\tboundary="' + B + '"\r\n\r\n';
+
+    return head + parts.join('') + '--' + B + '--\r\n';
+  }
+
+  UJE.DemoArchive = { buildDemoArchive };
+})(typeof window !== 'undefined' ? window : globalThis);
+/* ============================================================
+   MODULE: ui helpers
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+
+  function h(tag, attrs, children) {
+    const el = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = v;
+      else if (k === 'html') el.innerHTML = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else if (k === 'value') el.value = v;
+      else if (k === 'checked') el.checked = !!v;
+      else if (k === 'disabled') el.disabled = !!v;
+      else el.setAttribute(k, v);
+    }
+    for (const c of [].concat(children || [])) {
+      if (c == null) continue;
+      el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+    return el;
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  async function copyText(text, btn) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    if (btn) {
+      const original = btn.dataset.label || btn.textContent;
+      btn.dataset.label = original;
+      btn.classList.add('copied');
+      btn.textContent = '✓ Copied';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = original; }, 1600);
+    }
+  }
+
+  function download(filename, text, mime) {
+    const blob = new Blob([text], { type: mime || 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  const wordCount = (s) => (s || '').trim().split(/\s+/).filter(Boolean).length;
+
+  function statusMsg(el, msg, kind) {
+    el.textContent = msg;
+    el.className = 'status ' + (kind || '');
+    if (!msg) el.className = 'status';
+  }
+
+  UJE.UI = { h, esc, fmtBytes, copyText, download, wordCount, statusMsg };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ============================================================
+   MODULE: app — orchestration & rendering
+   ============================================================ */
+(function (root) {
+  'use strict';
+  const UJE = (root.UJE = root.UJE || {});
+  if (typeof document === 'undefined') return; // Node test import guard
+
+  const { h, esc, fmtBytes, copyText, download, wordCount, statusMsg } = UJE.UI;
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  const state = {
+    settings: UJE.Storage.loadSettings(),
+    rawBytes: null,
+    rawFilename: '',
+    archive: null,
+    task: null,
+    reports: { A: null, B: null },
+    contextPackage: null,
+    aiResult: null,        // {result, valid, issues, repairs, staged, usage, model, ...}
+    observations: { aVisual: '', aInteraction: '', bVisual: '', bInteraction: '' },
+    final: { aestheticsOption: '', aestheticsReason: '', functionalityOption: '', functionalityReason: '' },
+    finalDirty: { aestheticsOption: false, aestheticsReason: false, functionalityOption: false, functionalityReason: false },
+    requirements: [],      // editable checklist rows
+    historyId: null,
+    candViews: { A: 'render', B: 'render' },
+    payloadPreviewShown: false,
+    payloadPreviewHtml: '',
+    aiStatus: { msg: '', kind: '' },
+  };
+
+  /* ================= input handling ================= */
+
+  function bindInputs() {
+    const dz = $('#dropZone');
+    const fi = $('#fileInput');
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault(); dz.classList.remove('drag');
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) readFile(f);
+      else statusMsg($('#inputStatus'), 'Drop produced no file.', 'error');
+    });
+    dz.addEventListener('click', () => fi.click());
+    $('#chooseFileBtn').addEventListener('click', (e) => { e.stopPropagation(); fi.click(); });
+    fi.addEventListener('change', () => { if (fi.files[0]) readFile(fi.files[0]); fi.value = ''; });
+    $('#pasteBtn').addEventListener('click', () => { $('#pasteModal').hidden = false; $('#pasteArea').focus(); });
+    $('#pasteCancel').addEventListener('click', () => { $('#pasteModal').hidden = true; });
+    $('#pasteParse').addEventListener('click', () => {
+      const text = $('#pasteArea').value;
+      if (!text.trim()) { statusMsg($('#pasteStatus'), 'Nothing pasted.', 'error'); return; }
+      $('#pasteModal').hidden = true;
+      loadArchive(new TextEncoder().encode(text), 'pasted.mhtml');
+    });
+    $('#demoBtn').addEventListener('click', () => {
+      loadArchive(new TextEncoder().encode(UJE.DemoArchive.buildDemoArchive()), 'demo-archive.mhtml');
+    });
+    $('#clearBtn').addEventListener('click', clearAll);
+  }
+
+  function readFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => loadArchive(new Uint8Array(reader.result), file.name);
+    reader.onerror = () => statusMsg($('#inputStatus'), 'Could not read file: ' + reader.error, 'error');
+    reader.readAsArrayBuffer(file);
+  }
+
+  function clearAll() {
+    Object.assign(state, {
+      rawBytes: null, rawFilename: '', archive: null, task: null,
+      reports: { A: null, B: null }, contextPackage: null, aiResult: null,
+      final: { aestheticsOption: '', aestheticsReason: '', functionalityOption: '', functionalityReason: '' },
+      finalDirty: { aestheticsOption: false, aestheticsReason: false, functionalityOption: false, functionalityReason: false },
+      requirements: [], historyId: null, payloadPreviewShown: false,
+    });
+    state.observations = { aVisual: '', aInteraction: '', bVisual: '', bInteraction: '' };
+    ['obsAVisual', 'obsAInteraction', 'obsBVisual', 'obsBInteraction'].forEach(id => { $('#' + id).value = ''; });
+    $('#workspace').hidden = true;
+    $('#diagnosticsDrawer').hidden = true;
+    statusMsg($('#inputStatus'), '');
+    $('#dropZone').classList.remove('loaded');
+    $('#dropZoneMain').textContent = 'DROP UI JERRY MHTML HERE';
+    $('#dropZoneSub').textContent = '.mhtml / .mht / multipart/related — or use the buttons below';
+  }
+
+  function loadArchive(bytes, filename) {
+    statusMsg($('#inputStatus'), 'Parsing ' + filename + ' (' + fmtBytes(bytes.length) + ')…');
+    let archive;
+    try {
+      archive = UJE.MhtmlParser.parse(bytes, filename);
+    } catch (e) {
+      statusMsg($('#inputStatus'), 'Parser crashed: ' + e.message, 'error');
+      return;
+    }
+    state.rawBytes = bytes;
+    state.rawFilename = filename;
+    state.archive = archive;
+
+    let task = null;
+    try {
+      task = UJE.TaskExtractor.extract(archive, { matchingSensitivity: state.settings.matchingSensitivity });
+    } catch (e) {
+      archive.warnings.push('Task extraction error: ' + e.message);
+    }
+    state.task = task;
+
+    state.reports = { A: null, B: null };
+    if (task) {
+      for (const k of ['A', 'B']) {
+        const cand = task['website' + k];
+        if (cand && cand.part) {
+          try { state.reports[k] = UJE.CandidateParser.analyze(cand, archive); }
+          catch (e) { archive.warnings.push('Candidate ' + k + ' analysis error: ' + e.message); }
+        }
+      }
+    }
+
+    // reset per-archive evaluation state
+    state.contextPackage = null;
+    state.aiResult = null;
+    state.requirements = [];
+    state.historyId = null;
+    state.payloadPreviewShown = false;
+    state.payloadPreviewHtml = '';
+    state.aiStatus = { msg: '', kind: '' };
+    state.final = {
+      aestheticsOption: (task && task.existingAnswers.aestheticsOption) || '',
+      aestheticsReason: (task && task.existingAnswers.aestheticsReason) || '',
+      functionalityOption: (task && task.existingAnswers.functionalityOption) || '',
+      functionalityReason: (task && task.existingAnswers.functionalityReason) || '',
+    };
+    state.finalDirty = { aestheticsOption: false, aestheticsReason: false, functionalityOption: false, functionalityReason: false };
+    state.observations = { aVisual: '', aInteraction: '', bVisual: '', bInteraction: '' };
+
+    renderAll();
+    saveHistorySoon();
+
+    const nHtml = archive.htmlParts.length;
+    const ok = task && task.userRequest.text && task.websiteA && task.websiteB;
+    statusMsg($('#inputStatus'),
+      'Loaded ' + filename + ' — ' + archive.parts.length + ' resources, ' + nHtml + ' HTML documents. ' +
+      (ok ? 'Task, Website A and Website B identified.' : 'Attention needed — check diagnostics / manual assignment.'),
+      ok ? 'ok' : 'warn');
+    $('#dropZone').classList.add('loaded');
+    $('#dropZoneMain').textContent = filename;
+    $('#dropZoneSub').textContent = fmtBytes(bytes.length) + ' · ' + archive.parts.length + ' resources · drop another file to replace';
+  }
+
+  /* ================= rendering: top-level ================= */
+
+  function renderAll() {
+    const has = !!state.archive;
+    $('#workspace').hidden = !has;
+    if (!has) return;
+    renderTaskPanel();
+    renderCandidatePanel('A');
+    renderCandidatePanel('B');
+    renderRequirements();
+    renderObservations();
+    renderAiPanel();
+    renderResults();
+    renderOutputs();
+    renderDiagnostics();
+  }
+
+  function confBadge(c) {
+    if (c == null) return '';
+    const pct = Math.round(c * 100);
+    const cls = c >= 0.85 ? 'good' : c >= 0.6 ? 'warn' : 'bad';
+    return '<span class="badge ' + cls + '">confidence ' + pct + '%</span>';
+  }
+
+  function renderTaskPanel() {
+    const t = state.task;
+    const box = $('#taskPanel');
+    if (!t) {
+      box.innerHTML = '<h2>Task</h2><p class="error">Task extraction failed. See diagnostics.</p>';
+      return;
+    }
+    const warnHtml = state.archive.warnings.concat(t.warnings || [])
+      .map(w => '<li>' + esc(w) + '</li>').join('');
+    box.innerHTML = `
+      <div class="panel-head"><h2>Original user request</h2>
+        <div class="meta">
+          ${esc(t.taskTitle || '')}${t.taskId ? ' · <code>' + esc(t.taskId) + '</code>' : ''}
+          ${t.sourceUrl ? ' · <a href="' + esc(t.sourceUrl) + '" target="_blank" rel="noreferrer">' + esc(t.sourceUrl) + '</a>' : ''}
+        </div>
+      </div>
+      <textarea id="userRequestEdit" class="mono req-edit" rows="8" aria-label="User request (editable)">${esc(t.userRequest.text)}</textarea>
+      <div class="row gap wrap">
+        ${confBadge(t.userRequest.confidence)}
+        <span class="dim">extraction: ${esc(t.userRequest.method)}</span>
+        <button id="reanalyzeBtn" class="btn small">Re-analyze archive</button>
+      </div>
+      ${(t.existingAnswers.aestheticsOption || t.existingAnswers.functionalityOption || t.existingAnswers.aestheticsReason || t.existingAnswers.functionalityReason) ? `
+      <details class="existing"><summary>Answers already entered on the task page</summary>
+        <div class="kv"><span>Aesthetics</span><span>${esc(t.existingAnswers.aestheticsOption || '—')}</span></div>
+        <div class="kv"><span>Aesthetics reason</span><span>${esc(t.existingAnswers.aestheticsReason || '—')}</span></div>
+        <div class="kv"><span>Functionality</span><span>${esc(t.existingAnswers.functionalityOption || '—')}</span></div>
+        <div class="kv"><span>Functionality reason</span><span>${esc(t.existingAnswers.functionalityReason || '—')}</span></div>
+      </details>` : ''}
+      ${t.shellHiddenNotes.length ? '<div class="note">' + t.shellHiddenNotes.map(esc).join('<br>') + '</div>' : ''}
+      ${warnHtml ? '<details class="warnings" open><summary>Warnings (' + (state.archive.warnings.length + (t.warnings || []).length) + ')</summary><ul>' + warnHtml + '</ul></details>' : ''}
+    `;
+    $('#userRequestEdit').addEventListener('input', (e) => {
+      t.userRequest.text = e.target.value;
+      t.userRequest.method = 'manual edit';
+      t.userRequest.confidence = 1;
+      state.contextPackage = null;
+      renderAiPanel();
+      saveHistorySoon();
+    });
+    $('#reanalyzeBtn').addEventListener('click', () => {
+      const keepNotes = state.settings.preserveNotesOnReevaluate;
+      const savedObs = Object.assign({}, state.observations);
+      const savedReq = state.requirements;
+      const task = UJE.TaskExtractor.extract(state.archive, { matchingSensitivity: state.settings.matchingSensitivity });
+      state.task = task;
+      for (const k of ['A', 'B']) {
+        state.reports[k] = null;
+        const cand = task['website' + k];
+        if (cand && cand.part) {
+          try { state.reports[k] = UJE.CandidateParser.analyze(cand, state.archive); } catch (e) { /* surfaced in diagnostics */ }
+        }
+      }
+      if (keepNotes) { state.observations = savedObs; state.requirements = savedReq; }
+      state.contextPackage = null;
+      renderAll();
+      saveHistorySoon();
+    });
+  }
+
+  /* ================= candidate panels ================= */
+
+  const CAND_VIEWS = [
+    ['render', 'Render'], ['source', 'Source'], ['dom', 'DOM'], ['css', 'CSS'],
+    ['js', 'JavaScript'], ['anim', 'Animations'], ['hidden', 'Hidden'], ['evidence', 'Evidence'],
+  ];
+
+  function renderCandidatePanel(label) {
+    const panel = $('#cand' + label + 'Panel');
+    const t = state.task;
+    const cand = t && t['website' + label];
+    const report = state.reports[label];
+
+    const htmlOptions = state.archive.htmlParts.map(p =>
+      '<option value="' + p.index + '"' + (cand && cand.part.index === p.index ? ' selected' : '') + '>part #' + p.index + ' — ' + esc((p.contentLocation || p.contentId || '(no location)').slice(0, 70)) + '</option>').join('');
+
+    panel.innerHTML = `
+      <div class="panel-head">
+        <h2 class="cand-title cand-${label.toLowerCase()}">Website ${label}</h2>
+        ${cand ? confBadge(cand.confidence) : '<span class="badge bad">not identified</span>'}
+      </div>
+      <div class="cand-url">${cand ? esc(cand.url || '(no URL)') : '—'}</div>
+      <div class="row gap small-row">
+        <label class="dim" for="cand${label}Part">HTML resource</label>
+        <select id="cand${label}Part" class="mono">${htmlOptions}</select>
+      </div>
+      ${report ? `
+      <div class="cand-tabs" role="tablist" aria-label="Website ${label} views">
+        ${CAND_VIEWS.map(([id, name]) => '<button role="tab" data-view="' + id + '" class="cand-tab' + (state.candViews[label] === id ? ' active' : '') + '">' + name + (id === 'hidden' && report.hidden.length ? ' (' + report.hidden.length + ')' : '') + '</button>').join('')}
+      </div>
+      <div class="cand-body" id="cand${label}Body"></div>` :
+      '<p class="dim">No analyzable document assigned. Pick an HTML resource above.</p>'}
+    `;
+
+    $('#cand' + label + 'Part').addEventListener('change', (e) => {
+      const part = state.archive.parts.find(p => p.index === Number(e.target.value));
+      if (!part || !state.task) return;
+      // prevent both candidates pointing at the same part without confirmation
+      state.task['website' + label] = {
+        label, part, url: part.contentLocation, iframeSrc: '',
+        confidence: 1, method: 'manual assignment',
+        relatedResources: [],
+      };
+      try {
+        state.task['website' + label].relatedResources = [];
+        state.reports[label] = UJE.CandidateParser.analyze(state.task['website' + label], state.archive);
+      } catch (err) {
+        state.reports[label] = null;
+        state.archive.warnings.push('Manual assignment analysis failed: ' + err.message);
+      }
+      state.contextPackage = null;
+      renderAll();
+      saveHistorySoon();
+    });
+
+    if (report) {
+      panel.querySelectorAll('.cand-tab').forEach(btn => btn.addEventListener('click', () => {
+        state.candViews[label] = btn.dataset.view;
+        panel.querySelectorAll('.cand-tab').forEach(b => b.classList.toggle('active', b === btn));
+        renderCandidateBody(label);
+      }));
+      renderCandidateBody(label);
+    }
+  }
+
+  function renderCandidateBody(label) {
+    const body = $('#cand' + label + 'Body');
+    const report = state.reports[label];
+    if (!report) { body.innerHTML = ''; return; }
+    const view = state.candViews[label];
+    if (view === 'render') body.innerHTML = '', body.appendChild(renderSandboxed(label, report));
+    else if (view === 'source') body.innerHTML = '<pre class="code">' + esc(report.html) + '</pre>';
+    else if (view === 'dom') body.innerHTML = renderDomInventory(report);
+    else if (view === 'css') body.innerHTML = renderCssInventory(report);
+    else if (view === 'js') body.innerHTML = renderJsInventory(report);
+    else if (view === 'anim') body.innerHTML = renderAnimInventory(report);
+    else if (view === 'hidden') body.innerHTML = renderHidden(report);
+    else if (view === 'evidence') body.innerHTML = renderEvidence(report);
+  }
+
+  function renderSandboxed(label, report) {
+    // Build a renderable document: inline archived CSS, inline archived images as data URIs.
+    // Candidate JavaScript is NEVER executed: the iframe has an empty sandbox attribute.
+    let html = report.html;
+    html = html.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi, (m, href) => {
+      const part = state.archive.resolveRef(href);
+      if (part && part.contentType === 'text/css' && part.text) {
+        return '<style data-inlined-from="' + esc(href) + '">\n' + part.text.replace(/<\/style/gi, '<\\/style') + '\n</style>';
+      }
+      return '<!-- stylesheet not in archive: ' + esc(href) + ' -->';
+    });
+    html = html.replace(/(src=["'])(cid:[^"']+)(["'])/gi, (m, pre, ref, post) => {
+      const part = state.archive.resolveRef(ref);
+      if (part && /^image\//.test(part.contentType)) {
+        let bin = '';
+        const CH = 0x8000;
+        for (let i = 0; i < part.bytes.length; i += CH) bin += String.fromCharCode.apply(null, part.bytes.subarray(i, i + CH));
+        return pre + 'data:' + part.contentType + ';base64,' + btoa(bin) + post;
+      }
+      return m;
+    });
+    const wrap = h('div', { class: 'render-wrap' });
+    wrap.appendChild(h('div', { class: 'render-note', text: 'Sandboxed render — scripts disabled, no network, no same-origin access. CSS animations still run.' }));
+    const iframe = h('iframe', {
+      class: 'cand-frame',
+      sandbox: '',           // fully restricted: no scripts, no same-origin, no forms, no popups
+      referrerpolicy: 'no-referrer',
+      'aria-label': 'Sandboxed render of Website ' + label,
+    });
+    iframe.srcdoc = html;
+    wrap.appendChild(iframe);
+    return wrap;
+  }
+
+  function kv(label, value) {
+    return '<div class="kv"><span>' + esc(label) + '</span><span>' + value + '</span></div>';
+  }
+  function listOrNone(items, render) {
+    if (!items || !items.length) return '<p class="dim">None found.</p>';
+    return '<ul class="inv">' + items.map(render).join('') + '</ul>';
+  }
+
+  function renderDomInventory(r) {
+    const d = r.dom;
+    return `
+      ${kv('Title', esc(d.title))}${kv('Elements', d.elementCount)}${kv('Lang', esc(d.lang || '—'))}
+      <h3>Visible text excerpt</h3><p class="quote">${esc(d.textExcerpt || '—')}</p>
+      <h3>Headings (${d.headings.length})</h3>${listOrNone(d.headings, x => '<li><code>' + x.level + '</code> ' + esc(x.text) + '</li>')}
+      <h3>Links (${d.links.length})</h3>${listOrNone(d.links, x => '<li>' + esc(x.text || '(no text)') + ' → <code>' + esc(x.href) + '</code></li>')}
+      <h3>Buttons / controls (${d.buttons.length})</h3>${listOrNone(d.buttons, x => '<li>' + esc(x) + '</li>')}
+      <h3>Forms (${d.forms.length})</h3>${listOrNone(d.forms, f => '<li><code>' + esc(f.method.toUpperCase() + ' ' + (f.action || '(no action)')) + '</code> fields: ' + esc(f.fields.join(', ') || 'none') + '</li>')}
+      <h3>Inputs (${d.inputs.length})</h3>${listOrNone(d.inputs, x => '<li><code>' + esc(x) + '</code></li>')}
+      <h3>Images (${d.images.length})</h3>${listOrNone(d.images, x => '<li>' + esc(x.alt || '(no alt)') + ' <code>' + esc(x.src) + '</code></li>')}
+      <h3>SVGs (${d.svgs.length})</h3>${listOrNone(d.svgs, s => '<li>viewBox <code>' + esc(s.viewBox) + '</code>, ' + s.paths + ' paths' + (s.pathClasses.length ? ', classes <code>' + esc(s.pathClasses.join(' ')) + '</code>' : '') + (s.inlineStyles ? ', inline style state on ' + s.inlineStyles + ' element(s)' : '') + (s.ariaLabel ? ', aria-label "' + esc(s.ariaLabel) + '"' : '') + '</li>')}
+      ${kv('Canvas / media / dialogs / nav / tabs', d.canvases + ' / ' + d.media.length + ' / ' + d.dialogs + ' / ' + d.navs + ' / ' + d.tabs)}
+      ${Object.keys(d.ariaRoles).length ? kv('ARIA roles', esc(Object.entries(d.ariaRoles).map(([r2, n]) => r2 + '×' + n).join(', '))) : ''}
+    `;
+  }
+
+  function renderCssInventory(r) {
+    const c = r.css;
+    return `
+      ${kv('Rules', c.ruleCount)}${kv('@media blocks', c.mediaQueries.length)}${kv('prefers-reduced-motion', c.reducedMotion ? 'supported' : 'not handled')}
+      <h3>Colors (${c.colors.length})</h3>
+      <div class="swatches">${c.colors.slice(0, 40).map(x => '<span class="swatch"><i style="background:' + esc(x.color) + '"></i>' + esc(x.color) + (x.count > 1 ? ' ×' + x.count : '') + '</span>').join('') || '<span class="dim">none</span>'}</div>
+      <h3>Fonts</h3>${listOrNone(c.fonts, x => '<li>' + esc(x.family) + '</li>')}
+      <h3>Transforms (${c.transforms.length})</h3>${listOrNone(c.transforms, x => '<li><code>' + esc(x.selector) + '</code> { ' + esc(x.declarations) + ' }</li>')}
+      ${c.mediaQueries.length ? '<h3>Media queries</h3><ul class="inv">' + c.mediaQueries.map(mq => '<li><code>@media ' + esc(mq) + '</code></li>').join('') + '</ul>' : ''}
+      <h3>CSS sources</h3>
+      ${r.cssSources.map((s, i) => '<details class="src"><summary>' + esc(s.origin) + ' — ' + fmtBytes(s.size) + '</summary><pre class="code">' + esc(s.text.slice(0, 20000)) + (s.text.length > 20000 ? '\n…(' + (s.text.length - 20000) + ' more chars)' : '') + '</pre></details>').join('') || '<p class="dim">No CSS.</p>'}
+    `;
+  }
+
+  function renderJsInventory(r) {
+    const j = r.js;
+    if (!j.hasJavaScript) return '<p class="dim">No JavaScript in this candidate. Any motion/behavior is CSS-driven.</p>';
+    return `
+      ${kv('addEventListener calls', j.eventListenerCount + (j.eventListeners.length ? ' (' + esc(Array.from(new Set(j.eventListeners)).join(', ')) + ')' : ''))}
+      ${kv('Timers', 'setTimeout×' + j.timers.setTimeout + ' · setInterval×' + j.timers.setInterval + ' · rAF×' + j.timers.requestAnimationFrame)}
+      ${kv('DOM queries / mutations', j.domQueries + ' / innerHTML×' + j.domMutations.innerHTML + ' classList×' + j.domMutations.classList + ' style×' + j.domMutations.styleChanges)}
+      ${kv('Form behavior signals', j.formBehavior)}
+      ${kv('Navigation / storage / network', j.navigation + ' / ' + j.storage + ' / ' + j.network)}
+      ${j.animationApis.webAnimations + j.animationApis.gsap ? kv('Animation APIs', 'element.animate×' + j.animationApis.webAnimations + ' · GSAP×' + j.animationApis.gsap) : ''}
+      ${j.inlineHandlerAttrs.length ? kv('Inline on* handlers', esc(j.inlineHandlerAttrs.join(' '))) : ''}
+      ${j.suspicious.length ? '<div class="note warn">Suspicious constructs: ' + esc(j.suspicious.join(', ')) + '</div>' : ''}
+      <h3>JS sources</h3>
+      ${r.jsSources.map(s => '<details class="src"><summary>' + esc(s.origin) + ' — ' + fmtBytes(s.size) + '</summary><pre class="code">' + esc(s.text.slice(0, 20000)) + (s.text.length > 20000 ? '\n…' : '') + '</pre></details>').join('')}
+      <p class="dim">Static analysis only — candidate JavaScript is never executed by this tool.</p>
+    `;
+  }
+
+  function renderAnimInventory(r) {
+    const c = r.css, j = r.js;
+    return `
+      <h3>@keyframes (${c.keyframes.length})</h3>
+      ${c.keyframes.map(k => '<details class="src" open><summary>' + esc(k.name) + '</summary><ul class="inv">' + k.steps.map(s => '<li><code>' + esc(s) + '</code></li>').join('') + '</ul></details>').join('') || '<p class="dim">None.</p>'}
+      <h3>Animation rules (${c.animations.length})</h3>${listOrNone(c.animations, a => '<li><code>' + esc(a.selector) + '</code> { ' + esc(a.declarations) + ' }</li>')}
+      <h3>Transitions (${c.transitions.length})</h3>${listOrNone(c.transitions, t2 => '<li><code>' + esc(t2.selector) + '</code> { ' + esc(t2.declarations) + ' }</li>')}
+      ${kv('JS animation APIs', 'element.animate×' + j.animationApis.webAnimations + ' · GSAP refs×' + j.animationApis.gsap + ' · rAF×' + j.animationApis.animationFrame)}
+      ${kv('prefers-reduced-motion', c.reducedMotion ? 'supported' : 'not handled')}
+    `;
+  }
+
+  function renderHidden(r) {
+    if (!r.hidden.length) return '<p class="dim">No hidden or inactive content detected in this candidate.</p>';
+    return '<p class="note">These findings describe material NOT necessarily visible in the captured active state.</p>' +
+      '<ul class="inv hidden-list">' + r.hidden.map(x =>
+        '<li><span class="badge warn">' + esc(x.kind) + '</span> <code>' + esc(x.target) + '</code>' +
+        (x.excerpt ? '<div class="quote">' + esc(x.excerpt) + '</div>' : '') + '</li>').join('') + '</ul>';
+  }
+
+  function renderEvidence(r) {
+    return `
+      <h3>Parser observations</h3>
+      ${listOrNone(r.observations, o => '<li>' + esc(o) + '</li>')}
+      <h3>Archived media resources</h3>
+      ${listOrNone(r.mediaResources, mr => '<li><code>' + esc(mr.type) + '</code> ' + esc(mr.location) + ' — ' + fmtBytes(mr.size) + '</li>')}
+      ${kv('HTML size', fmtBytes(r.htmlSize))}${kv('Archive part', '#' + r.partIndex)}
+    `;
+  }
+
+  /* ================= requirements checklist (human-editable) ================= */
+
+  const REQ_CATS = ['content', 'visual', 'layout', 'behavior', 'animation', 'interaction', 'responsive', 'prohibition', 'other'];
+  const REQ_MARKS = ['?', '✓', '✗'];
+
+  function renderRequirements() {
+    const box = $('#reqPanel');
+    box.innerHTML = `
+      <div class="panel-head"><h2>Requirement checklist</h2>
+      <span class="dim">human-maintained — the AI sees this only if you paste it into notes; nothing here is auto-judged</span></div>
+      <table class="req-table" id="reqTable">
+        <thead><tr><th>Requirement</th><th>Category</th><th>A</th><th>B</th><th>Evidence / note</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="btn small" id="reqAdd">+ Add requirement</button>
+    `;
+    const tbody = box.querySelector('tbody');
+    const drawRow = (row, i) => {
+      const tr = h('tr');
+      const mkSel = (val, opts, set) => {
+        const s = h('select');
+        opts.forEach(o => s.appendChild(h('option', { value: o, text: o })));
+        s.value = val;
+        s.addEventListener('change', () => { set(s.value); saveHistorySoon(); });
+        return s;
+      };
+      const reqInput = h('input', { type: 'text', value: row.label, class: 'req-label' });
+      reqInput.addEventListener('input', () => { row.label = reqInput.value; saveHistorySoon(); });
+      const evInput = h('input', { type: 'text', value: row.evidence || '', placeholder: 'where did you see this?' });
+      evInput.addEventListener('input', () => { row.evidence = evInput.value; saveHistorySoon(); });
+      tr.append(
+        h('td', null, reqInput),
+        h('td', null, mkSel(row.category, REQ_CATS, v => row.category = v)),
+        h('td', null, mkSel(row.a, REQ_MARKS, v => row.a = v)),
+        h('td', null, mkSel(row.b, REQ_MARKS, v => row.b = v)),
+        h('td', null, evInput),
+        h('td', null, h('button', { class: 'btn tiny danger', text: '✕', onclick: () => { state.requirements.splice(i, 1); renderRequirements(); saveHistorySoon(); } })),
+      );
+      return tr;
+    };
+    state.requirements.forEach((row, i) => tbody.appendChild(drawRow(row, i)));
+    $('#reqAdd').addEventListener('click', () => {
+      state.requirements.push({ label: '', category: 'content', a: '?', b: '?', evidence: '' });
+      renderRequirements();
+      const inputs = tbody.querySelectorAll('.req-label');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    });
+  }
+
+  /* ================= human observations ================= */
+
+  function renderObservations() {
+    const map = { obsAVisual: 'aVisual', obsAInteraction: 'aInteraction', obsBVisual: 'bVisual', obsBInteraction: 'bInteraction' };
+    for (const [id, key] of Object.entries(map)) {
+      const ta = $('#' + id);
+      if (ta.value !== state.observations[key]) ta.value = state.observations[key];
+      ta.oninput = () => {
+        state.observations[key] = ta.value;
+        state.contextPackage = null;
+        renderAiPanel();
+        saveHistorySoon();
+      };
+    }
+  }
+
+  /* ================= AI panel ================= */
+
+  function ensureContext() {
+    if (!state.contextPackage && state.task) {
+      state.contextPackage = UJE.AiContextBuilder.build({
+        task: state.task,
+        reportA: state.reports.A,
+        reportB: state.reports.B,
+        observations: state.observations,
+        settings: state.settings,
+      });
+    }
+    return state.contextPackage;
+  }
+
+  function renderAiPanel() {
+    const box = $('#aiPanel');
+    const s = state.settings;
+    if (!state.task) { box.hidden = true; return; }
+    box.hidden = false;
+    const ctx = ensureContext();
+    const configured = !!(s.apiBaseUrl && s.apiKey && s.model);
+    box.innerHTML = `
+      <div class="panel-head"><h2>AI evaluation</h2>
+        <span class="dim">the LLM is the evaluator — this tool collects evidence, builds context, validates the response</span>
+      </div>
+      <div class="row gap wrap">
+        <span class="badge ${ctx.staged ? 'warn' : 'good'}">context ≈ ${ctx.estTotalTokens.toLocaleString()} tokens ${ctx.staged ? '(two-stage workflow will be used)' : '(single call)'}</span>
+        <span class="badge">${ctx.sections.filter(x => x.included).length} sections included</span>
+        ${ctx.omitted.length ? '<span class="badge bad">' + ctx.omitted.length + ' sections omitted (budget)</span>' : ''}
+      </div>
+      <details class="src"><summary>Context contents &amp; budget detail</summary>
+        <ul class="inv">
+          ${ctx.sections.map(sec => '<li>' + (sec.included ? '✅' : '⛔') + ' ' + esc(sec.title) + ' — ≈' + sec.estTokens.toLocaleString() + ' tok' + (sec.truncated ? ' (middle truncated)' : '') + (sec.omitReason ? ' — <span class="dim">' + esc(sec.omitReason) + '</span>' : '') + '</li>').join('')}
+        </ul>
+      </details>
+      <div class="row gap wrap ai-controls">
+        <label>Decision style
+          <select id="toneSelect">
+            <option value="conservative">Conservative</option>
+            <option value="balanced">Balanced</option>
+            <option value="decisive">Decisive</option>
+          </select>
+        </label>
+        <button id="evalBtn" class="btn primary" ${configured ? '' : 'disabled'}>EVALUATE WITH AI</button>
+        <button id="reevalBtn" class="btn" ${state.aiResult && configured ? '' : 'disabled'}>RE-EVALUATE</button>
+        <button id="reevalNotesBtn" class="btn" ${state.aiResult && configured ? '' : 'disabled'}>RE-EVALUATE WITH NOTES</button>
+      </div>
+      ${configured ? '' : '<p class="note warn">AI is not configured — set endpoint, API key and model in the Admin tab. Nothing is ever sent automatically.</p>'}
+      <div id="payloadPreview"></div>
+      <div id="aiStatus" class="status"></div>
+    `;
+    if (state.aiStatus.msg) statusMsg($('#aiStatus'), state.aiStatus.msg, state.aiStatus.kind);
+    if (state.payloadPreviewHtml) $('#payloadPreview').innerHTML = state.payloadPreviewHtml;
+    $('#toneSelect').value = s.tone;
+    $('#toneSelect').addEventListener('change', (e) => { s.tone = e.target.value; UJE.Storage.saveSettings(s); });
+    if (configured) {
+      $('#evalBtn').addEventListener('click', () => runEvaluation(false));
+      if (state.aiResult) {
+        $('#reevalBtn').addEventListener('click', () => runEvaluation(false));
+        $('#reevalNotesBtn').addEventListener('click', () => {
+          const obsEmpty = !Object.values(state.observations).some(v => v.trim());
+          if (obsEmpty) {
+            setAiStatus('No human observations entered yet — add notes above for a stronger re-evaluation. Running anyway.', 'warn');
+          }
+          $('#observationsPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          runEvaluation(true);
+        });
+      }
+    }
+  }
+
+  function setAiStatus(msg, kind) {
+    state.aiStatus = { msg, kind };
+    const el = $('#aiStatus');
+    if (el) statusMsg(el, msg, kind);
+  }
+
+  async function runEvaluation(withNotes) {
+    const s = state.settings;
+    const ctx = ensureContext();
+    const systemPrompt = UJE.EvaluatorPrompt.buildSystemPrompt(s);
+
+    // diagnostics mode: show exactly what will be sent before the first evaluation
+    if (s.diagnosticsMode && !state.payloadPreviewShown) {
+      const userText = ctx.staged
+        ? '(two-stage: per-candidate summaries first, then comparison — see Context contents above)'
+        : ctx.toPromptText();
+      state.payloadPreviewHtml = `
+        <details class="src" open><summary>PAYLOAD PREVIEW — exactly what will be sent (diagnostics mode; shown once per archive)</summary>
+          <h4>system</h4><pre class="code">${esc(systemPrompt)}</pre>
+          <h4>user (${userText.length.toLocaleString()} chars)</h4><pre class="code">${esc(userText.slice(0, 6000))}${userText.length > 6000 ? '\n… [preview clipped at 6,000 chars; full text is sent]' : ''}</pre>
+        </details>`;
+      $('#payloadPreview').innerHTML = state.payloadPreviewHtml;
+      state.payloadPreviewShown = true;
+    }
+
+    const btn = $('#evalBtn');
+    btn.disabled = true;
+    setAiStatus('Evaluating with ' + s.model + '…');
+    try {
+      const out = await UJE.AiClient.evaluateTask({
+        settings: s, systemPrompt, contextPackage: ctx,
+        task: state.task, reportA: state.reports.A, reportB: state.reports.B,
+        observations: state.observations,
+        onProgress: (m) => setAiStatus(m),
+      });
+      state.aiResult = out;
+      // fill final fields the human has not manually edited
+      const fill = (key, val) => { if (!state.finalDirty[key]) state.final[key] = val; };
+      fill('aestheticsOption', out.result.aesthetics.option);
+      fill('aestheticsReason', out.result.aesthetics.reason);
+      fill('functionalityOption', out.result.functionality.option);
+      fill('functionalityReason', out.result.functionality.reason);
+      setAiStatus(
+        (out.valid ? 'Evaluation complete.' : 'Evaluation complete with validation issues — review below.') +
+        (out.usage.prompt_tokens ? ' Tokens: ' + out.usage.prompt_tokens.toLocaleString() + ' in / ' + out.usage.completion_tokens.toLocaleString() + ' out.' : '') +
+        (out.repairs.length ? ' ' + out.repairs.join(' ') : ''),
+        out.valid ? 'ok' : 'warn');
+    } catch (e) {
+      setAiStatus('AI evaluation failed: ' + e.message, 'error');
+    }
+    btn.disabled = false;
+    renderAiPanel();
+    renderResults();
+    renderOutputs();
+    saveHistorySoon();
+  }
+
+  /* ================= results (evidence viewer) ================= */
+
+  function renderResults() {
+    const box = $('#resultsPanel');
+    const out = state.aiResult;
+    if (!out) { box.innerHTML = ''; box.hidden = true; return; }
+    box.hidden = false;
+    const dimCard = (dim, title) => {
+      const d = out.result[dim];
+      if (!d) return '';
+      const conf = state.settings.showConfidence ? `
+        <div class="conf"><div class="conf-bar"><i style="width:${Math.round((d.confidence || 0) * 100)}%"></i></div>
+        <span>${Math.round((d.confidence || 0) * 100)}% AI confidence</span></div>` : '';
+      return `
+      <div class="result-card">
+        <h3>${title} — AI suggestion: <strong>${esc(d.option)}</strong></h3>
+        ${conf}
+        <p class="quote">${esc(d.reason)} <span class="dim">(${wordCount(d.reason)} words)</span></p>
+        <h4>Evidence used</h4>
+        ${d.evidence.length ? '<ul class="inv evidence">' + d.evidence.map(ev => {
+          const target = /website a\b/i.test(ev) && !/website b\b/i.test(ev) ? 'A' : /website b\b/i.test(ev) && !/website a\b/i.test(ev) ? 'B' : null;
+          return '<li' + (target ? ' data-goto="' + target + '" class="linked" title="Click to jump to Website ' + target + '"' : '') + '>' + esc(ev) + '</li>';
+        }).join('') + '</ul>' : '<p class="dim">None supplied.</p>'}
+        <h4>Caveats</h4>
+        ${d.caveats.length ? '<ul class="inv caveats">' + d.caveats.map(c => '<li>' + esc(c) + '</li>').join('') + '</ul>' : '<p class="dim">None supplied.</p>'}
+      </div>`;
+    };
+    box.innerHTML = `
+      <div class="panel-head"><h2>AI result — inspectable evidence</h2>
+        <span class="dim">model: ${esc(out.model || '?')}${out.staged ? ' · two-stage workflow' : ''}${out.valid ? '' : ' · <span class="error">validation issues</span>'}</span>
+      </div>
+      ${out.issues.length ? '<div class="note warn">Validation issues: ' + out.issues.map(esc).join(' | ') + '</div>' : ''}
+      ${out.repairs.length ? '<div class="note">Reason repairs: ' + out.repairs.map(esc).join(' | ') + '</div>' : ''}
+      <div class="result-grid">${dimCard('aesthetics', 'Aesthetics')}${dimCard('functionality', 'Functionality')}</div>
+      ${out.stagedReports ? '<details class="src"><summary>Stage-1 candidate analyst reports</summary><h4>Website A</h4><pre class="code">' + esc(out.stagedReports.A || '') + '</pre><h4>Website B</h4><pre class="code">' + esc(out.stagedReports.B || '') + '</pre></details>' : ''}
+      <details class="src"><summary>Raw evaluation request messages</summary><pre class="code">${esc(out.sentMessages.map(m => '--- ' + m.role + ' ---\n' + m.content).join('\n\n'))}</pre></details>
+    `;
+    box.querySelectorAll('.evidence li.linked').forEach(li => {
+      li.addEventListener('click', () => {
+        const panel = $('#cand' + li.dataset.goto + 'Panel');
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        panel.classList.add('flash');
+        setTimeout(() => panel.classList.remove('flash'), 1500);
+      });
+    });
+  }
+
+  /* ================= final outputs ================= */
+
+  function renderOutputs() {
+    const box = $('#outputPanel');
+    if (!state.task) { box.hidden = true; return; }
+    box.hidden = false;
+    const min = state.settings.minReasonWords, max = state.settings.maxReasonWords;
+    const ai = state.aiResult && state.aiResult.result;
+    const overridden = (key, aiVal) => state.finalDirty[key] && ai && state.final[key] !== aiVal;
+
+    const field = (key, label, isSelect, aiVal) => {
+      const empty = !isSelect && !state.final[key].trim();
+      const wc = isSelect ? null : wordCount(state.final[key]);
+      const bad = wc != null && (wc < min || wc > max) && !empty;
+      const over = overridden(key, aiVal);
+      return `
+      <div class="out-field">
+        <div class="out-head">
+          <label for="out_${key}">${label}</label>
+          <span class="row gap">
+            ${over ? '<span class="badge warn">human override</span>' : ''}
+            ${wc != null && !empty ? '<span class="wc ' + (bad ? 'bad' : 'ok') + '">' + wc + ' words' + (bad ? ' — must be ' + min + '–' + max : '') + '</span>' : ''}
+            <button class="btn small copy" data-copy="${key}">Copy</button>
+          </span>
+        </div>
+        ${isSelect ? `
+        <select id="out_${key}" data-key="${key}">
+          <option value="">(unset)</option>
+          ${UJE.AiClient.OPTIONS.map(o => '<option' + (state.final[key] === o ? ' selected' : '') + '>' + o + '</option>').join('')}
+        </select>` : `
+        <textarea id="out_${key}" data-key="${key}" rows="4" class="${bad ? 'invalid' : ''}">${esc(state.final[key])}</textarea>`}
+      </div>`;
+    };
+
+    box.innerHTML = `
+      <div class="panel-head"><h2>Final answers</h2>
+        <span class="dim">edit freely — the human is the final judge · reasons must be ${min}–${max} words</span>
+      </div>
+      ${field('aestheticsOption', 'Aesthetics option', true, ai && ai.aesthetics.option)}
+      ${field('aestheticsReason', 'Aesthetics reason', false, ai && ai.aesthetics.reason)}
+      ${field('functionalityOption', 'Functionality option', true, ai && ai.functionality.option)}
+      ${field('functionalityReason', 'Functionality reason', false, ai && ai.functionality.reason)}
+      <div class="row gap">
+        <button class="btn primary" id="copyAllBtn">COPY ALL</button>
+        <span class="dim">format matches the four UI Jerry submission fields</span>
+      </div>
+    `;
+
+    box.querySelectorAll('[data-key]').forEach(el => {
+      el.addEventListener(isSelectEl(el) ? 'change' : 'input', () => {
+        const key = el.dataset.key;
+        state.final[key] = el.value;
+        state.finalDirty[key] = true;
+        if (el.tagName === 'SELECT') {
+          saveHistorySoon();
+          renderOutputs();   // selects don't hold text focus; refresh override badges
+          return;
+        }
+        if (el.tagName === 'TEXTAREA') {
+          const wc = wordCount(el.value);
+          const wcEl = el.closest('.out-field').querySelector('.wc');
+          const bad = (wc < min || wc > max) && el.value.trim().length > 0;
+          wcEl.textContent = wc + ' words' + (bad ? ' — must be ' + min + '–' + max : '');
+          wcEl.className = 'wc ' + (bad ? 'bad' : 'ok');
+          if (!el.value.trim()) { wcEl.textContent = ''; }
+          el.classList.toggle('invalid', bad);
+        }
+        saveHistorySoon();
+      });
+    });
+    function isSelectEl(el) { return el.tagName === 'SELECT'; }
+    box.querySelectorAll('.copy').forEach(btn => btn.addEventListener('click', () => {
+      copyText(state.final[btn.dataset.copy] || '', btn);
+    }));
+    $('#copyAllBtn').addEventListener('click', (e) => {
+      const f = state.final;
+      copyText(
+        'AESTHETICS OPTION\n' + (f.aestheticsOption || '(unset)') + '\n\n' +
+        'AESTHETICS REASON\n' + (f.aestheticsReason || '(unset)') + '\n\n' +
+        'FUNCTIONALITY OPTION\n' + (f.functionalityOption || '(unset)') + '\n\n' +
+        'FUNCTIONALITY REASON\n' + (f.functionalityReason || '(unset)'), e.currentTarget);
+    });
+  }
+
+  /* ================= diagnostics drawer ================= */
+
+  function renderDiagnostics() {
+    const box = $('#diagContent');
+    const a = state.archive;
+    if (!a) { box.innerHTML = '<p class="dim">No archive loaded.</p>'; return; }
+    const t = state.task;
+    const counts = {};
+    a.parts.forEach(p => counts[p.contentType] = (counts[p.contentType] || 0) + 1);
+    const line = (txt) => '<div class="diag-line">' + txt + '</div>';
+
+    let out = '';
+    out += line('<strong>MHTML</strong>');
+    out += line('&nbsp;&nbsp;File: ' + esc(a.filename) + ' (' + fmtBytes(a.size) + ')');
+    out += line('&nbsp;&nbsp;Boundary: <code>' + esc(a.boundary || 'none') + '</code>');
+    out += line('&nbsp;&nbsp;Parts: ' + a.parts.length);
+    out += line('&nbsp;&nbsp;Snapshot-Content-Location: <code>' + esc(a.headers.snapshotContentLocation || '—') + '</code>');
+    out += line('&nbsp;&nbsp;Types: ' + Object.entries(counts).map(([k, v]) => esc(k) + '×' + v).join(', '));
+    out += line('<strong>HTML DOCUMENTS (' + a.htmlParts.length + ')</strong>');
+    a.htmlParts.forEach(p => {
+      let role = '';
+      let conf = null;
+      if (t) {
+        if (t.shell.part === p) { role = 'task shell'; conf = t.shell.confidence; }
+        else if (t.websiteA && t.websiteA.part === p) { role = 'Website A'; conf = t.websiteA.confidence; }
+        else if (t.websiteB && t.websiteB.part === p) { role = 'Website B'; conf = t.websiteB.confidence; }
+        else role = 'unassigned';
+      }
+      out += line('&nbsp;&nbsp;[' + p.index + '] ' + esc(role) + (conf != null ? ' ' + confBadge(conf) : ''));
+      out += line('&nbsp;&nbsp;&nbsp;&nbsp;Content-Location: <code>' + esc(p.contentLocation || '—') + '</code>');
+      out += line('&nbsp;&nbsp;&nbsp;&nbsp;Content-ID: <code>' + esc(p.contentId || '—') + '</code> · ' + fmtBytes(p.size) + ' · ' + esc(p.encoding));
+    });
+    if (t) {
+      out += line('<strong>TASK EXTRACTION</strong>');
+      out += line('&nbsp;&nbsp;User request: ' + (t.userRequest.text ? 'FOUND ' + confBadge(t.userRequest.confidence) + ' <span class="dim">(' + esc(t.userRequest.method) + ')</span>' : '<span class="error">NOT FOUND</span>'));
+      out += line('&nbsp;&nbsp;Website A: ' + (t.websiteA ? 'FOUND ' + confBadge(t.websiteA.confidence) + ' <span class="dim">' + esc(t.websiteA.method) + '</span>' : '<span class="error">NOT FOUND</span>'));
+      out += line('&nbsp;&nbsp;Website B: ' + (t.websiteB ? 'FOUND ' + confBadge(t.websiteB.confidence) + ' <span class="dim">' + esc(t.websiteB.method) + '</span>' : '<span class="error">NOT FOUND</span>'));
+      const ea = t.existingAnswers;
+      out += line('&nbsp;&nbsp;Existing answers: ' + ['aestheticsOption', 'aestheticsReason', 'functionalityOption', 'functionalityReason'].map(k => k.replace(/([A-Z])/g, ' $1') + '=' + (ea[k] ? '"' + esc(String(ea[k]).slice(0, 40)) + '"' : '—')).join(', '));
+      out += line('<strong>EXTRACTION LOG</strong>');
+      t.log.forEach(l => out += line('&nbsp;&nbsp;' + esc(l.what) + ' — ' + esc(l.how) + (l.confidence != null ? ' ' + confBadge(l.confidence) : '')));
+      if (t.shellHiddenNotes.length) {
+        out += line('<strong>CAPTURED TAB STATE</strong>');
+        t.shellHiddenNotes.forEach(n => out += line('&nbsp;&nbsp;' + esc(n)));
+      }
+    }
+    out += line('<strong>WARNINGS (' + (a.warnings.length + (t ? t.warnings.length : 0)) + ')</strong>');
+    a.warnings.concat(t ? t.warnings : []).forEach(w => out += line('&nbsp;&nbsp;<span class="error">' + esc(w) + '</span>'));
+    box.innerHTML = out;
+  }
+
+  function bindDiagnostics() {
+    $('#diagnosticsToggle').addEventListener('click', () => {
+      const d = $('#diagnosticsDrawer');
+      d.hidden = !d.hidden;
+      if (!d.hidden) renderDiagnostics();
+    });
+    $('#diagClose').addEventListener('click', () => { $('#diagnosticsDrawer').hidden = true; });
+    $('#diagCopyDiag').addEventListener('click', (e) => copyText($('#diagContent').innerText, e.currentTarget));
+    $('#diagCopyTask').addEventListener('click', (e) => {
+      if (!state.task) return;
+      const t = Object.assign({}, state.task);
+      t.shell = { index: t.shell.part && t.shell.part.index, confidence: t.shell.confidence, method: t.shell.method };
+      for (const k of ['websiteA', 'websiteB']) {
+        if (t[k]) t[k] = Object.assign({}, t[k], { part: t[k].part.index, relatedResources: (t[k].relatedResources || []).map(p => p.index) });
+      }
+      t.unassignedHtmlParts = t.unassignedHtmlParts.map(p => p.index);
+      copyText(JSON.stringify(t, null, 2), e.currentTarget);
+    });
+    for (const k of ['A', 'B']) {
+      $('#diagCopy' + k).addEventListener('click', (e) => {
+        const r = state.reports[k];
+        if (!r) { statusMsg($('#diagStatus'), 'Website ' + k + ' not analyzed.', 'error'); return; }
+        const summary = {
+          url: r.url, title: r.title, partIndex: r.partIndex, htmlSize: r.htmlSize,
+          dom: r.dom, css: Object.assign({}, r.css, { sources: r.cssSources.map(s => ({ origin: s.origin, size: s.size })) }),
+          js: r.js, hidden: r.hidden, observations: r.observations, mediaResources: r.mediaResources,
+        };
+        copyText(JSON.stringify(summary, null, 2), e.currentTarget);
+      });
+    }
+  }
+
+  /* ================= history ================= */
+
+  let saveTimer = null;
+  function saveHistorySoon() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveHistory, 800);
+  }
+
+  async function buildHistoryRecord() {
+    const t = state.task;
+    if (!t) return null;
+    const ai = state.aiResult;
+    const overrode = ai && ai.result ? (
+      (state.finalDirty.aestheticsOption && state.final.aestheticsOption !== ai.result.aesthetics.option) ||
+      (state.finalDirty.aestheticsReason && state.final.aestheticsReason !== ai.result.aesthetics.reason) ||
+      (state.finalDirty.functionalityOption && state.final.functionalityOption !== ai.result.functionality.option) ||
+      (state.finalDirty.functionalityReason && state.final.functionalityReason !== ai.result.functionality.reason)
+    ) : false;
+    return {
+      taskId: t.taskId, taskTitle: t.taskTitle, sourceUrl: t.sourceUrl,
+      promptExcerpt: (t.userRequest.text || '').slice(0, 300),
+      userRequest: t.userRequest.text,
+      candidatesMeta: {
+        A: t.websiteA ? { url: t.websiteA.url, title: state.reports.A && state.reports.A.title } : null,
+        B: t.websiteB ? { url: t.websiteB.url, title: state.reports.B && state.reports.B.title } : null,
+      },
+      existingAnswers: t.existingAnswers,
+      observations: state.observations,
+      requirements: state.requirements,
+      aiResult: ai ? { result: ai.result, valid: ai.valid, issues: ai.issues, repairs: ai.repairs, staged: ai.staged, model: ai.model, usage: ai.usage } : null,
+      final: state.final,
+      finalDirty: state.finalDirty,
+      humanOverrode: !!overrode,
+      qaFeedback: null,             // reserved for future learning loop
+      recommendationDiff: null,     // reserved
+      archiveFilename: state.rawFilename,
+      archiveSize: state.rawBytes ? state.rawBytes.length : 0,
+    };
+  }
+
+  async function saveHistory() {
+    const rec = await buildHistoryRecord();
+    if (!rec) return;
+    try {
+      if (state.historyId) {
+        rec.id = state.historyId;
+        await UJE.Storage.updateHistory(rec);
+      } else {
+        state.historyId = await UJE.Storage.addHistory(rec);
+        if (state.settings.preserveRawArchive && state.rawBytes) {
+          await UJE.Storage.saveArchiveBlob(state.historyId, state.rawBytes, state.rawFilename).catch(() => {});
+        }
+      }
+      renderHistoryList();
+    } catch (e) {
+      console.warn('history save failed', e);
+    }
+  }
+
+  async function renderHistoryList() {
+    const box = $('#historyList');
+    let items = [];
+    try { items = await UJE.Storage.listHistory(); } catch (e) { box.innerHTML = '<p class="error">History unavailable: ' + esc(e.message) + '</p>'; return; }
+    if (!items.length) { box.innerHTML = '<p class="dim">No saved evaluations yet. Load an archive to begin.</p>'; return; }
+    box.innerHTML = '';
+    for (const rec of items) {
+      const row = h('div', { class: 'hist-row' });
+      row.innerHTML = `
+        <div class="hist-main">
+          <div><strong>${esc(rec.taskTitle || rec.taskId || '(untitled)')}</strong>
+            ${rec.humanOverrode ? '<span class="badge warn">override</span>' : ''}
+            ${rec.aiResult ? '' : '<span class="badge">no AI run</span>'}</div>
+          <div class="dim">${esc((rec.createdAt || '').replace('T', ' ').slice(0, 19))} · ${esc(rec.promptExcerpt || '').slice(0, 120)}…</div>
+          <div class="dim">A: ${esc(rec.final && rec.final.aestheticsOption || '—')} · F: ${esc(rec.final && rec.final.functionalityOption || '—')}</div>
+        </div>
+        <div class="hist-actions">
+          <button class="btn small" data-act="open">Reopen</button>
+          <button class="btn small" data-act="dup">Duplicate</button>
+          <button class="btn small" data-act="json">Export JSON</button>
+          <button class="btn small danger" data-act="del">Delete</button>
+        </div>`;
+      row.querySelector('[data-act="open"]').addEventListener('click', () => openHistory(rec.id));
+      row.querySelector('[data-act="dup"]').addEventListener('click', async () => {
+        const copy = Object.assign({}, rec);
+        delete copy.id;
+        copy.taskTitle = (copy.taskTitle || '') + ' (copy)';
+        await UJE.Storage.addHistory(copy);
+        renderHistoryList();
+      });
+      row.querySelector('[data-act="json"]').addEventListener('click', () => download('uje-eval-' + rec.id + '.json', JSON.stringify(rec, null, 2)));
+      row.querySelector('[data-act="del"]').addEventListener('click', async () => {
+        if (!confirm('Delete this history entry?')) return;
+        await UJE.Storage.deleteHistory(rec.id);
+        if (state.historyId === rec.id) state.historyId = null;
+        renderHistoryList();
+      });
+      box.appendChild(row);
+    }
+  }
+
+  async function openHistory(id) {
+    const rec = await UJE.Storage.getHistory(id);
+    if (!rec) return;
+    // try to restore the full archive if it was persisted
+    let restored = false;
+    try {
+      const blob = await UJE.Storage.getArchiveBlob(id);
+      if (blob && blob.bytes) {
+        loadArchive(blob.bytes instanceof Uint8Array ? blob.bytes : new Uint8Array(blob.bytes), blob.filename || rec.archiveFilename || 'restored.mhtml');
+        restored = true;
+      }
+    } catch (e) { /* no archive stored */ }
+    state.historyId = id;
+    state.observations = Object.assign({ aVisual: '', aInteraction: '', bVisual: '', bInteraction: '' }, rec.observations);
+    state.requirements = rec.requirements || [];
+    if (rec.aiResult) state.aiResult = Object.assign({ sentMessages: [] }, rec.aiResult);
+    state.final = Object.assign({}, rec.final);
+    state.finalDirty = Object.assign({}, rec.finalDirty);
+    if (restored) {
+      renderAll(); // re-render with restored observation/final state
+    } else {
+      // archive not persisted: present what we have
+      state.task = {
+        taskId: rec.taskId, taskTitle: rec.taskTitle, sourceUrl: rec.sourceUrl,
+        userRequest: { text: rec.userRequest || rec.promptExcerpt || '', confidence: 1, method: 'history record' },
+        reviewInstructions: '', websiteA: null, websiteB: null,
+        unassignedHtmlParts: [], existingAnswers: rec.existingAnswers || {},
+        shellHiddenNotes: [], shell: { part: null, confidence: 0, method: 'history' },
+        warnings: ['Restored from history without the raw archive — candidate source views unavailable. Enable "preserve raw archive" in Admin to make reopening fully lossless.'], log: [],
+      };
+      state.archive = { filename: rec.archiveFilename || '(not stored)', size: rec.archiveSize || 0, headers: {}, boundary: null, parts: [], htmlParts: [], warnings: [], byCid: new Map(), byLocation: new Map(), resolveRef: () => null };
+      state.reports = { A: null, B: null };
+      state.contextPackage = null;
+      renderAll();
+    }
+    switchView('evaluate');
+  }
+
+  function bindHistory() {
+    $('#histExportAll').addEventListener('click', async () => {
+      const items = await UJE.Storage.listHistory();
+      download('uje-history-all.json', JSON.stringify(items, null, 2));
+    });
+    $('#histClear').addEventListener('click', async () => {
+      if (!confirm('Clear ALL history? This cannot be undone.')) return;
+      await UJE.Storage.clearHistory();
+      state.historyId = null;
+      renderHistoryList();
+    });
+  }
+
+  /* ================= admin ================= */
+
+  function bindAdmin() {
+    const s = state.settings;
+    const bind = (id, key, parse) => {
+      const el = $('#' + id);
+      el.value = s[key];
+      el.addEventListener('change', () => {
+        s[key] = parse ? parse(el.value) : el.value;
+        UJE.Storage.saveSettings(s);
+        statusMsg($('#adminStatus'), 'Settings saved.', 'ok');
+        setTimeout(() => statusMsg($('#adminStatus'), ''), 1500);
+      });
+    };
+    const bindCheck = (id, key) => {
+      const el = $('#' + id);
+      el.checked = !!s[key];
+      el.addEventListener('change', () => { s[key] = el.checked; UJE.Storage.saveSettings(s); });
+    };
+    bind('setTone', 'tone');
+    bind('setMinWords', 'minReasonWords', v => Math.max(1, parseInt(v, 10) || 40));
+    bind('setMaxWords', 'maxReasonWords', v => Math.max(10, parseInt(v, 10) || 140));
+    bindCheck('setShowConfidence', 'showConfidence');
+    bindCheck('setPreserveNotes', 'preserveNotesOnReevaluate');
+    bindCheck('setDiagnostics', 'diagnosticsMode');
+    bindCheck('setPreserveRaw', 'preserveRawArchive');
+    bind('setSensitivity', 'matchingSensitivity');
+    bind('setApiBase', 'apiBaseUrl');
+    bind('setApiKey', 'apiKey');
+    bind('setTemperature', 'temperature', v => Math.min(2, Math.max(0, parseFloat(v) || 0)));
+    bind('setMaxTokens', 'maxOutputTokens', v => Math.max(100, parseInt(v, 10) || 4000));
+    bind('setBudget', 'contextBudgetTokens', v => Math.max(4000, parseInt(v, 10) || 100000));
+    bind('setSystemPrompt', 'customSystemPrompt');
+
+    // model select per junkdrawer OpenRouter convention
+    const modelSel = $('#setModel');
+    const renderModelOptions = (ids) => {
+      const current = s.model;
+      modelSel.innerHTML = '';
+      if (!ids.length) {
+        modelSel.appendChild(h('option', { value: current, text: current + ' (saved/default)' }));
+        return;
+      }
+      const groups = new Map();
+      ids.forEach(id => {
+        const provider = id.includes('/') ? id.split('/')[0] : '(other)';
+        if (!groups.has(provider)) groups.set(provider, []);
+        groups.get(provider).push(id);
+      });
+      for (const [provider, list] of Array.from(groups.entries()).sort()) {
+        const og = h('optgroup', { label: provider });
+        list.forEach(id => og.appendChild(h('option', { value: id, text: id })));
+        modelSel.appendChild(og);
+      }
+      if (!ids.includes(current)) {
+        modelSel.insertBefore(h('option', { value: current, text: current + ' (saved — not in list)' }), modelSel.firstChild);
+      }
+      modelSel.value = current;
+    };
+    renderModelOptions([]);
+    modelSel.value = s.model;
+    modelSel.addEventListener('change', () => { s.model = modelSel.value; UJE.Storage.saveSettings(s); });
+
+    const fetchStatus = $('#modelStatus');
+    const doFetchModels = async () => {
+      if (!s.apiKey) { statusMsg(fetchStatus, 'Enter an API key first.', 'warn'); return; }
+      statusMsg(fetchStatus, 'Fetching models from ' + s.apiBaseUrl + '/models …');
+      try {
+        const ids = await UJE.AiClient.fetchModels(s);
+        renderModelOptions(ids);
+        statusMsg(fetchStatus, ids.length + ' models loaded.', 'ok');
+      } catch (e) {
+        statusMsg(fetchStatus, 'Model fetch failed: ' + e.message + ' — saved model "' + s.model + '" remains usable.', 'error');
+      }
+    };
+    $('#refreshModels').addEventListener('click', doFetchModels);
+    $('#setApiKey').addEventListener('change', doFetchModels);
+
+    $('#resetSystemPrompt').addEventListener('click', () => {
+      $('#setSystemPrompt').value = '';
+      s.customSystemPrompt = '';
+      UJE.Storage.saveSettings(s);
+      statusMsg($('#adminStatus'), 'System prompt reset to built-in default.', 'ok');
+    });
+    $('#showDefaultPrompt').addEventListener('click', () => {
+      $('#defaultPromptView').hidden = !$('#defaultPromptView').hidden;
+      if (!$('#defaultPromptView').hidden) {
+        $('#defaultPromptView').textContent = UJE.EvaluatorPrompt.buildSystemPrompt(s);
+      }
+    });
+  }
+
+  /* ================= view switching & init ================= */
+
+  function switchView(name) {
+    $$('.view').forEach(v => v.hidden = v.id !== 'view-' + name);
+    $$('.top-tab').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+    if (name === 'history') renderHistoryList();
+  }
+
+  function init() {
+    $$('.top-tab').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+    bindInputs();
+    bindDiagnostics();
+    bindHistory();
+    bindAdmin();
+    switchView('evaluate');
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+</body>
+</html>
