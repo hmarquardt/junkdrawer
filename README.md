@@ -190,6 +190,11 @@ The `skills/` directory contains reusable agent workflows for common tasks. Skil
 |---|---|
 | `skills/new-page-workflow.md` | Guide for creating a new single-file HTML tool |
 | `skills/version-bump-workflow.md` | Guide for safely incrementing version numbers |
+| `.claude/skills/junkdrawer-new-page/` | Auto-discovered SKILL.md: full new-page creation and registration workflow |
+| `.claude/skills/junkdrawer-version-bump/` | Auto-discovered SKILL.md + `scripts/bump-version.sh` helper |
+| `.claude/skills/openrouter-model-selector/` | Auto-discovered SKILL.md: provider-grouped OpenRouter model selector pattern |
+| `.claude/skills/junkdrawer-compliance-audit/` | Auto-discovered SKILL.md + `scripts/audit.sh` repo convention checker |
+| `.claude/skills/junkdrawer-page-testing/` | Auto-discovered SKILL.md: Playwright testing pattern for file:// pages |
 
 ## Limitations
 
