@@ -74,7 +74,7 @@ Add `"hide": true` for private/hidden pages (title/description/emoji optional th
 Run the compliance audit (from repo root):
 
 ```bash
-.claude/skills/junkdrawer-compliance-audit/scripts/audit.sh filename.html
+.agents/skills/junkdrawer-compliance-audit/scripts/audit.sh filename.html
 ```
 
 It must report no errors for the new file. Also open the page in a browser (see `junkdrawer-page-testing`) and confirm it loads with no console errors.

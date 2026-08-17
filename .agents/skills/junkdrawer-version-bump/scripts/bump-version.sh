@@ -7,7 +7,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+# Walk up from this script to find the repo root (the dir holding junk-drawer.json),
+# so the script works from .agents/skills/, via .claude/skills/ symlinks, or copies.
+REPO_ROOT="$SCRIPT_DIR"
+while [ "$REPO_ROOT" != "/" ] && [ ! -f "$REPO_ROOT/junk-drawer.json" ]; do
+  REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+if [ ! -f "$REPO_ROOT/junk-drawer.json" ]; then
+  echo "error: could not locate junk-drawer.json above $SCRIPT_DIR" >&2
+  exit 1
+fi
 JSON="$REPO_ROOT/junk-drawer.json"
 
 if [ $# -ne 1 ]; then

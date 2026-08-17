@@ -13,10 +13,10 @@ From the repo root:
 
 ```bash
 # Whole repo
-.claude/skills/junkdrawer-compliance-audit/scripts/audit.sh
+.agents/skills/junkdrawer-compliance-audit/scripts/audit.sh
 
 # Single page
-.claude/skills/junkdrawer-compliance-audit/scripts/audit.sh whatshouldIeat.html
+.agents/skills/junkdrawer-compliance-audit/scripts/audit.sh whatshouldIeat.html
 ```
 
 Exit code is non-zero if any **errors** exist; warnings never fail the run.

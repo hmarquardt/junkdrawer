@@ -22,7 +22,7 @@ Compare against the version in the file's `JUNKDRAWER_DEPLOY_FOOTER` comment, no
 From the repo root:
 
 ```bash
-.claude/skills/junkdrawer-version-bump/scripts/bump-version.sh <filename.html>
+.agents/skills/junkdrawer-version-bump/scripts/bump-version.sh <filename.html>
 ```
 
 The script computes the new version from today's date, rewrites all occurrences of the old version in the HTML file (comment, attribute, footer text), updates `junk-drawer.json` via `jq`, and verifies the result. It refuses to run if the file has no `JUNKDRAWER_DEPLOY_FOOTER` comment.
@@ -38,7 +38,7 @@ The script computes the new version from today's date, rewrites all occurrences 
 ## Verify and ship
 
 ```bash
-.claude/skills/junkdrawer-compliance-audit/scripts/audit.sh <filename.html>
+.agents/skills/junkdrawer-compliance-audit/scripts/audit.sh <filename.html>
 git add <filename.html> junk-drawer.json
 git commit -m "Bump version for <change description>" && git push
 ```
