@@ -259,6 +259,8 @@ body {
   font-size: 0.6rem; font-weight: 600; letter-spacing: 0.06em;
   color: var(--boundary-label); background: var(--surface);
   padding: 0 0.35rem; text-transform: uppercase; line-height: 1;
+}
+
 /* Rendered content typography */
 .rendered-doc { max-width: 100%; overflow-wrap: break-word; }
 .rendered-doc h1, .rendered-doc h2, .rendered-doc h3, .rendered-doc h4 {
@@ -312,6 +314,121 @@ body {
 .rendered-doc summary { font-weight: 600; cursor: pointer; padding: 0.25rem 0; }
 
 /* Structured data (XML/JSON rendering) */
+.structured-object {
+  margin: 0.75rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--surface-alt);
+  overflow: hidden;
+}
+.structured-object .object-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.structured-field {
+  display: flex;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  align-items: baseline;
+}
+.structured-field:last-of-type {
+  border-bottom: none;
+}
+.structured-field .field-label {
+  flex: 0 0 30%;
+  font-weight: 500;
+  color: var(--text-muted);
+  word-break: break-word;
+  min-width: 6rem;
+}
+.structured-field .field-value {
+  flex: 1;
+  word-break: break-word;
+  color: var(--text);
+}
+.structured-nested {
+  margin: 0.5rem 0 0.5rem 1rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border-strong);
+}
+.structured-list-item {
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+}
+.structured-list-item:last-child {
+  border-bottom: none;
+}
+.xml-table-wrap {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+}
+.xml-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+.xml-table-wrap caption {
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.375rem 0;
+  text-align: left;
+  color: var(--text);
+}
+.xml-table-wrap th {
+  background: var(--table-header-bg);
+  font-weight: 600;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--table-border);
+  text-align: left;
+  white-space: nowrap;
+}
+.xml-table-wrap td {
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--table-border);
+  vertical-align: top;
+}
+.xml-table-wrap tr:nth-child(even) td {
+  background: var(--table-alt-bg);
+}
+.structured-fallback {
+  margin: 0.5rem 0;
+  padding: 0.75rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  font-family: 'SF Mono','Cascadia Code','JetBrains Mono','Menlo','Consolas',monospace;
+  font-size: 0.8125rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+.parse-error-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.375rem;
+  font-size: 0.7rem;
+  color: #ea580c;
+  background: #fff7ed;
+  border-radius: 0.25rem;
+  border: 1px solid #fed7aa;
+}
+@media (prefers-color-scheme: dark) {
+  .parse-error-warning {
+    color: #fb923c;
+    background: #2d1b0e;
+    border-color: #78350f;
+  }
+}
 </style>
 </head>
 <body>
@@ -501,169 +618,258 @@ body {
     return null;
   }
 
-  function detectHTML(text) {
-    var trimmed = text.trim();
-    if (!trimmed || trimmed.charAt(0) !== '<') return null;
-    var htmlElemRe = /<\/?(?:html|head|body|div|span|p|h[1-6]|a|img|table|tr|td|th|ul|ol|li|br|hr|strong|em|b|i|u|pre|code|blockquote|section|article|nav|header|footer|main|aside|details|summary|form|input|select|option|label|button|figure|figcaption|dl|dt|dd|cite|abbr|time|small|sub|sup|mark|del|ins)[\s>]/i;
-    if (!htmlElemRe.test(trimmed)) return null;
-    var openTags = (trimmed.match(/<[a-zA-Z][a-zA-Z0-9]*[\s>]/g) || []).length;
-    var closeTags = (trimmed.match(/<\/[a-zA-Z][a-zA-Z0-9]*[\s>]/g) || []).length;
-    if (openTags === 0 && closeTags === 0) return null;
-    return { type: 'html', reason: 'recognizable HTML markup', confidence: 'medium' };
-  }
-
-  function detectMarkdown(text) {
-    var trimmed = text.trim();
-    if (!trimmed) return null;
-    var lines = trimmed.split('\n');
-    var mdScore = 0;
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (/^#{1,6}\s/.test(line)) mdScore += 3;
-      if (i > 0 && /^={3,}\s*$/.test(line)) mdScore += 3;
-      if (i > 0 && /^-{3,}\s*$/.test(line) && !/^\s*-\s/.test(lines[i-1])) mdScore += 2;
-      if (/^[\s]*[-*+]\s/.test(line)) mdScore += 2;
-      if (/^[\s]*\d+\.\s/.test(line)) mdScore += 2;
-      if (/^>\s/.test(line)) mdScore += 2;
-      if (/\|.*\|/.test(line) && /\|.*-/.test(line)) mdScore += 3;
-      if (/^(?:[-*_]\s*){3,}$/.test(line)) mdScore += 2;
-      if (/^`{3,}/.test(line) || /^~{3,}/.test(line)) mdScore += 4;
-    }
-    var ratio = mdScore / Math.max(lines.length, 1);
-    if (mdScore >= 3 && (ratio > 0.15 || mdScore >= 5)) {
-      return { type: 'markdown', reason: 'Markdown block structure',
-        confidence: ratio > 0.3 ? 'high' : 'medium' };
+  /**
+   * Extract a complete JSON structure from text starting at a given position.
+   * Uses brace/bracket depth counting to find the matching close.
+   * Returns { content, endIdx } or null.
+   */
+  function tryExtractJSON(text, pos) {
+    var first = text[pos];
+    var closeChar = first === '{' ? '}' : ']';
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    var i = pos;
+    for (; i < text.length; i++) {
+      var ch = text[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\' && inString) { escaped = true; continue; }
+      if (ch === '"' && !escaped) { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === first) depth++;
+      if (ch === closeChar) {
+        depth--;
+        if (depth === 0) {
+          var candidate = text.slice(pos, i + 1);
+          try {
+            var parsed = JSON.parse(candidate);
+            if (parsed !== null && typeof parsed === 'object') {
+              return { content: candidate, endIdx: i + 1 };
+            }
+          } catch (_) {}
+          return null;
+        }
+      }
     }
     return null;
   }
 
-  /** Determine format of a text block. Tries detectors in priority order. */
-  function detectFormat(text) {
-    var trimmed = text.trim();
-    if (!trimmed) return { type: 'text', reason: 'empty', confidence: 'high' };
-    if (text.indexOf('\x00PROTX') !== -1) {
-      return { type: 'code', reason: 'protected code region', confidence: 'high' };
-    }
-    var r;
-    r = detectJSON(trimmed); if (r) return r;
-    r = detectXML(trimmed);  if (r) return r;
-    r = detectHTML(trimmed); if (r) return r;
-    r = detectMarkdown(trimmed); if (r) return r;
-    return { type: 'text', reason: 'no structured format detected', confidence: 'high' };
-  }
-
-  /* ---- Segment Builder ---- */
   /**
-   * Split text into blocks separated by blank lines, classify each, then
-   * merge adjacent same-type blocks. This runs on the non-protected text
-   * (code fences are already extracted).
+   * Extract a complete XML document from text starting at a given position.
+   * Finds the root opening tag, builds a depth counter, and matches the close.
+   * Returns { content, endIdx } or null.
    */
-  function splitTextIntoBlocks(text) {
-    // Split on two or more consecutive newlines (blank-line separation)
-    var raw = text.split(/\n\n+/);
-    var blocks = [];
-    for (var i = 0; i < raw.length; i++) {
-      var b = raw[i].trim();
-      if (b.length > 0) blocks.push(b);
+  function tryExtractXML(text, pos) {
+    if (pos + 1 >= text.length) return null;
+    var nextCh = text[pos + 1];
+    if (nextCh === '/' || nextCh === '!') return null;
+    if (!/[a-zA-Z_:]/.test(nextCh)) return null;
+
+    var tagNameMatch = text.slice(pos + 1).match(/^([a-zA-Z_:][a-zA-Z0-9_:.-]*)/);
+    if (!tagNameMatch) return null;
+    var tagName = tagNameMatch[1];
+
+    // Self-closing tag check
+    var selfRe = new RegExp('<' + tagName + '[^>]*/>');
+    if (selfRe.test(text.slice(pos))) {
+      var selfTest = text.slice(pos);
+      var selfEnd = selfTest.indexOf('/>') + 2;
+      var selfCandidate = text.slice(pos, pos + selfEnd);
+      try {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(selfCandidate, 'text/xml');
+        if (doc.querySelectorAll('parsererror').length === 0 && doc.documentElement) {
+          return { content: selfCandidate, endIdx: pos + selfEnd };
+        }
+      } catch (_) {}
+      return null;
     }
-    return blocks;
+
+    // Depth-based matching: scan forward counting open/close tags
+    var openTagRe = new RegExp('<' + tagName + '[\\s>]');
+    var closeTagRe = new RegExp('</' + tagName + '>');
+    var searchText = text.slice(pos);
+    var depth = 0;
+    var scanIdx = 0;
+
+    while (scanIdx < searchText.length) {
+      var rest = searchText.slice(scanIdx);
+      var nextOpen = rest.search(openTagRe);
+      var nextClose = rest.search(closeTagRe);
+      if (nextOpen === -1 && nextClose === -1) break;
+
+      var useOpen = nextOpen >= 0 ? nextOpen : Infinity;
+      var useClose = nextClose >= 0 ? nextClose : Infinity;
+
+      if (useOpen < useClose) {
+        depth++;
+        scanIdx += useOpen + tagName.length;
+        var tagEnd = searchText.indexOf('>', scanIdx - tagName.length);
+        if (tagEnd >= 0) scanIdx = tagEnd + 1;
+      } else if (useClose < Infinity) {
+        depth--;
+        scanIdx += useClose + tagName.length + 3;
+        if (depth === 0) {
+          var candidate = searchText.slice(0, scanIdx);
+          try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(candidate, 'text/xml');
+            if (doc.querySelectorAll('parsererror').length === 0 && doc.documentElement) {
+              return { content: candidate, endIdx: pos + candidate.length };
+            }
+          } catch (_) {}
+          return null;
+        }
+      } else {
+        break;
+      }
+    }
+    return null;
+  }
+
+  /**    return null;
   }
 
   /**
-   * Build the full ordered segment array from the raw source text.
-   * Pipeline:
-   * 1. Normalize line endings.
-   * 2. Extract and protect fenced code blocks.
-   * 3. Split remaining text into blocks, classify each, merge adjacent same-type.
-   * 4. Interleave code fence segments at their original positions.
-   * 5. Determine start/end offsets in the original text for each segment.
+   * Island-first pipeline:
+   * 1. Protect fenced code blocks.
+   * 2. In the remaining text, find and protect JSON islands (parseable objects/arrays).
+   * 3. Then find and protect XML islands (parseable XML documents).
+   * 4. Interleave in original order: code fences, JSON islands, XML islands,
+   *    and leftover text (which gets Markdown-rendered).
    */
   function buildSegments(rawText) {
     var normalized = normalizeLineEndings(rawText);
     if (!normalized.trim()) return [];
 
-    // Step 1: Extract code fences
+    // Step 1: Extract fenced code blocks
     var protectedInfo = protectCodeFences(normalized);
     var fences = protectedInfo.fences;
-    var protectedText = protectedInfo.protectedText;
+    var workingText = protectedInfo.protectedText;
 
-    // Step 2: Split remaining text and classify
-    // We'll work with the protected text to find non-code regions
-    // Build a map of marker positions
-    var allSegments = [];
-    var cursor = 0;
+    var allIslands = []; // { type, content, start, end, sourceContent, language }
 
-    // Walk through the protected text, splitting at fence markers
-    var parts = protectedText.split(/(\x00PROTX\d+\x00)/);
+    // Step 2: Find JSON islands in the working text
+    // Replace found JSON with PROT_JSON markers
+    var jsonPattern = /[{\[]/g;
+    var jsonMatch;
+    var textWithJsonMarkers = '';
+    var lastJsonPos = 0;
+    var jsonOffset = 0;
+
+    while ((jsonMatch = jsonPattern.exec(workingText)) !== null) {
+      var jsonPos = jsonMatch.index;
+      // Skip if inside a PROT marker
+      var beforeSlice = workingText.slice(lastJsonPos, jsonPos);
+      var result = tryExtractJSON(workingText, jsonPos);
+      if (result) {
+        // Found a JSON island
+        textWithJsonMarkers += beforeSlice;
+        var marker = '\x00ISLJSON' + allIslands.length + '\x00';
+        allIslands.push({
+          type: 'json',
+          content: result.content,
+          sourceContent: result.content,
+          language: ''
+        });
+        textWithJsonMarkers += marker;
+        lastJsonPos = result.endIdx;
+        jsonPattern.lastIndex = result.endIdx;
+        jsonOffset += (result.content.length - marker.length);
+      } else {
+        // Not JSON, advance normally
+        jsonOffset = 0;
+      }
+    }
+    textWithJsonMarkers += workingText.slice(lastJsonPos);
+
+    // Step 3: Find XML islands in remaining text (now with JSON stripped)
+    var xmlPattern = /</g;
+    var xmlMatch;
+    var finalText = '';
+    var lastXmlPos = 0;
+
+    while ((xmlMatch = xmlPattern.exec(textWithJsonMarkers)) !== null) {
+      var xmlPos = xmlMatch.index;
+      // Skip if inside a PROT marker
+      var result = tryExtractXML(textWithJsonMarkers, xmlPos);
+      if (result) {
+        finalText += textWithJsonMarkers.slice(lastXmlPos, xmlPos);
+        var marker = '\x00ISLXML' + allIslands.length + '\x00';
+        allIslands.push({
+          type: 'xml',
+          content: result.content,
+          sourceContent: result.content,
+          language: ''
+        });
+        finalText += marker;
+        lastXmlPos = result.endIdx;
+        xmlPattern.lastIndex = result.endIdx;
+      }
+    }
+    finalText += textWithJsonMarkers.slice(lastXmlPos);
+
+    // Step 4: Build ordered segment list
+    // Parse the final text for markers (PROTX, ISLJSON, ISLXML) and text blocks
+    var allMarkers = [];
+    var re = /(\x00PROTX\d+\x00|\x00ISLJSON\d+\x00|\x00ISLXML\d+\x00)/g;
+    var parts = finalText.split(re);
+    var segments = [];
+    var islandIdx = 0;
 
     for (var i = 0; i < parts.length; i++) {
       var part = parts[i];
       if (!part) continue;
 
-      // Check if this part is a fence marker
-      var markerMatch = part.match(/^\x00PROTX(\d+)\x00$/);
-      if (markerMatch) {
-        var fenceIdx = parseInt(markerMatch[1], 10);
-        var fence = fences[fenceIdx];
-        allSegments.push({
+      // Check if it's a marker
+      var fenceM = part.match(/^\x00PROTX(\d+)\x00$/);
+      var jsonM = part.match(/^\x00ISLJSON(\d+)\x00$/);
+      var xmlM = part.match(/^\x00ISLXML(\d+)\x00$/);
+
+      if (fenceM) {
+        var fIdx = parseInt(fenceM[1], 10);
+        var fence = fences[fIdx];
+        segments.push({
           type: 'code',
           content: fence.content,
           sourceContent: fence.innerContent,
           language: fence.language,
-          startOffset: fence.start,
-          endOffset: fence.end,
           reason: 'fenced code block',
           confidence: 'high'
         });
-        continue;
-      }
-
-      // This is a non-code region — classify its blocks
-      if (part.trim().length === 0) continue;
-
-      var blocks = splitTextIntoBlocks(part);
-      for (var j = 0; j < blocks.length; j++) {
-        var block = blocks[j];
-        var detection = detectFormat(block);
-        var seg = {
-          type: detection.type,
-          content: block,
-          startOffset: 0,
-          endOffset: 0,
-          reason: detection.reason,
-          confidence: detection.confidence
-        };
-        // Merge adjacent same-type segments
-        var last = allSegments.length > 0 ? allSegments[allSegments.length - 1] : null;
-        if (last && last.type === seg.type && last.type !== 'code') {
-          last.content += '\n\n' + seg.content;
-          last.reason = last.reason + '; ' + seg.reason;
-        } else {
-          allSegments.push(seg);
+      } else if (jsonM) {
+        var jIdx = parseInt(jsonM[1], 10);
+        var island = allIslands[jIdx];
+        segments.push({
+          type: 'json',
+          content: island.content,
+          reason: 'parseable JSON object/array',
+          confidence: 'high'
+        });
+      } else if (xmlM) {
+        var xIdx = parseInt(xmlM[1], 10);
+        var xIsland = allIslands[xIdx];
+        segments.push({
+          type: 'xml',
+          content: xIsland.content,
+          reason: 'parseable XML document',
+          confidence: 'high'
+        });
+      } else {
+        // Plain text / Markdown — render through markdown-it
+        var trimmed = part.trim();
+        if (trimmed) {
+          segments.push({
+            type: 'markdown',
+            content: trimmed,
+            reason: 'remaining text rendered as Markdown',
+            confidence: 'high'
+          });
         }
       }
     }
 
-    computeOffsets(allSegments, normalized);
-    return allSegments;
-  }
-
-  function computeOffsets(segments, original) {
-    var searchPos = 0;
-    for (var i = 0; i < segments.length; i++) {
-      var seg = segments[i];
-      var content = seg.content;
-      var found = original.indexOf(content, searchPos);
-      if (found !== -1) {
-        seg.startOffset = found;
-        seg.endOffset = found + content.length;
-        searchPos = found + content.length;
-      } else {
-        seg.startOffset = searchPos;
-        seg.endOffset = searchPos + content.length;
-        searchPos = seg.endOffset;
-      }
-    }
+    return segments;
   }
 
 /* ---- Markdown Renderer ---- */
@@ -674,7 +880,7 @@ body {
         var MarkdownIt = typeof markdownExport === 'function' ? markdownExport :
           markdownExport && (markdownExport.default || markdownExport.MarkdownIt);
         if (typeof MarkdownIt !== 'function') {
-          return renderText(text);
+          return '<pre><code>' + escapeHtml(text) + '</code></pre>';
         }
         var options = {
           html: true,
@@ -1094,15 +1300,11 @@ body {
     for (var i = 0; i < segs.length; i++) {
       var seg = segs[i];
       var segHtml = '';
-      var hasError = false;
 
       try {
         switch (seg.type) {
           case 'markdown':
             segHtml = renderMarkdown(seg.content);
-            break;
-          case 'html':
-            segHtml = renderHTML(seg.content);
             break;
           case 'xml':
             segHtml = renderXMLSegment(seg);
@@ -1114,14 +1316,13 @@ body {
             segHtml = renderCode(seg.sourceContent || seg.content, seg.language);
             break;
           default:
-            segHtml = renderText(seg.content);
+            segHtml = renderMarkdown(seg.content);
             break;
         }
       } catch (err) {
-        segHtml = '<div class="parse-error-warning">⚠ Render error: ' +
+        segHtml = '<div class="parse-error-warning">\u26a0 Render error: ' +
           escapeHtml(err.message) + '</div>' +
           '<div class="structured-fallback">' + escapeHtml(seg.content) + '</div>';
-        hasError = true;
       }
 
       if (showBounds) {
@@ -1129,10 +1330,6 @@ body {
         html += '<div class="segment-boundary">';
         html += '<span class="boundary-label">' + boundaryLabel + '</span>';
         html += segHtml;
-        if (seg.confidence && seg.confidence !== 'high') {
-          html += '<div style="font-size:0.6rem;color:var(--text-faint);margin-top:0.25rem;">detection: ' +
-            escapeHtml(seg.reason) + ' (' + seg.confidence + ')</div>';
-        }
         html += '</div>';
       } else {
         html += segHtml;
@@ -1141,12 +1338,10 @@ body {
 
     html += '</div>';
     container.innerHTML = html;
-
-    // Update format badges
     updateBadges(segs);
   }
 
-/* ---- UI Handlers ---- */
+  /* ---- UI Handlers ---- *//* ---- UI Handlers ---- */
   function updateBadges(segs) {
     var badgeContainer = document.getElementById('formatBadges');
     var types = getFormatTypes(segs);
@@ -1299,6 +1494,40 @@ body {
 '\n' +
 'Mathematical comparisons are not markup: 2 < 5 and 10 > 7. Also 3 <= 4 and 8 >= 8.\n' +
 '\n' +
+'XML with blank lines does NOT break the structural render:\n' +
+'\n' +
+'<catalog>\n' +
+'  <book>\n' +
+'    <title>Designing Data-Intensive Applications</title>\n' +
+'\n' +
+'    <author>Martin Kleppmann</author>\n' +
+'    <year>2017</year>\n' +
+'  </book>\n' +
+'\n' +
+'  <book>\n' +
+'    <title>Structure and Interpretation of Computer Programs</title>\n' +
+'    <author>Harold Abelson</author>\n' +
+'\n' +
+'    <year>1984</year>\n' +
+'  </book>\n' +
+'</catalog>\n' +
+'\n' +
+'JSON with blank lines inside arrays also works:\n' +
+'\n' +
+'[\n' +
+'  {"product": "Widget A", "price": 9.99},\n' +
+'\n' +
+'  {"product": "Widget B", "price": 14.99}\n' +
+']\n' +
+'\n' +
+'HTML inside Markdown paragraphs with blank lines still renders as HTML:\n' +
+'\n' +
+'<blockquote>\n' +
+'  <p>This is a blockquote with <strong>bold text</strong>.</p>\n' +
+'\n' +
+'  <p>This is a second paragraph inside the same blockquote.</p>\n' +
+'</blockquote>\n' +
+'\n' +
 'A long time ago in a galaxy far, far away...\n' +
 '\n' +
 'Final note: the quick brown fox jumps over the lazy dog. End of transmission.';
@@ -1374,7 +1603,6 @@ body {
   function getBoundaryLabel(type) {
     switch (type) {
       case 'markdown': return 'MARKDOWN';
-      case 'html': return 'HTML';
       case 'xml': return 'XML';
       case 'json': return 'JSON';
       case 'code': return 'CODE';
@@ -1400,27 +1628,6 @@ body {
       return '<div class="parse-error-warning">⚠ JSON parsing failed — showing raw content</div>' +
         '<div class="structured-fallback">' + escapeHtml(seg.content) + '</div>';
     }
-  }
-
-  /* ---- Plaintext Renderer ---- */
-  function renderText(text) {
-    // Render plaintext preserving paragraph boundaries
-    // Escape HTML entities, wrap in paragraphs
-    var paragraphs = text.split(/\n\n+/);
-    var html = '';
-    for (var i = 0; i < paragraphs.length; i++) {
-      var p = paragraphs[i].trim();
-      if (!p) continue;
-      // Check if it looks like a single line (e.g., line-oriented data)
-      var lines = p.split('\n');
-      if (lines.length > 1 && lines.length < 20) {
-        // Multi-line but not too many: preserve line breaks
-        html += '<p style="white-space:pre-wrap">' + escapeHtml(p) + '</p>';
-      } else {
-        html += '<p>' + escapeHtml(p.replace(/\n/g, ' ')) + '</p>';
-      }
-    }
-    return html;
   }
 
   function isComplexValue(v) {
@@ -1467,21 +1674,13 @@ body {
       return null;
     }
   }
-  function renderHTML(text) {
-    try {
-      return sanitizeHTML(text);
-    } catch (e) {
-      return '<div class="parse-error-warning">⚠ HTML render error: ' +
-        escapeHtml(e.message) + '</div><pre>' + escapeHtml(text) + '</pre>';
-    }
-  }
 
   })();
 </script>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.21.3" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.21.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · RenderLens · version 2026.08.21.3
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.21.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.21.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · RenderLens · version 2026.08.21.5
 </footer>
 </body>
 </html>
