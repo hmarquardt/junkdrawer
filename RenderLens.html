@@ -362,6 +362,7 @@ body {
 
   <!-- Copy Toast -->
   <div class="copy-toast" id="copyToast"></div>
+<script>
 // ==========================================================================
 // RenderLens — Format-Aware Document Viewer
 // All application JavaScript
@@ -637,16 +638,55 @@ body {
         if (last && last.type === seg.type && last.type !== 'code') {
           last.content += '\n\n' + seg.content;
           last.reason = last.reason + '; ' + seg.reason;
+        } else {
+          allSegments.push(seg);
+        }
+      }
+    }
+
+    computeOffsets(allSegments, normalized);
+    return allSegments;
+  }
+
+  function computeOffsets(segments, original) {
+    var searchPos = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var content = seg.content;
+      var found = original.indexOf(content, searchPos);
+      if (found !== -1) {
+        seg.startOffset = found;
+        seg.endOffset = found + content.length;
+        searchPos = found + content.length;
+      } else {
+        seg.startOffset = searchPos;
+        seg.endOffset = searchPos + content.length;
+        searchPos = seg.endOffset;
+      }
+    }
+  }
+
 /* ---- Markdown Renderer ---- */
   function renderMarkdown(text) {
     try {
       if (!state.md) {
-        state.md = window.markdownit({
+        var markdownExport = window.markdownit;
+        var MarkdownIt = typeof markdownExport === 'function' ? markdownExport :
+          markdownExport && (markdownExport.default || markdownExport.MarkdownIt);
+        if (typeof MarkdownIt !== 'function') {
+          return renderText(text);
+        }
+        var options = {
           html: true,
           linkify: true,
           typographer: false,
           breaks: false
-        });
+        };
+        try {
+          state.md = MarkdownIt(options);
+        } catch (_) {
+          state.md = new MarkdownIt(options);
+        }
       }
       var html = state.md.render(text);
       // Sanitize the output
@@ -764,6 +804,15 @@ body {
       return elementToData(c);
     });
 
+    return {
+      kind: 'object',
+      tag: tagName,
+      label: humanizeTag(tagName),
+      fields: fields_list,
+      attributes: hasAttrs ? attrs : null
+    };
+  }
+
 /* ---- JSON-to-Data Converter ---- */
   /**
    * Convert parsed JSON to a data representation similar to XML.
@@ -856,6 +905,10 @@ body {
         label: label || 'Object',
         fields: fields
       };
+    }
+    return { kind: 'leaf', value: formatLeafValue(value), label: label || 'Value' };
+  }
+
 /* ---- Structured Data Renderer ---- */
   /**
    * Render a data representation object (from XML or JSON parsing)
@@ -966,6 +1019,13 @@ body {
   function renderCode(text, language) {
     // Fenced code blocks render as pre/code with optional language label
     var html = '';
+    if (language) {
+      html += '<div style="font-size:0.65rem;color:var(--text-faint);margin-bottom:0.25rem;text-transform:uppercase;letter-spacing:0.04em;">' + escapeHtml(language) + '</div>';
+    }
+    html += '<pre><code>' + escapeHtml(text) + '</code></pre>';
+    return html;
+  }
+
 /* ---- Sanitization / Post-Processing ---- */
   /**
    * Sanitize HTML using DOMPurify with strict rules.
@@ -1185,7 +1245,7 @@ body {
 '</div>\n' +
 '\n' +
 '<scr' + 'ipt>alert("this should never execute")</scr' + 'ipt>\n' +
-'<img src="x" onerror="alert(\'XSS\')">\n' +
+'<img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" onerror="alert(\'XSS\')" alt="Sanitization test pixel">\n' +
 '\n' +
 'Now here is the user profile data in XML:\n' +
 '\n' +
@@ -1341,12 +1401,6 @@ body {
         '<div class="structured-fallback">' + escapeHtml(seg.content) + '</div>';
     }
   }
-    if (language) {
-      html += '<div style="font-size:0.65rem;color:var(--text-faint);margin-bottom:0.25rem;text-transform:uppercase;letter-spacing:0.04em;">' + escapeHtml(language) + '</div>';
-    }
-    html += '<pre><code>' + escapeHtml(text) + '</code></pre>';
-    return html;
-  }
 
   /* ---- Plaintext Renderer ---- */
   function renderText(text) {
@@ -1368,10 +1422,6 @@ body {
     }
     return html;
   }
-    }
-    // Primitive
-    return { kind: 'leaf', value: formatLeafValue(value), label: label || 'Value' };
-  }
 
   function isComplexValue(v) {
     return v !== null && typeof v === 'object';
@@ -1388,14 +1438,6 @@ body {
     var s = key.replace(/[_-]/g, ' ');
     s = s.replace(/([a-z])([A-Z])/g, '$1 $2');
     return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-    return {
-      kind: 'object',
-      tag: tagName,
-      label: humanizeTag(tagName),
-      fields: fields_list,
-      attributes: hasAttrs ? attrs : null
-    };
   }
 
   function humanizeTag(tag) {
@@ -1433,49 +1475,13 @@ body {
         escapeHtml(e.message) + '</div><pre>' + escapeHtml(text) + '</pre>';
     }
   }
-        } else {
-          allSegments.push(seg);
-        }
-      }
-    }
-
-    // Step 3: Compute offsets by scanning the original text
-    computeOffsets(allSegments, normalized);
-
-    return allSegments;
-  }
-
-  /**
-   * Compute start/end offsets for each segment by locating its content
-   * in the original normalized text. Uses sequential scanning since
-   * segments are ordered and non-overlapping.
-   */
-  function computeOffsets(segments, original) {
-    var searchPos = 0;
-    for (var i = 0; i < segments.length; i++) {
-      var seg = segments[i];
-      var content = seg.content;
-      // Find the content starting from searchPos
-      var found = original.indexOf(content, searchPos);
-      if (found !== -1) {
-        seg.startOffset = found;
-        seg.endOffset = found + content.length;
-        searchPos = found + content.length;
-      } else {
-        // Fallback: approximate
-        seg.startOffset = searchPos;
-        seg.endOffset = searchPos + content.length;
-        searchPos = seg.endOffset;
-      }
-    }
-  }
 
   })();
 </script>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.21.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.21.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · RenderLens · version 2026.08.21.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.21.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.21.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · RenderLens · version 2026.08.21.3
 </footer>
 </body>
 </html>
