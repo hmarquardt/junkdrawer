@@ -1,0 +1,1481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RenderLens — Format-Aware Document Viewer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>" />
+
+  <!-- CDN dependencies — exact versions only -->
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@15.0.0/dist/markdown-it.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.13/dist/purify.min.js"></script>
+
+  <!-- Analytics Lite -->
+  <script src="analytics-lite.js" data-site-id="junkdrawer" data-api="https://lab.aismallbizguru.com/api/analytics/collect" defer></script>
+
+<style>
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+
+:root {
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --surface-alt: #f8fafc;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-faint: #94a3b8;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-bg: #eff6ff;
+  --scrollbar: #cbd5e1;
+  --scrollbar-hover: #94a3b8;
+  --badge-text: #f8fafc;
+  --badge-md: #8b5cf6;
+  --badge-html: #f59e0b;
+  --badge-xml: #10b981;
+  --badge-json: #3b82f6;
+  --badge-code: #ef4444;
+  --badge-plain: #6b7280;
+  --shadow: rgba(0,0,0,0.06);
+  --focus-ring: rgba(59,130,246,0.35);
+  --toolbar-bg: #f8fafc;
+  --code-bg: #1e293b;
+  --code-text: #e2e8f0;
+  --table-border: #e2e8f0;
+  --table-header-bg: #f1f5f9;
+  --table-alt-bg: #f8fafc;
+  --boundary-line: rgba(100,116,139,0.2);
+  --boundary-label: rgba(100,116,139,0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1219;
+    --surface: #1a1f2e;
+    --surface-alt: #1e2436;
+    --border: #2a3145;
+    --border-strong: #3b4460;
+    --text: #e8edf5;
+    --text-muted: #8896b0;
+    --text-faint: #5d6b87;
+    --accent: #60a5fa;
+    --accent-hover: #93bbfd;
+    --accent-bg: #1e293b;
+    --scrollbar: #3b4460;
+    --scrollbar-hover: #5d6b87;
+    --shadow: rgba(0,0,0,0.25);
+    --focus-ring: rgba(96,165,250,0.35);
+    --toolbar-bg: #1e2436;
+    --code-bg: #0d1117;
+    --code-text: #c9d1d9;
+    --table-border: #2a3145;
+    --table-header-bg: #1e2436;
+    --table-alt-bg: #1a1f2e;
+    --boundary-line: rgba(136,150,176,0.15);
+    --boundary-label: rgba(136,150,176,0.4);
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* Layout */
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  line-height: 1.5;
+}
+
+#app-header {
+  flex: 0 0 auto;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+#app-header h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#app-header h1 span.subtitle {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-left: 0.25rem;
+}
+
+.header-actions { display: flex; gap: 0.5rem; align-items: center; }
+
+/* Main Split */
+#main-split { flex: 1 1 0; display: flex; min-height: 0; gap: 0; }
+
+.pane { flex: 1 1 50%; display: flex; flex-direction: column; min-width: 0; }
+.pane:first-child { border-right: 1px solid var(--border); }
+
+.pane-header {
+  flex: 0 0 auto;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Source Pane */
+#source-pane textarea {
+  flex: 1;
+  width: 100%;
+  padding: 0.875rem;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  tab-size: 2;
+  background: var(--surface-alt);
+  color: var(--text);
+  scrollbar-width: thin;
+}
+
+#source-pane textarea:focus {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+#source-pane textarea::placeholder { color: var(--text-faint); }
+
+.source-footer {
+  flex: 0 0 auto;
+  padding: 0.375rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.source-footer .stats { display: flex; gap: 0.75rem; margin-right: auto; }
+.source-footer .stats span { white-space: nowrap; }
+
+/* Rendered Pane */
+#rendered-pane { background: var(--surface); }
+#rendered-pane .pane-content {
+  flex: 1; overflow-y: auto; padding: 1.25rem; scrollbar-width: thin;
+}
+
+.rendered-toolbar {
+  flex: 0 0 auto;
+  padding: 0.375rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  min-height: 2rem;
+}
+
+.rendered-toolbar .badge-group { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.rendered-toolbar .spacer { flex: 1; }
+
+.rendered-toolbar .toggle-label {
+  display: flex; align-items: center; gap: 0.375rem;
+  color: var(--text-muted); cursor: pointer; user-select: none;
+}
+.rendered-toolbar .toggle-label input[type="checkbox"] { accent-color: var(--accent); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.35rem 0.7rem; font-size: 0.75rem; font-weight: 500;
+  border: 1px solid var(--border); border-radius: 0.375rem;
+  background: var(--surface); color: var(--text);
+  cursor: pointer; transition: all 0.12s ease;
+  white-space: nowrap; line-height: 1.4;
+}
+.btn:hover { background: var(--surface-alt); border-color: var(--border-strong); }
+.btn:active { transform: scale(0.97); }
+.btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
+.btn-ghost:hover { background: var(--surface-alt); color: var(--text); border-color: var(--border); }
+.btn-icon { padding: 0.35rem; min-width: 1.75rem; justify-content: center; }
+
+/* Format Badges */
+.format-badge {
+  display: inline-flex; align-items: center;
+  padding: 0.125rem 0.45rem;
+  font-size: 0.65rem; font-weight: 600;
+  letter-spacing: 0.03em; border-radius: 0.25rem;
+  text-transform: uppercase; color: var(--badge-text); line-height: 1.3;
+}
+.format-badge.md { background: var(--badge-md); }
+.format-badge.html { background: var(--badge-html); }
+.format-badge.xml { background: var(--badge-xml); }
+.format-badge.json { background: var(--badge-json); }
+.format-badge.code { background: var(--badge-code); }
+.format-badge.text { background: var(--badge-plain); }
+.format-badge.count { background: transparent; color: var(--text-faint); font-weight: 400; }
+
+/* Boundary markers */
+.segment-boundary {
+  position: relative; margin: 0.5rem 0; padding: 0.5rem 0;
+  border-top: 1px dashed var(--boundary-line);
+}
+.segment-boundary:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+.segment-boundary .boundary-label {
+  position: absolute; top: -0.45rem; left: 0;
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.06em;
+  color: var(--boundary-label); background: var(--surface);
+  padding: 0 0.35rem; text-transform: uppercase; line-height: 1;
+/* Rendered content typography */
+.rendered-doc { max-width: 100%; overflow-wrap: break-word; }
+.rendered-doc h1, .rendered-doc h2, .rendered-doc h3, .rendered-doc h4 {
+  margin: 1rem 0 0.5rem; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em;
+}
+.rendered-doc h1 { font-size: 1.35rem; }
+.rendered-doc h2 { font-size: 1.15rem; }
+.rendered-doc h3 { font-size: 1rem; }
+.rendered-doc h4 { font-size: 0.9rem; }
+.rendered-doc p { margin: 0.5rem 0; }
+.rendered-doc ul, .rendered-doc ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+.rendered-doc li { margin: 0.2rem 0; }
+.rendered-doc blockquote {
+  margin: 0.5rem 0; padding: 0.25rem 0.75rem;
+  border-left: 3px solid var(--accent);
+  color: var(--text-muted); background: var(--surface-alt);
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+.rendered-doc hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+.rendered-doc pre {
+  margin: 0.5rem 0; padding: 0.75rem;
+  background: var(--code-bg); color: var(--code-text);
+  border-radius: 0.375rem; overflow-x: auto;
+  font-family: 'SF Mono','Cascadia Code','JetBrains Mono','Menlo','Consolas',monospace;
+  font-size: 0.8125rem; line-height: 1.5;
+}
+.rendered-doc code {
+  font-family: 'SF Mono','Cascadia Code','JetBrains Mono','Menlo','Consolas',monospace;
+  font-size: 0.8125em; padding: 0.1em 0.3em;
+  background: var(--surface-alt); border-radius: 0.2em;
+}
+.rendered-doc pre code { padding: 0; background: transparent; font-size: 0.8125rem; }
+.rendered-doc table {
+  border-collapse: collapse; margin: 0.75rem 0; width: 100%; font-size: 0.8125rem;
+}
+.rendered-doc th, .rendered-doc td {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--table-border);
+  text-align: left; vertical-align: top;
+}
+.rendered-doc th { background: var(--table-header-bg); font-weight: 600; }
+.rendered-doc tr:nth-child(even) td { background: var(--table-alt-bg); }
+.rendered-doc img { max-width: 100%; height: auto; border-radius: 0.375rem; margin: 0.5rem 0; }
+.rendered-doc a { color: var(--accent); text-decoration: none; }
+.rendered-doc a:hover { text-decoration: underline; }
+.rendered-doc details {
+  margin: 0.5rem 0; padding: 0.5rem;
+  background: var(--surface-alt); border-radius: 0.375rem;
+  border: 1px solid var(--border);
+}
+.rendered-doc summary { font-weight: 600; cursor: pointer; padding: 0.25rem 0; }
+
+/* Structured data (XML/JSON rendering) */
+</style>
+</head>
+<body>
+  <header id="app-header">
+    <h1>🔍 RenderLens <span class="subtitle">Format-Aware Document Viewer</span></h1>
+    <div class="header-actions">
+      <button class="btn btn-ghost" id="loadSampleBtn" title="Load built-in test sample">📋 Load Sample</button>
+    </div>
+  </header>
+
+  <div id="main-split">
+    <!-- Source Pane -->
+    <div class="pane" id="source-pane">
+      <div class="pane-header">
+        <span>Source</span>
+      </div>
+      <textarea id="sourceInput" spellcheck="false" placeholder="Paste annotation data, mixed-format model responses, or any document with embedded formats here…"></textarea>
+      <div class="source-footer">
+        <div class="stats" id="sourceStats">
+          <span id="statChars">0 chars</span>
+          <span id="statLines">0 lines</span>
+        </div>
+        <button class="btn btn-primary" id="renderBtn">▶ Render</button>
+        <button class="btn btn-ghost" id="clearBtn">✕ Clear</button>
+      </div>
+    </div>
+
+    <!-- Rendered Pane -->
+    <div class="pane" id="rendered-pane">
+      <div class="pane-header">
+        <span>Interpreted View</span>
+      </div>
+      <div class="rendered-toolbar" id="renderedToolbar">
+        <div class="badge-group" id="formatBadges"></div>
+        <span class="spacer"></span>
+        <label class="toggle-label">
+          <input type="checkbox" id="showBoundariesToggle">
+          Show Boundaries
+        </label>
+        <button class="btn btn-ghost btn-icon" id="copySourceBtn" title="Copy source text">📄</button>
+        <button class="btn btn-ghost btn-icon" id="copyRenderedBtn" title="Copy rendered text">📋</button>
+      </div>
+      <div class="pane-content" id="renderedContent">
+        <div class="status-msg">Paste text in the left pane and click Render, or use <strong>Load Sample</strong>.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Copy Toast -->
+  <div class="copy-toast" id="copyToast"></div>
+// ==========================================================================
+// RenderLens — Format-Aware Document Viewer
+// All application JavaScript
+// ==========================================================================
+
+(function() {
+  'use strict';
+
+  /* ---- State ---- */
+  var state = {
+    sourceText: '',
+    segments: [],
+    showBoundaries: false,
+    md: null
+  };
+
+  /* ---- Utilities ---- */
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  function pluralize(n, s) { return n + ' ' + s + (n !== 1 ? 's' : ''); }
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+  function debounce(fn, ms) {
+    var timer = null;
+    return function() {
+      var ctx = this, args = arguments;
+      clearTimeout(timer);
+      timer = setTimeout(function() { fn.apply(ctx, args); }, ms);
+    };
+  }
+
+  function showToast(msg, duration) {
+    duration = duration || 1800;
+    var el = document.getElementById('copyToast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, duration);
+  }
+
+  function getFormatTypes(segs) {
+    var types = [], seen = {};
+    for (var i = 0; i < segs.length; i++) {
+      var t = segs[i].type;
+      if (!seen[t]) { seen[t] = true; types.push(t); }
+    }
+    return types;
+  }
+
+  /* ---- Source Normalization ---- */
+  function normalizeLineEndings(text) {
+    return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  }
+
+  /* ---- Protected-Region Detection ---- */
+  /**
+   * First pass: find fenced code blocks (``` or ~~~).
+   * These regions are protected from further format detection.
+   * Returns fences array and protectedText with markers substituted.
+   */
+  function protectCodeFences(text) {
+    var fences = [];
+    var re = /(?:^|\n)( {0,3})(```|~~~)(\w*)\n([\s\S]*?)\n\1\2(?:\n|$)/gm;
+    var match;
+    var protectedText = text;
+    var offset = 0;
+
+    while ((match = re.exec(text)) !== null) {
+      var indent = match[1];
+      var fenceChar = match[2];
+      var lang = match[3] || '';
+      var content = match[4];
+      var full = match[0];
+      var start = match.index;
+      var end = start + full.length;
+      var marker = '\x00PROTX' + fences.length + '\x00';
+
+      fences.push({
+        start: start, end: end, content: full,
+        language: lang, innerContent: content, marker: marker
+      });
+
+      protectedText = protectedText.slice(0, start - offset) +
+        marker + protectedText.slice(end - offset);
+      offset += (full.length - marker.length);
+    }
+    return { fences: fences, protectedText: protectedText };
+  }
+
+  /* ---- Format Detectors ---- */
+  /** Each detector returns { type, reason, confidence } or null. Tried in priority order. */
+
+  function detectJSON(text) {
+    var trimmed = text.trim();
+    if (!trimmed) return null;
+    var first = trimmed.charAt(0);
+    if (first !== '{' && first !== '[') return null;
+    try {
+      var parsed = JSON.parse(trimmed);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return { type: 'json', reason: 'valid JSON object/array', confidence: 'high' };
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function detectXML(text) {
+    var trimmed = text.trim();
+    if (!trimmed || trimmed.charAt(0) !== '<') return null;
+    var lower = trimmed.toLowerCase();
+    var htmlRoots = ['<html','<!doctype html','<head','<body','<div','<p ','<span',
+      '<h1','<h2','<h3','<table','<ul','<ol','<li','<a ','<img','<br','<hr',
+      '<form','<input','<select','<style','<script','<nav','<header','<footer',
+      '<main','<section','<article','<aside','<button','<label','<option'];
+    for (var i = 0; i < htmlRoots.length; i++) {
+      if (lower.indexOf(htmlRoots[i]) === 0) return null;
+    }
+    // Need at least one tag-like construct
+    var tagLike = /<([a-zA-Z_:][a-zA-Z0-9_:.-]*)[\s>]/g;
+    if (!tagLike.test(trimmed)) return null;
+    try {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(trimmed, 'text/xml');
+      if (doc.querySelectorAll('parsererror').length > 0) return null;
+      var root = doc.documentElement;
+      if (!root) return null;
+      var hasContent = root.children.length > 0 ||
+        root.attributes.length > 0 ||
+        (root.textContent && root.textContent.trim().length > 0);
+      if (!hasContent && trimmed.length < 10) return null;
+      return { type: 'xml', reason: 'parseable XML document', confidence: 'high' };
+    } catch (_) {}
+    return null;
+  }
+
+  function detectHTML(text) {
+    var trimmed = text.trim();
+    if (!trimmed || trimmed.charAt(0) !== '<') return null;
+    var htmlElemRe = /<\/?(?:html|head|body|div|span|p|h[1-6]|a|img|table|tr|td|th|ul|ol|li|br|hr|strong|em|b|i|u|pre|code|blockquote|section|article|nav|header|footer|main|aside|details|summary|form|input|select|option|label|button|figure|figcaption|dl|dt|dd|cite|abbr|time|small|sub|sup|mark|del|ins)[\s>]/i;
+    if (!htmlElemRe.test(trimmed)) return null;
+    var openTags = (trimmed.match(/<[a-zA-Z][a-zA-Z0-9]*[\s>]/g) || []).length;
+    var closeTags = (trimmed.match(/<\/[a-zA-Z][a-zA-Z0-9]*[\s>]/g) || []).length;
+    if (openTags === 0 && closeTags === 0) return null;
+    return { type: 'html', reason: 'recognizable HTML markup', confidence: 'medium' };
+  }
+
+  function detectMarkdown(text) {
+    var trimmed = text.trim();
+    if (!trimmed) return null;
+    var lines = trimmed.split('\n');
+    var mdScore = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (/^#{1,6}\s/.test(line)) mdScore += 3;
+      if (i > 0 && /^={3,}\s*$/.test(line)) mdScore += 3;
+      if (i > 0 && /^-{3,}\s*$/.test(line) && !/^\s*-\s/.test(lines[i-1])) mdScore += 2;
+      if (/^[\s]*[-*+]\s/.test(line)) mdScore += 2;
+      if (/^[\s]*\d+\.\s/.test(line)) mdScore += 2;
+      if (/^>\s/.test(line)) mdScore += 2;
+      if (/\|.*\|/.test(line) && /\|.*-/.test(line)) mdScore += 3;
+      if (/^(?:[-*_]\s*){3,}$/.test(line)) mdScore += 2;
+      if (/^`{3,}/.test(line) || /^~{3,}/.test(line)) mdScore += 4;
+    }
+    var ratio = mdScore / Math.max(lines.length, 1);
+    if (mdScore >= 3 && (ratio > 0.15 || mdScore >= 5)) {
+      return { type: 'markdown', reason: 'Markdown block structure',
+        confidence: ratio > 0.3 ? 'high' : 'medium' };
+    }
+    return null;
+  }
+
+  /** Determine format of a text block. Tries detectors in priority order. */
+  function detectFormat(text) {
+    var trimmed = text.trim();
+    if (!trimmed) return { type: 'text', reason: 'empty', confidence: 'high' };
+    if (text.indexOf('\x00PROTX') !== -1) {
+      return { type: 'code', reason: 'protected code region', confidence: 'high' };
+    }
+    var r;
+    r = detectJSON(trimmed); if (r) return r;
+    r = detectXML(trimmed);  if (r) return r;
+    r = detectHTML(trimmed); if (r) return r;
+    r = detectMarkdown(trimmed); if (r) return r;
+    return { type: 'text', reason: 'no structured format detected', confidence: 'high' };
+  }
+
+  /* ---- Segment Builder ---- */
+  /**
+   * Split text into blocks separated by blank lines, classify each, then
+   * merge adjacent same-type blocks. This runs on the non-protected text
+   * (code fences are already extracted).
+   */
+  function splitTextIntoBlocks(text) {
+    // Split on two or more consecutive newlines (blank-line separation)
+    var raw = text.split(/\n\n+/);
+    var blocks = [];
+    for (var i = 0; i < raw.length; i++) {
+      var b = raw[i].trim();
+      if (b.length > 0) blocks.push(b);
+    }
+    return blocks;
+  }
+
+  /**
+   * Build the full ordered segment array from the raw source text.
+   * Pipeline:
+   * 1. Normalize line endings.
+   * 2. Extract and protect fenced code blocks.
+   * 3. Split remaining text into blocks, classify each, merge adjacent same-type.
+   * 4. Interleave code fence segments at their original positions.
+   * 5. Determine start/end offsets in the original text for each segment.
+   */
+  function buildSegments(rawText) {
+    var normalized = normalizeLineEndings(rawText);
+    if (!normalized.trim()) return [];
+
+    // Step 1: Extract code fences
+    var protectedInfo = protectCodeFences(normalized);
+    var fences = protectedInfo.fences;
+    var protectedText = protectedInfo.protectedText;
+
+    // Step 2: Split remaining text and classify
+    // We'll work with the protected text to find non-code regions
+    // Build a map of marker positions
+    var allSegments = [];
+    var cursor = 0;
+
+    // Walk through the protected text, splitting at fence markers
+    var parts = protectedText.split(/(\x00PROTX\d+\x00)/);
+
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i];
+      if (!part) continue;
+
+      // Check if this part is a fence marker
+      var markerMatch = part.match(/^\x00PROTX(\d+)\x00$/);
+      if (markerMatch) {
+        var fenceIdx = parseInt(markerMatch[1], 10);
+        var fence = fences[fenceIdx];
+        allSegments.push({
+          type: 'code',
+          content: fence.content,
+          sourceContent: fence.innerContent,
+          language: fence.language,
+          startOffset: fence.start,
+          endOffset: fence.end,
+          reason: 'fenced code block',
+          confidence: 'high'
+        });
+        continue;
+      }
+
+      // This is a non-code region — classify its blocks
+      if (part.trim().length === 0) continue;
+
+      var blocks = splitTextIntoBlocks(part);
+      for (var j = 0; j < blocks.length; j++) {
+        var block = blocks[j];
+        var detection = detectFormat(block);
+        var seg = {
+          type: detection.type,
+          content: block,
+          startOffset: 0,
+          endOffset: 0,
+          reason: detection.reason,
+          confidence: detection.confidence
+        };
+        // Merge adjacent same-type segments
+        var last = allSegments.length > 0 ? allSegments[allSegments.length - 1] : null;
+        if (last && last.type === seg.type && last.type !== 'code') {
+          last.content += '\n\n' + seg.content;
+          last.reason = last.reason + '; ' + seg.reason;
+/* ---- Markdown Renderer ---- */
+  function renderMarkdown(text) {
+    try {
+      if (!state.md) {
+        state.md = window.markdownit({
+          html: true,
+          linkify: true,
+          typographer: false,
+          breaks: false
+        });
+      }
+      var html = state.md.render(text);
+      // Sanitize the output
+      return sanitizeHTML(html);
+    } catch (e) {
+      return '<div class="parse-error-warning">⚠ Markdown parse error: ' +
+        escapeHtml(e.message) + '</div><pre>' + escapeHtml(text) + '</pre>';
+    }
+  }
+
+  /* ---- HTML Renderer ---- */
+/* ---- XML-to-Data Converter ---- */
+  /**
+   * Parse XML with native DOMParser and convert to a structured
+   * representation that can be rendered as human-readable data.
+   *
+   * Strategy:
+   * 1. Parse as XML; if that fails, return null.
+   * 2. Analyze root element's children:
+   *    - Repeated same-named children with similar field sets → table
+   *    - Mixed children → labeled fields
+   *    - Nested structures → recursive sections
+   *    - Text-only leaves → simple field
+   *    - Attributes → metadata fields
+   */
+
+  /** Analyze an element's children to determine if they're a repeated record pattern. */
+  function isRepeatedRecord(children) {
+    if (children.length < 2) return null;
+    var tagCounts = {};
+    for (var i = 0; i < children.length; i++) {
+      var tag = children[i].tagName;
+      tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+    }
+    // Find the most common tag that appears in at least half of children
+    var maxTag = null, maxCount = 0;
+    for (var tag in tagCounts) {
+      if (tagCounts[tag] > maxCount) {
+        maxCount = tagCounts[tag];
+        maxTag = tag;
+      }
+    }
+    if (maxCount >= children.length * 0.5 && maxCount >= 2) {
+      return { tag: maxTag, count: maxCount };
+    }
+    return null;
+  }
+
+  /** Collect unique field names from a set of elements with the same tag. */
+  function collectFields(elements) {
+    var fields = {};
+    for (var i = 0; i < elements.length; i++) {
+      var el = elements[i];
+      for (var j = 0; j < el.children.length; j++) {
+        fields[el.children[j].tagName] = true;
+      }
+    }
+    return Object.keys(fields);
+  }
+
+  /** Convert an XML element to a data representation object. */
+  function elementToData(el) {
+    var children = Array.from(el.children);
+    var attrs = {};
+    for (var a = 0; a < el.attributes.length; a++) {
+      var attr = el.attributes[a];
+      attrs[attr.name] = attr.value;
+    }
+    var hasAttrs = Object.keys(attrs).length > 0;
+    var tagName = el.tagName;
+
+    // Leaf: no children, just text content
+    if (children.length === 0) {
+      var text = (el.textContent || '').trim();
+      return {
+        kind: 'leaf',
+        tag: tagName,
+        value: text,
+        attributes: attrs,
+        label: humanizeTag(tagName)
+      };
+    }
+
+    // Check for repeated records
+    var repeated = isRepeatedRecord(children);
+    if (repeated) {
+      var recordTag = repeated.tag;
+      var records = children.filter(function(c) { return c.tagName === recordTag; });
+      var fields = collectFields(records);
+      var rows = records.map(function(rec) {
+        var row = {};
+        for (var f = 0; f < fields.length; f++) {
+          var fieldName = fields[f];
+          var fieldEl = rec.querySelector(':scope > ' + fieldName);
+          row[fieldName] = fieldEl ? (fieldEl.textContent || '').trim() : '';
+        }
+        return row;
+      });
+
+      return {
+        kind: 'table',
+        tag: tagName,
+        label: humanizeTag(tagName),
+        recordTag: recordTag,
+        recordLabel: humanizeTag(recordTag),
+        columns: fields,
+        columnLabels: fields.map(humanizeTag),
+        rows: rows,
+        attributes: hasAttrs ? attrs : null
+      };
+    }
+
+    // Object with named children
+    var fields_list = children.map(function(c) {
+      return elementToData(c);
+    });
+
+/* ---- JSON-to-Data Converter ---- */
+  /**
+   * Convert parsed JSON to a data representation similar to XML.
+   *
+   * Strategy:
+   * - Object → labeled fields (recursively)
+   * - Array of similar objects → table
+   * - Array of primitives → list
+   * - Nested → recursive sections
+   */
+
+  function jsonToData(value, label) {
+    label = label || '';
+    // Null
+    if (value === null) {
+      return { kind: 'leaf', value: 'null', label: label || 'Value' };
+    }
+    // Array
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return { kind: 'leaf', value: '[]', label: label || 'Array' };
+      }
+      // Check if all elements are plain objects with similar keys
+      var allObjects = value.every(function(v) {
+        return typeof v === 'object' && v !== null && !Array.isArray(v);
+      });
+      if (allObjects && value.length > 0) {
+        // Collect all keys present across objects
+        var keys = {};
+        for (var i = 0; i < value.length; i++) {
+          for (var k in value[i]) {
+            if (value[i].hasOwnProperty(k)) keys[k] = true;
+          }
+        }
+        var keyList = Object.keys(keys);
+        // Only treat as table if objects are reasonably flat
+        var allSimple = value.every(function(v) {
+          return keyList.every(function(k) { return !isComplexValue(v[k]); });
+        });
+        if (allSimple) {
+          var rows = value.map(function(v) {
+            var row = {};
+            for (var j = 0; j < keyList.length; j++) {
+              row[keyList[j]] = formatLeafValue(v[keyList[j]]);
+            }
+            return row;
+          });
+          return {
+            kind: 'table',
+            label: label || 'Records',
+            columns: keyList,
+            columnLabels: keyList.map(humanizeKey),
+            rows: rows
+          };
+        }
+      }
+      // Array of primitives
+      var allPrimitives = value.every(function(v) { return !isComplexValue(v); });
+      if (allPrimitives) {
+        return {
+          kind: 'list',
+          label: label || 'List',
+          items: value.map(function(v) { return formatLeafValue(v); })
+        };
+      }
+      // Mixed/fallback: render each item
+      return {
+        kind: 'list',
+        label: label || 'Items',
+        items: value.map(function(v, idx) {
+          return jsonToData(v, 'Item ' + (idx + 1));
+        })
+      };
+    }
+    // Object
+    if (typeof value === 'object' && value !== null) {
+      var keys = Object.keys(value);
+      if (keys.length === 0) {
+        return { kind: 'leaf', value: '{}', label: label || 'Object' };
+      }
+      var fields = keys.map(function(k) {
+        var v = value[k];
+        if (isComplexValue(v)) {
+          return jsonToData(v, humanizeKey(k));
+        }
+        return { kind: 'leaf', key: k, label: humanizeKey(k), value: formatLeafValue(v) };
+      });
+      return {
+        kind: 'object',
+        label: label || 'Object',
+        fields: fields
+      };
+/* ---- Structured Data Renderer ---- */
+  /**
+   * Render a data representation object (from XML or JSON parsing)
+   * into readable HTML with labeled fields, tables, lists, and nested sections.
+   */
+
+  function renderStructuredData(data, depth) {
+    depth = depth || 0;
+    if (!data) return '';
+
+    var html = '';
+
+    switch (data.kind) {
+      case 'leaf':
+        html += '<div class="structured-field">';
+        if (data.label) {
+          html += '<span class="field-label">' + escapeHtml(data.label) + '</span>';
+        }
+        html += '<span class="field-value">' + escapeHtml(data.value) + '</span>';
+        if (data.attributes && depth === 0) {
+          html += renderAttributes(data.attributes);
+        }
+        html += '</div>';
+        break;
+
+      case 'object':
+        html += '<div class="structured-object">';
+        if (data.label) {
+          html += '<div class="object-title">' + escapeHtml(data.label) + '</div>';
+        }
+        if (data.attributes && depth === 0) {
+          html += renderAttributes(data.attributes);
+        }
+        for (var i = 0; i < data.fields.length; i++) {
+          var f = data.fields[i];
+          if (f.kind === 'leaf') {
+            html += '<div class="structured-field">';
+            html += '<span class="field-label">' + escapeHtml(f.label) + '</span>';
+            html += '<span class="field-value">' + escapeHtml(f.value) + '</span>';
+            html += '</div>';
+          } else {
+            html += '<div class="structured-nested">';
+            html += renderStructuredData(f, depth + 1);
+            html += '</div>';
+          }
+        }
+        html += '</div>';
+        break;
+
+      case 'table':
+        html += '<div class="xml-table-wrap">';
+        html += '<table>';
+        if (data.label) {
+          html += '<caption style="caption-side:top;text-align:left;font-weight:600;padding:0.25rem 0;font-size:0.8125rem;">' + escapeHtml(data.label) + '</caption>';
+        }
+        html += '<thead><tr>';
+        for (var c = 0; c < data.columnLabels.length; c++) {
+          html += '<th>' + escapeHtml(data.columnLabels[c]) + '</th>';
+        }
+        html += '</tr></thead><tbody>';
+        for (var r = 0; r < data.rows.length; r++) {
+          html += '<tr>';
+          for (var c2 = 0; c2 < data.columns.length; c2++) {
+            html += '<td>' + escapeHtml(data.rows[r][data.columns[c2]] || '') + '</td>';
+          }
+          html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        break;
+
+      case 'list':
+        html += '<div class="structured-object">';
+        if (data.label) {
+          html += '<div class="object-title">' + escapeHtml(data.label) + '</div>';
+        }
+        for (var i2 = 0; i2 < data.items.length; i2++) {
+          var item = data.items[i2];
+          if (typeof item === 'string') {
+            html += '<div class="structured-list-item">' + escapeHtml(item) + '</div>';
+          } else {
+            html += '<div class="structured-nested">';
+            html += renderStructuredData(item, depth + 1);
+            html += '</div>';
+          }
+        }
+        html += '</div>';
+        break;
+    }
+
+    return html;
+  }
+
+  function renderAttributes(attrs) {
+    if (!attrs) return '';
+    var keys = Object.keys(attrs);
+    if (keys.length === 0) return '';
+    var html = '';
+    for (var i = 0; i < keys.length; i++) {
+      html += '<div class="structured-field">';
+      html += '<span class="field-label">@' + escapeHtml(keys[i]) + '</span>';
+      html += '<span class="field-value">' + escapeHtml(attrs[keys[i]]) + '</span>';
+      html += '</div>';
+    }
+    return html;
+  }
+
+  /* ---- Code Renderer ---- */
+  function renderCode(text, language) {
+    // Fenced code blocks render as pre/code with optional language label
+    var html = '';
+/* ---- Sanitization / Post-Processing ---- */
+  /**
+   * Sanitize HTML using DOMPurify with strict rules.
+   * - Strip script tags, event handlers, javascript: URLs
+   * - Force all links to target=_blank rel=noopener noreferrer
+   * - Constrain images
+   * - Strip iframes entirely
+   */
+  function sanitizeHTML(html) {
+    if (!window.DOMPurify) return escapeHtml(html);
+    var purified = window.DOMPurify.sanitize(html, {
+      ADD_ATTR: ['target'],
+      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'applet', 'frame', 'frameset'],
+      FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onmouseout',
+        'onkeydown', 'onkeyup', 'onsubmit', 'onfocus', 'onblur', 'onchange',
+        'oninput', 'onresize', 'onscroll', 'onwheel', 'oncontextmenu',
+        'ondblclick', 'onmousedown', 'onmouseup', 'onmousemove', 'onmouseenter',
+        'onmouseleave', 'onpointerdown', 'onpointerup', 'onpointermove',
+        'onpointerenter', 'onpointerleave', 'onpointerover', 'onpointerout',
+        'ongotpointercapture', 'onlostpointercapture', 'ontouchstart',
+        'ontouchend', 'ontouchmove', 'ontouchcancel', 'onabort', 'onerror',
+        'oncanplay', 'oncanplaythrough', 'ondurationchange', 'onemptied',
+        'onended', 'onloadeddata', 'onloadedmetadata', 'onloadstart',
+        'onpause', 'onplay', 'onplaying', 'onprogress', 'onratechange',
+        'onseeked', 'onseeking', 'onstalled', 'onsuspend', 'ontimeupdate',
+        'onvolumechange', 'onwaiting', 'onbeforeunload', 'onhashchange',
+        'onmessage', 'onoffline', 'ononline', 'onpagehide', 'onpageshow',
+        'onpopstate', 'onstorage', 'onunload', 'ondrag', 'ondragend',
+        'ondragenter', 'ondragexit', 'ondragleave', 'ondragover',
+        'ondragstart', 'ondrop', 'oncopy', 'oncut', 'onpaste',
+        'onanimationend', 'onanimationiteration', 'onanimationstart',
+        'ontransitionend', 'ontransitionrun', 'ontransitionstart',
+        'onauxclick', 'onwheel', 'onpointerrawupdate'],
+      ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|mailto|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i
+    });
+
+    // Force all links to open in new tab with safe rel
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = purified;
+    var links = wrapper.querySelectorAll('a');
+    for (var i = 0; i < links.length; i++) {
+      links[i].setAttribute('target', '_blank');
+      links[i].setAttribute('rel', 'noopener noreferrer');
+    }
+
+    return wrapper.innerHTML;
+  }
+
+  /* ---- Document Renderer ---- */
+  /**
+   * Render the full ordered segment list into the rendered pane.
+   */
+  function renderDocument() {
+    var container = document.getElementById('renderedContent');
+    var showBounds = state.showBoundaries;
+    var segs = state.segments;
+
+    if (!segs || segs.length === 0) {
+      container.innerHTML = '<div class="status-msg">Paste text in the left pane and click Render, or use <strong>Load Sample</strong>.</div>';
+      updateBadges([]);
+      return;
+    }
+
+    var html = '<div class="rendered-doc">';
+
+    for (var i = 0; i < segs.length; i++) {
+      var seg = segs[i];
+      var segHtml = '';
+      var hasError = false;
+
+      try {
+        switch (seg.type) {
+          case 'markdown':
+            segHtml = renderMarkdown(seg.content);
+            break;
+          case 'html':
+            segHtml = renderHTML(seg.content);
+            break;
+          case 'xml':
+            segHtml = renderXMLSegment(seg);
+            break;
+          case 'json':
+            segHtml = renderJSONSegment(seg);
+            break;
+          case 'code':
+            segHtml = renderCode(seg.sourceContent || seg.content, seg.language);
+            break;
+          default:
+            segHtml = renderText(seg.content);
+            break;
+        }
+      } catch (err) {
+        segHtml = '<div class="parse-error-warning">⚠ Render error: ' +
+          escapeHtml(err.message) + '</div>' +
+          '<div class="structured-fallback">' + escapeHtml(seg.content) + '</div>';
+        hasError = true;
+      }
+
+      if (showBounds) {
+        var boundaryLabel = getBoundaryLabel(seg.type);
+        html += '<div class="segment-boundary">';
+        html += '<span class="boundary-label">' + boundaryLabel + '</span>';
+        html += segHtml;
+        if (seg.confidence && seg.confidence !== 'high') {
+          html += '<div style="font-size:0.6rem;color:var(--text-faint);margin-top:0.25rem;">detection: ' +
+            escapeHtml(seg.reason) + ' (' + seg.confidence + ')</div>';
+        }
+        html += '</div>';
+      } else {
+        html += segHtml;
+      }
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+
+    // Update format badges
+    updateBadges(segs);
+  }
+
+/* ---- UI Handlers ---- */
+  function updateBadges(segs) {
+    var badgeContainer = document.getElementById('formatBadges');
+    var types = getFormatTypes(segs);
+    var counts = {};
+    for (var i = 0; i < segs.length; i++) {
+      var t = segs[i].type;
+      counts[t] = (counts[t] || 0) + 1;
+    }
+    var html = '';
+    var typeMap = {
+      'markdown': 'md', 'html': 'html', 'xml': 'xml',
+      'json': 'json', 'code': 'code', 'text': 'text'
+    };
+    var labelMap = {
+      'markdown': 'Markdown', 'html': 'HTML', 'xml': 'XML',
+      'json': 'JSON', 'code': 'Code', 'text': 'Text'
+    };
+    for (var j = 0; j < types.length; j++) {
+      var cls = typeMap[types[j]] || 'text';
+      var label = labelMap[types[j]] || types[j];
+      html += '<span class="format-badge ' + cls + '">' + label + '</span>';
+      if (counts[types[j]] > 1) {
+        html += '<span class="format-badge count">×' + counts[types[j]] + '</span>';
+      }
+    }
+    badgeContainer.innerHTML = html || '<span class="format-badge text">Text</span>';
+  }
+
+  function updateStats(text) {
+    document.getElementById('statChars').textContent = pluralize(text.length, 'char');
+    document.getElementById('statLines').textContent = pluralize(text.split('\n').length, 'line');
+  }
+
+  function performRender() {
+    var textarea = document.getElementById('sourceInput');
+    var text = textarea.value;
+    state.sourceText = text;
+    updateStats(text);
+
+    if (!text.trim()) {
+      state.segments = [];
+      renderDocument();
+      return;
+    }
+
+    state.segments = buildSegments(text);
+    renderDocument();
+  }
+
+  function handleClear() {
+    document.getElementById('sourceInput').value = '';
+    state.sourceText = '';
+    state.segments = [];
+    updateStats('');
+    renderDocument();
+  }
+
+/* ---- Sample / Test Data ---- */
+  var SAMPLE_TEXT = 'Here is a typical AI response containing multiple formats:\n' +
+'\n' +
+'First, let me share some analysis in Markdown:\n' +
+'\n' +
+'## Market Overview\n' +
+'\n' +
+'The market showed **strong momentum** this quarter with three key trends:\n' +
+'\n' +
+'- Enterprise adoption increased by 34%\n' +
+'- Developer tooling matured significantly\n' +
+'- Open-source alternatives gained parity\n' +
+'\n' +
+'| Metric | Q1 | Q2 | Change |\n' +
+'|--------|-----|-----|--------|\n' +
+'| Revenue | $2.1M | $2.8M | +33% |\n' +
+'| Users | 14,200 | 19,800 | +39% |\n' +
+'| NPS | 42 | 51 | +9pts |\n' +
+'\n' +
+'The code snippet below demonstrates the primary integration pattern:\n' +
+'\n' +
+'```html\n' +
+'<div class="widget" data-version="2.0">\n' +
+'  <h2>Dashboard</h2>\n' +
+'  <p>Welcome, <span class="user">Alice</span>!</p>\n' +
+'  <script>alert("XSS attempt")</script>\n' +
+'</div>\n' +
+'```\n' +
+'\n' +
+'Note how the HTML inside the code block is NOT rendered as active markup in the viewer.\n' +
+'\n' +
+'Here is the actual response HTML from our API:\n' +
+'\n' +
+'<div style="padding: 1rem; background: #f0f9ff; border-radius: 8px;">\n' +
+'  <h3>Processing Complete</h3>\n' +
+'  <p>Your report is ready. <a href="https://example.com/report">Download here</a>.</p>\n' +
+'  <img src="https://placehold.co/400x100/3b82f6/white?text=Report+Ready" alt="Report Ready" width="400" height="100">\n' +
+'  <p>Status: <strong style="color:green;">Complete</strong></p>\n' +
+'</div>\n' +
+'\n' +
+'<script>alert("this should never execute")</script>\n' +
+'<img src="x" onerror="alert(\'XSS\')">\n' +
+'\n' +
+'Now here is the user profile data in XML:\n' +
+'\n' +
+'<person id="42" status="active" role="admin">\n' +
+'  <name>Bob Smith</name>\n' +
+'  <email>bob@example.com</email>\n' +
+'  <age>42</age>\n' +
+'  <department>Engineering</department>\n' +
+'</person>\n' +
+'\n' +
+'And here is a list of team members:\n' +
+'\n' +
+'<team>\n' +
+'  <member>\n' +
+'    <name>Bob Smith</name>\n' +
+'    <role>Lead Engineer</role>\n' +
+'    <years>7</years>\n' +
+'  </member>\n' +
+'  <member>\n' +
+'    <name>Alice Jones</name>\n' +
+'    <role>Product Manager</role>\n' +
+'    <years>4</years>\n' +
+'  </member>\n' +
+'  <member>\n' +
+'    <name>Charlie Brown</name>\n' +
+'    <role>Designer</role>\n' +
+'    <years>2</years>\n' +
+'  </member>\n' +
+'</team>\n' +
+'\n' +
+'Here is a JSON configuration object:\n' +
+'\n' +
+'{\n' +
+'  "appName": "RenderLens",\n' +
+'  "version": "1.0.0",\n' +
+'  "features": {\n' +
+'    "darkMode": true,\n' +
+'    "autoRender": true,\n' +
+'    "maxInputSize": 51200\n' +
+'  },\n' +
+'  "author": "Hank Marquardt"\n' +
+'}\n' +
+'\n' +
+'And a JSON array of records:\n' +
+'\n' +
+'[\n' +
+'  {"city": "Denver", "temp": 72, "condition": "Sunny"},\n' +
+'  {"city": "Chicago", "temp": 58, "condition": "Cloudy"},\n' +
+'  {"city": "Miami", "temp": 85, "condition": "Humid"}\n' +
+']\n' +
+'\n' +
+'Mathematical comparisons are not markup: 2 < 5 and 10 > 7. Also 3 <= 4 and 8 >= 8.\n' +
+'\n' +
+'A long time ago in a galaxy far, far away...\n' +
+'\n' +
+'Final note: the quick brown fox jumps over the lazy dog. End of transmission.';
+
+  /* ---- Initialization ---- */
+  function init() {
+    var sourceInput = document.getElementById('sourceInput');
+    var renderBtn = document.getElementById('renderBtn');
+    var clearBtn = document.getElementById('clearBtn');
+    var loadSampleBtn = document.getElementById('loadSampleBtn');
+    var showBoundariesToggle = document.getElementById('showBoundariesToggle');
+    var copySourceBtn = document.getElementById('copySourceBtn');
+    var copyRenderedBtn = document.getElementById('copyRenderedBtn');
+
+    // Auto-render on paste with debounce
+    var debouncedRender = debounce(performRender, 250);
+    sourceInput.addEventListener('input', debouncedRender);
+    sourceInput.addEventListener('paste', function() {
+      setTimeout(debouncedRender, 50);
+    });
+
+    // Explicit render button
+    renderBtn.addEventListener('click', performRender);
+
+    // Clear button
+    clearBtn.addEventListener('click', handleClear);
+
+    // Load sample
+    loadSampleBtn.addEventListener('click', handleLoadSample);
+
+    // Show boundaries toggle
+    showBoundariesToggle.addEventListener('change', function() {
+      state.showBoundaries = this.checked;
+      renderDocument();
+    });
+
+    // Copy buttons
+    copySourceBtn.addEventListener('click', handleCopySource);
+    copyRenderedBtn.addEventListener('click', handleCopyRendered);
+  }
+
+  // Kick off on DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  function handleCopySource() {
+    var text = state.sourceText || document.getElementById('sourceInput').value;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Source copied');
+    })['catch'](function() {
+      showToast('Copy failed');
+    });
+  }
+
+  function handleCopyRendered() {
+    var container = document.getElementById('renderedContent');
+    var text = container.textContent || container.innerText || '';
+    if (!text || text.indexOf('Paste text') !== -1) return;
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Rendered text copied');
+    })['catch'](function() {
+      showToast('Copy failed');
+    });
+  }
+
+  function handleLoadSample() {
+    document.getElementById('sourceInput').value = SAMPLE_TEXT;
+    performRender();
+  }
+  function getBoundaryLabel(type) {
+    switch (type) {
+      case 'markdown': return 'MARKDOWN';
+      case 'html': return 'HTML';
+      case 'xml': return 'XML';
+      case 'json': return 'JSON';
+      case 'code': return 'CODE';
+      default: return 'TEXT';
+    }
+  }
+
+  function renderXMLSegment(seg) {
+    var data = parseXML(seg.content);
+    if (!data) {
+      return '<div class="parse-error-warning">⚠ XML parsing failed — showing raw content</div>' +
+        '<div class="structured-fallback">' + escapeHtml(seg.content) + '</div>';
+    }
+    return renderStructuredData(data);
+  }
+
+  function renderJSONSegment(seg) {
+    try {
+      var parsed = JSON.parse(seg.content.trim());
+      var data = jsonToData(parsed);
+      return renderStructuredData(data);
+    } catch (e) {
+      return '<div class="parse-error-warning">⚠ JSON parsing failed — showing raw content</div>' +
+        '<div class="structured-fallback">' + escapeHtml(seg.content) + '</div>';
+    }
+  }
+    if (language) {
+      html += '<div style="font-size:0.65rem;color:var(--text-faint);margin-bottom:0.25rem;text-transform:uppercase;letter-spacing:0.04em;">' + escapeHtml(language) + '</div>';
+    }
+    html += '<pre><code>' + escapeHtml(text) + '</code></pre>';
+    return html;
+  }
+
+  /* ---- Plaintext Renderer ---- */
+  function renderText(text) {
+    // Render plaintext preserving paragraph boundaries
+    // Escape HTML entities, wrap in paragraphs
+    var paragraphs = text.split(/\n\n+/);
+    var html = '';
+    for (var i = 0; i < paragraphs.length; i++) {
+      var p = paragraphs[i].trim();
+      if (!p) continue;
+      // Check if it looks like a single line (e.g., line-oriented data)
+      var lines = p.split('\n');
+      if (lines.length > 1 && lines.length < 20) {
+        // Multi-line but not too many: preserve line breaks
+        html += '<p style="white-space:pre-wrap">' + escapeHtml(p) + '</p>';
+      } else {
+        html += '<p>' + escapeHtml(p.replace(/\n/g, ' ')) + '</p>';
+      }
+    }
+    return html;
+  }
+    }
+    // Primitive
+    return { kind: 'leaf', value: formatLeafValue(value), label: label || 'Value' };
+  }
+
+  function isComplexValue(v) {
+    return v !== null && typeof v === 'object';
+  }
+
+  function formatLeafValue(v) {
+    if (v === null) return 'null';
+    if (v === undefined) return '';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    return String(v);
+  }
+
+  function humanizeKey(key) {
+    var s = key.replace(/[_-]/g, ' ');
+    s = s.replace(/([a-z])([A-Z])/g, '$1 $2');
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+    return {
+      kind: 'object',
+      tag: tagName,
+      label: humanizeTag(tagName),
+      fields: fields_list,
+      attributes: hasAttrs ? attrs : null
+    };
+  }
+
+  function humanizeTag(tag) {
+    // Convert XML tag names to readable labels
+    // personName → Person Name, person_name → Person Name, Person → Person
+    var s = tag.replace(/[_-]/g, ' ');
+    // Insert space before uppercase letters (camelCase)
+    s = s.replace(/([a-z])([A-Z])/g, '$1 $2');
+    // Uppercase first letter
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  /**
+   * Parse XML text and return a data representation object,
+   * or null if parsing fails.
+   */
+  function parseXML(text) {
+    try {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(text, 'text/xml');
+      var errors = doc.querySelectorAll('parsererror');
+      if (errors.length > 0) return null;
+      var root = doc.documentElement;
+      if (!root) return null;
+      return elementToData(root);
+    } catch (e) {
+      return null;
+    }
+  }
+  function renderHTML(text) {
+    try {
+      return sanitizeHTML(text);
+    } catch (e) {
+      return '<div class="parse-error-warning">⚠ HTML render error: ' +
+        escapeHtml(e.message) + '</div><pre>' + escapeHtml(text) + '</pre>';
+    }
+  }
+        } else {
+          allSegments.push(seg);
+        }
+      }
+    }
+
+    // Step 3: Compute offsets by scanning the original text
+    computeOffsets(allSegments, normalized);
+
+    return allSegments;
+  }
+
+  /**
+   * Compute start/end offsets for each segment by locating its content
+   * in the original normalized text. Uses sequential scanning since
+   * segments are ordered and non-overlapping.
+   */
+  function computeOffsets(segments, original) {
+    var searchPos = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var content = seg.content;
+      // Find the content starting from searchPos
+      var found = original.indexOf(content, searchPos);
+      if (found !== -1) {
+        seg.startOffset = found;
+        seg.endOffset = found + content.length;
+        searchPos = found + content.length;
+      } else {
+        // Fallback: approximate
+        seg.startOffset = searchPos;
+        seg.endOffset = searchPos + content.length;
+        searchPos = seg.endOffset;
+      }
+    }
+  }
+
+  })();
+</script>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.21.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.21.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · RenderLens · version 2026.08.21.1
+</footer>
+</body>
+</html>
