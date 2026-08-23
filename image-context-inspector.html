@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Context Inspector</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗺️</text></svg>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/exifr@6.3.0/dist/exifr.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@15.0.0/dist/browser/markdown-it.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.13/dist/purify.min.js"></script>
+  <script src="analytics-lite.js" data-site-id="junkdrawer" data-api="https://lab.aismallbizguru.com/api/analytics/collect" defer></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+:root{--bg:#0d1117;--surface:#161b22;--surface-alt:#1c2333;--border:#2a3145;--border-strong:#3b4460;--text:#e6edf5;--text-muted:#8896b0;--text-faint:#5d6b87;--accent:#3b82f6;--accent-hover:#60a5fa;--accent-bg:#1e293b;--green:#34d399;--amber:#fbbf24;--red:#f87171;--scrollbar:#3b4460;--scrollbar-hover:#5d6b87;--shadow:0 4px 24px rgba(0,0,0,0.4);--focus-ring:rgba(59,130,246,0.4);--radius:8px;--radius-sm:4px}
+@media(prefers-color-scheme:light){:root{--bg:#f1f5f9;--surface:#fff;--surface-alt:#f8fafc;--border:#e2e8f0;--border-strong:#cbd5e1;--text:#0f172a;--text-muted:#64748b;--text-faint:#94a3b8;--accent:#2563eb;--accent-hover:#3b82f6;--green:#059669;--amber:#d97706;--red:#dc2626;--scrollbar:#cbd5e1;--scrollbar-hover:#94a3b8;--shadow:0 4px 20px rgba(0,0,0,0.08);--focus-ring:rgba(37,99,235,0.35)}}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.5;display:flex;flex-direction:column;height:100vh}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-hover)}
+#topbar{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:.5rem 1rem;border-bottom:1px solid var(--border);background:var(--surface);gap:.75rem;min-height:3rem}
+#topbar h1{font-size:1rem;font-weight:600;display:flex;align-items:center;gap:.5rem}
+#topbar h1 span.sub{font-weight:400;color:var(--text-muted);font-size:.75rem}
+.topbar-actions{display:flex;align-items:center;gap:.5rem}
+.btn{display:inline-flex;align-items:center;gap:.35rem;padding:.35rem .7rem;font-size:.75rem;font-weight:500;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);cursor:pointer;white-space:nowrap;line-height:1.4;transition:all .12s ease}
+.btn:hover{background:var(--surface-alt);border-color:var(--border-strong)}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn-ghost{border-color:transparent;background:transparent;color:var(--text-muted)}
+.btn-ghost:hover{background:var(--surface-alt);color:var(--text);border-color:var(--border)}
+.btn-sm{padding:.25rem .5rem;font-size:.7rem}
+.btn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+#workspace{flex:1;display:flex;flex-direction:column;min-height:0;overflow-y:auto;padding:1rem;gap:.75rem}
+#top-row{display:flex;gap:1rem;flex:0 0 auto}
+#image-panel{flex:1 1 55%;min-width:0;max-height:65vh}
+#drop-zone{position:relative;border:2px dashed var(--border-strong);border-radius:var(--radius);background:var(--surface-alt);display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:200px;text-align:center;padding:1.5rem;cursor:pointer;transition:border-color .2s,background .2s;overflow:hidden}
+#drop-zone.dragover{border-color:var(--accent);background:var(--accent-bg)}
+#drop-zone.has-image{border-style:solid;border-color:var(--border);cursor:default;padding:0}
+#drop-zone .dz-text{color:var(--text-muted);font-size:.85rem}
+#drop-zone .dz-icon{font-size:2.5rem;margin-bottom:.5rem;opacity:.5}
+#drop-zone img.preview{width:100%;height:100%;object-fit:contain;display:block}
+#dz-input{display:none}
+.file-info{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));padding:1rem .75rem .5rem;display:flex;gap:.75rem;font-size:.7rem;color:#e6edf5;pointer-events:none;opacity:0;transition:opacity .2s}
+#drop-zone:hover .file-info,#drop-zone.has-image .file-info{opacity:1}
+.file-info span{white-space:nowrap}
+#location-panel{flex:1 1 45%;min-width:0;display:flex;flex-direction:column;gap:.5rem;max-height:65vh}
+#gps-summary{display:flex;gap:.5rem;flex-wrap:wrap;flex:0 0 auto}
+.gps-card{flex:1;min-width:120px;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:.75rem}
+.gps-card .label{color:var(--text-muted);font-size:.65rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.15rem}
+.gps-card .value{font-weight:600;font-size:.85rem}
+#map-container{flex:1;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);min-height:140px;position:relative}
+#map-container .no-gps-msg{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:.85rem;padding:1rem;text-align:center}
+#map{width:100%;height:100%}
+#info-sections{display:flex;flex-direction:column;gap:.5rem;flex:0 0 auto}
+.section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.section-header{display:flex;align-items:center;justify-content:space-between;padding:.5rem .75rem;cursor:pointer;user-select:none;font-size:.8rem;font-weight:600;gap:.5rem}
+.section-header:hover{background:var(--surface-alt)}
+.section-header .chevron{color:var(--text-muted);transition:transform .2s;font-size:.7rem}
+.section-header.collapsed .chevron{transform:rotate(-90deg)}
+.section-body{padding:.5rem .75rem;border-top:1px solid var(--border);font-size:.8125rem}
+.section-body.hidden{display:none}
+.meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:.25rem 1rem}
+.meta-item{display:flex;gap:.5rem;padding:.15rem 0}
+.meta-item .ml{color:var(--text-muted);flex:0 0 45%;font-size:.75rem}
+.meta-item .mv{flex:1;word-break:break-word;font-size:.75rem}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.25rem}
+.status-dot.green{background:var(--green)}
+.status-dot.amber{background:var(--amber)}
+.status-dot.red{background:var(--red)}
+.ai-panel .section-body{display:block}
+.ai-layout{display:flex;flex-direction:column;gap:.75rem}
+.ai-controls{display:flex;gap:.75rem;flex-wrap:wrap}
+.ai-controls textarea{flex:1;min-width:200px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:.5rem .625rem;font-size:.8125rem;font-family:inherit;resize:vertical;min-height:2.5rem;outline:none}
+.ai-controls textarea:focus{border-color:var(--accent)}
+.ai-controls textarea::placeholder{color:var(--text-faint)}
+.ai-actions{display:flex;gap:.5rem;align-items:flex-start;flex-wrap:wrap}
+.checkbox-group{display:flex;flex-wrap:wrap;gap:.25rem .75rem;font-size:.75rem}
+.checkbox-group label{display:flex;align-items:center;gap:.3rem;cursor:pointer;user-select:none}
+.checkbox-group input[type=checkbox]{accent-color:var(--accent)}
+.context-preview{background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.5rem .75rem;font-size:.7rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap;font-family:monospace}
+.context-preview .label{color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;font-size:.6rem;margin-bottom:.25rem}
+#response-content{font-size:.8125rem;line-height:1.6;max-height:400px;overflow-y:auto}
+#response-content .empty-msg{color:var(--text-muted);text-align:center;padding:1rem}
+.response-meta{display:flex;gap:.75rem;font-size:.7rem;color:var(--text-muted);padding:.375rem .75rem;border-top:1px solid var(--border);flex-wrap:wrap}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.open{opacity:1;pointer-events:auto}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;min-width:320px;max-width:440px;box-shadow:var(--shadow)}
+.modal h2{font-size:1rem;margin-bottom:.75rem}
+.form-group{margin-bottom:.75rem}
+.form-group label{display:block;font-size:.75rem;font-weight:600;margin-bottom:.25rem;color:var(--text-muted)}
+.form-group input,.form-group select{width:100%;padding:.4rem .6rem;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:.8125rem;outline:none;font-family:inherit}
+.form-group input:focus{border-color:var(--accent)}
+.form-group .field-with-toggle{display:flex;gap:.35rem}
+.form-group .field-with-toggle input{flex:1}
+.modal-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem}
+#diagnostics{border-top:1px solid var(--border);padding:.5rem .75rem;font-size:.7rem;color:var(--text-faint);font-family:monospace}
+#diagnostics.hidden{display:none}
+.diag-toggle{cursor:pointer;color:var(--text-faint);font-size:.7rem;text-decoration:underline dotted}
+.diag-content{margin-top:.25rem;white-space:pre-wrap}
+.rendered-md h1,.rendered-md h2,.rendered-md h3{margin:.75rem 0 .375rem;font-weight:600;line-height:1.25}
+.rendered-md h1{font-size:1.1rem}
+.rendered-md h2{font-size:1rem}
+.rendered-md h3{font-size:.9rem}
+.rendered-md p{margin:.375rem 0}
+.rendered-md ul,.rendered-md ol{margin:.375rem 0;padding-left:1.25rem}
+.rendered-md li{margin:.15rem 0}
+.rendered-md blockquote{margin:.375rem 0;padding:.2rem .6rem;border-left:3px solid var(--accent);color:var(--text-muted);background:var(--surface-alt);border-radius:0 4px 4px 0}
+.rendered-md pre{margin:.375rem 0;padding:.5rem .625rem;background:#0d1117;border-radius:var(--radius-sm);overflow-x:auto;font-size:.75rem}
+.rendered-md code{font-size:.75rem;padding:.1em .25em;background:var(--surface-alt);border-radius:3px}
+.rendered-md pre code{padding:0;background:transparent}
+.rendered-md a{color:var(--accent)}
+.rendered-md img{max-width:100%;border-radius:var(--radius-sm)}
+.toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);padding:.4rem 1rem;background:var(--text);color:var(--bg);font-size:.8rem;border-radius:var(--radius-sm);opacity:0;transition:opacity .2s;pointer-events:none;z-index:200}
+.toast.show{opacity:1}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.leaflet-container{background:var(--surface-alt)!important}
+@media(max-width:640px){#top-row{flex-direction:column}#image-panel,#location-panel{flex:none;max-height:50vh}.meta-grid{grid-template-columns:1fr}.ai-controls{flex-direction:column}.ai-controls textarea{min-width:0}}
+</style>
+</head>
+<body>
+  <header id="topbar">
+    <h1>🗺️ Image Context Inspector <span class="sub">EXIF · Location · AI Analysis</span></h1>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-sm" id="diagToggleBtn" title="Toggle diagnostics">🔧</button>
+      <button class="btn btn-ghost btn-sm" id="settingsBtn" title="Settings">⚙️</button>
+    </div>
+  </header>
+
+  <div id="workspace">
+    <div id="top-row">
+      <div id="image-panel">
+        <div id="drop-zone" tabindex="0" role="button" aria-label="Drop image or click to select">
+          <input type="file" id="dz-input" accept="image/*" />
+          <div class="dz-icon">🖼️</div>
+          <div class="dz-text">Drop an image here or click to select</div>
+          <div class="file-info" id="fileInfo"></div>
+          <img class="preview" id="previewImg" alt="Image preview" style="display:none" />
+        </div>
+      </div>
+      <div id="location-panel">
+        <div id="gps-summary">
+          <div class="gps-card"><div class="label">Latitude</div><div class="value" id="gpsLat">—</div></div>
+          <div class="gps-card"><div class="label">Longitude</div><div class="value" id="gpsLng">—</div></div>
+          <div class="gps-card"><div class="label">Altitude</div><div class="value" id="gpsAlt">—</div></div>
+          <div class="gps-card"><div class="label">Direction</div><div class="value" id="gpsDir">—</div></div>
+        </div>
+        <div id="map-container">
+          <div class="no-gps-msg" id="noGpsMsg">Load a geotagged image to see the location on a map</div>
+          <div id="map" style="display:none;width:100%;height:100%"></div>
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" id="copyCoordsBtn" disabled>📋 Copy Coordinates</button>
+          <button class="btn btn-ghost btn-sm" id="clearImageBtn">✕ Clear Image</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="info-sections"></div>
+
+    <div class="section" id="ai-panel">
+      <div class="section-header" data-toggle="ai-body">
+        <span>🤖 Analyze with AI <span style="font-weight:400;font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;" id="aiStatus"></span></span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="section-body" id="ai-body">
+        <div class="ai-layout">
+          <div class="checkbox-group" id="contextCheckboxes">
+            <label><input type="checkbox" checked disabled id="ctxImage"> Image</label>
+            <label><input type="checkbox" checked id="ctxGps"> GPS coordinates</label>
+            <label><input type="checkbox" checked id="ctxLocation"> Location name</label>
+            <label><input type="checkbox" checked id="ctxCapture"> Capture date/time</label>
+            <label><input type="checkbox" checked id="ctxCamera"> Camera make/model</label>
+            <label><input type="checkbox" id="ctxFullCamera"> Full camera metadata</label>
+            <label><input type="checkbox" id="ctxSensitive"> Sensitive metadata</label>
+            <label><input type="checkbox" id="ctxRaw"> Raw EXIF</label>
+          </div>
+          <div class="ai-controls">
+            <textarea id="aiQuestion" placeholder="What can you determine about this image given both the visual content and its location/context?" rows="2"></textarea>
+            <div class="ai-actions">
+              <button class="btn btn-primary" id="analyzeBtn" disabled>🔍 Analyze</button>
+              <button class="btn btn-ghost" id="copyContextBtn" disabled>📋 Copy AI Context</button>
+              <button class="btn btn-ghost btn-sm" id="clearResponseBtn" style="display:none">✕ Clear Response</button>
+            </div>
+          </div>
+          <div class="context-preview" id="contextPreview" style="display:none">
+            <div class="label">Context to be sent to AI</div>
+            <pre id="contextPreviewContent"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" id="response-area" style="display:none">
+      <div class="section-header" data-toggle="response-body">
+        <span>📝 Analysis</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="section-body" id="response-body">
+        <div id="response-content"><div class="empty-msg">Results will appear here.</div></div>
+        <div class="response-meta" id="responseMeta"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <h2>⚙️ Settings</h2>
+      <div class="form-group">
+        <label for="apiKeyInput">OpenRouter API Key</label>
+        <div class="field-with-toggle">
+          <input type="password" id="apiKeyInput" placeholder="sk-or-..." autocomplete="off" />
+          <button class="btn btn-ghost btn-sm" id="toggleKeyBtn">Show</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="modelSelect">Model</label>
+        <input type="text" id="modelSelect" placeholder="e.g. openai/gpt-4.1-mini" />
+        <div style="font-size:0.65rem;color:var(--text-faint);margin-top:0.15rem;">Enter any OpenRouter model ID</div>
+      </div>
+      <div class="form-group">
+        <label for="siteNameInput">Site/App name (optional)</label>
+        <input type="text" id="siteNameInput" placeholder="Image Context Inspector" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="settingsCloseBtn">Cancel</button>
+        <button class="btn btn-primary" id="settingsSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div id="diagnostics" class="hidden">
+    <span class="diag-toggle" id="diagClick">🔧 diagnostics</span>
+    <div class="diag-content" id="diagContent" style="display:none"></div>
+  </div>
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.22.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.22.1" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.22.1
+  </footer>
+
+<script>
+(function() {
+  'use strict';
+
+  /* ======================================================================
+   * State
+   * ====================================================================== */
+  var state = {
+    file: null,          // original File object
+    fileName: '',
+    mimeType: '',
+    fileSize: 0,
+    width: null,
+    height: null,
+    exif: null,          // normalized metadata object
+    exifRaw: null,       // raw exifr output
+    gps: null,           // { lat, lng, altitude, direction, latRef, lngRef, timestamp }
+    reverse: null,       // reverse geocode result
+    previewUrl: null,
+    submissionDataUrl: null,  // converted copy for AI, if needed
+    submissionMime: null,
+    exifStatus: 'none',  // none | ok | no-exif | no-gps | error
+    map: null,
+    mapMarker: null,
+    analyzed: false
+  };
+
+  var settings = {
+    apiKey: '',
+    model: 'openai/gpt-4.1-mini',
+    siteName: 'Image Context Inspector'
+  };
+
+  var SETTINGS_KEY = 'image-context-inspector-settings';
+  var REVERSE_CACHE_KEY = 'image-context-inspector-reverse-cache';
+
+  /* ======================================================================
+   * Utilities
+   * ====================================================================== */
+  function $(id) { return document.getElementById(id); }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str == null ? '' : String(str)));
+    return div.innerHTML;
+  }
+
+  function debounce(fn, ms) {
+    var timer = null;
+    return function() {
+      var ctx = this, args = arguments;
+      clearTimeout(timer);
+      timer = setTimeout(function() { fn.apply(ctx, args); }, ms);
+    };
+  }
+
+  function showToast(msg, ms) {
+    ms = ms || 2000;
+    var el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, ms);
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    var k = 1024;
+    var sizes = ['B', 'KB', 'MB', 'GB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  function toJsonPretty(obj) {
+    try { return JSON.stringify(obj, null, 2); }
+    catch (e) { return String(obj); }
+  }
+
+  /* ======================================================================
+   * Settings persistence
+   * ====================================================================== */
+  function loadSettings() {
+    try {
+      var raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed.apiKey !== undefined) settings.apiKey = parsed.apiKey;
+        if (parsed.model !== undefined) settings.model = parsed.model;
+        if (parsed.siteName !== undefined) settings.siteName = parsed.siteName;
+      }
+    } catch (e) { /* ignore corrupt settings */ }
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch (e) { /* storage may be unavailable */ }
+  }
+
+  /* ======================================================================
+   * Reverse geocoding (cached, one lookup per new coordinate set)
+   * ====================================================================== */
+  function reverseGeocode(lat, lng) {
+    return new Promise(function(resolve) {
+      var cacheKey = lat.toFixed(4) + ',' + lng.toFixed(4);
+      try {
+        var cacheRaw = localStorage.getItem(REVERSE_CACHE_KEY);
+        var cache = cacheRaw ? JSON.parse(cacheRaw) : {};
+        if (cache[cacheKey]) {
+          state.reverse = cache[cacheKey];
+          resolve(state.reverse);
+          return;
+        }
+      } catch (e) { /* ignore cache issues */ }
+
+      // Use OpenStreetMap Nominatim, free public reverse geocoder
+      var url = 'https://nominatim.openstreetmap.org/reverse?lat=' + lat + '&lon=' + lng + '&format=jsonv2';
+      fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data && data.lat) {
+            state.reverse = {
+              displayName: data.display_name || null,
+              city: data.address && (data.address.city || data.address.town || data.address.village) || null,
+              county: data.address && data.address.county || null,
+              state: data.address && data.address.state || null,
+              country: data.address && data.address.country || null
+            };
+            try {
+              var cacheRaw2 = localStorage.getItem(REVERSE_CACHE_KEY);
+              var cache2 = cacheRaw2 ? JSON.parse(cacheRaw2) : {};
+              cache2[cacheKey] = state.reverse;
+              localStorage.setItem(REVERSE_CACHE_KEY, JSON.stringify(cache2));
+            } catch (e) {}
+            resolve(state.reverse);
+          } else {
+            state.reverse = null;
+            resolve(null);
+          }
+        })
+        .catch(function() {
+          state.reverse = null;
+          resolve(null);
+        });
+    });
+  }
+
+  /* ======================================================================
+   * EXIF parsing & GPS conversion
+   * ====================================================================== */
+  /**
+   * Convert GPS coordinate arrays like [38, 21, 21.3] and ref 'N' into decimal degrees.
+   * Per EXIF spec: degrees + minutes/60 + seconds/3600, sign from ref.
+   */
+  function gpsToDecimal(coordArray, ref) {
+    if (!Array.isArray(coordArray) || coordArray.length === 0) return null;
+    var deg = Number(coordArray[0]) || 0;
+    var min = Number(coordArray[1]) || 0;
+    var sec = Number(coordArray[2]) || 0;
+    var sign = 1;
+    if (ref === 'S' || ref === 'W') sign = -1;
+    var decimal = sign * (deg + min / 60 + sec / 3600);
+    if (!isFinite(decimal)) return null;
+    return decimal;
+  }
+
+  /**
+   * Extract and normalize useful metadata from exifr raw output.
+   * Returns { exif, gps } where exif is a normalized object.
+   */
+  function normalizeExif(raw) {
+    var exif = {};
+    var gps = null;
+
+    if (!raw || typeof raw !== 'object') return { exif: exif, gps: gps };
+
+    // Capture
+    if (raw.DateTimeOriginal) exif.DateTimeOriginal = raw.DateTimeOriginal;
+    if (raw.CreateDate) exif.CreateDate = raw.CreateDate;
+    if (raw.ModifyDate) exif.ModifyDate = raw.ModifyDate;
+    if (raw.OffsetTime || raw.OffsetTimeOriginal) exif.OffsetTime = raw.OffsetTimeOriginal || raw.OffsetTime;
+    if (raw.Orientation !== undefined) exif.Orientation = raw.Orientation;
+    if (raw.PixelXDimension) exif.Width = raw.PixelXDimension;
+    if (raw.PixelYDimension) exif.Height = raw.PixelYDimension;
+
+    // Camera
+    if (raw.Make) exif.Make = raw.Make;
+    if (raw.Model) exif.Model = raw.Model;
+    if (raw.LensMake) exif.LensMake = raw.LensMake;
+    if (raw.LensModel) exif.LensModel = raw.LensModel;
+    if (raw.FocalLength) exif.FocalLength = formatFocalLength(raw.FocalLength);
+    if (raw.FNumber) exif.FNumber = formatFNumber(raw.FNumber);
+    if (raw.ExposureTime) exif.ExposureTime = formatExposure(raw.ExposureTime);
+    if (raw.ISO !== undefined) exif.ISO = raw.ISO;
+    if (raw.Flash !== undefined) exif.Flash = formatFlash(raw.Flash);
+    if (raw.WhiteBalance !== undefined) exif.WhiteBalance = formatWhiteBalance(raw.WhiteBalance);
+    if (raw.ExposureProgram !== undefined) exif.ExposureProgram = formatExposureProgram(raw.ExposureProgram);
+    if (raw.Software) exif.Software = raw.Software;
+
+    // Sensitive
+    var sensitive = {};
+    if (raw.SerialNumber) sensitive.SerialNumber = raw.SerialNumber;
+    if (raw.BodySerialNumber) sensitive.BodySerialNumber = raw.BodySerialNumber;
+    if (raw.LensSerialNumber) sensitive.LensSerialNumber = raw.LensSerialNumber;
+    if (raw.OwnerName) sensitive.OwnerName = raw.OwnerName;
+    if (raw.Artist) sensitive.Artist = raw.Artist;
+    if (raw.Copyright) sensitive.Copyright = raw.Copyright;
+    if (raw.ImageUniqueID) sensitive.ImageUniqueID = raw.ImageUniqueID;
+    if (raw.ExifVersion) sensitive.ExifVersion = raw.ExifVersion;
+
+    // GPS
+    var gpsLat = gpsToDecimal(raw.latitude, raw.latitudeRef);
+    var gpsLng = gpsToDecimal(raw.longitude, raw.longitudeRef);
+    if (gpsLat !== null && gpsLng !== null &&
+        !(gpsLat === 0 && gpsLng === 0)) {
+      gps = {
+        lat: gpsLat,
+        lng: gpsLng,
+        altitude: raw.GPSAltitude !== undefined ? Number(raw.GPSAltitude) : null,
+        altitudeRef: raw.GPSAltitudeRef,
+        direction: raw.GPSImgDirection !== undefined ? Number(raw.GPSImgDirection) : null,
+        directionRef: raw.GPSImgDirectionRef,
+        timestamp: raw.GPSDateStamp || null
+      };
+    }
+
+    // Include sensitive keys in exif under 'sensitive' sub-object
+    if (Object.keys(sensitive).length > 0) exif.sensitive = sensitive;
+
+    return { exif: exif, gps: gps };
+  }
+
+  function formatFocalLength(v) {
+    if (v === null || v === undefined) return null;
+    return String(v) + ' mm';
+  }
+
+  function formatFNumber(v) {
+    if (v === null || v === undefined) return null;
+    return 'f/' + v;
+  }
+
+  function formatExposure(v) {
+    if (v === null || v === undefined) return null;
+    return '1/' + Math.round(1 / v) + ' s';
+  }
+
+  function formatFlash(v) {
+    if (v === undefined) return null;
+    var flash = typeof v === 'object' ? v.fired : v;
+    if (flash === true || flash === 1 || flash === '1') return 'Fired';
+    if (flash === false || flash === 0 || flash === '0') return 'Not fired';
+    return String(v);
+  }
+
+  function formatWhiteBalance(v) {
+    if (v === undefined || v === null) return null;
+    if (v === 0 || v === '0') return 'Auto';
+    if (v === 1 || v === '1') return 'Manual';
+    return String(v);
+  }
+
+  function formatExposureProgram(v) {
+    if (v === undefined || v === null) return null;
+    var map = { 0: 'Not defined', 1: 'Manual', 2: 'Program AE', 3: 'Aperture-priority AE',
+      4: 'Shutter priority AE', 5: 'Creative (slow speed)', 6: 'Action (high speed)',
+      7: 'Portrait', 8: 'Landscape' };
+    return map[v] || String(v);
+  }
+
+  /* ======================================================================
+   * File handling & preview
+   * ====================================================================== */
+  function handleFile(file) {
+    if (!file) return;
+    state.file = file;
+    state.fileName = file.name || '';
+    state.mimeType = file.type || '';
+    state.fileSize = file.size || 0;
+    state.exif = null;
+    state.exifRaw = null;
+    state.gps = null;
+    state.reverse = null;
+    state.previewUrl = null;
+    state.submissionDataUrl = null;
+    state.submissionMime = null;
+    state.exifStatus = 'none';
+    state.analyzed = false;
+    state.width = null;
+    state.height = null;
+
+    // Reset map
+    if (state.map) {
+      state.map.remove();
+      state.map = null;
+      state.mapMarker = null;
+    }
+    $('map').style.display = 'none';
+    $('noGpsMsg').style.display = 'flex';
+    $('noGpsMsg').textContent = 'Parsing image metadata…';
+
+    resetGpsSummary();
+    renderFileInfo();
+
+    var dropZone = $('drop-zone');
+    dropZone.classList.add('has-image');
+
+    // Attempt preview
+    var preview = $('previewImg');
+    var dzIcon = dropZone.querySelector('.dz-icon');
+    var dzText = dropZone.querySelector('.dz-text');
+    var canPreview = file.type && file.type.indexOf('image/') === 0;
+    if (canPreview) {
+      state.previewUrl = URL.createObjectURL(file);
+      preview.src = state.previewUrl;
+      preview.style.display = 'block';
+      dzIcon.style.display = 'none';
+      dzText.style.display = 'none';
+    } else {
+      preview.style.display = 'none';
+      dzIcon.style.display = 'block';
+      dzText.textContent = 'File type: ' + (file.type || 'unknown') + ' — metadata may still be inspectable';
+    }
+
+    // Read pixel dimensions from image when possible
+    if (canPreview) {
+      var img = new Image();
+      img.onload = function() {
+        state.width = img.naturalWidth;
+        state.height = img.naturalHeight;
+        renderFileInfo();
+      };
+      img.onerror = function() { /* dimensions unknown */ };
+      img.src = state.previewUrl;
+    }
+
+    parseExif(file);
+    updateUiForState();
+    buildContextPreview();
+  }
+
+  function renderFileInfo() {
+    var el = $('fileInfo');
+    var parts = [];
+    if (state.fileName) parts.push('📄 ' + state.fileName);
+    if (state.mimeType) parts.push('MIME: ' + state.mimeType);
+    if (state.fileSize) parts.push(formatBytes(state.fileSize));
+    if (state.width && state.height) parts.push(state.width + '×' + state.height + ' px');
+    el.innerHTML = '';
+    parts.forEach(function(p) {
+      var span = document.createElement('span');
+      span.textContent = p;
+      el.appendChild(span);
+    });
+  }
+
+  /**
+   * Parse EXIF using exifr. If the browser can't parse a format (e.g. HEIC),
+   * we still keep the file — just flag the status.
+   */
+  function parseExif(file) {
+    if (!window.exifr) {
+      state.exifStatus = 'error';
+      updateUiForState();
+      return;
+    }
+
+    window.exifr.parse(file, { gps: true, exif: true, xmp: false, iptc: false, tiff: true })
+      .then(function(raw) {
+        if (!raw || Object.keys(raw).length === 0) {
+          state.exifStatus = 'no-exif';
+          state.exifRaw = null;
+          updateUiForState();
+          return;
+        }
+        state.exifRaw = raw;
+        var normalized = normalizeExif(raw);
+        state.exif = normalized.exif;
+        state.gps = normalized.gps;
+        if (state.gps) {
+          state.exifStatus = 'ok';
+          // Get image dimensions from EXIF if not already known
+          if (!state.width && state.exif.Width) state.width = state.exif.Width;
+          if (!state.height && state.exif.Height) state.height = state.exif.Height;
+          renderFileInfo();
+          setupMap();
+        } else {
+          state.exifStatus = 'no-gps';
+        }
+        updateUiForState();
+        buildContextPreview();
+      })
+      .catch(function(err) {
+        state.exifStatus = 'error';
+        state.exifRaw = null;
+        state.exifErr = err && err.message ? err.message : String(err);
+        updateUiForState();
+      });
+  }
+
+  function clearImage() {
+    if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+    state.file = null;
+    state.fileName = '';
+    state.mimeType = '';
+    state.fileSize = 0;
+    state.width = null;
+    state.height = null;
+    state.exif = null;
+    state.exifRaw = null;
+    state.gps = null;
+    state.reverse = null;
+    state.previewUrl = null;
+    state.submissionDataUrl = null;
+    state.submissionMime = null;
+    state.exifStatus = 'none';
+
+    var dropZone = $('drop-zone');
+    dropZone.classList.remove('has-image');
+    $('previewImg').style.display = 'none';
+    dropZone.querySelector('.dz-icon').style.display = 'block';
+    dropZone.querySelector('.dz-text').textContent = 'Drop an image here or click to select';
+    $('fileInfo').innerHTML = '';
+
+    if (state.map) {
+      state.map.remove();
+      state.map = null;
+      state.mapMarker = null;
+    }
+    $('map').style.display = 'none';
+    $('noGpsMsg').style.display = 'flex';
+    $('noGpsMsg').textContent = 'Load a geotagged image to see the location on a map';
+    resetGpsSummary();
+    updateUiForState();
+    buildContextPreview();
+    renderInfoSections();
+  }
+
+  function resetGpsSummary() {
+    $('gpsLat').textContent = '—';
+    $('gpsLng').textContent = '—';
+    $('gpsAlt').textContent = '—';
+    $('gpsDir').textContent = '—';
+    $('copyCoordsBtn').disabled = true;
+  }
+
+  /* ======================================================================
+   * Map handling
+   * ====================================================================== */
+  function setupMap() {
+    if (!state.gps) return;
+    if (!window.L) {
+      $('noGpsMsg').textContent = 'Leaflet failed to load.';
+      return;
+    }
+    var lat = state.gps.lat;
+    var lng = state.gps.lng;
+    if (!isFinite(lat) || !isFinite(lng)) {
+      $('noGpsMsg').textContent = 'Invalid GPS coordinates.';
+      return;
+    }
+
+    if (state.map) {
+      state.map.setView([lat, lng], 15);
+      if (state.mapMarker) state.mapMarker.setLatLng([lat, lng]);
+      else {
+        state.mapMarker = L.marker([lat, lng]).addTo(state.map);
+      }
+      return;
+    }
+
+    var mapEl = $('map');
+    mapEl.style.display = 'block';
+    $('noGpsMsg').style.display = 'none';
+    // Delay to ensure container is visible
+    requestAnimationFrame(function() {
+      state.map = L.map(mapEl, {
+        center: [lat, lng],
+        zoom: 15,
+        zoomControl: true
+      });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>'
+      }).addTo(state.map);
+      state.mapMarker = L.marker([lat, lng]).addTo(state.map);
+
+      // Add direction arrow if heading is available
+      if (state.gps.direction !== null) {
+        var dirIcon = L.divIcon({
+          className: 'dir-arrow',
+          html: '<div style="transform:rotate(' + state.gps.direction + 'deg);font-size:24px;text-align:center;line-height:1;" title="Heading: ' + state.gps.direction + '°">➡️</div>',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        });
+        L.marker([lat, lng], { icon: dirIcon, zIndexOffset: 1000 }).addTo(state.map);
+      }
+
+      // Invalidate size after render
+      setTimeout(function() { state.map.invalidateSize(); }, 200);
+    });
+
+    // Attempt reverse geocode
+    reverseGeocode(lat, lng).then(function() {
+      updateUiForState();
+      buildContextPreview();
+    });
+  }
+
+  /* ======================================================================
+   * Context builder
+   * ====================================================================== */
+  function getContext() {
+    var ctx = {};
+
+    // File info
+    var filePart = {};
+    if (state.fileName) filePart.name = state.fileName;
+    if (state.mimeType) filePart.mime = state.mimeType;
+    if (state.fileSize) filePart.size = state.fileSize;
+    if (state.width && state.height) {
+      filePart.width = state.width;
+      filePart.height = state.height;
+    }
+    if (Object.keys(filePart).length) ctx.file = filePart;
+
+    // GPS
+    if ($('ctxGps').checked && state.gps) {
+      var loc = {};
+      loc.latitude = state.gps.lat;
+      loc.longitude = state.gps.lng;
+      if (state.gps.altitude !== null) loc.altitude_m = state.gps.altitude;
+      if (state.gps.direction !== null) loc.direction_deg = state.gps.direction;
+      if ($('ctxLocation').checked && state.reverse) {
+        if (state.reverse.city) loc.city = state.reverse.city;
+        if (state.reverse.state) loc.state = state.reverse.state;
+        if (state.reverse.country) loc.country = state.reverse.country;
+        if (state.reverse.displayName) loc.resolved_location = state.reverse.displayName;
+      }
+      ctx.location = loc;
+    }
+
+    // Capture
+    if ($('ctxCapture').checked && state.exif) {
+      var cap = {};
+      if (state.exif.DateTimeOriginal) cap.datetime_original = formatExifDate(state.exif.DateTimeOriginal);
+      if (state.exif.CreateDate) cap.create_date = formatExifDate(state.exif.CreateDate);
+      if (state.exif.Orientation) cap.orientation = state.exif.Orientation;
+      if (state.exif.OffsetTime) cap.offset = state.exif.OffsetTime;
+      if (Object.keys(cap).length) ctx.capture = cap;
+    }
+
+    // Camera
+    var camPart = {};
+    if ($('ctxCamera').checked && state.exif) {
+      if (state.exif.Make) camPart.make = state.exif.Make;
+      if (state.exif.Model) camPart.model = state.exif.Model;
+      if (Object.keys(camPart).length) ctx.camera = camPart;
+    }
+    if ($('ctxFullCamera').checked && state.exif) {
+      if (state.exif.LensMake) camPart.lens_make = state.exif.LensMake;
+      if (state.exif.LensModel) camPart.lens_model = state.exif.LensModel;
+      if (state.exif.FocalLength) camPart.focal_length = state.exif.FocalLength;
+      if (state.exif.FNumber) camPart.aperture = state.exif.FNumber;
+      if (state.exif.ExposureTime) camPart.exposure = state.exif.ExposureTime;
+      if (state.exif.ISO) camPart.iso = state.exif.ISO;
+      if (state.exif.Flash) camPart.flash = state.exif.Flash;
+      if (state.exif.WhiteBalance) camPart.white_balance = state.exif.WhiteBalance;
+      if (state.exif.ExposureProgram) camPart.exposure_program = state.exif.ExposureProgram;
+      if (state.exif.Software) camPart.software = state.exif.Software;
+      ctx.camera = camPart;
+    }
+
+    // Sensitive
+    if ($('ctxSensitive').checked && state.exif && state.exif.sensitive) {
+      ctx.sensitive = state.exif.sensitive;
+    }
+
+    // Raw EXIF
+    if ($('ctxRaw').checked && state.exifRaw) {
+      ctx.raw_exif = state.exifRaw;
+    }
+
+    return ctx;
+  }
+
+  function formatExifDate(val) {
+    if (!val) return null;
+    if (val instanceof Date) return val.toISOString().replace('Z', '');
+    return String(val);
+  }
+
+  function buildContextPreview() {
+    var preview = $('contextPreview');
+    var content = $('contextPreviewContent');
+    if (!state.file && !$('ctxGps').checked) {
+      preview.style.display = 'none';
+      return;
+    }
+    var ctx = getContext();
+    if (!ctx || Object.keys(ctx).length === 0) {
+      preview.style.display = 'none';
+      return;
+    }
+    content.textContent = toJsonPretty(ctx);
+    preview.style.display = 'block';
+  }
+
+  /* ======================================================================
+   * Image submission preparation
+   * ====================================================================== */
+  /**
+   * Convert the current file to a data URL for AI submission.
+   * If the source can't be sent as-is (e.g. HEIC), use canvas to produce
+   * a JPEG copy. The original file is never modified.
+   */
+  function prepareSubmissionImage() {
+    return new Promise(function(resolve, reject) {
+      if (!state.file) return reject(new Error('No file'));
+
+      var type = (state.mimeType || '').toLowerCase();
+      var canSend = /image\/(jpe?g|png|webp|gif)/.test(type);
+      if (canSend) {
+        // Read as data URL directly
+        var reader = new FileReader();
+        reader.onload = function() {
+          state.submissionDataUrl = reader.result;
+          state.submissionMime = type;
+          resolve();
+        };
+        reader.onerror = function() { reject(new Error('Could not read file')); };
+        reader.readAsDataURL(state.file);
+        return;
+      }
+
+      // Need to convert via canvas
+      if (!state.previewUrl) {
+        // Try to create object URL
+        state.previewUrl = URL.createObjectURL(state.file);
+      }
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement('canvas');
+        var maxDim = 2048;
+        var scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        state.submissionDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        state.submissionMime = 'image/jpeg';
+        resolve();
+      };
+      img.onerror = function() {
+        reject(new Error('Browser cannot decode this format for AI submission'));
+      };
+      img.src = state.previewUrl;
+    });
+  }
+
+  /* ======================================================================
+   * OpenRouter client
+   * ====================================================================== */
+  async function analyzeImage() {
+    var q = $('aiQuestion').value.trim();
+    if (!q) {
+      showToast('Enter a question first.');
+      return;
+    }
+    if (!settings.apiKey) {
+      showToast('Add your OpenRouter API key in Settings.');
+      openSettings();
+      return;
+    }
+    if (!state.file) {
+      showToast('Load an image first.');
+      return;
+    }
+
+    setAnalyzing(true);
+    var startTime = Date.now();
+    try {
+      await prepareSubmissionImage();
+      var ctx = getContext();
+      var response = await callOpenRouter(q, ctx);
+      var elapsed = Date.now() - startTime;
+      renderResponse(response, elapsed);
+    } catch (err) {
+      renderError(err);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  /**
+   * Build and POST a chat completion to OpenRouter.
+   * The system prompt instructs the model how to treat EXIF metadata.
+   */
+  async function callOpenRouter(question, ctx) {
+    var headers = {
+      'Authorization': 'Bearer ' + settings.apiKey,
+      'Content-Type': 'application/json'
+    };
+    var body = {
+      model: settings.model.trim() || 'openai/gpt-4.1-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an image analysis assistant. The user provides an image plus machine-readable EXIF metadata ' +
+            'as JSON. Treat the metadata as provided context: distinguish observed visual evidence from metadata-based conclusions. ' +
+            'If GPS coordinates were provided, do not claim a geographic inference came from vision — say it came from image metadata. ' +
+            'Call out uncertainty explicitly. Be concise and structured in your answer.'
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Metadata context:\n' + toJsonPretty(ctx) + '\n\nQuestion: ' + question }
+          ]
+        }
+      ]
+    };
+
+    // Add image to the user message
+    if ($('ctxImage').checked && state.submissionDataUrl) {
+      body.messages[1].content.unshift({
+        type: 'image_url',
+        image_url: { url: state.submissionDataUrl }
+      });
+    }
+
+    var resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      var errText = '';
+      try { errText = await resp.text(); } catch (e) {}
+      var err = new Error('OpenRouter request failed (HTTP ' + resp.status + ')');
+      err.status = resp.status;
+      err.body = errText;
+      throw err;
+    }
+
+    var data = await resp.json();
+    if (data.error) {
+      var err2 = new Error('OpenRouter error: ' + (data.error.message || JSON.stringify(data.error)));
+      throw err2;
+    }
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('OpenRouter returned an unexpected response shape.');
+    }
+
+    return {
+      text: data.choices[0].message.content || '',
+      model: data.model,
+      usage: data.usage || null
+    };
+  }
+
+  /* ======================================================================
+   * Rendering
+   * ====================================================================== */
+  function renderResponse(response, elapsed) {
+    $('response-area').style.display = 'block';
+    var content = $('response-content');
+    var md = window.markdownit ? window.markdownit({ html: false, linkify: true }) : null;
+    var html = md ? md.render(response.text || '') : '<p>' + escapeHtml(response.text || '') + '</p>';
+    if (window.DOMPurify) html = window.DOMPurify.sanitize(html);
+    content.innerHTML = '<div class="rendered-md">' + html + '</div>';
+
+    var meta = [];
+    if (response.model) meta.push('Model: ' + response.model);
+    meta.push('Elapsed: ' + (elapsed / 1000).toFixed(1) + 's');
+    if (response.usage) {
+      if (response.usage.prompt_tokens) meta.push('Prompt: ' + response.usage.prompt_tokens + ' tok');
+      if (response.usage.completion_tokens) meta.push('Output: ' + response.usage.completion_tokens + ' tok');
+    }
+    $('responseMeta').innerHTML = meta.map(function(m) {
+      return '<span>' + escapeHtml(m) + '</span>';
+    }).join('');
+    $('clearResponseBtn').style.display = 'inline-flex';
+    state.analyzed = true;
+    updateUiForState();
+  }
+
+  function renderError(err) {
+    $('response-area').style.display = 'block';
+    var content = $('response-content');
+    var msg = err && err.message ? err.message : String(err);
+    if (err && err.status) {
+      if (err.status === 401) msg += ' — check your OpenRouter API key.';
+      else if (err.status === 404) msg += ' — model not found.';
+      else if (err.status === 429) msg += ' — rate limited.';
+    }
+    content.innerHTML = '<div class="parse-error-warning">⚠ ' + escapeHtml(msg) + '</div>';
+    if (err && err.body) {
+      content.innerHTML += '<details style="margin-top:0.5rem"><summary style="cursor:pointer;color:var(--text-muted);font-size:0.7rem;">API response</summary><pre style="font-size:0.7rem;white-space:pre-wrap;color:var(--text-muted);margin-top:0.25rem;">' + escapeHtml(err.body) + '</pre></details>';
+    }
+    $('responseMeta').innerHTML = '';
+    $('clearResponseBtn').style.display = 'inline-flex';
+    state.analyzed = true;
+    updateUiForState();
+  }
+
+  function setAnalyzing(on) {
+    $('analyzeBtn').disabled = on || !state.file || !settings.apiKey;
+    if (on) {
+      $('analyzeBtn').innerHTML = '<span class="spinner"></span> Analyzing…';
+    } else {
+      $('analyzeBtn').textContent = '🔍 Analyze';
+      $('analyzeBtn').disabled = !state.file || !settings.apiKey;
+    }
+  }
+
+  /* ======================================================================
+   * Info sections rendering
+   * ====================================================================== */
+  function renderInfoSections() {
+    var container = $('info-sections');
+    var sections = [];
+
+    // Location section
+    var locItems = [];
+    if (state.gps) {
+      locItems.push(['Latitude', state.gps.lat.toFixed(6) + '°']);
+      locItems.push(['Longitude', state.gps.lng.toFixed(6) + '°']);
+      if (state.gps.altitude !== null) locItems.push(['Altitude', state.gps.altitude + ' m']);
+      if (state.gps.direction !== null) locItems.push(['Direction', state.gps.direction + '°']);
+      if (state.reverse) {
+        if (state.reverse.displayName) locItems.push(['Place', state.reverse.displayName]);
+      } else {
+        locItems.push(['Reverse geocode', 'Not resolved']);
+      }
+    } else {
+      locItems.push(['Status', getGpsStatusLabel()]);
+    }
+    sections.push(makeSection('📍 Location', locItems, 'location'));
+
+    // Capture section
+    var capItems = [];
+    if (state.exif) {
+      if (state.exif.DateTimeOriginal) capItems.push(['Date/Time Original', String(state.exif.DateTimeOriginal)]);
+      if (state.exif.CreateDate) capItems.push(['Create Date', String(state.exif.CreateDate)]);
+      if (state.exif.ModifyDate) capItems.push(['Modify Date', String(state.exif.ModifyDate)]);
+      if (state.exif.OffsetTime) capItems.push(['Timezone Offset', String(state.exif.OffsetTime)]);
+      if (state.exif.Orientation) capItems.push(['Orientation', String(state.exif.Orientation)]);
+      if (state.exif.Width) capItems.push(['Width', String(state.exif.Width)]);
+      if (state.exif.Height) capItems.push(['Height', String(state.exif.Height)]);
+    }
+    if (capItems.length === 0) capItems.push(['Status', 'No capture metadata']);
+    sections.push(makeSection('📷 Capture', capItems, 'capture'));
+
+    // Camera section
+    var camItems = [];
+    if (state.exif) {
+      if (state.exif.Make) camItems.push(['Make', String(state.exif.Make)]);
+      if (state.exif.Model) camItems.push(['Model', String(state.exif.Model)]);
+      if (state.exif.LensMake) camItems.push(['Lens Make', String(state.exif.LensMake)]);
+      if (state.exif.LensModel) camItems.push(['Lens Model', String(state.exif.LensModel)]);
+      if (state.exif.FocalLength) camItems.push(['Focal Length', String(state.exif.FocalLength)]);
+      if (state.exif.FNumber) camItems.push(['Aperture', String(state.exif.FNumber)]);
+      if (state.exif.ExposureTime) camItems.push(['Exposure', String(state.exif.ExposureTime)]);
+      if (state.exif.ISO) camItems.push(['ISO', String(state.exif.ISO)]);
+      if (state.exif.Flash) camItems.push(['Flash', String(state.exif.Flash)]);
+      if (state.exif.WhiteBalance) camItems.push(['White Balance', String(state.exif.WhiteBalance)]);
+      if (state.exif.ExposureProgram) camItems.push(['Exposure Program', String(state.exif.ExposureProgram)]);
+      if (state.exif.Software) camItems.push(['Software', String(state.exif.Software)]);
+    }
+    if (camItems.length === 0) camItems.push(['Status', 'No camera metadata']);
+    sections.push(makeSection('📷 Camera', camItems, 'camera'));
+
+    // Sensitive section
+    var senItems = [];
+    if (state.exif && state.exif.sensitive) {
+      var s = state.exif.sensitive;
+      for (var k in s) {
+        if (s.hasOwnProperty(k)) senItems.push([k, String(s[k])]);
+      }
+    }
+    if (senItems.length === 0) {
+      senItems.push(['Status', 'No sensitive metadata detected']);
+    }
+    sections.push(makeSection('🔒 Sensitive Metadata', senItems, 'sensitive'));
+
+    // Raw section
+    var rawItems = [];
+    if (state.exifRaw) {
+      rawItems.push(['Raw', toJsonPretty(state.exifRaw)]);
+    } else {
+      rawItems.push(['Status', 'No raw metadata available']);
+    }
+    sections.push(makeSection('📄 Raw Metadata', rawItems, 'raw'));
+
+    container.innerHTML = sections.join('');
+  }
+
+  function makeSection(title, items, id) {
+    var html = '<div class="section" id="sec-' + id + '">';
+    html += '<div class="section-header" data-toggle="sec-' + id + '-body">';
+    html += '<span>' + title + '</span>';
+    html += '<span class="chevron">▼</span>';
+    html += '</div>';
+    html += '<div class="section-body" id="sec-' + id + '-body">';
+    if (id === 'raw') {
+      html += '<pre style="font-size:0.7rem;white-space:pre-wrap;max-height:300px;overflow-y:auto;color:var(--text-muted);">' + escapeHtml(items[0][1]) + '</pre>';
+    } else {
+      html += '<div class="meta-grid">';
+      for (var i = 0; i < items.length; i++) {
+        html += '<div class="meta-item"><span class="ml">' + escapeHtml(items[i][0]) + '</span><span class="mv">' + escapeHtml(items[i][1]) + '</span></div>';
+      }
+      html += '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function getGpsStatusLabel() {
+    switch (state.exifStatus) {
+      case 'ok': return 'GPS present'; break;
+      case 'no-gps': return 'No GPS data in EXIF'; break;
+      case 'no-exif': return 'No EXIF metadata found'; break;
+      case 'error': return 'Metadata parsing failed'; break;
+      default: return 'No image loaded';
+    }
+  }
+
+  /* ======================================================================
+   * UI state updates
+   * ====================================================================== */
+  function updateUiForState() {
+    // GPS cards
+    if (state.gps) {
+      $('gpsLat').textContent = state.gps.lat.toFixed(6) + '°';
+      $('gpsLng').textContent = state.gps.lng.toFixed(6) + '°';
+      $('gpsAlt').textContent = state.gps.altitude !== null ? state.gps.altitude + ' m' : '—';
+      $('gpsDir').textContent = state.gps.direction !== null ? state.gps.direction + '°' : '—';
+      $('copyCoordsBtn').disabled = false;
+      // Enable GPS-related checkboxes
+      $('ctxGps').disabled = false;
+      $('ctxLocation').disabled = false;
+    } else {
+      $('gpsLat').textContent = '—';
+      $('gpsLng').textContent = '—';
+      $('gpsAlt').textContent = '—';
+      $('gpsDir').textContent = '—';
+      $('copyCoordsBtn').disabled = true;
+      $('ctxGps').disabled = true;
+      $('ctxLocation').disabled = true;
+    }
+
+    // Map status message
+    if (state.exifStatus === 'ok' && state.gps) {
+      $('noGpsMsg').style.display = 'none';
+      $('map').style.display = 'block';
+    } else if (state.exifStatus === 'ok' && !state.gps) {
+      $('noGpsMsg').textContent = 'GPS data present but incomplete';
+      $('noGpsMsg').style.display = 'flex';
+    } else if (state.exifStatus === 'no-exif') {
+      $('noGpsMsg').textContent = 'No EXIF metadata found in this image';
+      $('noGpsMsg').style.display = 'flex';
+    } else if (state.exifStatus === 'no-gps') {
+      $('noGpsMsg').textContent = 'EXIF present but contains no GPS coordinates';
+      $('noGpsMsg').style.display = 'flex';
+    } else if (state.exifStatus === 'error') {
+      $('noGpsMsg').textContent = 'Metadata parsing failed';
+      $('noGpsMsg').style.display = 'flex';
+    }
+
+    // Analyze button
+    $('analyzeBtn').disabled = !state.file || !settings.apiKey || state.analyzing;
+    $('copyContextBtn').disabled = !state.file;
+
+    // AI status line
+    var statusEl = $('aiStatus');
+    if (!settings.apiKey) statusEl.textContent = '(API key not configured — open Settings)';
+    else if (state.file) statusEl.textContent = '(ready)';
+    else statusEl.textContent = '';
+
+    // Enable sensitive checkbox only if sensitive metadata exists
+    $('ctxSensitive').disabled = !(state.exif && state.exif.sensitive);
+    $('ctxFullCamera').disabled = !state.exif;
+    $('ctxRaw').disabled = !state.exifRaw;
+    $('ctxCapture').disabled = !state.exif;
+    $('ctxCamera').disabled = !state.exif;
+
+    renderInfoSections();
+    updateDiagnostics();
+    buildContextPreview();
+  }
+
+  function updateDiagnostics() {
+    var lines = [];
+    lines.push('MIME: ' + (state.mimeType || 'none'));
+    lines.push('EXIF parser: ' + (window.exifr ? 'loaded' : 'MISSING'));
+    lines.push('EXIF status: ' + state.exifStatus);
+    if (state.gps) {
+      lines.push('GPS: ' + state.gps.lat.toFixed(6) + ', ' + state.gps.lng.toFixed(6));
+    } else {
+      lines.push('GPS: none');
+    }
+    lines.push('Reverse geocoder: ' + (state.reverse ? 'ok' : 'idle'));
+    lines.push('Model: ' + (settings.model || 'unset'));
+    lines.push('Submission MIME: ' + (state.submissionMime || 'not prepared'));
+    lines.push('API key: ' + (settings.apiKey ? 'configured' : 'not configured'));
+    $('diagContent').textContent = lines.join('\n');
+  }
+
+  /* ======================================================================
+   * Settings modal
+   * ====================================================================== */
+  function openSettings() {
+    $('apiKeyInput').value = settings.apiKey;
+    $('modelSelect').value = settings.model;
+    $('siteNameInput').value = settings.siteName;
+    $('settingsModal').classList.add('open');
+  }
+
+  function closeSettings() {
+    $('settingsModal').classList.remove('open');
+  }
+
+  function saveSettingsFromModal() {
+    settings.apiKey = $('apiKeyInput').value.trim();
+    settings.model = $('modelSelect').value.trim() || 'openai/gpt-4.1-mini';
+    settings.siteName = $('siteNameInput').value.trim() || 'Image Context Inspector';
+    saveSettings();
+    closeSettings();
+    updateUiForState();
+    showToast('Settings saved');
+  }
+
+  function copyCoordinates() {
+    if (!state.gps) return;
+    var text = state.gps.lat.toFixed(6) + ', ' + state.gps.lng.toFixed(6);
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('Coordinates copied');
+    }).catch(function() {
+      showToast('Copy failed');
+    });
+  }
+
+  function copyContext() {
+    var ctx = getContext();
+    if (!ctx || Object.keys(ctx).length === 0) return;
+    navigator.clipboard.writeText(toJsonPretty(ctx)).then(function() {
+      showToast('AI context copied');
+    }).catch(function() {
+      showToast('Copy failed');
+    });
+  }
+
+  function clearResponse() {
+    $('response-area').style.display = 'none';
+    $('response-content').innerHTML = '<div class="empty-msg">Results will appear here.</div>';
+    $('responseMeta').innerHTML = '';
+    $('clearResponseBtn').style.display = 'none';
+  }
+
+  /* ======================================================================
+   * Event wiring
+   * ====================================================================== */
+  function init() {
+    loadSettings();
+
+    var dropZone = $('drop-zone');
+    var dzInput = $('dz-input');
+
+    dropZone.addEventListener('click', function(e) {
+      if (e.target !== dzInput) dzInput.click();
+    });
+    dzInput.addEventListener('change', function(e) {
+      if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+    });
+
+    ['dragenter', 'dragover'].forEach(function(ev) {
+      dropZone.addEventListener(ev, function(e) {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function(ev) {
+      dropZone.addEventListener(ev, function(e) {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+      });
+    });
+    dropZone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) handleFile(files[0]);
+    });
+    dropZone.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        dzInput.click();
+      }
+    });
+
+    $('clearImageBtn').addEventListener('click', clearImage);
+    $('copyCoordsBtn').addEventListener('click', copyCoordinates);
+    $('copyContextBtn').addEventListener('click', copyContext);
+    $('analyzeBtn').addEventListener('click', analyzeImage);
+    $('clearResponseBtn').addEventListener('click', clearResponse);
+
+    $('settingsBtn').addEventListener('click', openSettings);
+    $('settingsCloseBtn').addEventListener('click', closeSettings);
+    $('settingsSaveBtn').addEventListener('click', saveSettingsFromModal);
+    $('toggleKeyBtn').addEventListener('click', function() {
+      var input = $('apiKeyInput');
+      var show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      this.textContent = show ? 'Hide' : 'Show';
+    });
+    $('settingsModal').addEventListener('click', function(e) {
+      if (e.target === this) closeSettings();
+    });
+
+    $('diagToggleBtn').addEventListener('click', function() {
+      var d = $('diagnostics');
+      d.classList.toggle('hidden');
+    });
+    $('diagClick').addEventListener('click', function() {
+      var c = $('diagContent');
+      c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    });
+
+    // Collapsible section toggles
+    document.addEventListener('click', function(e) {
+      var header = e.target.closest('.section-header');
+      if (!header) return;
+      var targetId = header.getAttribute('data-toggle');
+      if (!targetId) return;
+      var body = $(targetId);
+      if (!body) return;
+      body.classList.toggle('hidden');
+      header.classList.toggle('collapsed');
+    });
+
+    // Update context preview when checkboxes change
+    ['ctxGps', 'ctxLocation', 'ctxCapture', 'ctxCamera', 'ctxFullCamera', 'ctxSensitive', 'ctxRaw'].forEach(function(id) {
+      $(id).addEventListener('change', function() {
+        buildContextPreview();
+        updateDiagnostics();
+      });
+    });
+
+    // Model presets: quick-select on the model input via blur is not needed;
+    // placeholder shows the default. Provide a few quick presets below.
+    setupModelPresets();
+
+    updateUiForState();
+  }
+
+  function setupModelPresets() {
+    var presets = [
+      'openai/gpt-4.1-mini',
+      'openai/gpt-4o-mini',
+      'google/gemini-2.0-flash-001',
+      'anthropic/claude-3.5-sonnet',
+      'meta-llama/llama-3.2-11b-vision-instruct'
+    ];
+    // Wrap model input in a datalist for easy access
+    var datalist = document.createElement('datalist');
+    datalist.id = 'modelPresets';
+    presets.forEach(function(p) {
+      var opt = document.createElement('option');
+      opt.value = p;
+      datalist.appendChild(opt);
+    });
+    document.body.appendChild(datalist);
+    $('modelSelect').setAttribute('list', 'modelPresets');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
+</script>
+</body>
+</html>
