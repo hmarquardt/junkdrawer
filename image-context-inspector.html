@@ -6,7 +6,7 @@
   <title>Image Context Inspector</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗺️</text></svg>" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css" />
-  <script src="https://cdn.jsdelivr.net/npm/exifr@6.3.0/dist/exifr.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifr@6.3.0/dist/full.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@15.0.0/dist/browser/markdown-it.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.13/dist/purify.min.js"></script>
@@ -219,9 +219,16 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         </div>
       </div>
       <div class="form-group">
-        <label for="modelSelect">Model</label>
-        <input type="text" id="modelSelect" placeholder="e.g. openai/gpt-4.1-mini" />
-        <div style="font-size:0.65rem;color:var(--text-faint);margin-top:0.15rem;">Enter any OpenRouter model ID</div>
+        <label for="modelSelect">Vision Model</label>
+        <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+          <select id="modelSelect" style="flex:1;min-width:140px;"></select>
+          <button class="btn btn-ghost btn-sm" id="refreshModelsBtn" title="Refresh model catalog">⟳</button>
+        </div>
+        <div style="font-size:0.65rem;color:var(--text-faint);margin-top:0.15rem;" id="modelCatalogStatus">Loading vision models…</div>
+      </div>
+      <div class="form-group" id="customModelGroup" style="display:none">
+        <label for="customModelInput">Custom Model ID</label>
+        <input type="text" id="customModelInput" placeholder="e.g. openai/gpt-4.1-mini" />
       </div>
       <div class="form-group">
         <label for="siteNameInput">Site/App name (optional)</label>
@@ -241,9 +248,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.22.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.22.1" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.22.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.23.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.23.1" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.23.1
   </footer>
 
 <script>
@@ -267,10 +274,19 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     previewUrl: null,
     submissionDataUrl: null,  // converted copy for AI, if needed
     submissionMime: null,
-    exifStatus: 'none',  // none | ok | no-exif | no-gps | error
+    exifStatus: 'none',  // none | ok | no-gps | no-exif | parse-error | lib-missing
+    exifError: null,     // error message string from exif parse failure
+    exifTagCount: 0,     // number of EXIF tags found
+    exifLibLoaded: false,
+    gpsSource: '',       // 'decimal' | 'dms-fallback' | 'none'
     map: null,
     mapMarker: null,
-    analyzed: false
+    analyzed: false,
+    // Model catalog
+    modelCatalogStatus: 'idle',  // idle | loading | loaded | error
+    visionModels: [],
+    modelCatalogError: null,
+    modelCatalogLoadedAt: null
   };
 
   var settings = {
@@ -281,6 +297,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 
   var SETTINGS_KEY = 'image-context-inspector-settings';
   var REVERSE_CACHE_KEY = 'image-context-inspector-reverse-cache';
+  var MODEL_CATALOG_KEY = 'image-context-inspector-model-catalog';
 
   /* ======================================================================
    * Utilities
@@ -413,13 +430,16 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 
   /**
    * Extract and normalize useful metadata from exifr raw output.
-   * Returns { exif, gps } where exif is a normalized object.
+   * exifr returns GPS coordinates as already-normalized decimal values (e.g. 38.355917).
+   * Only falls back to DMS array parsing if decimal values are unavailable.
+   * Returns { exif, gps, gpsSource }.
    */
   function normalizeExif(raw) {
     var exif = {};
     var gps = null;
+    var gpsSource = 'none';
 
-    if (!raw || typeof raw !== 'object') return { exif: exif, gps: gps };
+    if (!raw || typeof raw !== 'object') return { exif: exif, gps: gps, gpsSource: gpsSource };
 
     // Capture
     if (raw.DateTimeOriginal) exif.DateTimeOriginal = raw.DateTimeOriginal;
@@ -454,27 +474,52 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     if (raw.Copyright) sensitive.Copyright = raw.Copyright;
     if (raw.ImageUniqueID) sensitive.ImageUniqueID = raw.ImageUniqueID;
     if (raw.ExifVersion) sensitive.ExifVersion = raw.ExifVersion;
-
-    // GPS
-    var gpsLat = gpsToDecimal(raw.latitude, raw.latitudeRef);
-    var gpsLng = gpsToDecimal(raw.longitude, raw.longitudeRef);
-    if (gpsLat !== null && gpsLng !== null &&
-        !(gpsLat === 0 && gpsLng === 0)) {
-      gps = {
-        lat: gpsLat,
-        lng: gpsLng,
-        altitude: raw.GPSAltitude !== undefined ? Number(raw.GPSAltitude) : null,
-        altitudeRef: raw.GPSAltitudeRef,
-        direction: raw.GPSImgDirection !== undefined ? Number(raw.GPSImgDirection) : null,
-        directionRef: raw.GPSImgDirectionRef,
-        timestamp: raw.GPSDateStamp || null
-      };
-    }
-
-    // Include sensitive keys in exif under 'sensitive' sub-object
     if (Object.keys(sensitive).length > 0) exif.sensitive = sensitive;
 
-    return { exif: exif, gps: gps };
+    // ---- GPS extraction ----
+    // Step 1: Try decimal values (exifr normalizes these)
+    var lat = Number(raw.latitude);
+    var lng = Number(raw.longitude);
+    var latRef = raw.latitudeRef;
+    var lngRef = raw.longitudeRef;
+
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+      gpsSource = 'decimal';
+    } else {
+      // Step 2: DMS fallback — raw.GPSLatitude / GPSLongitude may be arrays
+      lat = null;
+      lng = null;
+      var dmsLat = raw.GPSLatitude;
+      var dmsLng = raw.GPSLongitude;
+      if (Array.isArray(dmsLat) && dmsLat.length > 0 && Array.isArray(dmsLng) && dmsLng.length > 0) {
+        var decLat = gpsToDecimal(dmsLat, raw.GPSLatitudeRef);
+        var decLng = gpsToDecimal(dmsLng, raw.GPSLongitudeRef);
+        if (decLat !== null && decLng !== null && !(decLat === 0 && decLng === 0)) {
+          lat = decLat;
+          lng = decLng;
+          latRef = raw.GPSLatitudeRef;
+          lngRef = raw.GPSLongitudeRef;
+          gpsSource = 'dms-fallback';
+        }
+      }
+    }
+
+    // Validate final coordinates
+    if (lat !== null && lng !== null && Number.isFinite(lat) && Number.isFinite(lng)) {
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        gps = {
+          lat: lat,
+          lng: lng,
+          altitude: raw.GPSAltitude !== undefined ? Number(raw.GPSAltitude) : null,
+          altitudeRef: raw.GPSAltitudeRef !== undefined ? raw.GPSAltitudeRef : null,
+          direction: raw.GPSImgDirection !== undefined ? Number(raw.GPSImgDirection) : null,
+          directionRef: raw.GPSImgDirectionRef !== undefined ? raw.GPSImgDirectionRef : null,
+          timestamp: raw.GPSDateStamp || null
+        };
+      }
+    }
+
+    return { exif: exif, gps: gps, gpsSource: gpsSource };
   }
 
   function formatFocalLength(v) {
@@ -606,8 +651,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
    * we still keep the file — just flag the status.
    */
   function parseExif(file) {
-    if (!window.exifr) {
-      state.exifStatus = 'error';
+    state.exifLibLoaded = typeof window.exifr !== 'undefined' && typeof window.exifr.parse === 'function';
+    if (!state.exifLibLoaded) {
+      state.exifStatus = 'lib-missing';
+      state.exifError = 'EXIF library failed to load';
       updateUiForState();
       return;
     }
@@ -617,13 +664,16 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         if (!raw || Object.keys(raw).length === 0) {
           state.exifStatus = 'no-exif';
           state.exifRaw = null;
+          state.exifTagCount = 0;
           updateUiForState();
           return;
         }
         state.exifRaw = raw;
+        state.exifTagCount = Object.keys(raw).length;
         var normalized = normalizeExif(raw);
         state.exif = normalized.exif;
         state.gps = normalized.gps;
+        state.gpsSource = normalized.gpsSource;
         if (state.gps) {
           state.exifStatus = 'ok';
           // Get image dimensions from EXIF if not already known
@@ -638,9 +688,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         buildContextPreview();
       })
       .catch(function(err) {
-        state.exifStatus = 'error';
+        state.exifStatus = 'parse-error';
         state.exifRaw = null;
-        state.exifErr = err && err.message ? err.message : String(err);
+        state.exifError = err && err.message ? err.message : String(err);
+        state.exifTagCount = 0;
         updateUiForState();
       });
   }
@@ -661,6 +712,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     state.submissionDataUrl = null;
     state.submissionMime = null;
     state.exifStatus = 'none';
+    state.exifError = null;
+    state.exifTagCount = 0;
+    state.gpsSource = '';
 
     var dropZone = $('drop-zone');
     dropZone.classList.remove('has-image');
@@ -1168,7 +1222,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       case 'ok': return 'GPS present'; break;
       case 'no-gps': return 'No GPS data in EXIF'; break;
       case 'no-exif': return 'No EXIF metadata found'; break;
-      case 'error': return 'Metadata parsing failed'; break;
+      case 'parse-error': return 'Metadata parsing failed'; break;
+      case 'lib-missing': return 'EXIF library failed to load'; break;
       default: return 'No image loaded';
     }
   }
@@ -1210,8 +1265,11 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     } else if (state.exifStatus === 'no-gps') {
       $('noGpsMsg').textContent = 'EXIF present but contains no GPS coordinates';
       $('noGpsMsg').style.display = 'flex';
-    } else if (state.exifStatus === 'error') {
+    } else if (state.exifStatus === 'parse-error') {
       $('noGpsMsg').textContent = 'Metadata parsing failed';
+      $('noGpsMsg').style.display = 'flex';
+    } else if (state.exifStatus === 'lib-missing') {
+      $('noGpsMsg').textContent = 'EXIF library failed to load';
       $('noGpsMsg').style.display = 'flex';
     }
 
@@ -1239,19 +1297,239 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 
   function updateDiagnostics() {
     var lines = [];
-    lines.push('MIME: ' + (state.mimeType || 'none'));
-    lines.push('EXIF parser: ' + (window.exifr ? 'loaded' : 'MISSING'));
-    lines.push('EXIF status: ' + state.exifStatus);
+    lines.push('File: ' + (state.fileName || 'none'));
+    lines.push('MIME: ' + (state.mimeType || '-'));
+    lines.push('Size: ' + (state.fileSize ? formatBytes(state.fileSize) : '-'));
+    lines.push('Dimensions: ' + (state.width && state.height ? state.width + 'x' + state.height : '-'));
+    lines.push('');
+    lines.push('EXIF:');
+    lines.push('  library loaded: ' + (state.exifLibLoaded ? 'yes' : 'NO'));
+    lines.push('  parse function: ' + (typeof window.exifr !== 'undefined' && typeof window.exifr.parse === 'function' ? 'available' : 'MISSING'));
+    lines.push('  parse status: ' + state.exifStatus);
+    lines.push('  tag count: ' + state.exifTagCount);
+    lines.push('  parse error: ' + (state.exifError || '-'));
+    lines.push('');
+    lines.push('GPS:');
+    lines.push('  source: ' + state.gpsSource + ' (decimal / dms-fallback / none)');
     if (state.gps) {
-      lines.push('GPS: ' + state.gps.lat.toFixed(6) + ', ' + state.gps.lng.toFixed(6));
+      lines.push('  latitude: ' + state.gps.lat.toFixed(6));
+      lines.push('  longitude: ' + state.gps.lng.toFixed(6));
+      lines.push('  altitude: ' + (state.gps.altitude !== null ? state.gps.altitude + ' m' : '-'));
+      lines.push('  direction: ' + (state.gps.direction !== null ? state.gps.direction + '\u00b0' : '-'));
     } else {
-      lines.push('GPS: none');
+      lines.push('  latitude: -');
+      lines.push('  longitude: -');
+      lines.push('  altitude: -');
+      lines.push('  direction: -');
     }
+    lines.push('');
     lines.push('Reverse geocoder: ' + (state.reverse ? 'ok' : 'idle'));
-    lines.push('Model: ' + (settings.model || 'unset'));
-    lines.push('Submission MIME: ' + (state.submissionMime || 'not prepared'));
-    lines.push('API key: ' + (settings.apiKey ? 'configured' : 'not configured'));
+    lines.push('');
+    lines.push('OpenRouter:');
+    lines.push('  API key configured: ' + (settings.apiKey ? 'yes' : 'no'));
+    lines.push('  model catalog: ' + state.modelCatalogStatus);
+    lines.push('  vision models: ' + state.visionModels.length);
+    lines.push('  selected model: ' + (settings.model || 'none'));
+    lines.push('  Submission MIME: ' + (state.submissionMime || 'not prepared'));
     $('diagContent').textContent = lines.join('\n');
+  }
+
+  /* ======================================================================
+   * OpenRouter model catalog
+   * ====================================================================== */
+  /**
+   * Fetch vision-capable models from OpenRouter API.
+   * Caches in localStorage with 1-hour TTL.
+   */
+  async function loadModelCatalog(force) {
+    if (!settings.apiKey) {
+      state.modelCatalogStatus = 'idle';
+      state.visionModels = [];
+      populateModelSelect();
+      return;
+    }
+    // Check cache
+    if (!force) {
+      try {
+        var cacheRaw = localStorage.getItem(MODEL_CATALOG_KEY);
+        if (cacheRaw) {
+          var cache = JSON.parse(cacheRaw);
+          if (cache.fetchedAt && Date.now() - cache.fetchedAt < 3600000 && Array.isArray(cache.models)) {
+            state.visionModels = cache.models;
+            state.modelCatalogStatus = 'loaded';
+            state.modelCatalogLoadedAt = cache.fetchedAt;
+            populateModelSelect();
+            updateDiagnostics();
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
+    state.modelCatalogStatus = 'loading';
+    updateCatalogStatusMsg('Loading vision models\u2026');
+    updateDiagnostics();
+
+    try {
+      var resp = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + settings.apiKey }
+      });
+      if (!resp.ok) {
+        state.modelCatalogStatus = 'error';
+        state.modelCatalogError = 'HTTP ' + resp.status;
+        updateCatalogStatusMsg('Could not load model catalog (HTTP ' + resp.status + ') <button class="btn btn-ghost btn-sm" id="retryCatalogBtn">Retry</button>');
+        updateDiagnostics();
+        return;
+      }
+      var data = await resp.json();
+      if (!Array.isArray(data)) {
+        state.modelCatalogStatus = 'error';
+        state.modelCatalogError = 'Unexpected response shape';
+        updateCatalogStatusMsg('Could not load model catalog');
+        updateDiagnostics();
+        return;
+      }
+
+      // Filter for vision-capable models
+      var vision = data.filter(function(m) {
+        return m && m.architecture && Array.isArray(m.architecture.input_modalities) &&
+          m.architecture.input_modalities.indexOf('image') !== -1;
+      }).map(function(m) {
+        return {
+          id: m.id,
+          name: m.name,
+          provider: m.id.split('/')[0],
+          pricing: m.pricing || null,
+          context_length: m.context_length || null
+        };
+      });
+
+      // Sort by provider then name
+      vision.sort(function(a, b) {
+        if (a.provider < b.provider) return -1;
+        if (a.provider > b.provider) return 1;
+        if (a.name < b.name) return -1;
+        if (a.name > b.name) return 1;
+        return 0;
+      });
+
+      state.visionModels = vision;
+      state.modelCatalogStatus = 'loaded';
+      state.modelCatalogLoadedAt = Date.now();
+      state.modelCatalogError = null;
+
+      // Cache
+      try {
+        localStorage.setItem(MODEL_CATALOG_KEY, JSON.stringify({
+          fetchedAt: Date.now(),
+          models: vision
+        }));
+      } catch (e) {}
+
+      updateCatalogStatusMsg(vision.length + ' vision models available');
+      populateModelSelect();
+      updateDiagnostics();
+    } catch (err) {
+      state.modelCatalogStatus = 'error';
+      state.modelCatalogError = err && err.message ? err.message : String(err);
+      updateCatalogStatusMsg('Could not load model catalog <button class="btn btn-ghost btn-sm" id="retryCatalogBtn">Retry</button>');
+      updateDiagnostics();
+    }
+  }
+
+  function updateCatalogStatusMsg(html) {
+    var el = $('modelCatalogStatus');
+    if (el) el.innerHTML = html;
+    // Attach retry handler if present
+    var retryBtn = $('retryCatalogBtn');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', function() { loadModelCatalog(true); });
+    }
+  }
+
+  function populateModelSelect() {
+    var sel = $('modelSelect');
+    if (!sel) return;
+    sel.innerHTML = '';
+
+    var savedModel = settings.model;
+    var savedFound = false;
+
+    if (state.visionModels.length > 0) {
+      // Group by provider
+      var groups = {};
+      for (var i = 0; i < state.visionModels.length; i++) {
+        var m = state.visionModels[i];
+        var provider = m.provider || 'other';
+        if (!groups[provider]) groups[provider] = [];
+        groups[provider].push(m);
+      }
+
+      var providerOrder = Object.keys(groups).sort();
+      for (var p = 0; p < providerOrder.length; p++) {
+        var prov = providerOrder[p];
+        var models = groups[prov];
+        var optgroup = document.createElement('optgroup');
+        optgroup.label = prov.charAt(0).toUpperCase() + prov.slice(1);
+        for (var j = 0; j < models.length; j++) {
+          var opt = document.createElement('option');
+          opt.value = models[j].id;
+          opt.textContent = models[j].name;
+          if (models[j].context_length) {
+            opt.textContent += ' (' + formatContextLength(models[j].context_length) + ')';
+          }
+          if (models[j].id === savedModel) {
+            opt.selected = true;
+            savedFound = true;
+          }
+          optgroup.appendChild(opt);
+        }
+        sel.appendChild(optgroup);
+      }
+    }
+
+    // If saved model not found but exists, add option for it
+    if (savedModel && !savedFound) {
+      var opt = document.createElement('option');
+      opt.value = savedModel;
+      opt.textContent = 'Saved: ' + savedModel;
+      opt.selected = true;
+      sel.appendChild(opt);
+    }
+
+    // Custom model option
+    if (state.visionModels.length > 0 || !savedModel) {
+      var customOpt = document.createElement('option');
+      customOpt.value = '__custom__';
+      customOpt.textContent = 'Custom model ID\u2026';
+      sel.appendChild(customOpt);
+    }
+
+    // Handle custom selection toggle
+    sel.addEventListener('change', function() {
+      if (sel.value === '__custom__') {
+        $('customModelGroup').style.display = 'block';
+      } else {
+        $('customModelGroup').style.display = 'none';
+      }
+    });
+
+    // If no models at all, show empty state
+    if (state.visionModels.length === 0 && !savedModel) {
+      var opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(No vision models loaded)';
+      sel.appendChild(opt);
+    }
+
+    updateDiagnostics();
+  }
+
+  function formatContextLength(len) {
+    if (!len) return '';
+    var k = len / 1000;
+    if (k >= 1000) return (k / 1000).toFixed(1) + 'M';
+    return Math.round(k) + 'K';
   }
 
   /* ======================================================================
@@ -1259,9 +1537,32 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
    * ====================================================================== */
   function openSettings() {
     $('apiKeyInput').value = settings.apiKey;
-    $('modelSelect').value = settings.model;
     $('siteNameInput').value = settings.siteName;
     $('settingsModal').classList.add('open');
+    populateModelSelect();
+    loadModelCatalog();
+  }
+
+  function closeSettings() {
+    $('settingsModal').classList.remove('open');
+  }
+
+  function saveSettingsFromModal() {
+    settings.apiKey = $('apiKeyInput').value.trim();
+    var sel = $('modelSelect');
+    var custom = $('customModelInput');
+    if (sel.value === '__custom__') {
+      settings.model = custom.value.trim() || 'openai/gpt-4.1-mini';
+    } else {
+      settings.model = sel.value || 'openai/gpt-4.1-mini';
+    }
+    settings.siteName = $('siteNameInput').value.trim() || 'Image Context Inspector';
+    saveSettings();
+    closeSettings();
+    // If key just saved, load models
+    if (settings.apiKey) loadModelCatalog();
+    updateUiForState();
+    showToast('Settings saved');
   }
 
   function closeSettings() {
@@ -1393,31 +1694,21 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       });
     });
 
-    // Model presets: quick-select on the model input via blur is not needed;
-    // placeholder shows the default. Provide a few quick presets below.
-    setupModelPresets();
+    // Refresh models button
+    $('refreshModelsBtn').addEventListener('click', function() {
+      loadModelCatalog(true);
+    });
+
+    // Load model catalog on key change in settings
+    $('apiKeyInput').addEventListener('change', function() {
+      if (this.value.trim()) loadModelCatalog();
+    });
 
     updateUiForState();
-  }
-
-  function setupModelPresets() {
-    var presets = [
-      'openai/gpt-4.1-mini',
-      'openai/gpt-4o-mini',
-      'google/gemini-2.0-flash-001',
-      'anthropic/claude-3.5-sonnet',
-      'meta-llama/llama-3.2-11b-vision-instruct'
-    ];
-    // Wrap model input in a datalist for easy access
-    var datalist = document.createElement('datalist');
-    datalist.id = 'modelPresets';
-    presets.forEach(function(p) {
-      var opt = document.createElement('option');
-      opt.value = p;
-      datalist.appendChild(opt);
-    });
-    document.body.appendChild(datalist);
-    $('modelSelect').setAttribute('list', 'modelPresets');
+    // Attempt initial catalog load if key exists
+    if (settings.apiKey) {
+      loadModelCatalog();
+    }
   }
 
   if (document.readyState === 'loading') {
