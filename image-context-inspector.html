@@ -273,9 +273,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.3" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.3" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.3
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.4" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.4" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.4
   </footer>
 
 <script>
@@ -323,12 +323,15 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       loadStatus: 'idle',
       saveStatus: 'not-attempted',
       error: null,
+      bytes: 0,
       keyPresent: false,
       apiKeyRestored: false,
       modelRestored: null
     },
+    legacyCatalogPresent: false,
+    legacyCatalogRemoved: false,
     // Model catalog
-    modelCatalogStatus: 'idle',  // idle | loading | loaded | error
+    modelCatalogStatus: 'idle',  // idle | loading | loaded | loaded-empty | loaded-refresh-error | error
     visionModels: [],
     modelCatalogError: null,
     modelCatalogLoadedAt: null
@@ -347,6 +350,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   var SETTINGS_PROBE_KEY = 'image-context-inspector-storage-probe';
   var REVERSE_CACHE_KEY = 'image-context-inspector-reverse-cache';
   var MODEL_CATALOG_KEY = 'image-context-inspector-model-catalog';
+  var REVERSE_CACHE_MAX_ENTRIES = 40;
 
   /* ======================================================================
    * Utilities
@@ -478,6 +482,37 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     }
   }
 
+  function trimReverseCache(cache) {
+    var keys = cache && typeof cache === 'object' && !Array.isArray(cache) ? Object.keys(cache) : [];
+    while (keys.length > REVERSE_CACHE_MAX_ENTRIES) {
+      delete cache[keys.shift()];
+    }
+    return cache;
+  }
+
+  function prepareLocalStorage() {
+    try {
+      state.legacyCatalogPresent = localStorage.getItem(MODEL_CATALOG_KEY) !== null;
+      localStorage.removeItem(MODEL_CATALOG_KEY);
+      state.legacyCatalogRemoved = state.legacyCatalogPresent && localStorage.getItem(MODEL_CATALOG_KEY) === null;
+    } catch (e) {}
+
+    try {
+      var reverseRaw = localStorage.getItem(REVERSE_CACHE_KEY);
+      if (!reverseRaw) return;
+      var reverseCache = JSON.parse(reverseRaw);
+      if (!reverseCache || typeof reverseCache !== 'object' || Array.isArray(reverseCache)) {
+        localStorage.removeItem(REVERSE_CACHE_KEY);
+        return;
+      }
+      if (Object.keys(reverseCache).length > REVERSE_CACHE_MAX_ENTRIES) {
+        localStorage.setItem(REVERSE_CACHE_KEY, JSON.stringify(trimReverseCache(reverseCache)));
+      }
+    } catch (e) {
+      try { localStorage.removeItem(REVERSE_CACHE_KEY); } catch (ignore) {}
+    }
+  }
+
   function probeSettingsStorage() {
     try {
       localStorage.setItem(SETTINGS_PROBE_KEY, '1');
@@ -506,6 +541,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     }
     try {
       var raw = localStorage.getItem(SETTINGS_KEY);
+      state.settingsStorage.bytes = raw ? raw.length * 2 : 0;
       state.settingsStorage.keyPresent = raw !== null;
       if (!raw) {
         state.settingsStorage.loadStatus = 'missing';
@@ -547,7 +583,14 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         siteName: settings.siteName,
         completionChime: settings.completionChime
       });
-      localStorage.setItem(SETTINGS_KEY, serialized);
+      try {
+        localStorage.setItem(SETTINGS_KEY, serialized);
+      } catch (writeError) {
+        // Disposable cache data must never take priority over durable settings.
+        try { localStorage.removeItem(MODEL_CATALOG_KEY); } catch (ignore) {}
+        try { localStorage.removeItem(REVERSE_CACHE_KEY); } catch (ignore) {}
+        localStorage.setItem(SETTINGS_KEY, serialized);
+      }
       var storedRaw = localStorage.getItem(SETTINGS_KEY);
       var stored = storedRaw ? JSON.parse(storedRaw) : null;
       var verified = !!stored &&
@@ -558,6 +601,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       if (!verified) throw new Error('Settings write verification failed');
       state.settingsStorage.available = true;
       state.settingsStorage.saveStatus = 'verified';
+      state.settingsStorage.bytes = serialized.length * 2;
       state.settingsStorage.keyPresent = true;
       state.settingsStorage.error = null;
       updateSettingsStorageUi();
@@ -583,6 +627,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         var cache = cacheRaw ? JSON.parse(cacheRaw) : {};
         if (cache[cacheKey]) {
           state.reverse = cache[cacheKey];
+          delete cache[cacheKey];
+          cache[cacheKey] = state.reverse;
+          localStorage.setItem(REVERSE_CACHE_KEY, JSON.stringify(trimReverseCache(cache)));
           resolve(state.reverse);
           return;
         }
@@ -604,8 +651,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
             try {
               var cacheRaw2 = localStorage.getItem(REVERSE_CACHE_KEY);
               var cache2 = cacheRaw2 ? JSON.parse(cacheRaw2) : {};
+              delete cache2[cacheKey];
               cache2[cacheKey] = state.reverse;
-              localStorage.setItem(REVERSE_CACHE_KEY, JSON.stringify(cache2));
+              localStorage.setItem(REVERSE_CACHE_KEY, JSON.stringify(trimReverseCache(cache2)));
             } catch (e) {}
             resolve(state.reverse);
           } else {
@@ -1551,6 +1599,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     lines.push('  metadata parent: ' + ($('info-sections') && $('info-sections').parentElement ? $('info-sections').parentElement.id || '(no id)' : '-'));
     lines.push('');
     lines.push('Settings persistence:');
+    lines.push('Settings storage bytes: ' + state.settingsStorage.bytes);
+    lines.push('Model catalog persistence: disabled');
+    lines.push('Vision models in memory: ' + state.visionModels.length);
+    lines.push('Legacy catalog removed: ' + (state.legacyCatalogRemoved ? 'yes' : 'no'));
     lines.push('  origin: ' + location.origin);
     lines.push('  storage available: ' + (state.settingsStorage.available === null ? 'unknown' : state.settingsStorage.available ? 'yes' : 'no'));
     lines.push('  key present: ' + (state.settingsStorage.keyPresent ? 'yes' : 'no'));
@@ -1579,33 +1631,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   /**
    * Fetch vision-capable models from OpenRouter API.
    * Uses ?input_modalities=image to pre-filter. Does NOT require an API key.
-   * Caches in localStorage with 1-hour TTL.
-   * On failure, falls back to stale cache if available.
+   * Keeps the normalized catalog in memory only for the current page load.
    */
-  async function loadModelCatalog(force) {
-    var staleCache = null;
-    if (!force) {
-      try {
-        var cacheRaw = localStorage.getItem(MODEL_CATALOG_KEY);
-        if (cacheRaw) {
-          var cache = JSON.parse(cacheRaw);
-          if (cache.fetchedAt && Array.isArray(cache.models)) {
-            if (Date.now() - cache.fetchedAt < 3600000) {
-              state.visionModels = cache.models;
-              state.modelCatalogStatus = 'loaded-from-cache';
-              state.modelCatalogLoadedAt = cache.fetchedAt;
-              populateModelSelect();
-              updateAiPanelUi();
-              updateDiagnostics();
-              return;
-            } else {
-              staleCache = cache.models;
-            }
-          }
-        }
-      } catch (e) {}
-    }
-
+  async function loadModelCatalog() {
     state.modelCatalogStatus = 'loading';
     updateCatalogStatusMsg('Loading vision models\u2026');
     updateAiPanelUi();
@@ -1619,7 +1647,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       if (!resp.ok) {
         state.modelCatalogStatus = 'error';
         state.modelCatalogError = 'HTTP ' + resp.status;
-        useStaleOrFail(staleCache, 'HTTP error ' + resp.status);
+        useInMemoryOrFail('HTTP error ' + resp.status);
         updateDiagnostics();
         return;
       }
@@ -1629,20 +1657,19 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       if (!models) {
         state.modelCatalogStatus = 'error';
         state.modelCatalogError = 'Expected payload.data array';
-        useStaleOrFail(staleCache, 'Expected payload.data array');
+        useInMemoryOrFail('Expected payload.data array');
         updateDiagnostics();
         return;
       }
 
       var vision = models.filter(function(m) {
-        return m && m.architecture && Array.isArray(m.architecture.input_modalities) &&
+        return m && typeof m.id === 'string' && m.architecture && Array.isArray(m.architecture.input_modalities) &&
           m.architecture.input_modalities.indexOf('image') !== -1;
       }).map(function(m) {
         return {
           id: m.id,
-          name: m.name,
+          name: m.name || m.id,
           provider: m.id.split('/')[0],
-          pricing: m.pricing || null,
           context_length: m.context_length || null
         };
       });
@@ -1660,13 +1687,6 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       state.modelCatalogLoadedAt = Date.now();
       state.modelCatalogError = null;
 
-      try {
-        localStorage.setItem(MODEL_CATALOG_KEY, JSON.stringify({
-          fetchedAt: Date.now(),
-          models: vision
-        }));
-      } catch (e) {}
-
       updateCatalogStatusMsg(vision.length > 0 ?
         vision.length + ' vision models available' :
         '0 vision-capable models returned');
@@ -1676,23 +1696,20 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     } catch (err) {
       state.modelCatalogStatus = 'error';
       state.modelCatalogError = err && err.message ? err.message : String(err);
-      useStaleOrFail(staleCache, 'Could not load model catalog');
+      useInMemoryOrFail('Could not load model catalog');
       updateDiagnostics();
     }
   }
 
-  function useStaleOrFail(staleCache, msg) {
-    if (staleCache && staleCache.length > 0) {
-      state.visionModels = staleCache;
-      state.modelCatalogStatus = 'loaded-from-stale-cache';
-      state.modelCatalogError = 'Using cached models - ' + msg;
-      updateCatalogStatusMsg('Using cached models (refresh failed) <button class="btn btn-ghost btn-sm" id="retryCatalogBtn">Retry</button>');
-      populateModelSelect();
+  function useInMemoryOrFail(msg) {
+    if (state.visionModels.length > 0) {
+      state.modelCatalogStatus = 'loaded-refresh-error';
+      state.modelCatalogError = 'Keeping models already loaded in memory - ' + msg;
+      updateCatalogStatusMsg('Keeping loaded models (refresh failed) <button class="btn btn-ghost btn-sm" id="retryCatalogBtn">Retry</button>');
     } else {
-      state.visionModels = [];
       updateCatalogStatusMsg(msg + ' <button class="btn btn-ghost btn-sm" id="retryCatalogBtn">Retry</button>');
-      populateModelSelect();
     }
+    populateModelSelect();
     updateAiPanelUi();
   }
 
@@ -1701,7 +1718,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     if (el) el.innerHTML = html;
     var retryBtn = $('retryCatalogBtn');
     if (retryBtn) {
-      retryBtn.addEventListener('click', function() { loadModelCatalog(true); });
+      retryBtn.addEventListener('click', loadModelCatalog);
     }
   }
 
@@ -1895,7 +1912,6 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     $('settingsModal').classList.add('open');
     updateSettingsStorageUi();
     populateModelSelect();
-    loadModelCatalog();
   }
 
   function closeSettings() {
@@ -1963,6 +1979,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
    * Event wiring
    * ====================================================================== */
   function init() {
+    // Remove disposable legacy/cache data before testing durable settings storage.
+    prepareLocalStorage();
     probeSettingsStorage();
     loadSettings();
 
@@ -1976,12 +1994,17 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
           completionChimePlayCount: state.completionChimePlayCount,
           audioContextState: audioContext ? audioContext.state : 'unavailable',
           storageAvailable: state.settingsStorage.available,
+          settingsBytes: state.settingsStorage.bytes,
           loadStatus: state.settingsStorage.loadStatus,
           saveStatus: state.settingsStorage.saveStatus,
           keyPresent: state.settingsStorage.keyPresent,
           apiKeyRestored: state.settingsStorage.apiKeyRestored,
           modelRestored: state.settingsStorage.modelRestored,
-          storageError: state.settingsStorage.error
+          storageError: state.settingsStorage.error,
+          modelCatalogPersistence: 'disabled',
+          visionModelCount: state.visionModels.length,
+          legacyCatalogPresent: state.legacyCatalogPresent,
+          legacyCatalogRemoved: state.legacyCatalogRemoved
         };
       },
       testPersistence: function() {
@@ -2102,14 +2125,14 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 
     // Refresh models button
     $('refreshModelsBtn').addEventListener('click', function() {
-      loadModelCatalog(true);
+      loadModelCatalog();
     });
 
     // Load model catalog on key change in settings
     // No key-change -> catalog coupling — catalog is public
 
     updateUiForState();
-    // Attempt initial catalog load if key exists
+    // The public catalog is refreshed into memory on every page load.
     loadModelCatalog();
   }
 
