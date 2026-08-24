@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MAIBA Deterministic Human Rubric Evaluator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0e0d;
+    --surface: #131817;
+    --surface-2: #191f1d;
+    --surface-3: #202724;
+    --ink: #edf2ed;
+    --muted: #97a39c;
+    --faint: #68736c;
+    --line: #2a332f;
+    --line-strong: #3a4640;
+    --accent: #c6f36a;
+    --accent-ink: #152008;
+    --accent-soft: rgba(198, 243, 106, .11);
+    --bad: #ff8a65;
+    --bad-soft: rgba(255, 138, 101, .12);
+    --blue: #76b9ff;
+    --blue-soft: rgba(118, 185, 255, .11);
+    --paper: #e8e8df;
+    --paper-ink: #1b1d19;
+    --paper-rule: #c9cbc0;
+    --danger: #ff6b6b;
+    --shadow: 0 18px 48px rgba(0, 0, 0, .28);
+    --radius: 12px;
+    --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+    --sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  }
+  html.light {
+    color-scheme: light;
+    --bg: #ebece5;
+    --surface: #f8f8f3;
+    --surface-2: #f0f1ea;
+    --surface-3: #e6e8df;
+    --ink: #1b211d;
+    --muted: #5c6861;
+    --faint: #7c867f;
+    --line: #cfd4cc;
+    --line-strong: #aeb7af;
+    --accent: #567b11;
+    --accent-ink: #fff;
+    --accent-soft: rgba(86, 123, 17, .1);
+    --bad: #b64020;
+    --bad-soft: rgba(182, 64, 32, .09);
+    --blue: #246aa8;
+    --blue-soft: rgba(36, 106, 168, .09);
+    --paper: #fffef7;
+    --paper-ink: #1b1d19;
+    --paper-rule: #d5d5ca;
+    --danger: #b42318;
+    --shadow: 0 18px 48px rgba(39, 45, 40, .12);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background:
+      linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px), var(--bg);
+    background-size: 24px 24px;
+    color: var(--ink);
+    font: 14px/1.45 var(--sans);
+  }
+  button, textarea, input, select { font: inherit; }
+  button { color: inherit; }
+  button:focus-visible, textarea:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--blue); outline-offset: 2px;
+  }
+  .app { max-width: 1800px; margin: 0 auto; padding: 14px 18px 32px; }
+  .topbar { display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-2); font-size: 18px; }
+  h1 { margin: 0; font-size: clamp(16px, 1.4vw, 21px); letter-spacing: -.025em; line-height: 1.1; }
+  .brand small { display: block; color: var(--muted); margin-top: 2px; font: 10px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .11em; }
+  .top-actions { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+  .nav { display: flex; gap: 3px; padding: 10px 0 12px; }
+  .nav button { border: 0; border-radius: 8px; background: transparent; color: var(--muted); padding: 7px 12px; font-weight: 650; cursor: pointer; }
+  .nav button.active { background: var(--surface-3); color: var(--ink); }
+  .nav .history-count { margin-left: 5px; color: var(--faint); font: 11px var(--mono); }
+  .workspace { display: grid; grid-template-columns: minmax(390px, .88fr) minmax(560px, 1.12fr); gap: 14px; align-items: start; }
+  .panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 1px 0 rgba(255,255,255,.025) inset; }
+  .panel-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .panel-head h2, .section-title h3 { margin: 0; font-size: 14px; letter-spacing: -.01em; }
+  .eyebrow { color: var(--faint); font: 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+  .btn { min-height: 34px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 10px; background: var(--surface-2); color: var(--ink); font-weight: 650; cursor: pointer; transition: border-color .14s, transform .14s, background .14s; }
+  .btn:hover { border-color: var(--muted); background: var(--surface-3); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.danger { color: var(--danger); }
+  .btn.small { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .icon-btn { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); cursor: pointer; }
+  .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+  textarea, input[type="text"], select {
+    width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); padding: 9px 10px; resize: vertical;
+  }
+  textarea:focus, input[type="text"]:focus, select:focus { border-color: var(--blue); outline: 0; box-shadow: 0 0 0 2px var(--blue-soft); }
+  textarea.invalid, .invalid-group { border-color: var(--danger) !important; box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 14%, transparent) !important; }
+  #conversationInput { min-height: 245px; max-height: 56vh; border: 0; border-radius: 0; padding: 14px; background: #0d1211; color: #dce9df; font: 12.5px/1.55 var(--mono); }
+  html.light #conversationInput { background: #f5f6ef; color: #263029; }
+  .conversation-tools { padding: 10px 12px; border-top: 1px solid var(--line); }
+  .meta-strip { display: flex; gap: 7px; padding: 9px 12px; border-top: 1px solid var(--line); color: var(--muted); font: 11px var(--mono); }
+  .metric { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; }
+  .preview { max-height: 70vh; overflow: auto; padding: 12px; background: var(--surface-2); border-radius: 0 0 var(--radius) var(--radius); }
+  .preview-empty { display: grid; place-items: center; min-height: 180px; color: var(--faint); text-align: center; }
+  .message { position: relative; margin: 0 0 10px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+  .message.user { margin-right: 7%; border-left: 3px solid var(--blue); }
+  .message.assistant { margin-left: 7%; border-left: 3px solid var(--accent); }
+  .message.context { border-style: dashed; background: transparent; }
+  .message-head { display: flex; align-items: center; gap: 7px; padding: 6px 9px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+  .first-badge { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 999px; padding: 1px 6px; letter-spacing: .05em; }
+  .message-body { padding: 10px 11px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.55 var(--sans); user-select: text; }
+  .right-stack { display: grid; gap: 12px; }
+  .output-panel { position: sticky; top: 8px; z-index: 20; background: var(--paper); color: var(--paper-ink); border-color: #aeafa5; box-shadow: var(--shadow); }
+  .output-panel .panel-head { border-color: var(--paper-rule); }
+  .output-panel .panel-head h2 { display: flex; gap: 8px; align-items: center; }
+  .output-panel .eyebrow { color: #6e7268; }
+  #finalOutput { margin: 0; padding: 14px 16px; max-height: 37vh; min-height: 170px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 11.5px/1.48 var(--mono); }
+  #finalOutput .required { color: #af311f; font-weight: 800; }
+  .validation { min-height: 18px; padding: 0 14px 9px; color: #a53120; font-size: 12px; }
+  .copied { color: #2e6819; font-weight: 750; }
+  .builder { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .eval-section { padding: 13px; }
+  .eval-section.full { grid-column: 1 / -1; }
+  .section-title { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+  .qnum { display: grid; place-items: center; flex: 0 0 27px; height: 27px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--muted); font: 700 11px var(--mono); }
+  .section-title p { margin: 1px 0 0; color: var(--muted); font-size: 11px; }
+  .linked { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+  .rating-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; border-radius: 9px; }
+  .radio-card input, .goal-card input, .continuity-card input, .dim-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  .radio-card span { display: grid; place-items: center; min-height: 43px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); text-align: center; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .radio-card input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); box-shadow: inset 0 -2px var(--accent); }
+  .field { margin-top: 10px; }
+  .field-label { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
+  .count { color: var(--faint); font: 10px var(--mono); }
+  .evidence-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
+  .evidence-row textarea { min-height: 54px; }
+  .explanation { min-height: 85px; max-height: 240px; overflow-y: auto; }
+  .dimensions { display: grid; gap: 5px; }
+  .dim-row { display: grid; grid-template-columns: minmax(145px, 1fr) auto; gap: 8px; align-items: center; padding: 6px 7px 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+  .dim-name { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; font-weight: 700; }
+  .ok-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .dim-row.needs { border-color: color-mix(in srgb, var(--bad) 56%, var(--line)); background: var(--bad-soft); }
+  .dim-row.needs .ok-dot { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+  .dim-row.na .ok-dot { background: var(--faint); box-shadow: none; }
+  .dim-actions { display: flex; gap: 4px; }
+  .dim-toggle span { display: inline-flex; min-height: 28px; align-items: center; gap: 5px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font: 700 10px var(--sans); cursor: pointer; }
+  .dim-toggle input:checked + span { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+  .dim-toggle.na-toggle input:checked + span { color: var(--ink); border-color: var(--muted); background: var(--surface-3); }
+  .na-reason { display: none; margin-top: 7px; }
+  .na-reason.visible { display: block; }
+  .derived { padding: 9px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--muted); font: 11px/1.45 var(--mono); }
+  .goal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .goal-card span, .continuity-card span { display: flex; align-items: center; justify-content: center; min-height: 45px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); text-align: center; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .goal-card input:checked + span, .continuity-card input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+  .continuity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .quote-popover { position: fixed; z-index: 100; display: none; gap: 4px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); }
+  .quote-popover.visible { display: flex; }
+  .quote-popover button { border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); padding: 5px 7px; color: var(--ink); font-size: 11px; font-weight: 700; cursor: pointer; }
+  .history-panel { display: none; }
+  .history-panel.active { display: block; }
+  #evaluateView.hidden { display: none; }
+  .history-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .history-table-wrap { overflow: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 900px; }
+  th, td { padding: 10px 11px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--faint); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+  td { font-size: 12px; }
+  .history-actions { display: flex; gap: 4px; }
+  .empty-history { padding: 48px 20px; color: var(--faint); text-align: center; }
+  .detail { display: none; margin-top: 12px; }
+  .detail.active { display: block; }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+  .detail pre { max-height: 55vh; margin: 0; padding: 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); white-space: pre-wrap; font: 11px/1.5 var(--mono); }
+  .status { position: fixed; right: 18px; bottom: 18px; z-index: 120; min-width: 220px; max-width: 360px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-3); box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .2s ease; }
+  .status.visible { opacity: 1; transform: none; }
+  .kbd { border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; color: var(--muted); font: 10px var(--mono); }
+  footer { grid-column: 1 / -1; }
+  @media (max-width: 1100px) {
+    .workspace { grid-template-columns: 1fr; }
+    .output-panel { position: relative; top: 0; }
+    #finalOutput { max-height: 50vh; }
+  }
+  @media (max-width: 720px) {
+    .app { padding: 8px; }
+    .topbar { align-items: flex-start; padding: 7px 0; }
+    .brand small { display: none; }
+    .builder { grid-template-columns: 1fr; }
+    .eval-section.full { grid-column: auto; }
+    .rating-grid { grid-template-columns: repeat(2, 1fr); }
+    .goal-grid { grid-template-columns: 1fr 1fr; }
+    .detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">⚖️</div>
+      <div><h1>MAIBA Human Rubric Desk</h1><small>Deterministic formatter · no AI · local only</small></div>
+    </div>
+    <div class="top-actions">
+      <span class="eyebrow" id="draftState">Draft saved</span>
+      <button class="icon-btn" id="themeToggle" aria-label="Toggle light and dark theme" title="Toggle theme">◐</button>
+      <button class="btn danger small" id="clearWorking">Clear Working Evaluation</button>
+    </div>
+  </header>
+
+  <nav class="nav" aria-label="Application views">
+    <button class="active" data-view="evaluate" aria-current="page">Evaluate</button>
+    <button data-view="history">History <span class="history-count" id="historyCount">0</span></button>
+  </nav>
+
+  <section id="evaluateView">
+    <div class="workspace">
+      <div class="left-stack">
+        <section class="panel" aria-labelledby="conversationHeading">
+          <div class="panel-head">
+            <div><span class="eyebrow">Source material</span><h2 id="conversationHeading">Conversation</h2></div>
+            <div class="toolbar">
+              <button class="btn small" id="clearConversation">Clear Conversation</button>
+              <button class="btn small" id="restoreDraft">Restore Draft</button>
+            </div>
+          </div>
+          <textarea id="conversationInput" aria-label="Conversation transcript" placeholder="model: maiba_prod&#10;&#10;USER: What should I do next?&#10;&#10;ASSISTANT: Here is a practical plan…&#10;&#10;Selected Assets: {...}" spellcheck="false"></textarea>
+          <div class="conversation-tools">
+            <span class="eyebrow">Paste raw transcript · parsing only identifies roles and context</span>
+          </div>
+          <div class="meta-strip" id="conversationMeta"><span class="metric">USER 0</span><span class="metric">ASSISTANT 0</span></div>
+        </section>
+
+        <section class="panel" style="margin-top:12px" aria-labelledby="previewHeading">
+          <div class="panel-head">
+            <div><span class="eyebrow">Selectable text</span><h2 id="previewHeading">Conversation Preview</h2></div>
+            <span class="eyebrow">Select text to quote</span>
+          </div>
+          <div class="preview" id="conversationPreview"><div class="preview-empty">Paste a conversation to render a readable preview.</div></div>
+        </section>
+      </div>
+
+      <div class="right-stack">
+        <section class="panel output-panel" aria-labelledby="outputHeading">
+          <div class="panel-head">
+            <div><span class="eyebrow">Live proof</span><h2 id="outputHeading">Final Q1–Q8 Output</h2></div>
+            <div class="toolbar">
+              <button class="btn small" id="saveHistory">Save to History</button>
+              <button class="btn primary" id="copyOutput" title="Cmd/Ctrl + Enter">▣&nbsp; Copy Q1–Q8</button>
+            </div>
+          </div>
+          <pre id="finalOutput" aria-live="polite"></pre>
+          <div class="validation" id="validationMessage" role="alert"></div>
+        </section>
+
+        <div class="builder">
+          <section class="panel eval-section full" id="q1Section">
+            <div class="section-title"><span class="qnum">Q1</span><div><h3>First response rating</h3><p>Focus this judgment on the first assistant response only.</p></div><span class="linked" id="q1Linked"></span></div>
+            <div class="rating-grid" id="q1Ratings" role="radiogroup" aria-label="First response rating" tabindex="0"></div>
+          </section>
+
+          <section class="panel eval-section" id="q2Section">
+            <div class="section-title"><span class="qnum">Q2</span><div><h3>First response explanation</h3><p>Comment plus automatically derived dimensions.</p></div></div>
+            <div class="field">
+              <label class="field-label" for="q2Evidence"><span>Evidence / exact quote</span><span class="count" id="q2EvidenceCount">0 chars</span></label>
+              <div class="evidence-row"><textarea id="q2Evidence" rows="2" placeholder="Paste or capture exact response wording."></textarea><button class="btn small insert-quote" data-target="q2">Insert Quote</button></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="q2Justification"><span>Justification <b aria-hidden="true">*</b></span><span class="count" id="q2Count">0 chars</span></label>
+              <textarea class="explanation" id="q2Justification" placeholder="Explain why the first response deserves this rating. Reference what it did well, what materially hurt it, and use exact response wording where useful."></textarea>
+            </div>
+            <div class="field"><div class="field-label"><span>First-response dimensions</span><span>Unselected = did well</span></div><div class="dimensions" id="firstDimensions"></div><div class="na-reason" id="firstNaReasonWrap"><input type="text" id="firstNaReason" placeholder="because no advertiser-specific context was supplied." aria-label="First-response Personalization not applicable reason" /></div></div>
+          </section>
+
+          <section class="panel eval-section" id="q3q4Section">
+            <div class="section-title"><span class="qnum">Q3–4</span><div><h3>Full conversation</h3><p>Rate progress toward the user's goal.</p></div><span class="linked" id="overallLinked"></span></div>
+            <div class="rating-grid" id="q3Ratings" role="radiogroup" aria-label="Overall conversation rating" tabindex="0"></div>
+            <div class="field">
+              <label class="field-label" for="q4Evidence"><span>Evidence / exact quote</span><span class="count" id="q4EvidenceCount">0 chars</span></label>
+              <div class="evidence-row"><textarea id="q4Evidence" rows="2" placeholder="Paste or capture exact response wording."></textarea><button class="btn small insert-quote" data-target="q4">Insert Quote</button></div>
+            </div>
+            <div class="field"><label class="field-label" for="q4Justification"><span>Overall justification <b aria-hidden="true">*</b></span><span class="count" id="q4Count">0 chars</span></label><textarea class="explanation" id="q4Justification" placeholder="Explain the quality of the assistant's responses across the full conversation. Focus on whether the conversation made meaningful progress toward the user's goal."></textarea></div>
+          </section>
+
+          <section class="panel eval-section full" id="q5q6Section">
+            <div class="section-title"><span class="qnum">Q5–6</span><div><h3>Overall dimensions &amp; improvement</h3><p>One state drives Q4 Went wrong, Q5, and Q6.</p></div><button class="btn small" id="copyFirstDimensions">Start from first-response selections</button></div>
+            <div class="dimensions" id="overallDimensions"></div>
+            <div class="na-reason" id="overallNaReasonWrap"><input type="text" id="overallNaReason" placeholder="because no advertiser-specific context was supplied." aria-label="Overall Personalization not applicable reason" /></div>
+            <div class="field"><div class="field-label"><span>Q5 generated value</span><span>canonical order</span></div><div class="derived" id="q5Derived">None</div></div>
+            <div class="field" id="q6EditorWrap"><label class="field-label" for="q6Justification"><span>How should the response improve? <b aria-hidden="true">*</b></span><span class="count" id="q6Count">0 chars</span></label><div class="evidence-row"><textarea class="explanation" id="q6Justification" placeholder="Explain specifically what should have been done differently and why. Reference exact response wording when useful."></textarea><button class="btn small insert-quote" data-target="q6">Insert Quote</button></div></div>
+            <div class="derived" id="q6Automatic">Comment: No response quality dimensions need improvement.&#10;&#10;Dimensions to improve: None</div>
+          </section>
+
+          <section class="panel eval-section" id="q7Section">
+            <div class="section-title"><span class="qnum">Q7</span><div><h3>Goal fulfillment</h3><p>Independent human judgment.</p></div></div>
+            <div class="goal-grid invalid-target" id="q7Choices" role="radiogroup" aria-label="Goal fulfillment"></div>
+          </section>
+
+          <section class="panel eval-section" id="q8Section">
+            <div class="section-title"><span class="qnum">Q8</span><div><h3>Conversation continuity</h3><p>Defaults to one conversation.</p></div></div>
+            <div class="continuity-grid" id="q8Choices" role="radiogroup" aria-label="Conversation continuity"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="history-panel" id="historyView" aria-labelledby="historyHeading">
+    <div class="panel">
+      <div class="panel-head">
+        <div><span class="eyebrow">IndexedDB · completed only</span><h2 id="historyHeading">Evaluation History</h2></div>
+        <div class="history-controls">
+          <label class="eyebrow" for="historyLimit">Retention</label>
+          <select id="historyLimit" style="width:auto"><option value="25">Keep last 25</option><option value="100" selected>Keep last 100</option><option value="500">Keep last 500</option></select>
+          <button class="btn danger small" id="deleteAllHistory">Delete all history</button>
+        </div>
+      </div>
+      <div class="history-table-wrap" id="historyTableWrap"></div>
+    </div>
+    <section class="panel detail" id="historyDetail" aria-labelledby="detailHeading">
+      <div class="panel-head"><h2 id="detailHeading">Record Detail</h2><div class="toolbar"><button class="btn small" id="copyDetail">Copy Q1–Q8</button><button class="btn ghost small" id="closeDetail">Close</button></div></div>
+      <div class="detail-grid"><div><div class="field-label">Original conversation</div><pre id="detailConversation"></pre></div><div><div class="field-label">Human selections</div><pre id="detailState"></pre></div><div style="grid-column:1/-1"><div class="field-label">Final rendered Q1–Q8</div><pre id="detailOutput"></pre></div></div>
+    </section>
+  </section>
+
+  <div class="quote-popover" id="quotePopover" role="toolbar" aria-label="Quote selected conversation text"><button data-quote="q2">Quote in Q2</button><button data-quote="q4">Quote in Q4</button><button data-quote="q6">Quote in Q6</button></div>
+  <div class="status" id="appStatus" role="status" aria-live="polite"></div>
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Deterministic Human Rubric Evaluator · version 2026.08.24.1
+  </footer>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const RATINGS = Object.freeze(['Very Good', 'Good', 'Just Okay', 'Bad', 'Very Bad']);
+  const DIMENSIONS = Object.freeze(['Understands User Intent', 'Accuracy', 'Personalization', 'Actionability', 'Clarity', 'Style/Tone', 'Safety']);
+  const QUESTIONS = Object.freeze({
+    q1: "Q1. How do you evaluate the AI's first response in this conversation?",
+    q2: 'Q2. Please explain your selection in Q1.',
+    q3: "Q3. How do you evaluate the AI's responses across the full conversation?",
+    q4: 'Q4. Please explain your selection in Q3.',
+    q5: 'Q5. Across the full conversation, which of the following response quality dimensions need to be improved?',
+    q6: 'Q6. If you selected any of the response quality dimensions in Q5, please explain your reasoning for your choices.',
+    q7: "Q7. Based on your overall review of this conversation, does the AI appear to have met the user's goal(s)?",
+    q8: 'Q8. In your opinion, does this chat feel like a single conversation or multiple conversations?'
+  });
+  const Q7_VALUES = Object.freeze({
+    all: "Yes - the AI appears to have met all of the user's goals",
+    some: "Yes - the AI appears to have met some (but not all) of the user's goals",
+    none: "No - the AI did not seem to have met any of the user's goals",
+    unsure: "Not sure - I could not infer whether the AI did or did-not meet any of the user's goals."
+  });
+  const Q8_VALUES = Object.freeze({ single: 'A single conversation', multiple: 'Multiple conversations' });
+  const REQUIRED = '— REQUIRED —';
+  const DRAFT_KEY = 'maibaDeterministic.draft.v1';
+  const BACKUP_KEY = 'maibaDeterministic.draftBackup.v1';
+  const PREF_KEY = 'maibaDeterministic.preferences.v1';
+  const DB_NAME = 'maibaDeterministicHistory';
+  const DB_VERSION = 1;
+  const STORE_NAME = 'evaluations';
+
+  const blankDims = () => Object.fromEntries(DIMENSIONS.map(name => [name, 'ok']));
+  const blankState = () => ({
+    conversationText: '', q1: '', q2Evidence: '', q2Justification: '', firstDimensions: blankDims(), firstNaReason: '',
+    q3: '', q4Evidence: '', q4Justification: '', overallDimensions: blankDims(), overallNaReason: '', q6Justification: '',
+    q7: '', q8: 'single', linked: false
+  });
+  let state = blankState();
+  let parsed = { blocks: [], userCount: 0, assistantCount: 0 };
+  let selectedQuote = '';
+  let selectedHistoryRecord = null;
+  let saveTimer = 0;
+  let statusTimer = 0;
+  const carets = { q2: 0, q4: 0, q6: 0 };
+  const $ = id => document.getElementById(id);
+
+  function cloneDims(dims) { return Object.fromEntries(DIMENSIONS.map(name => [name, dims?.[name] || 'ok'])); }
+  function safeState(candidate) {
+    const base = blankState();
+    if (!candidate || typeof candidate !== 'object') return base;
+    for (const key of ['conversationText','q1','q2Evidence','q2Justification','firstNaReason','q3','q4Evidence','q4Justification','overallNaReason','q6Justification','q7','q8']) {
+      if (typeof candidate[key] === 'string') base[key] = candidate[key];
+    }
+    base.firstDimensions = cloneDims(candidate.firstDimensions);
+    base.overallDimensions = cloneDims(candidate.overallDimensions);
+    base.linked = Boolean(candidate.linked);
+    if (!Object.keys(Q8_VALUES).includes(base.q8)) base.q8 = 'single';
+    return base;
+  }
+
+  function parseConversation(text) {
+    const blocks = [];
+    let current = null;
+    const flush = () => {
+      if (!current) return;
+      current.text = current.lines.join('\n');
+      delete current.lines;
+      if (current.text.length || current.role === 'context') blocks.push(current);
+      current = null;
+    };
+    for (const line of text.split(/\r?\n/)) {
+      const roleMatch = line.match(/^\s*(USER|ASSISTANT)\s*:\s?(.*)$/i);
+      const contextMatch = line.match(/^\s*((?:model)|(?:Selected Assets))\s*:\s?(.*)$/i);
+      if (roleMatch) {
+        flush();
+        current = { role: roleMatch[1].toLowerCase(), label: roleMatch[1].toUpperCase(), lines: [roleMatch[2]] };
+      } else if (contextMatch) {
+        flush();
+        current = { role: 'context', label: contextMatch[1], lines: [contextMatch[2]] };
+      } else {
+        if (!current) current = { role: 'context', label: 'Context', lines: [] };
+        current.lines.push(line);
+      }
+    }
+    flush();
+    const userCount = blocks.filter(block => block.role === 'user').length;
+    const assistantCount = blocks.filter(block => block.role === 'assistant').length;
+    let firstMarked = false;
+    for (const block of blocks) {
+      block.first = block.role === 'assistant' && !firstMarked;
+      if (block.first) firstMarked = true;
+    }
+    return { blocks, userCount, assistantCount };
+  }
+
+  function dimensionSummary(dims, naReason) {
+    const wrong = DIMENSIONS.filter(name => dims[name] === 'needs');
+    const well = DIMENSIONS.filter(name => dims[name] === 'ok');
+    let didWell = well.length ? well.join(', ') + '.' : 'None.';
+    if (dims.Personalization === 'na') {
+      const reason = String(naReason || '').trim();
+      let sentence = 'Personalization was not applicable.';
+      if (reason) {
+        sentence = reason.toLowerCase().startsWith('personalization was not applicable') ? reason : `Personalization was not applicable ${reason}`;
+        if (!/[.!?]$/.test(sentence)) sentence += '.';
+      }
+      didWell += ` ${sentence}`;
+    }
+    return { wrong, wrongText: wrong.length ? wrong.join(', ') : 'None', didWell };
+  }
+
+  function buildEvaluationOutput(formState) {
+    const first = dimensionSummary(formState.firstDimensions, formState.firstNaReason);
+    const overall = dimensionSummary(formState.overallDimensions, formState.overallNaReason);
+    const q6Comment = overall.wrong.length ? (formState.q6Justification.trim() || REQUIRED) : 'No response quality dimensions need improvement.';
+    return [
+      QUESTIONS.q1, formState.q1 || REQUIRED, '',
+      QUESTIONS.q2, `Comment: ${formState.q2Justification.trim() || REQUIRED}`, `Went wrong: ${first.wrongText}.`, `Did well: ${first.didWell}`, '',
+      QUESTIONS.q3, formState.q3 || REQUIRED, '',
+      QUESTIONS.q4, `Comment: ${formState.q4Justification.trim() || REQUIRED}`, `Went wrong: ${overall.wrongText}.`, `Did well: ${overall.didWell}`, '',
+      QUESTIONS.q5, overall.wrongText, '',
+      QUESTIONS.q6, `Comment: ${q6Comment}`, '', `Dimensions to improve: ${overall.wrongText}`, '',
+      QUESTIONS.q7, Q7_VALUES[formState.q7] || REQUIRED, '',
+      QUESTIONS.q8, Q8_VALUES[formState.q8] || REQUIRED
+    ].join('\n');
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+  }
+
+  function renderOutput() {
+    const output = buildEvaluationOutput(state);
+    $('finalOutput').innerHTML = escapeHtml(output).replaceAll(escapeHtml(REQUIRED), `<span class="required">${REQUIRED}</span>`);
+    const overall = dimensionSummary(state.overallDimensions, state.overallNaReason);
+    $('q5Derived').textContent = overall.wrongText;
+    const needsQ6 = overall.wrong.length > 0;
+    $('q6EditorWrap').style.display = needsQ6 ? 'block' : 'none';
+    $('q6Automatic').style.display = needsQ6 ? 'none' : 'block';
+    $('quotePopover').querySelector('[data-quote="q6"]').style.display = needsQ6 ? '' : 'none';
+  }
+
+  function renderPreview() {
+    const target = $('conversationPreview');
+    $('conversationMeta').innerHTML = `<span class="metric">USER ${parsed.userCount}</span><span class="metric">ASSISTANT ${parsed.assistantCount}</span><span class="metric">BLOCKS ${parsed.blocks.length}</span>`;
+    if (!state.conversationText.trim()) {
+      target.innerHTML = '<div class="preview-empty">Paste a conversation to render a readable preview.</div>';
+      return;
+    }
+    if (!parsed.blocks.length) {
+      target.innerHTML = '<div class="preview-empty">No transcript blocks found.</div>';
+      return;
+    }
+    target.innerHTML = parsed.blocks.map(block => `<article class="message ${block.role}"><div class="message-head"><span>${escapeHtml(block.label)}</span>${block.first ? '<span class="first-badge">First response</span>' : ''}</div><div class="message-body">${escapeHtml(block.text)}</div></article>`).join('');
+  }
+
+  function renderRatings(containerId, name, selected, disabled) {
+    $(containerId).innerHTML = RATINGS.map((rating, index) => `<label class="radio-card"><input type="radio" name="${name}" value="${escapeHtml(rating)}" ${selected === rating ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span><i style="font:10px var(--mono);font-style:normal;color:var(--faint);margin-right:3px">${index + 1}</i>${rating}</span></label>`).join('');
+  }
+
+  function renderDimensions(containerId, key) {
+    const dims = state[key];
+    $(containerId).innerHTML = DIMENSIONS.map(name => {
+      const status = dims[name];
+      return `<div class="dim-row ${status === 'needs' ? 'needs' : status === 'na' ? 'na' : ''}"><span class="dim-name"><i class="ok-dot"></i>${escapeHtml(name)}</span><span class="dim-actions"><label class="dim-toggle"><input type="checkbox" data-dim-set="${key}" data-dimension="${escapeHtml(name)}" data-status="needs" ${status === 'needs' ? 'checked' : ''}><span>○ Needs improvement</span></label>${name === 'Personalization' ? `<label class="dim-toggle na-toggle"><input type="checkbox" data-dim-set="${key}" data-dimension="Personalization" data-status="na" ${status === 'na' ? 'checked' : ''}><span>N/A</span></label>` : ''}</span></div>`;
+    }).join('');
+  }
+
+  function renderChoices() {
+    $('q7Choices').innerHTML = [
+      ['all','All goals'], ['some','Some but not all'], ['none','None'], ['unsure','Not sure']
+    ].map(([value,label]) => `<label class="goal-card"><input type="radio" name="q7" value="${value}" ${state.q7 === value ? 'checked' : ''}><span>${label}</span></label>`).join('');
+    $('q8Choices').innerHTML = [['single','A single conversation'], ['multiple','Multiple conversations']].map(([value,label]) => `<label class="continuity-card"><input type="radio" name="q8" value="${value}" ${state.q8 === value ? 'checked' : ''}><span>${label}</span></label>`).join('');
+  }
+
+  function renderAll() {
+    renderRatings('q1Ratings', 'q1', state.q1, false);
+    renderRatings('q3Ratings', 'q3', state.q3, state.linked);
+    renderDimensions('firstDimensions', 'firstDimensions');
+    renderDimensions('overallDimensions', 'overallDimensions');
+    renderChoices();
+    $('firstNaReasonWrap').classList.toggle('visible', state.firstDimensions.Personalization === 'na');
+    $('overallNaReasonWrap').classList.toggle('visible', state.overallDimensions.Personalization === 'na');
+    $('q1Linked').innerHTML = state.linked ? '↔ Linked — single response' : '';
+    $('overallLinked').innerHTML = state.linked ? '↔ Linked — single response&nbsp; <button class="btn ghost small" id="unlinkSingle">Unlink</button>' : '';
+    $('copyFirstDimensions').style.display = parsed.assistantCount > 1 ? '' : 'none';
+    renderPreview();
+    renderOutput();
+    syncInputs();
+  }
+
+  function syncInputs() {
+    for (const id of ['conversationInput','q2Evidence','q2Justification','firstNaReason','q4Evidence','q4Justification','overallNaReason','q6Justification']) {
+      const key = id === 'conversationInput' ? 'conversationText' : id;
+      if ($(id).value !== state[key]) $(id).value = state[key];
+    }
+    updateCounts();
+  }
+
+  function updateCounts() {
+    for (const [id, output] of [['q2Evidence','q2EvidenceCount'],['q2Justification','q2Count'],['q4Evidence','q4EvidenceCount'],['q4Justification','q4Count'],['q6Justification','q6Count']]) {
+      $(output).textContent = `${$(id).value.length} chars`;
+    }
+  }
+
+  function updateLinkingFromTranscript(previousCount) {
+    if (parsed.assistantCount === 1 && previousCount !== 1) {
+      state.linked = true;
+      state.q3 = state.q1;
+      state.overallDimensions = cloneDims(state.firstDimensions);
+      state.overallNaReason = state.firstNaReason;
+    } else if (parsed.assistantCount !== 1) {
+      state.linked = false;
+    }
+  }
+
+  function mutate(callback, fullRender = false) {
+    callback();
+    if (state.linked) {
+      state.q3 = state.q1;
+      state.overallDimensions = cloneDims(state.firstDimensions);
+      state.overallNaReason = state.firstNaReason;
+    }
+    fullRender ? renderAll() : renderOutput();
+    scheduleDraftSave();
+  }
+
+  function scheduleDraftSave() {
+    $('draftState').textContent = 'Saving draft…';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(state));
+      $('draftState').textContent = 'Draft saved';
+    }, 180);
+  }
+
+  function showStatus(message) {
+    $('appStatus').textContent = message;
+    $('appStatus').classList.add('visible');
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => $('appStatus').classList.remove('visible'), 2200);
+  }
+
+  function autoGrow(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 240)}px`;
+  }
+
+  function validationErrors() {
+    const errors = [];
+    if (!state.conversationText.trim()) errors.push({ id: 'conversationInput', label: 'conversation transcript' });
+    else if (parsed.assistantCount < 1) errors.push({ id: 'conversationInput', label: 'at least one ASSISTANT response' });
+    if (!state.q1) errors.push({ id: 'q1Ratings', label: 'Q1 rating' });
+    if (!state.q2Justification.trim()) errors.push({ id: 'q2Justification', label: 'Q2 justification' });
+    if (!state.q3) errors.push({ id: 'q3Ratings', label: 'Q3 rating' });
+    if (!state.q4Justification.trim()) errors.push({ id: 'q4Justification', label: 'Q4 overall justification' });
+    if (dimensionSummary(state.overallDimensions, state.overallNaReason).wrong.length && !state.q6Justification.trim()) errors.push({ id: 'q6Justification', label: 'Q6 improvement explanation' });
+    if (!state.q7) errors.push({ id: 'q7Choices', label: 'Q7 goal fulfillment' });
+    return errors;
+  }
+
+  function clearValidation() {
+    document.querySelectorAll('.invalid, .invalid-group').forEach(node => node.classList.remove('invalid','invalid-group'));
+    $('validationMessage').textContent = '';
+  }
+
+  function validateAndFocus() {
+    clearValidation();
+    const errors = validationErrors();
+    if (!errors.length) return true;
+    const first = $(errors[0].id);
+    first.classList.add(first.matches('textarea,input') ? 'invalid' : 'invalid-group');
+    $('validationMessage').textContent = `Complete ${errors[0].label}${errors.length > 1 ? ` and ${errors.length - 1} more required field${errors.length > 2 ? 's' : ''}` : ''}.`;
+    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => first.focus(), 260);
+    return false;
+  }
+
+  async function copyText(text, message = 'Copied') {
+    await navigator.clipboard.writeText(text);
+    showStatus(message);
+  }
+
+  async function copyCompleted() {
+    if (!validateAndFocus()) return;
+    const text = buildEvaluationOutput(state);
+    if (text.includes(REQUIRED)) return;
+    try {
+      await copyText(text, 'Copied Q1–Q8');
+      $('validationMessage').innerHTML = '<span class="copied">Copied</span>';
+    } catch (_) {
+      $('validationMessage').textContent = 'Clipboard access was unavailable. Select and copy the output manually.';
+    }
+  }
+
+  function insertQuote(target, text) {
+    const exact = String(text || '');
+    if (!exact) { showStatus('Select or enter evidence first'); return; }
+    const id = { q2: 'q2Justification', q4: 'q4Justification', q6: 'q6Justification' }[target];
+    const key = id;
+    const field = $(id);
+    const pos = Math.min(carets[target] ?? field.value.length, field.value.length);
+    const quoted = `“${exact}”`;
+    const before = field.value.slice(0, pos);
+    const after = field.value.slice(pos);
+    const prefix = before && !/\s$/.test(before) ? ' ' : '';
+    const suffix = after && !/^\s/.test(after) ? ' ' : '';
+    const next = before + prefix + quoted + suffix + after;
+    mutate(() => { state[key] = next; });
+    field.value = next;
+    const caret = (before + prefix + quoted).length;
+    field.focus(); field.setSelectionRange(caret, caret); carets[target] = caret;
+    autoGrow(field); updateCounts();
+  }
+
+  function showQuotePopover() {
+    requestAnimationFrame(() => {
+      const selection = window.getSelection();
+      const pop = $('quotePopover');
+      if (!selection || selection.isCollapsed || !selection.rangeCount || !$('conversationPreview').contains(selection.anchorNode) || !$('conversationPreview').contains(selection.focusNode)) {
+        pop.classList.remove('visible'); return;
+      }
+      selectedQuote = selection.toString();
+      if (!selectedQuote) { pop.classList.remove('visible'); return; }
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      pop.style.left = `${Math.max(8, Math.min(window.innerWidth - pop.offsetWidth - 8, rect.left))}px`;
+      pop.style.top = `${Math.max(8, rect.top - 43)}px`;
+      pop.classList.add('visible');
+    });
+  }
+
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        store.createIndex('createdAt', 'createdAt');
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function dbAction(mode, callback) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, mode);
+      const result = callback(tx.objectStore(STORE_NAME));
+      tx.oncomplete = () => { db.close(); resolve(result?.result); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+  }
+
+  async function allRecords() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const request = tx.objectStore(STORE_NAME).getAll();
+      request.onsuccess = () => resolve(request.result.sort((a,b) => b.createdAt.localeCompare(a.createdAt)));
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => db.close();
+    });
+  }
+
+  async function pruneHistory() {
+    const limit = Number($('historyLimit').value || 100);
+    const records = await allRecords();
+    const excess = records.slice(limit);
+    if (!excess.length) return;
+    await dbAction('readwrite', store => excess.forEach(record => store.delete(record.id)));
+  }
+
+  async function saveToHistory() {
+    if (!validateAndFocus()) return;
+    const now = new Date().toISOString();
+    const record = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      createdAt: now,
+      updatedAt: now,
+      conversationText: state.conversationText,
+      humanFormState: structuredClone(state),
+      renderedQ1ToQ8Output: buildEvaluationOutput(state),
+      status: 'complete'
+    };
+    try {
+      await dbAction('readwrite', store => store.put(record));
+      await pruneHistory();
+      await renderHistory();
+      showStatus('Saved to history');
+    } catch (_) { showStatus('History save failed'); }
+  }
+
+  function conversationPreview(text) {
+    return text.replace(/\s+/g, ' ').trim().slice(0, 110) || 'Empty conversation';
+  }
+
+  async function renderHistory() {
+    try {
+      const records = await allRecords();
+      $('historyCount').textContent = records.length;
+      if (!records.length) {
+        $('historyTableWrap').innerHTML = '<div class="empty-history">No completed evaluations saved yet.</div>';
+        return;
+      }
+      $('historyTableWrap').innerHTML = `<table><thead><tr><th>Date</th><th>Conversation preview</th><th>Q1</th><th>Q3</th><th>Q5</th><th>Q7</th><th>Actions</th></tr></thead><tbody>${records.map(record => {
+        const form = safeState(record.humanFormState);
+        const q5 = dimensionSummary(form.overallDimensions, form.overallNaReason).wrongText;
+        return `<tr><td>${escapeHtml(new Date(record.createdAt).toLocaleString())}</td><td>${escapeHtml(conversationPreview(record.conversationText))}</td><td>${escapeHtml(form.q1)}</td><td>${escapeHtml(form.q3)}</td><td>${escapeHtml(q5)}</td><td>${escapeHtml(form.q7 ? Q7_VALUES[form.q7] : '')}</td><td><span class="history-actions"><button class="btn small" data-history="view" data-id="${record.id}">View</button><button class="btn small" data-history="restore" data-id="${record.id}">Restore</button><button class="btn small" data-history="copy" data-id="${record.id}">Copy</button><button class="btn danger small" data-history="delete" data-id="${record.id}">Delete</button></span></td></tr>`;
+      }).join('')}</tbody></table>`;
+    } catch (_) {
+      $('historyTableWrap').innerHTML = '<div class="empty-history">History is unavailable in this browser context.</div>';
+    }
+  }
+
+  async function getRecord(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const request = tx.objectStore(STORE_NAME).get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => db.close();
+    });
+  }
+
+  function showRecord(record) {
+    selectedHistoryRecord = record;
+    $('detailConversation').textContent = record.conversationText;
+    $('detailState').textContent = JSON.stringify(record.humanFormState, null, 2);
+    $('detailOutput').textContent = record.renderedQ1ToQ8Output;
+    $('historyDetail').classList.add('active');
+    $('historyDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function applyState(next) {
+    state = safeState(next);
+    parsed = parseConversation(state.conversationText);
+    if (state.linked && parsed.assistantCount !== 1) state.linked = false;
+    renderAll();
+    document.querySelectorAll('.explanation').forEach(autoGrow);
+    scheduleDraftSave();
+  }
+
+  function initializeStaticControls() {
+    const savedPrefs = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+    const isLight = savedPrefs.theme ? savedPrefs.theme === 'light' : matchMedia('(prefers-color-scheme: light)').matches;
+    document.documentElement.classList.toggle('light', isLight);
+    $('historyLimit').value = String(savedPrefs.historyLimit || 100);
+    try {
+      const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+      if (draft) state = safeState(draft);
+    } catch (_) { localStorage.removeItem(DRAFT_KEY); }
+    parsed = parseConversation(state.conversationText);
+    if (state.linked && parsed.assistantCount !== 1) state.linked = false;
+    renderAll();
+    renderHistory();
+  }
+
+  document.addEventListener('input', event => {
+    const id = event.target.id;
+    const map = { conversationInput:'conversationText', q2Evidence:'q2Evidence', q2Justification:'q2Justification', firstNaReason:'firstNaReason', q4Evidence:'q4Evidence', q4Justification:'q4Justification', overallNaReason:'overallNaReason', q6Justification:'q6Justification' };
+    if (!map[id]) return;
+    const previousCount = parsed.assistantCount;
+    mutate(() => {
+      state[map[id]] = event.target.value;
+      if (id === 'conversationInput') {
+        parsed = parseConversation(state.conversationText);
+        updateLinkingFromTranscript(previousCount);
+      }
+    }, id === 'conversationInput');
+    if (event.target.matches('textarea') && id !== 'conversationInput') autoGrow(event.target);
+    updateCounts();
+    event.target.classList.remove('invalid');
+  });
+
+  document.addEventListener('change', event => {
+    const target = event.target;
+    if (target.name === 'q1') mutate(() => { state.q1 = target.value; }, true);
+    if (target.name === 'q3') mutate(() => { state.q3 = target.value; }, true);
+    if (target.name === 'q7') mutate(() => { state.q7 = target.value; });
+    if (target.name === 'q8') mutate(() => { state.q8 = target.value; });
+    if (target.dataset.dimSet) {
+      const key = target.dataset.dimSet;
+      const name = target.dataset.dimension;
+      const status = target.dataset.status;
+      mutate(() => { state[key][name] = target.checked ? status : 'ok'; }, true);
+    }
+  });
+
+  document.addEventListener('click', async event => {
+    const viewButton = event.target.closest('[data-view]');
+    if (viewButton) {
+      document.querySelectorAll('[data-view]').forEach(button => { button.classList.toggle('active', button === viewButton); button.toggleAttribute('aria-current', button === viewButton); });
+      const history = viewButton.dataset.view === 'history';
+      $('evaluateView').classList.toggle('hidden', history);
+      $('historyView').classList.toggle('active', history);
+      if (history) renderHistory();
+    }
+    if (event.target.id === 'themeToggle') {
+      document.documentElement.classList.toggle('light');
+      const prefs = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+      prefs.theme = document.documentElement.classList.contains('light') ? 'light' : 'dark';
+      localStorage.setItem(PREF_KEY, JSON.stringify(prefs));
+    }
+    if (event.target.id === 'unlinkSingle') mutate(() => { state.linked = false; }, true);
+    if (event.target.id === 'copyFirstDimensions') mutate(() => { state.overallDimensions = cloneDims(state.firstDimensions); state.overallNaReason = state.firstNaReason; }, true);
+    if (event.target.id === 'copyOutput') copyCompleted();
+    if (event.target.id === 'saveHistory') saveToHistory();
+    if (event.target.id === 'clearConversation') {
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(state));
+      const previousCount = parsed.assistantCount;
+      mutate(() => { state.conversationText = ''; parsed = parseConversation(''); updateLinkingFromTranscript(previousCount); }, true);
+      showStatus('Conversation cleared · draft backup available');
+    }
+    if (event.target.id === 'restoreDraft') {
+      try {
+        const backup = JSON.parse(localStorage.getItem(BACKUP_KEY) || localStorage.getItem(DRAFT_KEY) || 'null');
+        if (backup) { applyState(backup); showStatus('Draft restored'); } else showStatus('No saved draft found');
+      } catch (_) { showStatus('Saved draft could not be restored'); }
+    }
+    if (event.target.id === 'clearWorking' && confirm('Clear the transcript and every current evaluation field? Your completed history will remain.')) {
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(state));
+      applyState(blankState());
+      showStatus('Working evaluation cleared');
+    }
+    const insertButton = event.target.closest('.insert-quote');
+    if (insertButton) insertQuote(insertButton.dataset.target, state[`${insertButton.dataset.target}Evidence`]);
+    const quoteButton = event.target.closest('[data-quote]');
+    if (quoteButton) { insertQuote(quoteButton.dataset.quote, selectedQuote); $('quotePopover').classList.remove('visible'); window.getSelection()?.removeAllRanges(); }
+    const historyButton = event.target.closest('[data-history]');
+    if (historyButton) {
+      const record = await getRecord(historyButton.dataset.id);
+      if (!record) return;
+      if (historyButton.dataset.history === 'view') showRecord(record);
+      if (historyButton.dataset.history === 'restore') {
+        applyState(record.humanFormState);
+        document.querySelector('[data-view="evaluate"]').click();
+        showStatus('Evaluation restored as working draft');
+      }
+      if (historyButton.dataset.history === 'copy') copyText(record.renderedQ1ToQ8Output, 'Copied saved Q1–Q8');
+      if (historyButton.dataset.history === 'delete' && confirm('Delete this saved evaluation?')) {
+        await dbAction('readwrite', store => store.delete(record.id));
+        $('historyDetail').classList.remove('active'); renderHistory(); showStatus('History record deleted');
+      }
+    }
+    if (event.target.id === 'closeDetail') $('historyDetail').classList.remove('active');
+    if (event.target.id === 'copyDetail' && selectedHistoryRecord) copyText(selectedHistoryRecord.renderedQ1ToQ8Output, 'Copied saved Q1–Q8');
+    if (event.target.id === 'deleteAllHistory' && confirm('Permanently delete all saved evaluation history?')) {
+      await dbAction('readwrite', store => store.clear());
+      $('historyDetail').classList.remove('active'); renderHistory(); showStatus('All history deleted');
+    }
+  });
+
+  $('historyLimit').addEventListener('change', async () => {
+    const prefs = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+    prefs.historyLimit = Number($('historyLimit').value);
+    localStorage.setItem(PREF_KEY, JSON.stringify(prefs));
+    await pruneHistory(); renderHistory(); showStatus(`Keeping the last ${$('historyLimit').value} records`);
+  });
+
+  for (const [id, key] of [['q1Ratings','q1'],['q3Ratings','q3']]) {
+    $(id).addEventListener('keydown', event => {
+      const index = Number(event.key) - 1;
+      if (index >= 0 && index < RATINGS.length && !(key === 'q3' && state.linked)) {
+        event.preventDefault(); mutate(() => { state[key] = RATINGS[index]; }, true);
+      }
+    });
+  }
+
+  for (const [id, key] of [['q2Justification','q2'],['q4Justification','q4'],['q6Justification','q6']]) {
+    const field = $(id);
+    const rememberCaret = () => { carets[key] = field.selectionStart; };
+    field.addEventListener('click', rememberCaret);
+    field.addEventListener('keyup', rememberCaret);
+    field.addEventListener('select', rememberCaret);
+  }
+
+  $('conversationPreview').addEventListener('mouseup', showQuotePopover);
+  $('conversationPreview').addEventListener('keyup', showQuotePopover);
+  document.addEventListener('mousedown', event => { if (!event.target.closest('#quotePopover') && !event.target.closest('.message-body')) $('quotePopover').classList.remove('visible'); });
+  document.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); copyCompleted(); }
+    if (event.key === 'Escape') $('quotePopover').classList.remove('visible');
+  });
+
+  window.__MAIBA_DETERMINISTIC_TEST__ = Object.freeze({
+    getState: () => structuredClone(state),
+    setState: next => applyState(next),
+    parseConversation,
+    buildEvaluationOutput,
+    dimensionSummary,
+    constants: { RATINGS, DIMENSIONS, QUESTIONS, Q7_VALUES, Q8_VALUES }
+  });
+
+  initializeStaticControls();
+})();
+</script>
+</body>
+</html>
