@@ -234,6 +234,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
           <input type="password" id="apiKeyInput" placeholder="sk-or-..." autocomplete="off" />
           <button class="btn btn-ghost btn-sm" id="toggleKeyBtn">Show</button>
         </div>
+        <div id="settingsStorageStatus" role="status" aria-live="polite" style="font-size:.65rem;color:var(--text-faint);margin-top:.25rem;">Checking persistent browser storage…</div>
       </div>
       <div class="form-group">
         <label for="modelSelect">Vision Model</label>
@@ -265,9 +266,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.1" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.2" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.2" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.2
   </footer>
 
 <script>
@@ -308,6 +309,15 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       sensitive: true,
       raw: true
     },
+    settingsStorage: {
+      available: null,
+      loadStatus: 'idle',
+      saveStatus: 'not-attempted',
+      error: null,
+      keyPresent: false,
+      apiKeyRestored: false,
+      modelRestored: null
+    },
     // Model catalog
     modelCatalogStatus: 'idle',  // idle | loading | loaded | error
     visionModels: [],
@@ -322,6 +332,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   };
 
   var SETTINGS_KEY = 'image-context-inspector-settings';
+  var SETTINGS_PROBE_KEY = 'image-context-inspector-storage-probe';
   var REVERSE_CACHE_KEY = 'image-context-inspector-reverse-cache';
   var MODEL_CATALOG_KEY = 'image-context-inspector-model-catalog';
 
@@ -369,22 +380,121 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   /* ======================================================================
    * Settings persistence
    * ====================================================================== */
+  function storageErrorMessage(error) {
+    if (!error) return 'Storage verification failed';
+    return error.name && error.message ? error.name + ': ' + error.message : String(error);
+  }
+
+  function updateSettingsStorageUi() {
+    var el = $('settingsStorageStatus');
+    if (!el) return;
+    if (state.settingsStorage.available === false) {
+      el.textContent = 'Persistent browser storage unavailable. Settings will only last for this session.';
+      el.style.color = 'var(--red)';
+    } else if (state.settingsStorage.saveStatus === 'error') {
+      el.textContent = 'Could not persist settings in this browser.';
+      el.style.color = 'var(--red)';
+    } else if (state.settingsStorage.saveStatus === 'verified') {
+      el.textContent = 'Settings saved in this browser for ' + location.origin + '.';
+      el.style.color = 'var(--green)';
+    } else if (state.settingsStorage.loadStatus === 'error') {
+      el.textContent = 'Could not load saved settings in this browser.';
+      el.style.color = 'var(--red)';
+    } else {
+      el.textContent = 'Stored only in this browser for ' + location.origin + '.';
+      el.style.color = 'var(--text-faint)';
+    }
+  }
+
+  function probeSettingsStorage() {
+    try {
+      localStorage.setItem(SETTINGS_PROBE_KEY, '1');
+      var ok = localStorage.getItem(SETTINGS_PROBE_KEY) === '1';
+      localStorage.removeItem(SETTINGS_PROBE_KEY);
+      if (!ok) throw new Error('Storage probe read-back did not match');
+      state.settingsStorage.available = true;
+      state.settingsStorage.error = null;
+      updateSettingsStorageUi();
+      return true;
+    } catch (e) {
+      try { localStorage.removeItem(SETTINGS_PROBE_KEY); } catch (ignore) {}
+      state.settingsStorage.available = false;
+      state.settingsStorage.error = storageErrorMessage(e);
+      updateSettingsStorageUi();
+      return false;
+    }
+  }
+
   function loadSettings() {
+    if (state.settingsStorage.available === null) probeSettingsStorage();
+    if (!state.settingsStorage.available) {
+      state.settingsStorage.loadStatus = 'error';
+      updateSettingsStorageUi();
+      return 'error';
+    }
     try {
       var raw = localStorage.getItem(SETTINGS_KEY);
-      if (raw) {
-        var parsed = JSON.parse(raw);
-        if (parsed.apiKey !== undefined) settings.apiKey = parsed.apiKey;
-        if (parsed.model !== undefined) settings.model = parsed.model;
-        if (parsed.siteName !== undefined) settings.siteName = parsed.siteName;
+      state.settingsStorage.keyPresent = raw !== null;
+      if (!raw) {
+        state.settingsStorage.loadStatus = 'missing';
+        state.settingsStorage.apiKeyRestored = false;
+        state.settingsStorage.modelRestored = null;
+        return 'missing';
       }
-    } catch (e) { /* ignore corrupt settings */ }
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') throw new Error('Stored settings are not an object');
+      if (typeof parsed.apiKey === 'string') settings.apiKey = parsed.apiKey;
+      if (typeof parsed.model === 'string') settings.model = parsed.model;
+      if (typeof parsed.siteName === 'string') settings.siteName = parsed.siteName;
+      state.settingsStorage.loadStatus = 'loaded';
+      state.settingsStorage.apiKeyRestored = typeof parsed.apiKey === 'string' && !!parsed.apiKey;
+      state.settingsStorage.modelRestored = typeof parsed.model === 'string' && parsed.model ? parsed.model : null;
+      state.settingsStorage.error = null;
+      return 'loaded';
+    } catch (e) {
+      state.settingsStorage.loadStatus = 'error';
+      state.settingsStorage.error = storageErrorMessage(e);
+      updateSettingsStorageUi();
+      return 'error';
+    }
   }
 
   function saveSettings() {
+    if (state.settingsStorage.available === null) probeSettingsStorage();
+    if (!state.settingsStorage.available) {
+      state.settingsStorage.saveStatus = 'error';
+      updateSettingsStorageUi();
+      updateDiagnostics();
+      return false;
+    }
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch (e) { /* storage may be unavailable */ }
+      var serialized = JSON.stringify({
+        apiKey: settings.apiKey,
+        model: settings.model,
+        siteName: settings.siteName
+      });
+      localStorage.setItem(SETTINGS_KEY, serialized);
+      var storedRaw = localStorage.getItem(SETTINGS_KEY);
+      var stored = storedRaw ? JSON.parse(storedRaw) : null;
+      var verified = !!stored &&
+        stored.apiKey === settings.apiKey &&
+        stored.model === settings.model &&
+        stored.siteName === settings.siteName;
+      if (!verified) throw new Error('Settings write verification failed');
+      state.settingsStorage.available = true;
+      state.settingsStorage.saveStatus = 'verified';
+      state.settingsStorage.keyPresent = true;
+      state.settingsStorage.error = null;
+      updateSettingsStorageUi();
+      updateDiagnostics();
+      return true;
+    } catch (e) {
+      state.settingsStorage.saveStatus = 'error';
+      state.settingsStorage.error = storageErrorMessage(e);
+      updateSettingsStorageUi();
+      updateDiagnostics();
+      return false;
+    }
   }
 
   /* ======================================================================
@@ -1363,21 +1473,22 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     lines.push('  parent: ' + (aiPanel && aiPanel.parentElement ? aiPanel.parentElement.id || '(no id)' : '-'));
     lines.push('  metadata parent: ' + ($('info-sections') && $('info-sections').parentElement ? $('info-sections').parentElement.id || '(no id)' : '-'));
     lines.push('');
+    lines.push('Settings persistence:');
+    lines.push('  origin: ' + location.origin);
+    lines.push('  storage available: ' + (state.settingsStorage.available === null ? 'unknown' : state.settingsStorage.available ? 'yes' : 'no'));
+    lines.push('  key present: ' + (state.settingsStorage.keyPresent ? 'yes' : 'no'));
+    lines.push('  load status: ' + state.settingsStorage.loadStatus);
+    lines.push('  save status: ' + state.settingsStorage.saveStatus);
+    lines.push('  API key restored: ' + (state.settingsStorage.apiKeyRestored ? 'yes' : 'no'));
+    lines.push('  model restored: ' + (state.settingsStorage.modelRestored || 'none'));
+    lines.push('  last storage error: ' + (state.settingsStorage.error || '-'));
+    lines.push('');
     lines.push('OpenRouter:');
     lines.push('  API key configured: ' + (settings.apiKey ? 'yes' : 'no'));
     lines.push('  model catalog: ' + state.modelCatalogStatus);
     lines.push('  vision models: ' + state.visionModels.length);
     lines.push('  selected model: ' + (settings.model || 'none'));
     lines.push('  Submission MIME: ' + (state.submissionMime || 'not prepared'));
-    try {
-      var lsRaw = localStorage.getItem(SETTINGS_KEY);
-      if (lsRaw) {
-        try { JSON.parse(lsRaw); lines.push('  localStorage settings: loaded'); }
-        catch (e) { lines.push('  localStorage settings: PARSE ERROR'); }
-      } else {
-        lines.push('  localStorage settings: missing');
-      }
-    } catch (e) { lines.push('  localStorage settings: unavailable'); }
     $('diagContent').textContent = lines.join('\n');
   }
 
@@ -1655,7 +1766,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 
   function setSelectedModel(modelId) {
     settings.model = modelId || '';
-    saveSettings();
+    var saved = saveSettings();
     var sel = $('modelSelect');
     if (sel) {
       for (var i = 0; i < sel.options.length; i++) {
@@ -1670,6 +1781,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     }
     updateAiPanelUi();
     updateDiagnostics();
+    if (!saved) showToast('Model selected, but could not persist settings in this browser.', 3500);
   }
 
   function updateAiPanelUi() {
@@ -1699,6 +1811,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     $('apiKeyInput').value = settings.apiKey;
     $('siteNameInput').value = settings.siteName;
     $('settingsModal').classList.add('open');
+    updateSettingsStorageUi();
     populateModelSelect();
     loadModelCatalog();
   }
@@ -1708,16 +1821,28 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   }
 
   function saveSettingsFromModal() {
-    settings.apiKey = $('apiKeyInput').value.trim();
+    var newApiKey = $('apiKeyInput').value.trim();
     var sel = $('modelSelect');
     var custom = $('customModelInput');
+    var newModel;
     if (sel.value === '__custom__') {
-      settings.model = custom.value.trim() || '';
+      newModel = custom.value.trim() || '';
     } else {
-      settings.model = sel.value || '';
+      newModel = sel.value || '';
     }
-    settings.siteName = $('siteNameInput').value.trim() || 'Image Context Inspector';
-    saveSettings();
+    var newSiteName = $('siteNameInput').value.trim() || 'Image Context Inspector';
+
+    settings.apiKey = newApiKey;
+    settings.model = newModel;
+    settings.siteName = newSiteName;
+
+    if (!saveSettings()) {
+      updateAiPanelUi();
+      showToast('Could not persist settings in this browser.', 3500);
+      return;
+    }
+
+    populateModelSelect();
     closeSettings();
     updateUiForState();
     showToast('Settings saved');
@@ -1754,7 +1879,30 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
    * Event wiring
    * ====================================================================== */
   function init() {
+    probeSettingsStorage();
     loadSettings();
+
+    window.__ICI_TEST__ = {
+      getSettingsState: function() {
+        return {
+          apiKeyConfigured: !!settings.apiKey,
+          model: settings.model,
+          siteName: settings.siteName,
+          storageAvailable: state.settingsStorage.available,
+          loadStatus: state.settingsStorage.loadStatus,
+          saveStatus: state.settingsStorage.saveStatus,
+          keyPresent: state.settingsStorage.keyPresent,
+          apiKeyRestored: state.settingsStorage.apiKeyRestored,
+          modelRestored: state.settingsStorage.modelRestored,
+          storageError: state.settingsStorage.error
+        };
+      },
+      testPersistence: function() {
+        var passed = probeSettingsStorage();
+        updateDiagnostics();
+        return { passed: passed, origin: location.origin };
+      }
+    };
 
     var dropZone = $('drop-zone');
     var dzInput = $('dz-input');
