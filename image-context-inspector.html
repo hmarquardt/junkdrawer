@@ -273,9 +273,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.4" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.4" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.4
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.5" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.5" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.5
   </footer>
 
 <script>
@@ -319,14 +319,28 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       raw: true
     },
     settingsStorage: {
+      backend: 'IndexedDB',
       available: null,
+      initialized: false,
       loadStatus: 'idle',
       saveStatus: 'not-attempted',
       error: null,
-      bytes: 0,
-      keyPresent: false,
+      recordPresent: false,
+      recordBytes: 0,
       apiKeyRestored: false,
-      modelRestored: null
+      modelRestored: null,
+      migratedFromLocalStorage: false
+    },
+    localStorageStatus: {
+      available: null,
+      probeStatus: 'not-run',
+      failureType: null,
+      errorName: null,
+      errorMessage: null,
+      keyCount: 0,
+      approxBytes: 0,
+      largestEntries: [],
+      inventoryError: null
     },
     legacyCatalogPresent: false,
     legacyCatalogRemoved: false,
@@ -351,6 +365,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   var REVERSE_CACHE_KEY = 'image-context-inspector-reverse-cache';
   var MODEL_CATALOG_KEY = 'image-context-inspector-model-catalog';
   var REVERSE_CACHE_MAX_ENTRIES = 40;
+  var SETTINGS_DB_NAME = 'junkdrawer-image-context-inspector';
+  var SETTINGS_DB_VERSION = 1;
+  var SETTINGS_STORE_NAME = 'settings';
+  var SETTINGS_RECORD_ID = 'primary';
 
   /* ======================================================================
    * Utilities
@@ -465,19 +483,25 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     var el = $('settingsStorageStatus');
     if (!el) return;
     if (state.settingsStorage.available === false) {
-      el.textContent = 'Persistent browser storage unavailable. Settings will only last for this session.';
+      el.textContent = 'IndexedDB is unavailable. Settings will only last for this session.';
       el.style.color = 'var(--red)';
+    } else if (state.settingsStorage.saveStatus === 'saving') {
+      el.textContent = 'Saving settings to IndexedDB…';
+      el.style.color = 'var(--text-faint)';
     } else if (state.settingsStorage.saveStatus === 'error') {
-      el.textContent = 'Could not persist settings in this browser.';
+      el.textContent = 'Could not save settings to IndexedDB. Your entries are still shown above.';
       el.style.color = 'var(--red)';
     } else if (state.settingsStorage.saveStatus === 'verified') {
-      el.textContent = 'Settings saved in this browser for ' + location.origin + '.';
+      el.textContent = 'Settings saved in this browser.';
       el.style.color = 'var(--green)';
     } else if (state.settingsStorage.loadStatus === 'error') {
-      el.textContent = 'Could not load saved settings in this browser.';
+      el.textContent = 'Could not load settings from IndexedDB.';
       el.style.color = 'var(--red)';
+    } else if (state.settingsStorage.available === true) {
+      el.textContent = 'Settings are stored in this browser using IndexedDB.';
+      el.style.color = 'var(--text-faint)';
     } else {
-      el.textContent = 'Stored only in this browser for ' + location.origin + '.';
+      el.textContent = 'Initializing settings storage…';
       el.style.color = 'var(--text-faint)';
     }
   }
@@ -490,7 +514,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     return cache;
   }
 
-  function prepareLocalStorage() {
+  function prepareDisposableStorage() {
     try {
       state.legacyCatalogPresent = localStorage.getItem(MODEL_CATALOG_KEY) !== null;
       localStorage.removeItem(MODEL_CATALOG_KEY);
@@ -513,103 +537,244 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     }
   }
 
-  function probeSettingsStorage() {
+  function classifyLocalStorageFailure(error) {
+    if (error && error.name === 'QuotaExceededError') return 'QuotaExceededError';
+    if (error && error.name === 'SecurityError') return 'SecurityError';
+    return 'other';
+  }
+
+  function inspectLocalStorage() {
+    try {
+      var entries = Object.keys(localStorage).map(function(key) {
+        var value = localStorage.getItem(key) || '';
+        return { key: key, approxBytes: value.length * 2 };
+      }).sort(function(a, b) { return b.approxBytes - a.approxBytes; });
+      state.localStorageStatus.keyCount = entries.length;
+      state.localStorageStatus.approxBytes = entries.reduce(function(total, entry) {
+        return total + entry.approxBytes;
+      }, 0);
+      state.localStorageStatus.largestEntries = entries.slice(0, 5);
+      state.localStorageStatus.inventoryError = null;
+      return entries;
+    } catch (error) {
+      state.localStorageStatus.keyCount = 0;
+      state.localStorageStatus.approxBytes = 0;
+      state.localStorageStatus.largestEntries = [];
+      state.localStorageStatus.inventoryError = storageErrorMessage(error);
+      return [];
+    }
+  }
+
+  function probeLocalStorage() {
     try {
       localStorage.setItem(SETTINGS_PROBE_KEY, '1');
       var ok = localStorage.getItem(SETTINGS_PROBE_KEY) === '1';
       localStorage.removeItem(SETTINGS_PROBE_KEY);
       if (!ok) throw new Error('Storage probe read-back did not match');
-      state.settingsStorage.available = true;
-      state.settingsStorage.error = null;
-      updateSettingsStorageUi();
+      state.localStorageStatus.available = true;
+      state.localStorageStatus.probeStatus = 'PASSED';
+      state.localStorageStatus.failureType = null;
+      state.localStorageStatus.errorName = null;
+      state.localStorageStatus.errorMessage = null;
+      inspectLocalStorage();
       return true;
-    } catch (e) {
+    } catch (error) {
       try { localStorage.removeItem(SETTINGS_PROBE_KEY); } catch (ignore) {}
+      state.localStorageStatus.available = false;
+      state.localStorageStatus.probeStatus = 'FAILED';
+      state.localStorageStatus.failureType = classifyLocalStorageFailure(error);
+      state.localStorageStatus.errorName = error && error.name ? error.name : 'Error';
+      state.localStorageStatus.errorMessage = error && error.message ? error.message : String(error);
+      inspectLocalStorage();
+      return false;
+    }
+  }
+
+  var settingsDbPromise = null;
+
+  function waitForTransaction(transaction) {
+    return new Promise(function(resolve, reject) {
+      transaction.oncomplete = function() { resolve(); };
+      transaction.onerror = function() { reject(transaction.error || new Error('IndexedDB transaction failed')); };
+      transaction.onabort = function() { reject(transaction.error || new Error('IndexedDB transaction aborted')); };
+    });
+  }
+
+  var settingsStore = {
+    open: function() {
+      if (settingsDbPromise) return settingsDbPromise;
+      settingsDbPromise = new Promise(function(resolve, reject) {
+        if (!window.indexedDB) {
+          reject(new Error('IndexedDB is not supported by this browser'));
+          return;
+        }
+        var request = indexedDB.open(SETTINGS_DB_NAME, SETTINGS_DB_VERSION);
+        request.onupgradeneeded = function() {
+          var db = request.result;
+          if (!db.objectStoreNames.contains(SETTINGS_STORE_NAME)) {
+            db.createObjectStore(SETTINGS_STORE_NAME, { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = function() {
+          var db = request.result;
+          db.onversionchange = function() { db.close(); };
+          resolve(db);
+        };
+        request.onerror = function() {
+          settingsDbPromise = null;
+          reject(request.error || new Error('Could not open IndexedDB'));
+        };
+        request.onblocked = function() {
+          settingsDbPromise = null;
+          reject(new Error('IndexedDB upgrade was blocked by another tab'));
+        };
+      });
+      return settingsDbPromise;
+    },
+
+    load: async function() {
+      var db = await this.open();
+      return new Promise(function(resolve, reject) {
+        var transaction = db.transaction(SETTINGS_STORE_NAME, 'readonly');
+        var request = transaction.objectStore(SETTINGS_STORE_NAME).get(SETTINGS_RECORD_ID);
+        request.onsuccess = function() { resolve(request.result || null); };
+        request.onerror = function() { reject(request.error || new Error('Could not read settings from IndexedDB')); };
+      });
+    },
+
+    save: async function(source) {
+      var db = await this.open();
+      var record = normalizeSettingsRecord(source);
+      var transaction = db.transaction(SETTINGS_STORE_NAME, 'readwrite');
+      transaction.objectStore(SETTINGS_STORE_NAME).put(record);
+      await waitForTransaction(transaction);
+      var stored = await this.load();
+      var verified = !!stored &&
+        stored.id === SETTINGS_RECORD_ID &&
+        stored.apiKey === record.apiKey &&
+        stored.model === record.model &&
+        stored.siteName === record.siteName &&
+        stored.completionChime === record.completionChime;
+      if (!verified) throw new Error('IndexedDB settings write verification failed');
+      return stored;
+    }
+  };
+
+  function normalizeSettingsRecord(source) {
+    source = source && typeof source === 'object' ? source : {};
+    return {
+      id: SETTINGS_RECORD_ID,
+      apiKey: typeof source.apiKey === 'string' ? source.apiKey : '',
+      model: typeof source.model === 'string' && source.model ? source.model : 'openai/gpt-4.1-mini',
+      siteName: typeof source.siteName === 'string' && source.siteName ? source.siteName : 'Image Context Inspector',
+      completionChime: typeof source.completionChime === 'boolean' ? source.completionChime : true
+    };
+  }
+
+  function applySettingsRecord(record) {
+    var normalized = normalizeSettingsRecord(record);
+    settings.apiKey = normalized.apiKey;
+    settings.model = normalized.model;
+    settings.siteName = normalized.siteName;
+    settings.completionChime = normalized.completionChime;
+    state.settingsStorage.recordBytes = JSON.stringify(normalized).length * 2;
+  }
+
+  async function initializeSettingsStore() {
+    try {
+      await settingsStore.open();
+      state.settingsStorage.available = true;
+      state.settingsStorage.initialized = true;
+      state.settingsStorage.error = null;
+      updateSettingsStorageUi();
+      return true;
+    } catch (error) {
       state.settingsStorage.available = false;
-      state.settingsStorage.error = storageErrorMessage(e);
+      state.settingsStorage.initialized = true;
+      state.settingsStorage.error = storageErrorMessage(error);
       updateSettingsStorageUi();
       return false;
     }
   }
 
-  function loadSettings() {
-    if (state.settingsStorage.available === null) probeSettingsStorage();
+  async function loadPersistentSettings() {
     if (!state.settingsStorage.available) {
       state.settingsStorage.loadStatus = 'error';
       updateSettingsStorageUi();
       return 'error';
     }
     try {
-      var raw = localStorage.getItem(SETTINGS_KEY);
-      state.settingsStorage.bytes = raw ? raw.length * 2 : 0;
-      state.settingsStorage.keyPresent = raw !== null;
-      if (!raw) {
-        state.settingsStorage.loadStatus = 'missing';
-        state.settingsStorage.apiKeyRestored = false;
-        state.settingsStorage.modelRestored = null;
-        return 'missing';
+      var record = await settingsStore.load();
+      if (record) {
+        applySettingsRecord(record);
+        state.settingsStorage.recordPresent = true;
+        state.settingsStorage.loadStatus = 'loaded';
+        state.settingsStorage.apiKeyRestored = !!settings.apiKey;
+        state.settingsStorage.modelRestored = settings.model || null;
+        state.settingsStorage.error = null;
+        updateSettingsStorageUi();
+        return 'loaded';
       }
-      var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') throw new Error('Stored settings are not an object');
-      if (typeof parsed.apiKey === 'string') settings.apiKey = parsed.apiKey;
-      if (typeof parsed.model === 'string') settings.model = parsed.model;
-      if (typeof parsed.siteName === 'string') settings.siteName = parsed.siteName;
-      if (typeof parsed.completionChime === 'boolean') settings.completionChime = parsed.completionChime;
-      state.settingsStorage.loadStatus = 'loaded';
-      state.settingsStorage.apiKeyRestored = typeof parsed.apiKey === 'string' && !!parsed.apiKey;
-      state.settingsStorage.modelRestored = typeof parsed.model === 'string' && parsed.model ? parsed.model : null;
+
+      var legacyRaw = null;
+      try {
+        legacyRaw = localStorage.getItem(SETTINGS_KEY);
+      } catch (ignore) {}
+      if (legacyRaw) {
+        var legacy = JSON.parse(legacyRaw);
+        var migrated = await settingsStore.save(legacy);
+        applySettingsRecord(migrated);
+        state.settingsStorage.recordPresent = true;
+        state.settingsStorage.loadStatus = 'loaded';
+        state.settingsStorage.apiKeyRestored = !!settings.apiKey;
+        state.settingsStorage.modelRestored = settings.model || null;
+        state.settingsStorage.migratedFromLocalStorage = true;
+        state.settingsStorage.error = null;
+        try { localStorage.removeItem(SETTINGS_KEY); } catch (ignore) {}
+        inspectLocalStorage();
+        updateSettingsStorageUi();
+        return 'migrated';
+      }
+
+      state.settingsStorage.recordPresent = false;
+      state.settingsStorage.recordBytes = 0;
+      state.settingsStorage.loadStatus = 'missing';
+      state.settingsStorage.apiKeyRestored = false;
+      state.settingsStorage.modelRestored = null;
       state.settingsStorage.error = null;
-      return 'loaded';
-    } catch (e) {
+      updateSettingsStorageUi();
+      return 'missing';
+    } catch (error) {
       state.settingsStorage.loadStatus = 'error';
-      state.settingsStorage.error = storageErrorMessage(e);
+      state.settingsStorage.error = storageErrorMessage(error);
       updateSettingsStorageUi();
       return 'error';
     }
   }
 
-  function saveSettings() {
-    if (state.settingsStorage.available === null) probeSettingsStorage();
+  async function savePersistentSettings() {
     if (!state.settingsStorage.available) {
       state.settingsStorage.saveStatus = 'error';
+      state.settingsStorage.error = state.settingsStorage.error || 'IndexedDB is unavailable';
       updateSettingsStorageUi();
       updateDiagnostics();
       return false;
     }
+    state.settingsStorage.saveStatus = 'saving';
+    state.settingsStorage.error = null;
+    updateSettingsStorageUi();
     try {
-      var serialized = JSON.stringify({
-        apiKey: settings.apiKey,
-        model: settings.model,
-        siteName: settings.siteName,
-        completionChime: settings.completionChime
-      });
-      try {
-        localStorage.setItem(SETTINGS_KEY, serialized);
-      } catch (writeError) {
-        // Disposable cache data must never take priority over durable settings.
-        try { localStorage.removeItem(MODEL_CATALOG_KEY); } catch (ignore) {}
-        try { localStorage.removeItem(REVERSE_CACHE_KEY); } catch (ignore) {}
-        localStorage.setItem(SETTINGS_KEY, serialized);
-      }
-      var storedRaw = localStorage.getItem(SETTINGS_KEY);
-      var stored = storedRaw ? JSON.parse(storedRaw) : null;
-      var verified = !!stored &&
-        stored.apiKey === settings.apiKey &&
-        stored.model === settings.model &&
-        stored.siteName === settings.siteName &&
-        stored.completionChime === settings.completionChime;
-      if (!verified) throw new Error('Settings write verification failed');
-      state.settingsStorage.available = true;
+      var stored = await settingsStore.save(settings);
+      applySettingsRecord(stored);
+      state.settingsStorage.recordPresent = true;
       state.settingsStorage.saveStatus = 'verified';
-      state.settingsStorage.bytes = serialized.length * 2;
-      state.settingsStorage.keyPresent = true;
       state.settingsStorage.error = null;
       updateSettingsStorageUi();
       updateDiagnostics();
       return true;
-    } catch (e) {
+    } catch (error) {
       state.settingsStorage.saveStatus = 'error';
-      state.settingsStorage.error = storageErrorMessage(e);
+      state.settingsStorage.error = storageErrorMessage(error);
       updateSettingsStorageUi();
       updateDiagnostics();
       return false;
@@ -1599,18 +1764,39 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     lines.push('  metadata parent: ' + ($('info-sections') && $('info-sections').parentElement ? $('info-sections').parentElement.id || '(no id)' : '-'));
     lines.push('');
     lines.push('Settings persistence:');
-    lines.push('Settings storage bytes: ' + state.settingsStorage.bytes);
+    lines.push('  Settings backend: ' + state.settingsStorage.backend);
+    lines.push('  IndexedDB available: ' + (state.settingsStorage.available === null ? 'unknown' : state.settingsStorage.available ? 'yes' : 'no'));
+    lines.push('  Settings record: ' + (state.settingsStorage.recordPresent ? 'loaded' : state.settingsStorage.loadStatus));
+    lines.push('  Settings record approximate bytes: ' + state.settingsStorage.recordBytes);
+    lines.push('  load status: ' + state.settingsStorage.loadStatus);
+    lines.push('  save status: ' + state.settingsStorage.saveStatus);
+    lines.push('  migrated from localStorage: ' + (state.settingsStorage.migratedFromLocalStorage ? 'yes' : 'no'));
+    lines.push('  API key restored: ' + (state.settingsStorage.apiKeyRestored ? 'yes' : 'no'));
+    lines.push('  model restored: ' + (state.settingsStorage.modelRestored || 'none'));
+    lines.push('  last IndexedDB error: ' + (state.settingsStorage.error || '-'));
+    lines.push('');
+    lines.push('localStorage diagnostics:');
+    lines.push('  localStorage probe: ' + state.localStorageStatus.probeStatus);
+    lines.push('  localStorage available: ' + (state.localStorageStatus.available === null ? 'unknown' : state.localStorageStatus.available ? 'yes' : 'no'));
+    lines.push('  failure class: ' + (state.localStorageStatus.failureType || '-'));
+    lines.push('  error name: ' + (state.localStorageStatus.errorName || '-'));
+    lines.push('  error message: ' + (state.localStorageStatus.errorMessage || '-'));
+    lines.push('  localStorage keys: ' + state.localStorageStatus.keyCount);
+    lines.push('  estimated localStorage bytes: ' + state.localStorageStatus.approxBytes + ' (' + formatBytes(state.localStorageStatus.approxBytes) + ')');
+    lines.push('  inventory error: ' + (state.localStorageStatus.inventoryError || '-'));
+    lines.push('  Largest localStorage entries:');
+    if (state.localStorageStatus.largestEntries.length === 0) {
+      lines.push('    (none available)');
+    } else {
+      state.localStorageStatus.largestEntries.forEach(function(entry) {
+        lines.push('    ' + entry.key + '  ' + formatBytes(entry.approxBytes));
+      });
+    }
+    lines.push('');
     lines.push('Model catalog persistence: disabled');
     lines.push('Vision models in memory: ' + state.visionModels.length);
     lines.push('Legacy catalog removed: ' + (state.legacyCatalogRemoved ? 'yes' : 'no'));
     lines.push('  origin: ' + location.origin);
-    lines.push('  storage available: ' + (state.settingsStorage.available === null ? 'unknown' : state.settingsStorage.available ? 'yes' : 'no'));
-    lines.push('  key present: ' + (state.settingsStorage.keyPresent ? 'yes' : 'no'));
-    lines.push('  load status: ' + state.settingsStorage.loadStatus);
-    lines.push('  save status: ' + state.settingsStorage.saveStatus);
-    lines.push('  API key restored: ' + (state.settingsStorage.apiKeyRestored ? 'yes' : 'no'));
-    lines.push('  model restored: ' + (state.settingsStorage.modelRestored || 'none'));
-    lines.push('  last storage error: ' + (state.settingsStorage.error || '-'));
     lines.push('');
     lines.push('Completion chime: ' + (settings.completionChime ? 'enabled' : 'disabled'));
     lines.push('AudioContext: ' + (audioContext ? audioContext.state : 'unavailable'));
@@ -1862,9 +2048,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     };
   }
 
-  function setSelectedModel(modelId) {
+  async function setSelectedModel(modelId) {
     settings.model = modelId || '';
-    var saved = saveSettings();
     var sel = $('modelSelect');
     if (sel) {
       for (var i = 0; i < sel.options.length; i++) {
@@ -1879,6 +2064,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     }
     updateAiPanelUi();
     updateDiagnostics();
+    var saved = await savePersistentSettings();
     if (!saved) showToast('Model selected, but could not persist settings in this browser.', 3500);
   }
 
@@ -1918,7 +2104,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     $('settingsModal').classList.remove('open');
   }
 
-  function saveSettingsFromModal() {
+  async function saveSettingsFromModal() {
+    var saveBtn = $('settingsSaveBtn');
     var newApiKey = $('apiKeyInput').value.trim();
     var sel = $('modelSelect');
     var custom = $('customModelInput');
@@ -1936,9 +2123,15 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     settings.siteName = newSiteName;
     settings.completionChime = newCompletionChime;
 
-    if (!saveSettings()) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    var saved = await savePersistentSettings();
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save';
+
+    if (!saved) {
       updateAiPanelUi();
-      showToast('Could not persist settings in this browser.', 3500);
+      showToast('Could not save settings to IndexedDB.', 3500);
       return;
     }
 
@@ -1978,11 +2171,12 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   /* ======================================================================
    * Event wiring
    * ====================================================================== */
-  function init() {
-    // Remove disposable legacy/cache data before testing durable settings storage.
-    prepareLocalStorage();
-    probeSettingsStorage();
-    loadSettings();
+  async function init() {
+    // Disposable localStorage is diagnosed independently from durable IndexedDB settings.
+    prepareDisposableStorage();
+    probeLocalStorage();
+    await initializeSettingsStore();
+    await loadPersistentSettings();
 
     window.__ICI_TEST__ = {
       getSettingsState: function() {
@@ -1993,24 +2187,77 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
           completionChime: settings.completionChime,
           completionChimePlayCount: state.completionChimePlayCount,
           audioContextState: audioContext ? audioContext.state : 'unavailable',
+          settingsBackend: state.settingsStorage.backend,
+          indexedDBAvailable: state.settingsStorage.available,
           storageAvailable: state.settingsStorage.available,
-          settingsBytes: state.settingsStorage.bytes,
+          settingsRecordPresent: state.settingsStorage.recordPresent,
+          settingsRecordBytes: state.settingsStorage.recordBytes,
           loadStatus: state.settingsStorage.loadStatus,
           saveStatus: state.settingsStorage.saveStatus,
-          keyPresent: state.settingsStorage.keyPresent,
           apiKeyRestored: state.settingsStorage.apiKeyRestored,
           modelRestored: state.settingsStorage.modelRestored,
           storageError: state.settingsStorage.error,
+          migratedFromLocalStorage: state.settingsStorage.migratedFromLocalStorage,
+          localStorageAvailable: state.localStorageStatus.available,
+          localStorageProbeStatus: state.localStorageStatus.probeStatus,
+          localStorageFailureType: state.localStorageStatus.failureType,
+          localStorageErrorName: state.localStorageStatus.errorName,
+          localStorageErrorMessage: state.localStorageStatus.errorMessage,
+          localStorageKeyCount: state.localStorageStatus.keyCount,
+          localStorageApproxBytes: state.localStorageStatus.approxBytes,
+          localStorageLargestEntries: state.localStorageStatus.largestEntries.map(function(entry) {
+            return { key: entry.key, approxBytes: entry.approxBytes };
+          }),
           modelCatalogPersistence: 'disabled',
           visionModelCount: state.visionModels.length,
           legacyCatalogPresent: state.legacyCatalogPresent,
           legacyCatalogRemoved: state.legacyCatalogRemoved
         };
       },
-      testPersistence: function() {
-        var passed = probeSettingsStorage();
+      testPersistence: async function() {
+        var passed = await savePersistentSettings();
         updateDiagnostics();
-        return { passed: passed, origin: location.origin };
+        return { passed: passed, backend: state.settingsStorage.backend, origin: location.origin };
+      },
+      testLocalStorage: function() {
+        var passed = probeLocalStorage();
+        updateDiagnostics();
+        return {
+          passed: passed,
+          errorName: state.localStorageStatus.errorName,
+          errorMessage: state.localStorageStatus.errorMessage,
+          failureType: state.localStorageStatus.failureType,
+          keyCount: state.localStorageStatus.keyCount,
+          approxBytes: state.localStorageStatus.approxBytes,
+          largestEntries: state.localStorageStatus.largestEntries.map(function(entry) {
+            return { key: entry.key, approxBytes: entry.approxBytes };
+          })
+        };
+      },
+      getRuntimeState: function() {
+        return {
+          fileLoaded: !!state.file,
+          exifStatus: state.exifStatus,
+          mapInitialized: !!state.map,
+          reverseResolved: !!state.reverse,
+          analyzed: state.analyzed,
+          modelCatalogStatus: state.modelCatalogStatus,
+          visionModelCount: state.visionModels.length
+        };
+      },
+      exerciseLocation: async function(lat, lng) {
+        state.gps = {
+          lat: Number(lat),
+          lng: Number(lng),
+          altitude: null,
+          direction: null,
+          latRef: null,
+          lngRef: null,
+          timestamp: null
+        };
+        setupMap();
+        await new Promise(function(resolve) { setTimeout(resolve, 400); });
+        return { mapInitialized: !!state.map, reverseResolved: !!state.reverse };
       }
     };
 
@@ -2136,10 +2383,21 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     loadModelCatalog();
   }
 
+  function handleInitializationError(error) {
+    state.settingsStorage.available = false;
+    state.settingsStorage.initialized = true;
+    state.settingsStorage.loadStatus = 'error';
+    state.settingsStorage.error = storageErrorMessage(error);
+    updateSettingsStorageUi();
+    updateDiagnostics();
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', function() {
+      init().catch(handleInitializationError);
+    });
   } else {
-    init();
+    init().catch(handleInitializationError);
   }
 
 })();
