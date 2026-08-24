@@ -252,6 +252,13 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         <label for="siteNameInput">Site/App name (optional)</label>
         <input type="text" id="siteNameInput" placeholder="Image Context Inspector" />
       </div>
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;">
+        <label for="completionChimeInput" style="display:flex;align-items:center;gap:.4rem;margin:0;color:var(--text);font-weight:500;cursor:pointer;">
+          <input type="checkbox" id="completionChimeInput" checked style="accent-color:var(--accent);" />
+          Completion chime
+        </label>
+        <button class="btn btn-ghost btn-sm" type="button" id="testChimeBtn">♪ Test Chime</button>
+      </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="settingsCloseBtn">Cancel</button>
         <button class="btn btn-primary" id="settingsSaveBtn">Save</button>
@@ -266,9 +273,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.2" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.2" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.2
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.3" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.3" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.3
   </footer>
 
 <script>
@@ -301,6 +308,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     mapMarker: null,
     analyzed: false,
     analyzing: false,
+    completionChimePlayCount: 0,
+    audioError: null,
     contextPreviewOpen: false,
     sectionCollapsed: {
       location: false,
@@ -328,8 +337,11 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   var settings = {
     apiKey: '',
     model: 'openai/gpt-4.1-mini',
-    siteName: 'Image Context Inspector'
+    siteName: 'Image Context Inspector',
+    completionChime: true
   };
+
+  var audioContext = null;
 
   var SETTINGS_KEY = 'image-context-inspector-settings';
   var SETTINGS_PROBE_KEY = 'image-context-inspector-storage-probe';
@@ -375,6 +387,66 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   function toJsonPretty(obj) {
     try { return JSON.stringify(obj, null, 2); }
     catch (e) { return String(obj); }
+  }
+
+  function ensureAudioContext() {
+    try {
+      if (!audioContext || audioContext.state === 'closed') {
+        var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return null;
+        audioContext = new AudioContextClass();
+      }
+      if (audioContext.state === 'suspended') {
+        var resumed = audioContext.resume();
+        if (resumed && typeof resumed.catch === 'function') {
+          resumed.catch(function(error) {
+            state.audioError = storageErrorMessage(error);
+            updateDiagnostics();
+          });
+        }
+      }
+      state.audioError = null;
+      return audioContext;
+    } catch (error) {
+      state.audioError = storageErrorMessage(error);
+      updateDiagnostics();
+      return null;
+    }
+  }
+
+  function playCompletionChime(force) {
+    if (!force && !settings.completionChime) return false;
+    try {
+      var ctx = ensureAudioContext();
+      if (!ctx) return false;
+      var start = ctx.currentTime + .02;
+      var notes = [
+        { frequency: 523.25, offset: 0 },
+        { frequency: 659.25, offset: .17 },
+        { frequency: 783.99, offset: .34 }
+      ];
+      notes.forEach(function(note) {
+        var oscillator = ctx.createOscillator();
+        var gain = ctx.createGain();
+        var at = start + note.offset;
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(note.frequency, at);
+        gain.gain.setValueAtTime(.0001, at);
+        gain.gain.exponentialRampToValueAtTime(.075, at + .035);
+        gain.gain.exponentialRampToValueAtTime(.0001, at + .3);
+        oscillator.connect(gain).connect(ctx.destination);
+        oscillator.start(at);
+        oscillator.stop(at + .32);
+      });
+      state.completionChimePlayCount += 1;
+      state.audioError = null;
+      updateDiagnostics();
+      return true;
+    } catch (error) {
+      state.audioError = storageErrorMessage(error);
+      updateDiagnostics();
+      return false;
+    }
   }
 
   /* ======================================================================
@@ -446,6 +518,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       if (typeof parsed.apiKey === 'string') settings.apiKey = parsed.apiKey;
       if (typeof parsed.model === 'string') settings.model = parsed.model;
       if (typeof parsed.siteName === 'string') settings.siteName = parsed.siteName;
+      if (typeof parsed.completionChime === 'boolean') settings.completionChime = parsed.completionChime;
       state.settingsStorage.loadStatus = 'loaded';
       state.settingsStorage.apiKeyRestored = typeof parsed.apiKey === 'string' && !!parsed.apiKey;
       state.settingsStorage.modelRestored = typeof parsed.model === 'string' && parsed.model ? parsed.model : null;
@@ -471,7 +544,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       var serialized = JSON.stringify({
         apiKey: settings.apiKey,
         model: settings.model,
-        siteName: settings.siteName
+        siteName: settings.siteName,
+        completionChime: settings.completionChime
       });
       localStorage.setItem(SETTINGS_KEY, serialized);
       var storedRaw = localStorage.getItem(SETTINGS_KEY);
@@ -479,7 +553,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       var verified = !!stored &&
         stored.apiKey === settings.apiKey &&
         stored.model === settings.model &&
-        stored.siteName === settings.siteName;
+        stored.siteName === settings.siteName &&
+        stored.completionChime === settings.completionChime;
       if (!verified) throw new Error('Settings write verification failed');
       state.settingsStorage.available = true;
       state.settingsStorage.saveStatus = 'verified';
@@ -1120,6 +1195,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       return;
     }
 
+    ensureAudioContext();
     setAnalyzing(true);
     var startTime = Date.now();
     try {
@@ -1128,6 +1204,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       var response = await callOpenRouter(q, ctx);
       var elapsed = Date.now() - startTime;
       renderResponse(response, elapsed);
+      playCompletionChime(false);
     } catch (err) {
       renderError(err);
     } finally {
@@ -1483,6 +1560,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     lines.push('  model restored: ' + (state.settingsStorage.modelRestored || 'none'));
     lines.push('  last storage error: ' + (state.settingsStorage.error || '-'));
     lines.push('');
+    lines.push('Completion chime: ' + (settings.completionChime ? 'enabled' : 'disabled'));
+    lines.push('AudioContext: ' + (audioContext ? audioContext.state : 'unavailable'));
+    lines.push('  last audio error: ' + (state.audioError || '-'));
+    lines.push('');
     lines.push('OpenRouter:');
     lines.push('  API key configured: ' + (settings.apiKey ? 'yes' : 'no'));
     lines.push('  model catalog: ' + state.modelCatalogStatus);
@@ -1810,6 +1891,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   function openSettings() {
     $('apiKeyInput').value = settings.apiKey;
     $('siteNameInput').value = settings.siteName;
+    $('completionChimeInput').checked = settings.completionChime;
     $('settingsModal').classList.add('open');
     updateSettingsStorageUi();
     populateModelSelect();
@@ -1831,10 +1913,12 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       newModel = sel.value || '';
     }
     var newSiteName = $('siteNameInput').value.trim() || 'Image Context Inspector';
+    var newCompletionChime = $('completionChimeInput').checked;
 
     settings.apiKey = newApiKey;
     settings.model = newModel;
     settings.siteName = newSiteName;
+    settings.completionChime = newCompletionChime;
 
     if (!saveSettings()) {
       updateAiPanelUi();
@@ -1888,6 +1972,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
           apiKeyConfigured: !!settings.apiKey,
           model: settings.model,
           siteName: settings.siteName,
+          completionChime: settings.completionChime,
+          completionChimePlayCount: state.completionChimePlayCount,
+          audioContextState: audioContext ? audioContext.state : 'unavailable',
           storageAvailable: state.settingsStorage.available,
           loadStatus: state.settingsStorage.loadStatus,
           saveStatus: state.settingsStorage.saveStatus,
@@ -1963,6 +2050,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     $('settingsBtn').addEventListener('click', openSettings);
     $('settingsCloseBtn').addEventListener('click', closeSettings);
     $('settingsSaveBtn').addEventListener('click', saveSettingsFromModal);
+    $('testChimeBtn').addEventListener('click', function() {
+      if (!playCompletionChime(true)) showToast('Audio could not be started.', 3000);
+    });
     $('toggleKeyBtn').addEventListener('click', function() {
       var input = $('apiKeyInput');
       var show = input.type === 'password';
