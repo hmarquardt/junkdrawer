@@ -36,6 +36,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .btn-sm{padding:.25rem .5rem;font-size:.7rem}
 .btn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
 #workspace{flex:1;display:flex;flex-direction:column;min-height:0;overflow-y:auto;padding:1rem;gap:.75rem}
+#workspace>.section{flex:0 0 auto}
 #top-row{display:flex;gap:1rem;flex:0 0 auto}
 #image-panel{flex:1 1 55%;min-width:0;max-height:65vh}
 #drop-zone{position:relative;border:2px dashed var(--border-strong);border-radius:var(--radius);background:var(--surface-alt);display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:200px;text-align:center;padding:1.5rem;cursor:pointer;transition:border-color .2s,background .2s;overflow:hidden}
@@ -78,9 +79,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .ai-model-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .ai-model-row select{flex:0 0 auto;min-width:180px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:.3rem .5rem;font-size:.75rem;outline:none;cursor:pointer}
 .ai-model-row select:focus{border-color:var(--accent)}
-.ai-controls textarea{flex:1;min-width:200px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:.625rem .75rem;font-size:.875rem;font-family:inherit;resize:vertical;min-height:90px;outline:none}
-.ai-controls textarea:focus{border-color:var(--accent)}
-.ai-controls textarea::placeholder{color:var(--text-faint)}
+#aiQuestion{width:100%;min-height:90px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:.625rem .75rem;font-size:.875rem;font-family:inherit;resize:vertical;outline:none}
+#aiQuestion:focus{border-color:var(--accent)}
+#aiQuestion::placeholder{color:var(--text-faint)}
 .ai-actions{display:flex;gap:.5rem;align-items:flex-start;flex-wrap:wrap}
 .checkbox-group{display:flex;flex-wrap:wrap;gap:.25rem .75rem;font-size:.75rem}
 .checkbox-group label{display:flex;align-items:center;gap:.3rem;cursor:pointer;user-select:none}
@@ -123,7 +124,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .leaflet-container{background:var(--surface-alt)!important}
-@media(max-width:640px){#top-row{flex-direction:column}#image-panel,#location-panel{flex:none;max-height:50vh}.meta-grid{grid-template-columns:1fr}.ai-controls{flex-direction:column}.ai-controls textarea{min-width:0}}
+@media(max-width:640px){#top-row{flex-direction:column}#image-panel,#location-panel{flex:none;max-height:50vh}.meta-grid{grid-template-columns:1fr}.ai-controls{flex-direction:column}}
 </style>
 </head>
 <body>
@@ -185,6 +186,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
             <span style="color:var(--text-muted);">Context:</span>
             <span id="ctxSummary" style="color:var(--text-muted);"></span>
             <button class="btn btn-ghost btn-sm" id="ctxOptionsToggle">▶ Options</button>
+            <button class="btn btn-ghost btn-sm" id="contextPreviewToggle" disabled>▶ Preview AI Context</button>
             <div style="flex:1"></div>
             <button class="btn btn-ghost btn-sm" id="copyContextBtn" disabled>📋 Copy AI Context</button>
             <button class="btn btn-primary" id="analyzeBtn" disabled>🔍 Analyze</button>
@@ -263,9 +265,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.23.3" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.23.3" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.23.3
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.1" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.1
   </footer>
 
 <script>
@@ -297,6 +299,15 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     map: null,
     mapMarker: null,
     analyzed: false,
+    analyzing: false,
+    contextPreviewOpen: false,
+    sectionCollapsed: {
+      location: false,
+      capture: true,
+      camera: true,
+      sensitive: true,
+      raw: true
+    },
     // Model catalog
     modelCatalogStatus: 'idle',  // idle | loading | loaded | error
     visionModels: [],
@@ -909,6 +920,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   function buildContextPreview() {
     var preview = $('contextPreview');
     var content = $('contextPreviewContent');
+    var toggle = $('contextPreviewToggle');
     // Update ctxSummary
     var summaryEl = $('ctxSummary');
     var parts = [];
@@ -919,17 +931,12 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     if ($('ctxCamera').checked && state.exif) parts.push('Camera');
     if (summaryEl) summaryEl.textContent = parts.length ? parts.join(' · ') : '(none)';
 
-    if (!state.file && !$('ctxGps').checked) {
-      preview.style.display = 'none';
-      return;
-    }
     var ctx = getContext();
-    if (!ctx || Object.keys(ctx).length === 0) {
-      preview.style.display = 'none';
-      return;
-    }
-    content.textContent = toJsonPretty(ctx);
-    preview.style.display = 'block';
+    var hasContext = !!ctx && Object.keys(ctx).length > 0;
+    content.textContent = hasContext ? toJsonPretty(ctx) : '';
+    toggle.disabled = !hasContext;
+    preview.style.display = hasContext && state.contextPreviewOpen ? 'block' : 'none';
+    toggle.textContent = state.contextPreviewOpen && hasContext ? '\u25bc Hide AI Context' : '\u25b6 Preview AI Context';
   }
 
   /* ======================================================================
@@ -1131,13 +1138,13 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
   }
 
   function setAnalyzing(on) {
-    $('analyzeBtn').disabled = on || !state.file || !settings.apiKey || !settings.model;
+    state.analyzing = on;
     if (on) {
       $('analyzeBtn').innerHTML = '<span class="spinner"></span> Analyzing…';
     } else {
       $('analyzeBtn').textContent = '🔍 Analyze';
-      $('analyzeBtn').disabled = !state.file || !settings.apiKey;
     }
+    updateAiPanelUi();
   }
 
   /* ======================================================================
@@ -1162,7 +1169,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     } else {
       locItems.push(['Status', getGpsStatusLabel()]);
     }
-    sections.push(makeSection('📍 Location', locItems, 'location'));
+    sections.push(makeSection('📍 Location', locItems, 'location', state.sectionCollapsed.location));
 
     // Capture section
     var capItems = [];
@@ -1176,7 +1183,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       if (state.exif.Height) capItems.push(['Height', String(state.exif.Height)]);
     }
     if (capItems.length === 0) capItems.push(['Status', 'No capture metadata']);
-    sections.push(makeSection('📷 Capture', capItems, 'capture', true));
+    sections.push(makeSection('📷 Capture', capItems, 'capture', state.sectionCollapsed.capture));
 
     // Camera section
     var camItems = [];
@@ -1195,7 +1202,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       if (state.exif.Software) camItems.push(['Software', String(state.exif.Software)]);
     }
     if (camItems.length === 0) camItems.push(['Status', 'No camera metadata']);
-    sections.push(makeSection('📷 Camera', camItems, 'camera', true));
+    sections.push(makeSection('📷 Camera', camItems, 'camera', state.sectionCollapsed.camera));
 
     // Sensitive section
     var senItems = [];
@@ -1208,7 +1215,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     if (senItems.length === 0) {
       senItems.push(['Status', 'No sensitive metadata detected']);
     }
-    sections.push(makeSection('🔒 Sensitive Metadata', senItems, 'sensitive', true));
+    sections.push(makeSection('🔒 Sensitive Metadata', senItems, 'sensitive', state.sectionCollapsed.sensitive));
 
     // Raw section
     var rawItems = [];
@@ -1217,7 +1224,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     } else {
       rawItems.push(['Status', 'No raw metadata available']);
     }
-    sections.push(makeSection('📄 Raw Metadata', rawItems, 'raw', true));
+    sections.push(makeSection('📄 Raw Metadata', rawItems, 'raw', state.sectionCollapsed.raw));
 
     container.innerHTML = sections.join('');
   }
@@ -1300,16 +1307,6 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       $('noGpsMsg').style.display = 'flex';
     }
 
-    // Analyze button
-    $('analyzeBtn').disabled = !state.file || !settings.apiKey || state.analyzing;
-    $('copyContextBtn').disabled = !state.file;
-
-    // AI status line
-    var statusEl = $('aiStatus');
-    if (!settings.apiKey) statusEl.textContent = '(API key not configured — open Settings)';
-    else if (state.file) statusEl.textContent = '(ready)';
-    else statusEl.textContent = '';
-
     // Enable sensitive checkbox only if sensitive metadata exists
     $('ctxSensitive').disabled = !(state.exif && state.exif.sensitive);
     $('ctxFullCamera').disabled = !state.exif;
@@ -1320,6 +1317,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     renderInfoSections();
     updateDiagnostics();
     buildContextPreview();
+    updateAiPanelUi();
   }
 
   function updateDiagnostics() {
@@ -1351,6 +1349,19 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     }
     lines.push('');
     lines.push('Reverse geocoder: ' + (state.reverse ? 'ok' : 'idle'));
+    lines.push('');
+    var aiPanel = $('ai-panel');
+    var aiCss = aiPanel ? getComputedStyle(aiPanel) : null;
+    var aiRect = aiPanel ? aiPanel.getBoundingClientRect() : null;
+    var aiHeight = aiRect ? aiRect.height : 0;
+    lines.push('AI panel:');
+    lines.push('  exists: ' + (aiPanel ? 'yes' : 'NO'));
+    lines.push('  display: ' + (aiCss ? aiCss.display : '-'));
+    lines.push('  visibility: ' + (aiCss ? aiCss.visibility : '-'));
+    lines.push('  height: ' + Math.round(aiHeight) + 'px' + (aiPanel && aiHeight <= 1 ? '  <-- INVALID' : ''));
+    lines.push('  top: ' + (aiRect ? Math.round(aiRect.top) + 'px' : '-'));
+    lines.push('  parent: ' + (aiPanel && aiPanel.parentElement ? aiPanel.parentElement.id || '(no id)' : '-'));
+    lines.push('  metadata parent: ' + ($('info-sections') && $('info-sections').parentElement ? $('info-sections').parentElement.id || '(no id)' : '-'));
     lines.push('');
     lines.push('OpenRouter:');
     lines.push('  API key configured: ' + (settings.apiKey ? 'yes' : 'no'));
@@ -1392,6 +1403,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
               state.modelCatalogStatus = 'loaded-from-cache';
               state.modelCatalogLoadedAt = cache.fetchedAt;
               populateModelSelect();
+              updateAiPanelUi();
               updateDiagnostics();
               return;
             } else {
@@ -1404,6 +1416,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 
     state.modelCatalogStatus = 'loading';
     updateCatalogStatusMsg('Loading vision models\u2026');
+    updateAiPanelUi();
     updateDiagnostics();
 
     try {
@@ -1466,6 +1479,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         vision.length + ' vision models available' :
         '0 vision-capable models returned');
       populateModelSelect();
+      updateAiPanelUi();
       updateDiagnostics();
     } catch (err) {
       state.modelCatalogStatus = 'error';
@@ -1487,6 +1501,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       updateCatalogStatusMsg(msg + ' <button class="btn btn-ghost btn-sm" id="retryCatalogBtn">Retry</button>');
       populateModelSelect();
     }
+    updateAiPanelUi();
   }
 
   function updateCatalogStatusMsg(html) {
@@ -1663,21 +1678,15 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     var cfgBtn = $('configureOrBtn');
     var hasKey = !!settings.apiKey;
     var hasModel = !!settings.model;
-    if (state.modelCatalogStatus === 'loading') {
-      statusEl.textContent = 'Loading vision models\u2026';
-    } else if (!hasKey) {
+    cfgBtn.style.display = hasKey ? 'none' : 'inline-flex';
+    keyStatusEl.textContent = hasKey && !hasModel ? '(key set)' : '';
+    if (!hasKey) {
       statusEl.textContent = 'OpenRouter key required';
-      keyStatusEl.textContent = '';
-      if (cfgBtn) cfgBtn.style.display = 'inline-flex';
     } else if (!hasModel) {
       statusEl.textContent = 'Select a vision model';
-      keyStatusEl.textContent = '(key set)';
-      if (cfgBtn) cfgBtn.style.display = 'none';
     } else {
       var label = settings.model.split('/').pop() || settings.model;
-      statusEl.textContent = 'Ready \u00b7 ' + label;
-      keyStatusEl.textContent = '';
-      if (cfgBtn) cfgBtn.style.display = 'none';
+      statusEl.textContent = (state.modelCatalogStatus === 'loading' ? 'Loading catalog \u00b7 ' : 'Ready \u00b7 ') + label;
     }
     $('analyzeBtn').disabled = !(state.file && hasKey && hasModel) || state.analyzing;
     $('copyContextBtn').disabled = !state.file;
@@ -1798,6 +1807,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
         btn.textContent = '\u25b6 Options';
       }
     });
+    $('contextPreviewToggle').addEventListener('click', function() {
+      state.contextPreviewOpen = !state.contextPreviewOpen;
+      buildContextPreview();
+    });
 
     $('settingsBtn').addEventListener('click', openSettings);
     $('settingsCloseBtn').addEventListener('click', closeSettings);
@@ -1815,6 +1828,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
     $('diagToggleBtn').addEventListener('click', function() {
       var d = $('diagnostics');
       d.classList.toggle('hidden');
+      updateDiagnostics();
     });
     $('diagClick').addEventListener('click', function() {
       var c = $('diagContent');
@@ -1831,6 +1845,13 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
       if (!body) return;
       body.classList.toggle('hidden');
       header.classList.toggle('collapsed');
+      if (targetId.indexOf('sec-') === 0 && targetId.slice(-5) === '-body') {
+        var sectionId = targetId.slice(4, -5);
+        if (Object.prototype.hasOwnProperty.call(state.sectionCollapsed, sectionId)) {
+          state.sectionCollapsed[sectionId] = body.classList.contains('hidden');
+        }
+      }
+      updateDiagnostics();
     });
 
     // Update context preview when checkboxes change
