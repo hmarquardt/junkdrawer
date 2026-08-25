@@ -746,7 +746,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.25.3');
+    expect(post.body.data.appVersion).toBe('2026.08.25.4');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -799,6 +799,8 @@ function catalogPayload() {
     pricing: { prompt: '0.0000001', completion: '0.0000004' }
   });
   return { data: [
+    mk('openai/gpt-5.6-luna', 'OpenAI: GPT-5.6 Luna', ['text', 'image'], ['text']),
+    mk('google/gemini-3.7-flash', 'Google: Gemini 3.7 Flash', ['text', 'image'], ['text']),
     mk('openai/gpt-4.1-mini', 'OpenAI: GPT-4.1 Mini', ['text', 'image'], ['text']),
     mk('openai/gpt-4.1', 'OpenAI: GPT-4.1', ['text'], ['text']),
     mk('openai/omni-moderation-latest', 'OpenAI: Omni Moderation', ['text'], ['text']),
@@ -818,6 +820,7 @@ function transcriptionCatalogPayload() {
     architecture: { input_modalities: ['audio'], output_modalities: ['transcription'] }
   });
   return { data: [
+    mk('openai/gpt-transcribe', 'OpenAI: GPT Transcribe'),
     mk('openai/whisper-1', 'OpenAI: Whisper 1'),
     mk('openai/gpt-4o-mini-transcribe', 'OpenAI: GPT-4o Mini Transcribe'),
     mk('deepgram/nova-3', 'Deepgram: Nova-3')
@@ -836,6 +839,36 @@ function normalizeFixture(payload, dedicatedTranscription) {
       supportsTranscription: dedicatedTranscription, source: 'catalog'
     };
   });
+}
+
+function recommendationResult(overrides = {}) {
+  return {
+    transcription: {
+      model_id: 'openai/gpt-transcribe', reason: 'Best outdoor field-note accuracy.', confidence: 0.93, alternatives: ['openai/whisper-1']
+    },
+    classification: {
+      model_id: 'openai/gpt-5.6-luna', reason: 'Reliable low-cost structured extraction.', confidence: 0.95, alternatives: ['openai/gpt-4.1-mini']
+    },
+    vision: {
+      model_id: 'google/gemini-3.7-flash', reason: 'Strong fine-grained wildlife vision.', confidence: 0.91, alternatives: ['openai/gpt-5.6-luna']
+    },
+    ...overrides
+  };
+}
+
+async function mockRecommendation(page, result = recommendationResult(), { fail = false } = {}) {
+  const calls = [];
+  await page.route('**/chat/completions', route => {
+    const body = route.request().postDataJSON();
+    if (body.model !== '~openai/gpt-latest') return route.abort();
+    calls.push(body);
+    if (fail) return route.abort();
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] })
+    });
+  });
+  return calls;
 }
 
 /** Seed localStorage settings before any page script runs. Merges with any
@@ -945,7 +978,8 @@ test('OR-D/E/F: general and dedicated transcription catalogs populate only their
   // D — only image-input + text-output models in Photo identification
   const vision = await selectValues(page, 'cfg-vision-model');
   expect(vision.sort()).toEqual([
-    'anthropic/claude-sonnet-4', 'google/gemini-2.5-flash', 'openai/gpt-4.1-mini'
+    'anthropic/claude-sonnet-4', 'google/gemini-2.5-flash', 'google/gemini-3.7-flash',
+    'openai/gpt-4.1-mini', 'openai/gpt-5.6-luna'
   ]);
   expect(vision).not.toContain('openai/gpt-4.1');           // text-only
   expect(vision).not.toContain('openai/dall-e-3');          // image-output
@@ -954,7 +988,7 @@ test('OR-D/E/F: general and dedicated transcription catalogs populate only their
   const cls = await selectValues(page, 'cfg-text-model');
   for (const expected of ['openai/gpt-4.1-mini', 'openai/gpt-4.1', 'anthropic/claude-sonnet-4',
     'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite', 'deepseek/deepseek-chat-v4',
-    'mistralai/mistral-medium-3']) {
+    'mistralai/mistral-medium-3', 'openai/gpt-5.6-luna', 'google/gemini-3.7-flash']) {
     expect(cls).toContain(expected);
   }
   expect(cls).not.toContain('openai/text-embedding-3-large'); // embedding (no text output)
@@ -963,7 +997,7 @@ test('OR-D/E/F: general and dedicated transcription catalogs populate only their
 
   // F — only the dedicated output_modalities=transcription result is used.
   const trans = await selectValues(page, 'cfg-trans-model');
-  expect(trans.sort()).toEqual(['deepgram/nova-3', 'openai/gpt-4o-mini-transcribe', 'openai/whisper-1']);
+  expect(trans.sort()).toEqual(['deepgram/nova-3', 'openai/gpt-4o-mini-transcribe', 'openai/gpt-transcribe', 'openai/whisper-1']);
   expect(trans).not.toContain('google/gemini-2.5-flash'); // audio-capable chat model must not leak in
   expect(trans).not.toContain('google/gemini-2.5-flash-lite');
   expect(trans).not.toContain('mistralai/mistral-medium-3');  // ordinary chat model
@@ -1031,9 +1065,9 @@ test('OR-H2: cached .2 audio-chat transcription selection migrates to STT fallba
   await page.waitForLoadState('networkidle');
   await dbWaitQuiet(page);
 
-  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/whisper-1');
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/gpt-transcribe');
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('wfr_settings')));
-  expect(stored.transModel).toBe('openai/whisper-1');
+  expect(stored.transModel).toBe('openai/gpt-transcribe');
   expect(await selectValues(page, 'cfg-trans-model')).not.toContain('google/gemini-2.5-flash-lite');
   expect(errors).toEqual([]);
 });
@@ -1054,7 +1088,7 @@ test('OR-I: cached catalog survives refresh failure; fallback list without cache
   const cachedStt = [{ id: 'openai/whisper-1', name: 'Whisper 1', provider: 'openai',
     inputModalities: ['audio'], outputModalities: ['transcription'], supportsText: false,
     supportsVision: false, supportsAudioInput: true, supportsTranscription: true, source: 'catalog' }];
-  seedSettings(page.context(), { textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini' }, cachedModels, cachedStt);
+  seedSettings(page.context(), { transModel: 'openai/whisper-1', textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini' }, cachedModels, cachedStt);
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
   await dbWaitQuiet(page);
@@ -1074,9 +1108,9 @@ test('OR-I: cached catalog survives refresh failure; fallback list without cache
   await page2.waitForLoadState('networkidle');
   await page2.waitForTimeout(400);
   expect((await selectValues(page2, 'cfg-text-model'))).toContain('openai/gpt-4.1-mini');
-  expect(await selectedValue(page2, 'cfg-text-model')).toBe('openai/gpt-4.1-mini');
-  expect(await selectedValue(page2, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini'); // vision default despite no vision-capable fallback entry beyond mini
-  expect(await selectedValue(page2, 'cfg-trans-model')).toBe('openai/whisper-1');
+  expect(await selectedValue(page2, 'cfg-text-model')).toBe('openai/gpt-5.6-luna');
+  expect(await selectedValue(page2, 'cfg-vision-model')).toBe('google/gemini-3.7-flash');
+  expect(await selectedValue(page2, 'cfg-trans-model')).toBe('openai/gpt-transcribe');
   expect(errors2).toEqual([]);
   await ctx2.close();
   expect(errors).toEqual([]);
@@ -1095,7 +1129,7 @@ test('OR-I2: dedicated STT catalog failure preserves general results and STT fal
   await page.waitForLoadState('networkidle');
   await page.waitForFunction(() => /partly refreshed/i.test(document.getElementById('or-catalog-status').textContent));
 
-  expect(await selectValues(page, 'cfg-trans-model')).toEqual(['openai/whisper-1']);
+  expect((await selectValues(page, 'cfg-trans-model')).sort()).toEqual(['openai/gpt-transcribe', 'openai/whisper-1']);
   expect(await selectValues(page, 'cfg-text-model')).toContain('anthropic/claude-sonnet-4');
   expect(await selectValues(page, 'cfg-vision-model')).toContain('openai/gpt-4.1-mini');
   expect(await page.textContent('#or-catalog-status')).toMatch(/retained cached\/fallback choices/i);
@@ -1147,8 +1181,9 @@ test('OR-J: endpoint regression keeps STT dedicated and classification/vision on
   await dbWait(page, o => o.classificationStatus === 'done' || o.classificationError);
 
   expect(sttCalls).toHaveLength(1);
-  expect(chatCalls).toHaveLength(1); // photo identification only
-  for (const call of [...sttCalls, ...chatCalls]) {
+  const operationalChatCalls = chatCalls.filter(call => call.body.model !== '~openai/gpt-latest');
+  expect(operationalChatCalls).toHaveLength(1); // photo identification only
+  for (const call of [...sttCalls, ...operationalChatCalls]) {
     expect(call.host).toBe('openrouter.ai');
     expect(call.body.model).toMatch(/^[a-z0-9~_-]+\/[a-z0-9._-]+$/i); // OpenRouter-style ID
   }
@@ -1157,8 +1192,8 @@ test('OR-J: endpoint regression keeps STT dedicated and classification/vision on
   expect(sttCalls[0].body.input_audio.format).toBe('wav');
   expect(sttCalls[0].body.input_audio.data).toBeTruthy();
   expect(sttCalls[0].body).not.toHaveProperty('messages');
-  expect(chatCalls[0].path).toBe('/api/v1/chat/completions');
-  expect(chatCalls[0].body).toHaveProperty('messages');
+  expect(operationalChatCalls[0].path).toBe('/api/v1/chat/completions');
+  expect(operationalChatCalls[0].body).toHaveProperty('messages');
   expect(openAiCalls).toBe(0); // no direct OpenAI traffic whatsoever
   expect(errors).toEqual([]);
 });
@@ -1214,12 +1249,330 @@ test('OR-K: voice pipeline passes STT result.text into one chat classification r
   });
 
   expect(sttCalls).toHaveLength(1);
-  expect(chatCalls).toHaveLength(1);
+  const operationalChatCalls = chatCalls.filter(call => call.model !== '~openai/gpt-latest');
+  expect(operationalChatCalls).toHaveLength(1);
   expect(sttCalls[0]).not.toHaveProperty('messages');
-  expect(chatCalls[0].messages[0].content).toContain('Red-tailed hawk circling over the field.');
+  expect(operationalChatCalls[0].messages[0].content).toContain('Red-tailed hawk circling over the field.');
   expect(result.transcript).toBe('Red-tailed hawk circling over the field.');
   expect(result.subjectCommonName).toBe('Red-tailed Hawk');
   expect(result.category).toBe('bird');
   expect(result.submitStatus).toBe('ready');
+  expect(errors).toEqual([]);
+});
+
+/* ========================
+   Recommended models + dynamic recommendation engine
+   ======================== */
+
+test('REC-A/B/C/E: bootstrap recommendations lead each picker, are unique, and default fresh installs', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  seedSettings(page.context());
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => document.querySelector('#cfg-trans-model option[value="openai/gpt-transcribe"]'));
+
+  const expected = {
+    'cfg-trans-model': 'openai/gpt-transcribe',
+    'cfg-text-model': 'openai/gpt-5.6-luna',
+    'cfg-vision-model': 'google/gemini-3.7-flash'
+  };
+  for (const [id, modelId] of Object.entries(expected)) {
+    const info = await page.evaluate(({ id, modelId }) => {
+      const select = document.getElementById(id);
+      return {
+        firstGroup: select.children[0]?.label,
+        count: Array.from(select.options).filter(o => o.value === modelId).length,
+        label: Array.from(select.options).find(o => o.value === modelId)?.textContent,
+        selected: select.value
+      };
+    }, { id, modelId });
+    expect(info.firstGroup).toBe('★ Recommended for WFR');
+    expect(info.count).toBe(1);
+    expect(info.label).toMatch(/^★ .+ — Recommended$/);
+    expect(info.selected).toBe(modelId);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('REC-D/F: existing choices survive recommendations until one-click adoption, then persist', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  seedSettings(page.context());
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.click('nav#tabs button[data-tab="admin"]');
+  await dbWaitQuiet(page);
+
+  await page.selectOption('#cfg-trans-model', 'openai/whisper-1');
+  await page.selectOption('#cfg-text-model', 'anthropic/claude-sonnet-4');
+  await page.selectOption('#cfg-vision-model', 'openai/gpt-4.1-mini');
+
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/whisper-1');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4');
+  expect(await selectedValue(page, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini');
+
+  await page.click('#use-recommended-models');
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/gpt-transcribe');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('openai/gpt-5.6-luna');
+  expect(await selectedValue(page, 'cfg-vision-model')).toBe('google/gemini-3.7-flash');
+  await expect(page.locator('#recommendation-status')).toHaveText('Recommended WFR models selected');
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/gpt-transcribe');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('openai/gpt-5.6-luna');
+  expect(await selectedValue(page, 'cfg-vision-model')).toBe('google/gemini-3.7-flash');
+  expect(errors).toEqual([]);
+});
+
+test('REC-G: unavailable bootstrap role creates no invalid option and preserves that role', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const general = catalogPayload();
+  general.data = general.data.filter(m => m.id !== 'google/gemini-3.7-flash');
+  await mockCatalog(page, general);
+  seedSettings(page.context(), {
+    transModel: 'openai/whisper-1', textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini'
+  });
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.click('nav#tabs button[data-tab="admin"]');
+  await page.waitForFunction(() => document.getElementById('cfg-text-model').options.length > 5);
+
+  expect(await selectValues(page, 'cfg-vision-model')).not.toContain('google/gemini-3.7-flash');
+  await expect(page.locator('#rec-vision-model')).toHaveText('Recommended model currently unavailable');
+  await page.click('#use-recommended-models');
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/gpt-transcribe');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('openai/gpt-5.6-luna');
+  expect(await selectedValue(page, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini');
+  await expect(page.locator('#recommendation-status')).toContainText('Photo ID');
+  expect(errors).toEqual([]);
+});
+
+test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing selections until adoption', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const general = catalogPayload();
+  general.data.push({
+    id: 'example/new-better-model', name: 'Example: New Better Model', created: 1787684400,
+    context_length: 250000,
+    architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+    pricing: { prompt: '0.00000005', completion: '0.0000002' }
+  });
+  await mockCatalog(page, general);
+  const calls = await mockRecommendation(page, recommendationResult({
+    classification: {
+      model_id: 'example/new-better-model', reason: 'New catalog model is ideal for compact JSON extraction.', confidence: 0.97,
+      alternatives: ['openai/gpt-5.6-luna']
+    }
+  }));
+  seedSettings(page.context(), {
+    transModel: 'openai/whisper-1', textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini'
+  });
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => document.querySelector('#cfg-text-model optgroup:first-child option')?.value === 'example/new-better-model');
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0].model).toBe('~openai/gpt-latest');
+  const prompt = calls[0].messages.map(m => m.content).join('\n');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.25.4');
+  expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
+  expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
+  expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);
+  expect(prompt).toContain('example/new-better-model');
+  expect(prompt).not.toContain('openai/text-embedding-3-large');
+  expect(calls[0].response_format.type).toBe('json_schema');
+
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4');
+  await expect(page.locator('#rec-classification-model')).toHaveText('New Better Model');
+  await expect(page.locator('#rec-classification-reason')).toContainText('compact JSON extraction');
+
+  await page.click('nav#tabs button[data-tab="admin"]');
+  await page.click('#use-recommended-models');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('example/new-better-model');
+  expect(errors).toEqual([]);
+});
+
+test('REC-T/U: hallucinated and wrong-capability recommendations are rejected per role', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  await mockRecommendation(page, recommendationResult({
+    transcription: { model_id: 'google/gemini-2.5-flash', reason: 'Wrong endpoint type.', confidence: 0.9, alternatives: [] },
+    classification: { model_id: 'fakevendor/model-that-does-not-exist', reason: 'Hallucinated.', confidence: 0.9, alternatives: [] },
+    vision: { model_id: 'openai/gpt-4.1', reason: 'Text only.', confidence: 0.9, alternatives: [] }
+  }));
+  seedSettings(page.context(), {
+    transModel: 'openai/whisper-1', textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini'
+  });
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => document.querySelector('#cfg-text-model optgroup:first-child option'));
+
+  expect(await selectValues(page, 'cfg-text-model')).not.toContain('fakevendor/model-that-does-not-exist');
+  expect(await page.locator('#cfg-trans-model optgroup:first-child option').getAttribute('value')).toBe('openai/gpt-transcribe');
+  expect(await page.locator('#cfg-text-model optgroup:first-child option').getAttribute('value')).toBe('openai/gpt-5.6-luna');
+  expect(await page.locator('#cfg-vision-model optgroup:first-child option').getAttribute('value')).toBe('google/gemini-3.7-flash');
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/whisper-1');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4');
+  expect(await selectedValue(page, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini');
+  expect(errors).toEqual([]);
+});
+
+test('REC-V/W/X: fresh cache avoids inference; manual refresh and catalog fingerprint changes re-evaluate', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  let general = catalogPayload();
+  await page.route(OR_MODELS_URL, route => {
+    const isTranscription = new URL(route.request().url()).searchParams.get('output_modalities') === 'transcription';
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(isTranscription ? transcriptionCatalogPayload() : general) });
+  });
+  const calls = await mockRecommendation(page);
+  seedSettings(page.context());
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => document.getElementById('recommendation-freshness').textContent.includes('GPT Latest'));
+  expect(calls).toHaveLength(1);
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(250);
+  expect(calls).toHaveLength(1);
+
+  await page.click('nav#tabs button[data-tab="admin"]');
+  await page.click('#refresh-models');
+  await page.waitForFunction(() => document.getElementById('refresh-models').disabled === false);
+  expect(calls).toHaveLength(2);
+
+  general = { data: [...general.data, {
+    id: 'example/catalog-newcomer', name: 'Example: Catalog Newcomer', created: 1787684500,
+    architecture: { input_modalities: ['text'], output_modalities: ['text'] }, pricing: { prompt: '0.0000001', completion: '0.0000002' }
+  }] };
+  await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    await T.refreshModelCatalog({ silent: true });
+    await T.refreshRecommendations();
+  });
+  expect(calls).toHaveLength(3);
+  expect(errors).toEqual([]);
+});
+
+test('REC-Y: recommendation failure is non-destructive after catalog refresh', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  await mockRecommendation(page, recommendationResult(), { fail: true });
+  seedSettings(page.context(), { textModel: 'anthropic/claude-sonnet-4' });
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.click('nav#tabs button[data-tab="admin"]');
+  await page.click('#refresh-models');
+  await page.waitForFunction(() => document.getElementById('refresh-models').disabled === false);
+
+  await expect(page.locator('#or-catalog-status')).toContainText('recommendation update failed');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4');
+  expect((await selectValues(page, 'cfg-text-model')).length).toBeGreaterThan(5);
+  expect(errors).toEqual([]);
+});
+
+/* ========================
+   Appearance, contrast, smoke, and mobile layout
+   ======================== */
+
+test('THEME-H/I/J: dark defaults, header toggle persists light and dark', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  expect(await page.getAttribute('html', 'data-theme')).toBe('dark');
+  await expect(page.locator('#theme-toggle')).toHaveAttribute('aria-label', 'Switch to light theme');
+
+  await page.click('#theme-toggle');
+  expect(await page.getAttribute('html', 'data-theme')).toBe('light');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  expect(await page.getAttribute('html', 'data-theme')).toBe('light');
+
+  await page.click('#theme-toggle');
+  expect(await page.getAttribute('html', 'data-theme')).toBe('dark');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  expect(await page.getAttribute('html', 'data-theme')).toBe('dark');
+  expect(errors).toEqual([]);
+});
+
+test('THEME-K/L: both themes meet contrast targets and retain surface/control hierarchy', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.click('nav#tabs button[data-tab="admin"]');
+
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => window.__WFR_TEST__.applyTheme(theme), theme);
+    const audit = await page.evaluate(() => {
+      const rgb = value => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+      const lum = value => {
+        const c = rgb(value).map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+      };
+      const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+      const body = getComputedStyle(document.body);
+      const card = getComputedStyle(document.querySelector('.card'));
+      const muted = getComputedStyle(document.querySelector('#or-catalog-status'));
+      const primary = getComputedStyle(document.querySelector('#test-llm'));
+      const panel = getComputedStyle(document.querySelector('.recommendation-panel'));
+      const input = getComputedStyle(document.querySelector('#cfg-or-key'));
+      return {
+        body: ratio(body.color, body.backgroundColor),
+        card: ratio(card.color, card.backgroundColor),
+        muted: ratio(muted.color, card.backgroundColor),
+        primary: ratio(primary.color, primary.backgroundColor),
+        pageBg: body.backgroundColor, cardBg: card.backgroundColor, panelBg: panel.backgroundColor,
+        inputBg: input.backgroundColor, inputBorder: input.borderTopColor,
+        inputBorderContrast: ratio(input.borderTopColor, input.backgroundColor)
+      };
+    });
+    expect(audit.body, `${theme} body contrast`).toBeGreaterThanOrEqual(4.5);
+    expect(audit.card, `${theme} card contrast`).toBeGreaterThanOrEqual(4.5);
+    expect(audit.muted, `${theme} muted contrast`).toBeGreaterThanOrEqual(4.5);
+    expect(audit.primary, `${theme} primary contrast`).toBeGreaterThanOrEqual(4.5);
+    expect(audit.pageBg).not.toBe(audit.cardBg);
+    expect(audit.cardBg).not.toBe(audit.panelBg);
+    expect(audit.inputBg).not.toBe(audit.inputBorder);
+    expect(audit.inputBorderContrast).toBeGreaterThanOrEqual(3);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('THEME-M/N: core tabs smoke in both themes and 320/375/430px have no body overflow', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => window.__WFR_TEST__.applyTheme(theme), theme);
+    for (const tab of ['capture', 'review', 'admin', 'history', 'map']) {
+      await page.evaluate(tab => document.querySelector(`nav#tabs button[data-tab="${tab}"]`).click(), tab);
+      await page.waitForTimeout(40);
+      await expect(page.locator(`#tab-${tab}`)).toHaveClass(/active/);
+    }
+    for (const width of [320, 375, 430]) {
+      await page.setViewportSize({ width, height: 820 });
+      for (const tab of ['capture', 'review', 'admin']) {
+        await page.evaluate(tab => document.querySelector(`nav#tabs button[data-tab="${tab}"]`).click(), tab);
+        const dimensions = await page.evaluate(() => ({
+          scroll: document.documentElement.scrollWidth,
+          client: document.documentElement.clientWidth,
+          offenders: Array.from(document.querySelectorAll('body *')).map(el => {
+            const rect = el.getBoundingClientRect();
+            return { tag: el.tagName, id: el.id, cls: el.className, left: Math.round(rect.left), right: Math.round(rect.right), width: Math.round(rect.width) };
+          }).filter(x => x.right > document.documentElement.clientWidth + 1 || x.left < -1).slice(0, 8)
+        }));
+        expect(dimensions.scroll, `${theme} ${width}px ${tab}: ${JSON.stringify(dimensions.offenders)}`).toBeLessThanOrEqual(dimensions.client);
+      }
+    }
+  }
   expect(errors).toEqual([]);
 });
