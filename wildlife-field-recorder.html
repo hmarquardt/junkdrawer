@@ -564,9 +564,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.01.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.1
 </footer>
 </div>
 
@@ -574,7 +574,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.01.2';
+const APP_VERSION = '2026.08.25.1';
 
 /* ========================
    DB (Dexie)
@@ -602,7 +602,8 @@ const defaultSettings = {
   llmKey: '',
   transModel: 'whisper-1',
   textModel: 'gpt-4.1-mini',
-  visionModel: 'openai/gpt-4.1-mini',
+  // Empty = resolved per endpoint via resolveVisionModel() (OpenRouter vs direct OpenAI)
+  visionModel: '',
   sameKey: true,
   maxAudioSeconds: 120,
   autoStop: true,
@@ -931,7 +932,6 @@ async function onCaptureStop(sessionId) {
   if (session.stream) session.stream.getTracks().forEach(t => t.stop());
   if (session.discarding) {
     session.chunks = [];
-    if (session.photo && session.photo.url) URL.revokeObjectURL(session.photo.url);
     $('capture-status').textContent = 'Discarded';
     logInfo('Capture discarded');
     if (activeCapture && activeCapture.id === session.id) {
@@ -1402,16 +1402,94 @@ function wallEpochMinutes(value) {
   return parts ? Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) / 60000 : NaN;
 }
 
+function deviceTimezoneName() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch(e) { return null; }
+}
+function deviceTimezoneAbbreviation(ms) {
+  try {
+    const part = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(new Date(ms)).find(p => p.type === 'timeZoneName');
+    return part ? part.value : null;
+  } catch(e) { return null; }
+}
+/** Wall-clock datetime-local value to show in a review form: prefer the known
+ *  EXIF/user provenance wall time; fall back to offset arithmetic only for
+ *  legacy records that never stored one. */
+function observationWallInputValue(obs) {
+  const tp = obs.timeProvenance || {};
+  if (tp.wallIso) return tp.wallIso.slice(0, 16);
+  if (obs.createdAt && isFinite(obs.createdAt)) {
+    const offSec = typeof tp.utcOffsetSeconds === 'number' && isFinite(tp.utcOffsetSeconds)
+      ? tp.utcOffsetSeconds
+      : -new Date(obs.createdAt).getTimezoneOffset() * 60;
+    return new Date(obs.createdAt + offSec * 1000).toISOString().slice(0, 16);
+  }
+  return '';
+}
+/** Mark weather stale after an observation-time edit so it reruns against the
+ *  new timestamp; old weather data is dropped rather than silently retained. */
+function markWeatherStaleForTimeEdit(obs) {
+  const en = obs.photoEnrichment || (obs.photoEnrichment = {});
+  if (en.weather === 'done' || en.weather === 'running' || en.weather === 'error') {
+    en.weather = obs.latitude != null ? 'pending' : 'missing_location';
+    obs.weatherRaw = null;
+    obs.weatherStatus = obs.latitude != null ? 'stale' : 'missing-location';
+  } else if ((en.weather === 'missing_timestamp' || en.weather === 'unavailable') && obs.latitude != null) {
+    en.weather = 'pending';
+    obs.weatherRaw = null;
+    obs.weatherStatus = 'stale';
+  }
+}
+/** Canonical operation for adopting a new observation wall time.
+ *  Rebuilds complete timeProvenance (wallIso/localIso/utcIso/offset/timezone),
+ *  recomputes createdAt and startedAt, and invalidates dependent weather.
+ *  Returns true when the time was applied. */
+function applyObservationTime(obs, wallValue) {
+  if (!wallValue) return false;
+  const parts = captureWallParts(wallValue);
+  if (!parts) return false;
+  const wall = wallIso(parts);
+  if (!wall) return false;
+  const prev = obs.timeProvenance || {};
+  const prevOffset = typeof prev.utcOffsetSeconds === 'number' && isFinite(prev.utcOffsetSeconds) ? prev.utcOffsetSeconds : null;
+  // Keep the previously established offset for this observation when one exists
+  // (EXIF offset or a weather-resolved zone); otherwise assume the device zone.
+  const offsetSeconds = prevOffset !== null ? prevOffset :
+    -new Date(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second).getTimezoneOffset() * 60;
+  const utcMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - offsetSeconds * 1000;
+  const prevSource = prev.source || null;
+  obs.timeProvenance = {
+    source: 'user_provided',
+    editedFrom: prevSource && prevSource !== 'unknown' ? prevSource : null,
+    editedAt: Date.now(),
+    raw: wall,
+    wallIso: wall,
+    localIso: wall + (offsetText(offsetSeconds) || ''),
+    utcIso: new Date(utcMs).toISOString(),
+    utcOffsetSeconds: offsetSeconds,
+    timezone: prev.timezone || deviceTimezoneName(),
+    timezoneAbbreviation: prev.timezoneAbbreviation || deviceTimezoneAbbreviation(utcMs),
+    timezoneConfidence: prevOffset !== null ? (prev.timezoneConfidence === 'high' ? 'high' : 'medium') : 'medium',
+    timezoneInferredFromDevice: prevOffset === null
+  };
+  obs.createdAt = utcMs;
+  obs.startedAt = utcMs;
+  markWeatherStaleForTimeEdit(obs);
+  return true;
+}
+
 /** Normalize raw exifr output into a compact metadata object + GPS. */
 function normalizeExif(raw) {
   const exif = {};
   let gps = null;
   let gpsSource = 'none';
   if (!raw || typeof raw !== 'object') return { exif, gps, gpsSource };
-  if (raw.DateTimeOriginal) exif.DateTimeOriginal = String(raw.DateTimeOriginal);
-  if (raw.CreateDate) exif.CreateDate = String(raw.CreateDate);
-  if (raw.ModifyDate) exif.ModifyDate = String(raw.ModifyDate);
-  if (raw.OffsetTime) exif.OffsetTime = String(raw.OffsetTime);
+  // Keep timestamp/offset values in their original type (EXIF wall-clock strings,
+  // or Date instances if value revival is enabled) so parsing helpers see real types.
+  for (const key of ['DateTimeOriginal', 'CreateDate', 'ModifyDate', 'OffsetTime', 'OffsetTimeOriginal', 'OffsetTimeDigitized']) {
+    if (raw[key] !== undefined && raw[key] !== null) {
+      exif[key] = raw[key] instanceof Date ? new Date(raw[key].getTime()) : raw[key];
+    }
+  }
   if (raw.Make) exif.Make = String(raw.Make);
   if (raw.Model) exif.Model = String(raw.Model);
   if (raw.LensMake) exif.LensMake = String(raw.LensMake);
@@ -1457,26 +1535,40 @@ function normalizeExif(raw) {
   return { exif, gps, gpsSource };
 }
 
-/** Build a capture-time object from normalized EXIF (wall time + optional offset). */
+/** Each capture-time candidate pairs with the EXIF offset tag that describes it. */
+const CAPTURE_TIME_SOURCES = [
+  ['DateTimeOriginal', 'OffsetTimeOriginal'],
+  ['CreateDate', 'OffsetTimeDigitized'],
+  ['ModifyDate', 'OffsetTime']
+];
+
+/** Build a capture-time object from normalized EXIF (wall time + correctly paired offset). */
 function normalizeCaptureTime(exif) {
   if (!exif) return null;
-  const candidates = [
-    ['DateTimeOriginal', exif.DateTimeOriginal],
-    ['CreateDate', exif.CreateDate],
-    ['ModifyDate', exif.ModifyDate]
-  ];
-  const selected = candidates.find(item => !!item[1]);
+  const selected = CAPTURE_TIME_SOURCES.find(item => !!exif[item[0]]);
   if (!selected) return null;
-  const parts = captureWallParts(selected[1]);
+  const [tsField, pairedOffsetField] = selected;
+  const parts = captureWallParts(exif[tsField]);
   if (!parts) return null;
   const wall = wallIso(parts);
-  const explicitOffset = parseOffsetSeconds(exif.OffsetTime);
+  const pairedOffset = parseOffsetSeconds(exif[pairedOffsetField]);
+  const explicitOffset = pairedOffset !== null ? pairedOffset : parseOffsetSeconds(exif.OffsetTime);
+  const offsetSource = pairedOffset !== null ? pairedOffsetField : (explicitOffset !== null ? 'OffsetTime' : null);
   return {
-    source: selected[0], raw: String(selected[1]), wallIso: wall,
+    source: tsField,
+    raw: exif[tsField] instanceof Date ? exif[tsField].toISOString() : String(exif[tsField]),
+    wallIso: wall,
     localIso: explicitOffset === null ? wall : wall + offsetText(explicitOffset),
     utcIso: explicitOffset === null ? null : utcIsoFromWall(wall, explicitOffset),
-    timezone: null, timezoneAbbreviation: explicitOffset === null ? null : 'UTC' + offsetText(explicitOffset),
+    timezone: null,
+    timezoneAbbreviation: explicitOffset === null ? null : 'UTC' + offsetText(explicitOffset),
     utcOffsetSeconds: explicitOffset,
+    offsetSource,
+    offsetsSeen: {
+      OffsetTimeOriginal: parseOffsetSeconds(exif.OffsetTimeOriginal),
+      OffsetTimeDigitized: parseOffsetSeconds(exif.OffsetTimeDigitized),
+      OffsetTime: parseOffsetSeconds(exif.OffsetTime)
+    },
     timezoneInferredFromGps: explicitOffset === null,
     timezoneConfidence: explicitOffset === null ? 'low' : 'high'
   };
@@ -1494,7 +1586,7 @@ async function fetchJson(url, timeoutMs = 12000) {
 
 function compassDirection(degrees) {
   if (degrees === null || degrees === undefined || isNaN(Number(degrees))) return null;
-  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','SSW','SW','WSW','W','WNW','NW','NNW'];
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
   return dirs[Math.round(((Number(degrees) % 360) + 360) % 360 / 22.5) % 16];
 }
 
@@ -1547,13 +1639,21 @@ function applyWeatherTimezone(captureTime, data) {
  * weatherRaw.current shape so all existing display code keeps working.
  */
 async function enrichWeatherAt(lat, lng, captureTime) {
-  if (!lat || !lng || !captureTime || !captureTime.wallIso) {
-    return { status: 'unavailable', reason: 'Location or timestamp missing' };
+  if (typeof lat !== 'number' || !isFinite(lat) || lat < -90 || lat > 90 ||
+      typeof lng !== 'number' || !isFinite(lng) || lng < -180 || lng > 180) {
+    return { status: 'unavailable', reason: 'Location missing or invalid' };
   }
-  const dateKey = dateKeyFromWall(captureTime.wallIso);
-  const captureEpochMin = wallEpochMinutes(captureTime.wallIso) * 60000;
+  if (!captureTime || !captureTime.wallIso) {
+    return { status: 'unavailable', reason: 'Timestamp missing' };
+  }
+  const captureMinutes = wallEpochMinutes(captureTime.wallIso);
+  if (!isFinite(captureMinutes)) {
+    return { status: 'unavailable', reason: 'Timestamp invalid' };
+  }
+  const captureEpochMin = captureMinutes * 60000;
   const ageDays = (Date.now() - captureEpochMin) / 86400000;
   const order = ageDays >= -1 && ageDays <= 7 ? ['recent', 'archive'] : ['archive'];
+  const dateKey = dateKeyFromWall(captureTime.wallIso);
   const errors = [];
   for (const kind of order) {
     try {
@@ -1562,8 +1662,8 @@ async function enrichWeatherAt(lat, lng, captureTime) {
       applyWeatherTimezone(captureTime, data);
       let best = -1, bestDiff = Infinity;
       data.hourly.time.forEach((time, index) => {
-        const diff = Math.abs(wallEpochMinutes(time) - captureTime.wallIso);
-        if (diff < bestDiff) { best = index; bestDiff = diff; }
+        const diff = Math.abs(wallEpochMinutes(time) - captureMinutes);
+        if (isFinite(diff) && diff < bestDiff) { best = index; bestDiff = diff; }
       });
       if (best < 0) throw new Error('No matching hour');
       const i = best;
@@ -1576,7 +1676,7 @@ async function enrichWeatherAt(lat, lng, captureTime) {
         apiUrl: weatherUrlFor(kind, lat, lng, dateKey),
         fetchedAt: Date.now(),
         sourceTimeLocal: data.hourly.time[i],
-        differenceMinutes: Math.round(wallEpochMinutes(data.hourly.time[i]) - captureTime.wallIso),
+        differenceMinutes: Math.round(wallEpochMinutes(data.hourly.time[i]) - captureMinutes),
         strategy: kind === 'recent' ? 'recent-data fallback' : 'historical archive',
         confidence,
         current,
@@ -1595,17 +1695,37 @@ async function enrichWeatherAt(lat, lng, captureTime) {
 }
 
 /* ---- Vision identification via existing OpenRouter-compatible LLM settings ---- */
+/** Resolve which vision model slug fits the configured endpoint.
+ *  OpenRouter-style bases use vendor-prefixed slugs ("openai/gpt-4.1-mini");
+ *  direct OpenAI-compatible bases use bare names ("gpt-4.1-mini").
+ *  Explicit user-entered model names are preserved exactly. */
+function isOpenRouterBase() {
+  return settings.llmProvider === 'openrouter' || /openrouter\.ai/i.test(settings.llmBase || '');
+}
+function resolveVisionModel() {
+  const explicit = (settings.visionModel || '').trim();
+  if (!explicit) return isOpenRouterBase() ? 'openai/gpt-4.1-mini' : 'gpt-4.1-mini';
+  // The historical built-in default was an OpenRouter-flavored slug; translate it
+  // only when it is still exactly that default AND the endpoint is not OpenRouter.
+  if (!isOpenRouterBase() && explicit === 'openai/gpt-4.1-mini') return 'gpt-4.1-mini';
+  return explicit;
+}
+
 function categoryFromSubjectType(subjectType) {
+  const key = String(subjectType || '').toLowerCase();
+  if (key === 'unknown') return 'unknown';
   const map = { bird:'bird', mammal:'mammal', reptile:'reptile', amphibian:'amphibian', fish:'fish',
     insect:'insect', arachnid:'arachnid', plant:'plant', fungus:'fungus' };
-  return map[String(subjectType || '').toLowerCase()] || 'other';
+  return map[key] || 'other';
 }
 
 async function classifyPhotoObservation(obs, imageDataUrl) {
   const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
   const key = settings.llmKey;
   if (!key) throw new Error('No LLM key configured (see Setup)');
-  const model = settings.visionModel || settings.textModel || 'openai/gpt-4.1-mini';
+  const model = resolveVisionModel();
+  // The vision API requires a complete data URL, not a raw base64 payload.
+  const imageUrl = /^data:[^,;]+;base64,/.test(imageDataUrl) ? imageDataUrl : `data:image/jpeg;base64,${imageDataUrl}`;
   const d = obs.createdAt ? new Date(obs.createdAt) : null;
   const region = obs.geocode ? [obs.geocode.city, obs.geocode.county, obs.geocode.state, obs.geocode.country].filter(Boolean).join(', ') : null;
   const seasonNames = ['Winter','Winter','Spring','Spring','Spring','Summer','Summer','Summer','Autumn','Autumn','Autumn','Winter'];
@@ -1657,7 +1777,7 @@ Return ONLY valid JSON matching exactly this schema:
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: imageDataUrl } }
+          { type: 'image_url', image_url: { url: imageUrl } }
         ]
       }]
     })
@@ -1672,24 +1792,44 @@ Return ONLY valid JSON matching exactly this schema:
 }
 
 /* ---- Taxonomic normalization via GBIF species match ---- */
+/** Match a scientific name against GBIF. The top-level match is authoritative
+ *  whenever matchType indicates a usable result; alternatives are informational.
+ *  Ambiguous non-exact matches with alternatives are reported as such rather than
+ *  silently substituting the first alternative for the AI identification. */
 async function normalizeTaxonomy(scientificName) {
   if (!scientificName) return { status: 'unavailable', reason: 'No scientific name' };
   try {
     const data = await fetchJson('https://api.gbif.org/v1/species/match?name=' + encodeURIComponent(scientificName) + '&strict=false&verbose=true');
     if (!data || data.matchType === 'NONE') {
-      return { status: 'unavailable', reason: 'No GBIF match for "' + scientificName + '"' };
+      return { status: 'unavailable', reason: 'No GBIF match for "' + scientificName + '"', queriedName: scientificName };
     }
-    const pick = (data.alternatives && data.alternatives.length) ? data.alternatives[0] : data;
+    const exactish = data.matchType === 'EXACT' || data.matchType === 'HIGH_RANK_EXACT';
+    const alternatives = (Array.isArray(data.alternatives) ? data.alternatives : [])
+      .map(a => ({ scientificName: a.scientificName || null, kingdom: a.kingdom || null, family: a.family || null, genus: a.genus || null, species: a.species || null }));
+    if (!exactish && alternatives.length > 0) {
+      // Genuinely ambiguous: keep the AI identification, do not pick an alternative.
+      return {
+        status: 'ambiguous',
+        source: 'GBIF',
+        matchType: data.matchType,
+        queriedName: scientificName,
+        usageKey: data.usageKey || null,
+        scientificName: data.scientificName || scientificName,
+        alternatives: alternatives.slice(0, 5),
+        fetchedAt: Date.now()
+      };
+    }
     return {
       status: 'ok',
       source: 'GBIF',
-      usageKey: pick.usageKey || data.usageKey || null,
+      usageKey: data.usageKey || null,
       matchType: data.matchType,
       confidence: data.confidence ?? null,
-      kingdom: pick.kingdom || null, phylum: pick.phylum || null, class: pick.class || null,
-      order: pick.order || null, family: pick.family || null, genus: pick.genus || null,
-      species: pick.species || null,
-      scientificName: pick.scientificName || scientificName,
+      kingdom: data.kingdom || null, phylum: data.phylum || null, class: data.class || null,
+      order: data.order || null, family: data.family || null, genus: data.genus || null,
+      species: data.species || null,
+      scientificName: data.scientificName || scientificName,
+      alternativeNames: alternatives.map(a => a.scientificName).filter(Boolean),
       fetchedAt: Date.now()
     };
   } catch(e) {
@@ -1708,7 +1848,10 @@ function parseExifFromFile(file) {
       resolve({ status: 'lib-missing', error: 'EXIF library failed to load', exif: null, gps: null, captureTime: null });
       return;
     }
-    window.exifr.parse(file, { gps: true, exif: true, tiff: true })
+    // reviveValues:false keeps EXIF timestamps as their original wall-clock strings
+    // (e.g. "2026:05:14 17:42:00") instead of Date objects already reinterpreted
+    // through the browser timezone. Helpers still accept either form.
+    window.exifr.parse(file, { gps: true, exif: true, tiff: true, reviveValues: false })
       .then(raw => {
         if (!raw || Object.keys(raw).length === 0) {
           resolve({ status: 'no-exif', exif: null, gps: null, captureTime: null });
@@ -1859,6 +2002,9 @@ async function importPhotoFile(file) {
       utcIso: parsed.captureTime.utcIso,
       timezoneConfidence: parsed.captureTime.timezoneConfidence,
       utcOffsetSeconds: parsed.captureTime.utcOffsetSeconds,
+      offsetSource: parsed.captureTime.offsetSource,
+      offsetsSeen: parsed.captureTime.offsetsSeen,
+      timezone: null,
       timezoneAbbreviation: parsed.captureTime.timezoneAbbreviation
     } : { source: 'unknown' },
     exif: parsed.exif || null,
@@ -1917,129 +2063,186 @@ async function saveObs(obs) {
   await db.observations.put(obs);
 }
 
-async function runPhotoEnrichment(localId) {
-  const obs = await db.observations.get(localId);
-  if (!obs) return;
-  const en = obs.photoEnrichment || {};
+/* ---- Enrichment stages ----
+   Each stage is independently restartable: it re-reads the observation,
+   checks its own state gate, and exits early when not applicable.
+   Dependencies: geocode/weather need location+time; identification needs a
+   photo blob + key; taxonomy needs a scientific-name candidate. */
+const enrichmentQueues = new Map();
 
-  // Reverse geocode
-  if (en.location === 'ready' && obs.latitude != null && en.geocode !== 'done') {
-    en.geocode = 'running';
-    await saveObs({ ...obs, photoEnrichment: en });
-    const geo = await reverseGeocodeCoords(obs.latitude, obs.longitude);
-    const cur = await db.observations.get(localId);
-    if (!cur) return;
-    cur.geocode = geo;
-    cur.photoEnrichment.geocode = geo ? 'done' : 'error';
-    await saveObs(cur);
-  }
+function runPhotoEnrichment(localId) {
+  // Serialize runs per observation so overlapping retries cannot double-fetch.
+  const prev = enrichmentQueues.get(localId) || Promise.resolve();
+  const next = prev.catch(() => {}).then(() => runPhotoEnrichmentStages(localId));
+  const cleared = next.catch(() => {}).then(() => {
+    if (enrichmentQueues.get(localId) === cleared) enrichmentQueues.delete(localId);
+  });
+  enrichmentQueues.set(localId, next);
+  return next;
+}
 
-  // Weather at EXIF time + place
-  const cur1 = await db.observations.get(localId);
-  if (cur1 && (cur1.photoEnrichment.weather === 'pending' || cur1.photoEnrichment.weather === 'error')) {
-    if (cur1.latitude == null || (cur1.timeProvenance && cur1.timeProvenance.source === 'unknown')) {
-      cur1.photoEnrichment.weather = cur1.latitude == null ? 'missing_location' : 'missing_timestamp';
-      cur1.weatherStatus = cur1.latitude == null ? 'missing-location' : 'missing-timestamp';
-      await saveObs(cur1);
-    } else {
-      cur1.photoEnrichment.weather = 'running';
-      cur1.weatherStatus = 'pending';
-      await saveObs(cur1);
-      renderImportReviewStatuses(cur1);
-      const tp = cur1.timeProvenance || {};
-      const ct = { wallIso: tp.wallIso, utcOffsetSeconds: tp.utcOffsetSeconds ?? null, timezoneConfidence: tp.timezoneConfidence || 'low', timezone: null, timezoneAbbreviation: null };
-      const result = await enrichWeatherAt(cur1.latitude, cur1.longitude, ct);
-      const cur2 = await db.observations.get(localId);
-      if (!cur2) return;
-      if (result.status === 'ok') {
-        cur2.weatherRaw = result;
-        cur2.weatherStatus = 'ok';
-        cur2.weatherApiUrl = result.apiUrl;
-        cur2.weatherFetchedAt = result.fetchedAt;
-        cur2.weatherSubmitError = null;
-        cur2.photoEnrichment.weather = 'done';
-        cur2.timeProvenance = cur2.timeProvenance || {};
-        cur2.timeProvenance.timezone = ct.timezone || cur2.timeProvenance.timezone;
-        cur2.timeProvenance.timezoneAbbreviation = ct.timezoneAbbreviation || cur2.timeProvenance.timezoneAbbreviation;
-        if (cur2.timeProvenance.utcOffsetSeconds == null) {
-          cur2.timeProvenance.utcOffsetSeconds = ct.utcOffsetSeconds;
-          cur2.timeProvenance.timezoneConfidence = ct.timezoneConfidence;
-        }
-      } else {
-        cur2.weatherStatus = result.status;
-        cur2.weatherSubmitError = result.error || result.reason || null;
-        cur2.photoEnrichment.weather = result.status === 'error' ? 'error' : 'unavailable';
-      }
-      await saveObs(cur2);
-      renderImportReviewStatuses(cur2);
-    }
-  }
-
-  // AI vision identification (uses the resized derivative)
-  const cur3 = await db.observations.get(localId);
-  if (cur3 && (cur3.photoEnrichment.identification === 'pending' || cur3.photoEnrichment.identification === 'error')) {
-    if (!settings.llmKey) {
-      cur3.photoEnrichment.identification = 'unavailable';
-      await saveObs(cur3);
-      renderImportReviewStatuses(cur3);
-    } else {
-      cur3.photoEnrichment.identification = 'running';
-      cur3.classificationError = null;
-      await saveObs(cur3);
-      renderImportReviewStatuses(cur3);
-      try {
-        const rec = await db.audioBlobs.get((cur3.photoLocalIds || [])[0]);
-        if (!rec) throw new Error('Photo blob missing');
-        const dataUrl = await blobToBase64(rec.blob);
-        const cls = await classifyPhotoObservation(cur3, dataUrl);
-        const p = cls.parsed;
-        const cur4 = await db.observations.get(localId);
-        if (!cur4) return;
-        cur4.subjectCommonName = p.common_name || null;
-        cur4.subjectScientificName = p.scientific_name || null;
-        cur4.subjectConfidence = typeof p.confidence === 'number' ? p.confidence : null;
-        cur4.category = categoryFromSubjectType(p.subject_type);
-        cur4.behavior = p.behavior || null;
-        cur4.count = p.count != null ? p.count : null;
-        cur4.summary = Array.isArray(p.visible_traits) && p.visible_traits.length ? 'Traits: ' + p.visible_traits.join('; ') : null;
-        cur4.llmRaw = cls.rawContent;
-        cur4.aiIdentification = {
-          model: cls.model, classifiedAt: Date.now(),
-          subjectType: p.subject_type || null, taxonomicRank: p.taxonomic_rank || null,
-          alternatives: Array.isArray(p.alternatives) ? p.alternatives.slice(0, 3) : [],
-          visibleTraits: Array.isArray(p.visible_traits) ? p.visible_traits : [],
-          lifeStage: p.life_stage || null, sex: p.sex || null, notes: p.notes || null
-        };
-        cur4.classificationStatus = 'done';
-        cur4.classificationError = null;
-        cur4.photoEnrichment.identification = 'done';
-        if (cur4.submitStatus === 'local') cur4.submitStatus = 'ready';
-        await saveObs(cur4);
-        renderImportReviewStatuses(cur4);
-        // Taxonomy normalization follows identification
-        cur4.photoEnrichment.taxonomy = 'running';
-        await saveObs(cur4);
-        const tax = await normalizeTaxonomy(p.scientific_name);
-        const cur5 = await db.observations.get(localId);
-        if (!cur5) return;
-        cur5.taxonomy = tax;
-        cur5.photoEnrichment.taxonomy = tax.status === 'ok' ? 'done' : (tax.status === 'unavailable' ? 'unavailable' : 'error');
-        await saveObs(cur5);
-        renderImportReviewStatuses(cur5);
-      } catch(e) {
-        logWarn('Photo identification failed: ' + e.message);
-        const cur4 = await db.observations.get(localId);
-        if (!cur4) return;
-        cur4.classificationStatus = 'error';
-        cur4.classificationError = e.message;
-        cur4.photoEnrichment.identification = 'error';
-        cur4.photoEnrichment.taxonomy = 'pending';
-        await saveObs(cur4);
-        renderImportReviewStatuses(cur4);
-      }
-    }
-  }
+async function runPhotoEnrichmentStages(localId) {
+  await runGeocodeStage(localId);
+  await runWeatherStage(localId);
+  await runIdentificationStage(localId);
+  await runTaxonomyStage(localId);
   refreshStorageStats().catch(() => {});
+}
+
+/** Apply mutations to the CURRENT stored observation and persist.
+ *  Enrichment stages must never re-put a snapshot held across an await:
+ *  the user may have saved edits while a network call was in flight. */
+async function mutateObservation(localId, mutator) {
+  const cur = await db.observations.get(localId);
+  if (!cur) return null;
+  const result = mutator(cur) || cur;
+  await saveObs(cur);
+  renderImportReviewStatuses(cur);
+  return result;
+}
+
+async function runGeocodeStage(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.photoEnrichment) return;
+  if (!(obs.photoEnrichment.location === 'ready' && obs.latitude != null && obs.photoEnrichment.geocode !== 'done')) return;
+  if (obs.photoEnrichment.geocode === 'running') return;
+  await mutateObservation(localId, o => { o.photoEnrichment.geocode = 'running'; });
+  const geo = await reverseGeocodeCoords(obs.latitude, obs.longitude);
+  await mutateObservation(localId, o => {
+    o.geocode = geo;
+    o.photoEnrichment.geocode = geo ? 'done' : 'error';
+  });
+}
+
+async function runWeatherStage(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.photoEnrichment) return;
+  const state = obs.photoEnrichment.weather;
+  if (state !== 'pending' && state !== 'error') return;
+  const tp = obs.timeProvenance || {};
+  if (typeof obs.latitude !== 'number' || !isFinite(obs.latitude) ||
+      typeof obs.longitude !== 'number' || !isFinite(obs.longitude)) {
+    await mutateObservation(localId, o => {
+      o.photoEnrichment.weather = 'missing_location';
+      o.weatherStatus = 'missing-location';
+    });
+    return;
+  }
+  if (!tp.wallIso) {
+    await mutateObservation(localId, o => {
+      o.photoEnrichment.weather = 'missing_timestamp';
+      o.weatherStatus = 'missing-timestamp';
+    });
+    return;
+  }
+  await mutateObservation(localId, o => {
+    o.photoEnrichment.weather = 'running';
+    o.weatherStatus = 'pending';
+  });
+  const ct = {
+    wallIso: tp.wallIso,
+    utcOffsetSeconds: tp.utcOffsetSeconds ?? null,
+    timezone: tp.timezone || null,
+    timezoneAbbreviation: tp.timezoneAbbreviation || null,
+    timezoneConfidence: tp.timezoneConfidence || 'low'
+  };
+  const result = await enrichWeatherAt(obs.latitude, obs.longitude, ct);
+  await mutateObservation(localId, o => {
+    if (result.status === 'ok') {
+      o.weatherRaw = result;
+      o.weatherStatus = 'ok';
+      o.weatherApiUrl = result.apiUrl;
+      o.weatherFetchedAt = result.fetchedAt;
+      o.weatherSubmitError = null;
+      o.photoEnrichment.weather = 'done';
+      o.timeProvenance = o.timeProvenance || {};
+      o.timeProvenance.timezone = ct.timezone || o.timeProvenance.timezone;
+      o.timeProvenance.timezoneAbbreviation = ct.timezoneAbbreviation || o.timeProvenance.timezoneAbbreviation;
+      if (o.timeProvenance.utcOffsetSeconds == null) {
+        o.timeProvenance.utcOffsetSeconds = ct.utcOffsetSeconds;
+        o.timeProvenance.timezoneConfidence = ct.timezoneConfidence;
+      }
+    } else {
+      o.weatherStatus = result.status;
+      o.weatherSubmitError = result.error || result.reason || null;
+      o.photoEnrichment.weather = result.status === 'error' ? 'error' : 'unavailable';
+    }
+  });
+}
+
+async function runIdentificationStage(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.photoEnrichment) return;
+  const state = obs.photoEnrichment.identification;
+  if (state !== 'pending' && state !== 'error') return;
+  if (!settings.llmKey) {
+    await mutateObservation(localId, o => { o.photoEnrichment.identification = 'unavailable'; });
+    return;
+  }
+  await mutateObservation(localId, o => {
+    o.photoEnrichment.identification = 'running';
+    o.classificationError = null;
+  });
+  try {
+    const rec = await db.audioBlobs.get((obs.photoLocalIds || [])[0]);
+    if (!rec) throw new Error('Photo blob missing');
+    const b64 = await blobToBase64(rec.blob);
+    const dataUrl = `data:${rec.mimeType || 'image/jpeg'};base64,${b64}`;
+    const cls = await classifyPhotoObservation(obs, dataUrl);
+    const p = cls.parsed;
+    let identified = null;
+    await mutateObservation(localId, o => {
+      // Fields the user explicitly entered are theirs — a late AI result must
+      // never overwrite them, even if identification finishes after Save.
+      if (!o.subjectCommonNameUserEdited) o.subjectCommonName = p.common_name || null;
+      if (!o.subjectScientificNameUserEdited) o.subjectScientificName = p.scientific_name || null;
+      o.subjectConfidence = typeof p.confidence === 'number' ? p.confidence : null;
+      o.category = categoryFromSubjectType(p.subject_type);
+      o.behavior = p.behavior || null;
+      if (!o.countUserEdited) o.count = p.count != null ? p.count : null;
+      o.summary = Array.isArray(p.visible_traits) && p.visible_traits.length ? 'Traits: ' + p.visible_traits.join('; ') : null;
+      o.llmRaw = cls.rawContent;
+      o.aiIdentification = {
+        model: cls.model, classifiedAt: Date.now(),
+        subjectType: p.subject_type || null, taxonomicRank: p.taxonomic_rank || null,
+        alternatives: Array.isArray(p.alternatives) ? p.alternatives.slice(0, 3) : [],
+        visibleTraits: Array.isArray(p.visible_traits) ? p.visible_traits : [],
+        lifeStage: p.life_stage || null, sex: p.sex || null, notes: p.notes || null
+      };
+      o.classificationStatus = 'done';
+      o.classificationError = null;
+      o.photoEnrichment.identification = 'done';
+      if (o.submitStatus === 'local') o.submitStatus = 'ready';
+      identified = o;
+    });
+    if (identified) hydrateImportReviewFields(identified);
+  } catch(e) {
+    logWarn('Photo identification failed: ' + e.message);
+    await mutateObservation(localId, o => {
+      o.classificationStatus = 'error';
+      o.classificationError = e.message;
+      o.photoEnrichment.identification = 'error';
+    });
+  }
+}
+
+/** Taxonomy runs on its own gate — never merely as a side effect of vision. */
+async function runTaxonomyStage(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.photoEnrichment) return;
+  const state = obs.photoEnrichment.taxonomy;
+  if (state !== 'pending' && state !== 'error') return;
+  if (!obs.subjectScientificName) {
+    await mutateObservation(localId, o => { o.photoEnrichment.taxonomy = 'unavailable'; });
+    return;
+  }
+  await mutateObservation(localId, o => { o.photoEnrichment.taxonomy = 'running'; });
+  const tax = await normalizeTaxonomy(obs.subjectScientificName);
+  await mutateObservation(localId, o => {
+    o.taxonomy = tax;
+    o.photoEnrichment.taxonomy = tax.status === 'ok' ? 'done' :
+      (tax.status === 'error' ? 'error' : 'unavailable');
+  });
 }
 
 /* ---- Import review overlay UI ---- */
@@ -2078,6 +2281,7 @@ async function renderImportReviewStatuses(obs) {
 
 async function openImportReview(localId) {
   importReviewObsId = localId;
+  importReviewDirtyFields = new Set();
   const obs = await db.observations.get(localId);
   if (!obs) return;
   const overlay = $('import-overlay');
@@ -2090,6 +2294,25 @@ async function openImportReview(localId) {
   wireImportReview(localId);
 }
 
+/* ---- Dirty-field tracking for the review form ----
+   AI-derived fields (common name, scientific name, count, notes) start clean.
+   Async enrichment may fill them while the overlay is open; Save must persist
+   the enriched values unless the user explicitly edited a field. */
+let importReviewDirtyFields = new Set();
+
+function hydrateImportReviewFields(obs) {
+  if (importReviewObsId !== obs.localId) return;
+  const setIfClean = (id, value) => {
+    const el = $(id);
+    if (!el || importReviewDirtyFields.has(id)) return;
+    const next = value == null ? '' : String(value);
+    if ((el.value || '') !== next) el.value = next;
+  };
+  setIfClean('imp-common', obs.subjectCommonName);
+  setIfClean('imp-sci', obs.subjectScientificName);
+  setIfClean('imp-count', obs.count);
+}
+
 async function renderImportReviewBody(obs) {
   const thumb = await firstPhotoObjectUrl(obs.localId);
   return reviewTop(obs, thumb) + reviewForm(obs) + reviewDetails(obs);
@@ -2098,14 +2321,14 @@ async function renderImportReviewBody(obs) {
 function reviewTop(obs, thumbUrl) {
   const tzp = obs.timeProvenance || {};
   const tzAbbrev = tzp.timezoneAbbreviation ? ' · ' + tzp.timezoneAbbreviation : '';
-  const tzOffset = tzp.utcOffsetSeconds != null ? tzp.utcOffsetSeconds : -new Date().getTimezoneOffset() * 60;
-  const dtLocal = obs.createdAt && isFinite(obs.createdAt) ? new Date(obs.createdAt - tzOffset * 1000).toISOString().slice(0, 16) : '';
+  const dtLocal = observationWallInputValue(obs);
   const e = escapeHtml;
   const confLabel = obs.subjectConfidence == null ? null :
     obs.subjectConfidence >= 0.75 ? 'High' : obs.subjectConfidence >= 0.4 ? 'Medium' : 'Low';
   const tax = obs.taxonomy;
   const taxHtml = tax && tax.status === 'ok' ?
     `<div style="font-size:0.78rem;color:var(--text-muted);">Taxonomy (GBIF): ${e([tax.kingdom, tax.phylum, tax.class, tax.order, tax.family, tax.genus, tax.species].filter(Boolean).join(' › '))}</div>` :
+    tax && tax.status === 'ambiguous' ? `<div style="font-size:0.78rem;color:var(--warn);">Taxonomy match ambiguous (${e(tax.matchType || '')}) — AI name retained.</div>` :
     tax && tax.status === 'unavailable' ? `<div style="font-size:0.78rem;color:var(--warn);">Taxonomy normalization unavailable — AI name retained.</div>` :
     tax && tax.status === 'error' ? `<div style="font-size:0.78rem;color:var(--danger);">Taxonomy lookup failed. AI name retained.</div>` : '';
   return `
@@ -2153,27 +2376,55 @@ function reviewDetails(obs) {
     <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Technical details (EXIF &amp; provenance)</summary><pre style="font-size:0.68rem;white-space:pre-wrap;color:var(--text-dim);max-height:200px;overflow:auto;">${e(JSON.stringify({ exif: obs.exif, gpsSource: obs.exifGpsSource, timeProvenance: tzp, classificationRaw: alt ? { model: alt.model, subjectType: alt.subjectType, rank: alt.taxonomicRank, lifeStage: alt.lifeStage, sex: alt.sex, notes: alt.notes } : null }, null, 2))}</pre></details>`;
 }
 
+/* Retry buttons are rendered dynamically by renderImportReviewStatuses, so
+   handling is delegated to the stable overlay container instead of binding
+   only to elements that existed when the review opened. */
+document.getElementById('import-review-body').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-retry]');
+  if (!btn || !importReviewObsId) return;
+  const localId = importReviewObsId;
+  const cur = await db.observations.get(localId);
+  if (!cur || !cur.photoEnrichment) return;
+  const en = cur.photoEnrichment;
+  const tp = cur.timeProvenance || {};
+  const label = btn.dataset.retry;
+  if (label === 'LOCATION RESOLUTION' && cur.latitude != null) { en.location = 'ready'; en.geocode = 'pending'; }
+  if (label === 'WEATHER') en.weather = (cur.latitude != null && tp.wallIso) ? 'pending' : 'unavailable';
+  if (label === 'IMAGE IDENTIFICATION') { en.identification = 'pending'; cur.classificationError = null; }
+  if (label === 'TAXONOMY') en.taxonomy = 'pending';
+  await saveObs(cur);
+  renderImportReviewStatuses(cur);
+  runPhotoEnrichment(localId);
+});
+
 function wireImportReview(localId) {
-  const body = $('import-review-body');
-  body.querySelectorAll('[data-retry]').forEach(btn => btn.addEventListener('click', async () => {
-    const cur = await db.observations.get(localId);
-    if (!cur) return;
-    const label = btn.dataset.retry;
-    if (label === 'WEATHER') cur.photoEnrichment.weather = (cur.latitude != null && (cur.timeProvenance || {}).source !== 'unknown') ? 'pending' : 'unavailable';
-    if (label === 'IMAGE IDENTIFICATION') { cur.photoEnrichment.identification = 'pending'; cur.classificationError = null; }
-    if (label === 'TAXONOMY') cur.photoEnrichment.taxonomy = 'pending';
-    await saveObs(cur);
-    renderImportReviewStatuses(cur);
-    runPhotoEnrichment(localId);
-  }));
+  // Track which AI-derived fields the user has manually modified.
+  for (const id of ['imp-common', 'imp-sci', 'imp-count', 'imp-notes']) {
+    const el = $(id);
+    if (el && !el.dataset.dirtyWired) {
+      el.dataset.dirtyWired = '1';
+      el.addEventListener('input', () => importReviewDirtyFields.add(id));
+    }
+  }
 
   const readInputs = async () => {
     const cur = await db.observations.get(localId);
     if (!cur) return null;
-    cur.subjectCommonName = $('imp-common').value.trim() || null;
-    cur.subjectScientificName = $('imp-sci').value.trim() || null;
-    cur.userNoteText = $('imp-notes').value.trim() || null;
-    cur.count = $('imp-count').value ? parseInt($('imp-count').value, 10) : null;
+    // Dirty fields take the user's input; clean fields keep whatever enrichment
+    // has stored (which may have arrived after the form was opened blank).
+    if (importReviewDirtyFields.has('imp-common')) {
+      cur.subjectCommonName = $('imp-common').value.trim() || null;
+      if (cur.subjectCommonName) cur.subjectCommonNameUserEdited = true;
+    }
+    if (importReviewDirtyFields.has('imp-sci')) {
+      cur.subjectScientificName = $('imp-sci').value.trim() || null;
+      if (cur.subjectScientificName) cur.subjectScientificNameUserEdited = true;
+    }
+    if (importReviewDirtyFields.has('imp-notes')) cur.userNoteText = $('imp-notes').value.trim() || null;
+    if (importReviewDirtyFields.has('imp-count')) {
+      cur.count = $('imp-count').value ? parseInt($('imp-count').value, 10) : null;
+      if (cur.count != null) cur.countUserEdited = true;
+    }
     const latVal = parseFloat($('imp-lat').value);
     const lngVal = parseFloat($('imp-lng').value);
     const hadLoc = cur.latitude != null;
@@ -2183,7 +2434,9 @@ function wireImportReview(localId) {
       cur.latitude = latVal; cur.longitude = lngVal;
       cur.gpsStatus = 'ok'; cur.gpsSource = hadLoc ? cur.gpsSource : 'user_provided'; cur.accuracyMeters = null;
       if (locChanged || prevGeo !== 'done') { cur.photoEnrichment.location = 'ready'; cur.photoEnrichment.geocode = 'pending'; }
-      if (locChanged || cur.photoEnrichment.weather === 'missing_location') cur.photoEnrichment.weather = (cur.timeProvenance || {}).source !== 'unknown' ? 'pending' : 'missing_timestamp';
+      if (locChanged || cur.photoEnrichment.weather === 'missing_location') {
+        cur.photoEnrichment.weather = (cur.timeProvenance || {}).wallIso ? 'pending' : 'missing_timestamp';
+      }
     } else {
       cur.latitude = null; cur.longitude = null;
       cur.gpsStatus = 'missing'; cur.gpsSource = null;
@@ -2191,19 +2444,12 @@ function wireImportReview(localId) {
       cur.photoEnrichment.geocode = 'unavailable';
       cur.photoEnrichment.weather = 'missing_location';
     }
+    // Only recompute the observation time when the user actually changed it.
+    // Unedited EXIF times must survive Save exactly.
     const dtVal = $('imp-datetime').value;
+    const origWallInput = ((cur.timeProvenance && cur.timeProvenance.wallIso) || '').slice(0, 16);
     if (dtVal) {
-      const ms = Date.parse(dtVal + ':00');
-      if (!isNaN(ms)) {
-        const prevCreated = cur.createdAt;
-        const wasUnknown = (cur.timeProvenance || {}).source === 'unknown';
-        cur.createdAt = ms; cur.startedAt = ms;
-        cur.timeProvenance = (cur.timeProvenance && !wasUnknown) ? cur.timeProvenance : { source: 'user_provided' };
-        if (wasUnknown || cur.createdAt !== prevCreated) {
-          if (cur.photoEnrichment.weather === 'done') { cur.photoEnrichment.weather = 'pending'; cur.weatherRaw = null; cur.weatherStatus = 'stale'; }
-          else if (cur.photoEnrichment.weather === 'missing_timestamp' || cur.photoEnrichment.weather === 'unavailable') cur.photoEnrichment.weather = cur.latitude != null ? 'pending' : 'missing_location';
-        }
-      }
+      if (dtVal !== origWallInput) applyObservationTime(cur, dtVal);
     } else {
       cur.timeProvenance = { source: 'unknown' };
       cur.photoEnrichment.weather = 'missing_timestamp';
@@ -2221,8 +2467,10 @@ function wireImportReview(localId) {
   $('imp-retry-all').onclick = async () => {
     const cur = await readInputs();
     if (!cur) return;
-    if (cur.latitude != null && (cur.timeProvenance || {}).source !== 'unknown') cur.photoEnrichment.weather = 'pending';
+    const tp = cur.timeProvenance || {};
+    if (cur.latitude != null && tp.wallIso) cur.photoEnrichment.weather = 'pending';
     if (settings.llmKey) { cur.photoEnrichment.identification = cur.aiIdentification ? 'done' : 'pending'; cur.classificationError = null; }
+    if (cur.subjectScientificName && ['error', 'unavailable'].includes(cur.photoEnrichment.taxonomy)) cur.photoEnrichment.taxonomy = 'pending';
     await saveObs(cur);
     renderImportReviewStatuses(cur);
     runPhotoEnrichment(localId);
@@ -3321,7 +3569,9 @@ function loadSetup() {
   $('cfg-llm-key').value = settings.llmKey;
   $('cfg-trans-model').value = settings.transModel;
   $('cfg-text-model').value = settings.textModel;
-  $('cfg-vision-model').value = settings.visionModel || 'openai/gpt-4.1-mini';
+  const visionInput = $('cfg-vision-model');
+  visionInput.value = settings.visionModel || '';
+  visionInput.placeholder = resolveVisionModel();
   $('cfg-same-key').checked = settings.sameKey;
   $('cfg-max-audio').value = settings.maxAudioSeconds;
   $('cfg-auto-stop').checked = settings.autoStop;
@@ -3344,7 +3594,7 @@ function saveFromSetup() {
   settings.llmKey = $('cfg-llm-key').value.trim();
   settings.transModel = $('cfg-trans-model').value.trim();
   settings.textModel = $('cfg-text-model').value.trim();
-  settings.visionModel = $('cfg-vision-model').value.trim() || 'openai/gpt-4.1-mini';
+  settings.visionModel = $('cfg-vision-model').value.trim();
   settings.sameKey = $('cfg-same-key').checked;
   settings.maxAudioSeconds = parseInt($('cfg-max-audio').value, 10) || 120;
   settings.autoStop = $('cfg-auto-stop').checked;
@@ -4484,7 +4734,14 @@ async function init() {
 init();
 
 // Test hook (used by automated specs; harmless in production)
-window.__WFR_TEST__ = { db, importPhotoFile, parseExifFromFile, normalizeExif, enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex };
+window.__WFR_TEST__ = {
+  db, settings,
+  importPhotoFile, parseExifFromFile, normalizeExif, normalizeCaptureTime,
+  enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex,
+  compassDirection, wallEpochMinutes, captureWallParts, wallIso,
+  applyObservationTime, observationWallInputValue, resolveVisionModel,
+  categoryFromSubjectType, submitObservation
+};
 })();
 </script>
 </body>
