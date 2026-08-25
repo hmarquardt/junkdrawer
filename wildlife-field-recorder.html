@@ -8,6 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦉</text></svg>" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://cdn.jsdelivr.net/npm/dexie@4.0.11/dist/dexie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr@6.3.0/dist/full.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
 <style>
 :root {
@@ -146,9 +147,8 @@ th { color: var(--text-muted); font-weight: 600; }
 .trip-popup { min-width: 180px; color: #1f2933; }
 .trip-popup img { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; float: right; margin: 0 0 6px 8px; }
 #menu-toggle { display: none; background: none; border: none; color: var(--text); font-size: 1.4rem; padding: 4px 8px; cursor: pointer; }
-#camera-overlay { display: none; }
-#camera-overlay.open { display: flex; }
-#camera-overlay .modal-card { max-width: 640px; padding: 0; overflow: hidden; background: var(--bg); border: none; border-radius: var(--radius); }
+.import-btn { width: 160px; height: 160px; border-radius: 24px; border: 3px dashed var(--accent-dim); background: var(--bg-3); color: var(--accent-bright); font-size: 1.1rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; box-shadow: var(--shadow); transition: transform .15s, background .15s; cursor: pointer; }
+.import-btn:active { transform: scale(0.96); }
 .history-trip { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .history-trip-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--bg-3); cursor: pointer; flex-wrap: wrap; }
 .history-trip-head .trip-title { font-weight: 700; color: var(--accent-bright); flex: 1 1 auto; }
@@ -168,16 +168,10 @@ th { color: var(--text-muted); font-weight: 600; }
   .history-obs { grid-template-columns: 1fr; gap: 4px; padding: 10px 0; }
   .history-obs .history-time, .history-obs .history-cat, .history-obs .history-species, .history-obs .history-weather, .history-obs .history-transcript { white-space: normal; }
 }
-#camera-video { width: 100%; display: block; background: #000; }
-#camera-shutter { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: 64px; height: 64px; border-radius: 50%; border: 4px solid #fff; background: var(--danger); cursor: pointer; box-shadow: var(--shadow); }
-#camera-shutter:active { transform: translateX(-50%) scale(0.94); }
-#camera-cancel { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.55); border: none; color: #fff; font-size: 1.2rem; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-#camera-zoom { position: absolute; bottom: 60px; left: 10%; width: 80%; }
-#camera-rec-badge { position: absolute; top: 8px; left: 8px; }
-#capture-photo-preview { margin: 10px 0; }
-#capture-photo-preview img { width: 120px; height: 120px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); }
-.camera-icon-btn { width: 120px; height: 120px; border-radius: 50%; border: 4px solid var(--accent-dim); background: var(--bg-3); color: var(--accent-bright); font-size: 1.1rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px; box-shadow: var(--shadow); transition: transform .15s, background .15s; cursor: pointer; }
-.camera-icon-btn:active { transform: scale(0.96); }
+.enrich-status { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--bg-3); border: 1px solid var(--border); margin: 2px 0; }
+.enrich-status.done { color: var(--accent-bright); }
+.enrich-status.error, .enrich-status.retry { color: var(--danger); }
+.enrich-status.pending, .enrich-status.missing_location, .enrich-status.missing_timestamp, .enrich-status.unavailable { color: var(--warn); }
 @media (max-width: 639px) {
   #menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
   nav#tabs {
@@ -256,7 +250,8 @@ th { color: var(--text-muted); font-weight: 600; }
   <div class="card">
     <div class="card-title">How this works</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:0.82rem;color:var(--text-muted);">
-      <span class="chip">Capture</span> →
+      <span class="chip">🎙 Voice</span> /
+      <span class="chip">🖼 Import Photo</span> →
       <span class="chip">Local Queue</span> →
       <span class="chip">Process Audio</span> →
       <span class="chip">Classify Subject</span> →
@@ -270,6 +265,7 @@ th { color: var(--text-muted); font-weight: 600; }
     <div class="card-title">Features</div>
     <ul style="margin:0;padding:0 0 0 18px;color:var(--text-muted);font-size:0.9rem;">
       <li>Quick voice notes with GPS and timestamp</li>
+      <li>Import a photo → EXIF time/place, resize, weather, AI identification</li>
       <li>Offline-first: everything saved locally</li>
       <li>Weather snapshot when online</li>
       <li>LLM transcription and classification</li>
@@ -284,19 +280,20 @@ th { color: var(--text-muted); font-weight: 600; }
 
 <!-- Capture -->
 <section id="tab-capture" class="tab">
-  <h2>Capture</h2>
+  <h2>New Observation</h2>
   <div class="capture-wrap">
     <div id="capture-timer" class="timer" style="display:none;">00:00</div>
-    <button id="camera-capture-btn" class="camera-icon-btn" aria-label="Start sighting capture with camera">
-      <span>📷</span>
-      <span style="font-size:0.75rem;font-weight:500;opacity:0.9;">Capture Sighting</span>
-    </button>
-    <button id="capture-btn" class="capture-btn" aria-label="Start recording">
+    <button id="capture-btn" class="capture-btn" aria-label="Start recording voice observation">
+      <span>🎙</span>
       <span id="capture-label">Capture</span>
       <span id="capture-sub" style="font-size:0.75rem;font-weight:500;opacity:0.9;">Tap to record</span>
     </button>
+    <button id="import-photo-btn" class="import-btn" aria-label="Import a photo to create an observation">
+      <span>🖼️</span>
+      <span style="font-size:0.8rem;font-weight:600;">Import Photo</span>
+    </button>
+    <input type="file" id="photo-import-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" style="display:none;" />
     <div class="capture-hint" id="capture-status">Ready</div>
-    <div id="capture-photo-preview" style="display:none;"></div>
     <div id="capture-discard-wrap" style="display:none;margin-top:10px;">
       <button id="capture-discard" class="btn btn-danger">Discard</button>
     </div>
@@ -317,16 +314,11 @@ th { color: var(--text-muted); font-weight: 600; }
   </div>
 </section>
 
-<!-- Camera Overlay -->
-<div class="modal-overlay" id="camera-overlay">
-  <div class="modal-card">
-    <div style="position:relative; background:#000;">
-      <video id="camera-video" autoplay playsinline muted></video>
-      <span id="camera-rec-badge" class="status-chip ok">Recording annotation…</span>
-      <button id="camera-cancel" aria-label="Cancel camera">✕</button>
-      <input type="range" id="camera-zoom" hidden aria-label="Zoom" />
-      <button id="camera-shutter" aria-label="Take photo"></button>
-    </div>
+<!-- Photo Import Review Overlay -->
+<div class="modal-overlay" id="import-overlay" style="display:none;">
+  <div class="modal-card" style="max-width:640px;">
+    <div class="modal-head"><h3 id="import-review-title">Review Photo Observation</h3><button class="modal-close" id="import-close" aria-label="Close">✕</button></div>
+    <div id="import-review-body"></div>
   </div>
 </div>
 
@@ -467,6 +459,8 @@ th { color: var(--text-muted); font-weight: 600; }
     <input id="cfg-trans-model" value="whisper-1" />
     <label>Text/classification model</label>
     <input id="cfg-text-model" value="gpt-4.1-mini" />
+    <label>Vision model (photo identification)</label>
+    <input id="cfg-vision-model" value="openai/gpt-4.1-mini" />
     <div class="form-row" style="margin-top:8px;">
       <input type="checkbox" id="cfg-same-key" />
       <label for="cfg-same-key" style="margin:0;">Use same key for transcription and text</label>
@@ -570,8 +564,8 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.01.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.01.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
   &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.01.2
 </footer>
 </div>
@@ -608,6 +602,7 @@ const defaultSettings = {
   llmKey: '',
   transModel: 'whisper-1',
   textModel: 'gpt-4.1-mini',
+  visionModel: 'openai/gpt-4.1-mini',
   sameKey: true,
   maxAudioSeconds: 120,
   autoStop: true,
@@ -769,8 +764,6 @@ let activeCapture = null;
 let captureDisplayTimerId = null;
 let captureAutoStopTimerId = null;
 let lastCapturedLocalId = null;
-let cameraStream = null;
-let cameraTrack = null;
 
 function updateNetChip() {
   const chip = $('net-chip');
@@ -855,7 +848,6 @@ async function startCapture(opts = {}) {
     gps: null,
     weather: null,
     contextPromise: null,
-    photo: null,
     discarding: false,
     stopping: false,
     finalizationStarted: false
@@ -865,7 +857,6 @@ async function startCapture(opts = {}) {
   $('capture-status').textContent = 'Starting...';
   const btn = $('capture-btn');
   btn.style.display = 'inline-flex';
-  $('camera-capture-btn').style.display = 'none';
   btn.classList.add('recording');
   if (opts.stopLabel) {
     $('capture-label').textContent = opts.stopLabel;
@@ -925,12 +916,9 @@ function resetCaptureBtn() {
   const btn = $('capture-btn');
   btn.classList.remove('recording');
   btn.style.display = 'inline-flex';
-  $('camera-capture-btn').style.display = 'inline-flex';
   $('capture-label').textContent = 'Capture';
   $('capture-sub').textContent = 'Tap to record';
   $('capture-discard-wrap').style.display = 'none';
-  $('capture-photo-preview').style.display = 'none';
-  $('capture-photo-preview').innerHTML = '';
 }
 
 async function onCaptureStop(sessionId) {
@@ -970,14 +958,7 @@ async function onCaptureStop(sessionId) {
     catch(e) { logError('Audio blob save failed: ' + e.message); }
   }
 
-  // Attach session photo if present
-  let photoLocalIds = [];
-  if (session.photo && session.photo.blob) {
-    const photoId = await handlePhotoBlob(localId, session.photo.blob, session.photo.mimeType || 'image/jpeg', 'sighting.jpg');
-    if (photoId) photoLocalIds.push(photoId);
-    if (session.photo.url) URL.revokeObjectURL(session.photo.url);
-    session.photo = null;
-  }
+   let photoLocalIds = [];
 
   const obs = {
     localId,
@@ -1070,116 +1051,13 @@ function stopCapture(sessionId = activeCapture && activeCapture.id) {
 function discardCaptureSession() {
   if (!activeCapture) return;
   activeCapture.discarding = true;
-  stopCameraOnly();
   stopCapture(activeCapture.id);
 }
 
-/* ========================
-   Camera helpers
-   ======================== */
-async function openCameraOverlay() {
-  const overlay = $('camera-overlay');
-  const video = $('camera-video');
-  try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096, min: 1920 }, height: { ideal: 2160, min: 1080 } },
-      audio: false
-    });
-    video.srcObject = cameraStream;
-    await video.play();
-    cameraTrack = cameraStream.getVideoTracks()[0];
-    setupZoomControl(cameraTrack, $('camera-zoom'));
-    overlay.classList.add('open');
-    logInfo('Camera opened');
-  } catch(e) {
-    logWarn('Camera open failed: ' + e.message);
-    $('capture-status').textContent = 'Camera unavailable. Audio annotation is still recording.';
-  }
-}
-
-function setupZoomControl(track, inputEl) {
-  const capabilities = track.getCapabilities?.();
-  if (!capabilities || !capabilities.zoom) { inputEl.hidden = true; return; }
-  const zoom = capabilities.zoom;
-  inputEl.hidden = false;
-  inputEl.min = zoom.min;
-  inputEl.max = zoom.max;
-  inputEl.step = zoom.step || 0.1;
-  inputEl.value = track.getSettings?.().zoom || zoom.min;
-  inputEl.oninput = async () => {
-    try { await track.applyConstraints({ advanced: [{ zoom: Number(inputEl.value) }] }); }
-    catch(err) { logWarn('Zoom apply failed: ' + err.message); }
-  };
-}
-
-async function capturePhotoFromCamera() {
-  const video = $('camera-video');
-  if (cameraTrack && 'ImageCapture' in window) {
-    try {
-      const imageCapture = new ImageCapture(cameraTrack);
-      const caps = await imageCapture.getPhotoCapabilities();
-      const photoSettings = {};
-      if (caps.imageWidth && caps.imageWidth.max) photoSettings.imageWidth = caps.imageWidth.max;
-      if (caps.imageHeight && caps.imageHeight.max) photoSettings.imageHeight = caps.imageHeight.max;
-      const blob = await imageCapture.takePhoto(photoSettings);
-      logInfo('Photo captured at ' + (photoSettings.imageWidth || 'native') + 'x' + (photoSettings.imageHeight || 'native'));
-      return blob;
-    } catch(err) { logWarn('ImageCapture failed, falling back to canvas: ' + err.message); }
-  }
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 1920;
-  canvas.height = video.videoHeight || 1080;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(blob => { if (blob) resolve(blob); else reject(new Error('Canvas photo capture failed')); }, 'image/jpeg', 0.98);
-  });
-}
-
-function stopCameraOnly() {
-  const overlay = $('camera-overlay');
-  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); }
-  cameraStream = null;
-  cameraTrack = null;
-  if (overlay) overlay.classList.remove('open');
-}
-
-async function handlePhotoBlob(obsLocalId, blob, mimeType, filename) {
-  const localPhotoId = 'photo-' + uuid();
-  const photo = {
-    localPhotoId,
-    observationLocalId: obsLocalId,
-    backendObservationId: null,
-    createdAt: Date.now(),
-    blobId: localPhotoId,
-    mimeType: mimeType || 'image/jpeg',
-    sizeBytes: blob.size,
-    originalFilename: filename || 'photo.jpg',
-    caption: '',
-    uploadStatus: 'pending',
-    backendFileId: null,
-    backendFileUrl: null,
-    uploadError: null,
-    updatedAt: Date.now()
-  };
-  try {
-    await db.photos.put(photo);
-    await db.audioBlobs.put({ blobId: localPhotoId, blob, mimeType: photo.mimeType, sizeBytes: blob.size, createdAt: Date.now() });
-    logInfo('Photo saved ' + localPhotoId);
-    return localPhotoId;
-  } catch(e) {
-    logError('Photo save failed: ' + e.message);
-    return null;
-  }
-}
 
 /* ========================
    Capture event wiring
    ======================== */
-$('camera-capture-btn').addEventListener('click', async () => {
-  await startCapture({ stopLabel: 'Stop & Save', stopSub: 'Tap to save sighting' });
-  await openCameraOverlay();
-});
 $('capture-btn').addEventListener('click', () => {
   if ($('capture-btn').classList.contains('recording')) stopCapture(); else startCapture();
 });
@@ -1192,33 +1070,15 @@ $('capture-another').addEventListener('click', () => {
 $('capture-add-photo').addEventListener('click', () => {
   if (lastCapturedLocalId) openPhotoPicker(lastCapturedLocalId);
 });
-
-// Camera overlay controls
-$('camera-shutter').addEventListener('click', async () => {
-  const sessionId = activeCapture && activeCapture.id;
-  if (!sessionId) return;
-  try {
-    const blob = await capturePhotoFromCamera();
-    if (!activeCapture || activeCapture.id !== sessionId || activeCapture.finalizationStarted) return;
-    activeCapture.photo = { blob, mimeType: blob.type || 'image/jpeg', url: URL.createObjectURL(blob) };
-    stopCameraOnly();
-    $('capture-photo-preview').innerHTML = `<img src="${activeCapture.photo.url}" alt="Captured photo">`;
-    $('capture-photo-preview').style.display = 'block';
-    $('capture-status').textContent = 'Photo captured. Audio still recording…';
-    logInfo('Photo captured during session');
-  } catch(e) {
-    logError('Photo capture failed: ' + e.message);
-    $('capture-status').textContent = 'Photo capture failed. Audio still recording…';
-  }
-});
-$('camera-cancel').addEventListener('click', () => {
-  stopCameraOnly();
-  $('capture-status').textContent = 'Camera cancelled. Audio still recording…';
+$('import-photo-btn').addEventListener('click', () => { $('photo-import-input').click(); });
+$('photo-import-input').addEventListener('change', async e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (file) await importPhotoFile(file);
 });
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
-  stopCameraOnly();
   if (activeCapture && activeCapture.recorder && activeCapture.recorder.state === 'recording') activeCapture.recorder.stop();
 });
 
@@ -1491,8 +1351,900 @@ Extract:
 }
 
 /* ========================
-   Trips
+   Shared observation enrichment
+   EXIF / capture-time / historical weather logic adapted from the proven
+   Image Context Inspector implementation (exifr + Open-Meteo).
    ======================== */
+const PHOTO_MAX_EDGE = 1800;
+const PHOTO_JPEG_QUALITY = 0.82;
+const WEATHER_FIELDS = [
+  'temperature_2m','apparent_temperature','relative_humidity_2m','dew_point_2m',
+  'precipitation','rain','snowfall','cloud_cover','surface_pressure','pressure_msl',
+  'wind_speed_10m','wind_gusts_10m','wind_direction_10m','weather_code'
+];
+
+function padNumber(value) { return String(value).padStart(2, '0'); }
+function captureWallParts(value) {
+  if (!value) return null;
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return { year: value.getFullYear(), month: value.getMonth() + 1, day: value.getDate(), hour: value.getHours(), minute: value.getMinutes(), second: value.getSeconds() };
+  }
+  const match = String(value).trim().match(/(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return null;
+  return { year: +match[1], month: +match[2], day: +match[3], hour: +match[4], minute: +match[5], second: +(match[6] || 0) };
+}
+function wallIso(parts) {
+  if (!parts) return null;
+  return parts.year + '-' + padNumber(parts.month) + '-' + padNumber(parts.day) + 'T' +
+    padNumber(parts.hour) + ':' + padNumber(parts.minute) + ':' + padNumber(parts.second);
+}
+function dateKeyFromWall(value) { return value ? value.slice(0, 10) : null; }
+function parseOffsetSeconds(value) {
+  if (!value) return null;
+  const match = String(value).trim().match(/^([+\-])(\d{2}):?(\d{2})$/);
+  if (!match) return null;
+  return (match[1] === '-' ? -1 : 1) * ((+match[2] * 60 + +match[3]) * 60);
+}
+function offsetText(seconds) {
+  if (seconds === null || seconds === undefined || isNaN(seconds)) return null;
+  const sign = seconds < 0 ? '-' : '+';
+  const absolute = Math.abs(seconds);
+  return sign + padNumber(Math.floor(absolute / 3600)) + ':' + padNumber(Math.floor((absolute % 3600) / 60));
+}
+function utcIsoFromWall(wall, offsetSeconds) {
+  const parts = captureWallParts(wall);
+  if (!parts || offsetSeconds === null || offsetSeconds === undefined) return null;
+  const utc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - offsetSeconds * 1000;
+  return new Date(utc).toISOString();
+}
+function wallEpochMinutes(value) {
+  const parts = captureWallParts(value);
+  return parts ? Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) / 60000 : NaN;
+}
+
+/** Normalize raw exifr output into a compact metadata object + GPS. */
+function normalizeExif(raw) {
+  const exif = {};
+  let gps = null;
+  let gpsSource = 'none';
+  if (!raw || typeof raw !== 'object') return { exif, gps, gpsSource };
+  if (raw.DateTimeOriginal) exif.DateTimeOriginal = String(raw.DateTimeOriginal);
+  if (raw.CreateDate) exif.CreateDate = String(raw.CreateDate);
+  if (raw.ModifyDate) exif.ModifyDate = String(raw.ModifyDate);
+  if (raw.OffsetTime) exif.OffsetTime = String(raw.OffsetTime);
+  if (raw.Make) exif.Make = String(raw.Make);
+  if (raw.Model) exif.Model = String(raw.Model);
+  if (raw.LensMake) exif.LensMake = String(raw.LensMake);
+  if (raw.LensModel) exif.LensModel = String(raw.LensModel);
+  if (raw.FocalLength !== undefined) exif.FocalLength = Number(raw.FocalLength);
+  if (raw.FNumber !== undefined) exif.FNumber = Number(raw.FNumber);
+  if (raw.ExposureTime !== undefined) exif.ExposureTime = Number(raw.ExposureTime);
+  if (raw.ISO !== undefined) exif.ISO = Number(raw.ISO);
+  if (raw.Orientation !== undefined) exif.Orientation = Number(raw.Orientation);
+  if (raw.Software) exif.Software = String(raw.Software);
+  // Preserve remaining useful provenance fields we don't display
+  const extra = {};
+  for (const key of ['Flash', 'WhiteBalance', 'ExposureProgram', 'MeteringMode', 'ColorSpace', 'SceneCaptureType', 'DigitalZoomRatio', 'FocalLengthIn35mmFormat']) {
+    if (raw[key] !== undefined) extra[key] = raw[key];
+  }
+  if (Object.keys(extra).length > 0) exif.additional = extra;
+
+  // GPS: prefer exifr-normalized decimals, fall back to DMS arrays
+  let lat = Number(raw.latitude), lng = Number(raw.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+    gpsSource = 'decimal';
+  } else {
+    lat = null; lng = null;
+    if (Array.isArray(raw.GPSLatitude) && Array.isArray(raw.GPSLongitude)) {
+      const decLat = gpsToDecimal(raw.GPSLatitude, raw.GPSLatitudeRef);
+      const decLng = gpsToDecimal(raw.GPSLongitude, raw.GPSLongitudeRef);
+      if (decLat !== null && decLng !== null && !(decLat === 0 && decLng === 0)) {
+        lat = decLat; lng = decLng; gpsSource = 'dms-fallback';
+      }
+    }
+  }
+  if (lat !== null && lng !== null && Number.isFinite(lat) && Number.isFinite(lng) &&
+      lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+    gps = {
+      lat, lng,
+      altitude: raw.GPSAltitude !== undefined ? Number(raw.GPSAltitude) : null,
+      altitudeRef: raw.GPSAltitudeRef !== undefined ? Number(raw.GPSAltitudeRef) : null,
+      direction: raw.GPSImgDirection !== undefined ? Number(raw.GPSImgDirection) : null,
+      directionRef: raw.GPSImgDirectionRef !== undefined ? raw.GPSImgDirectionRef : null,
+      timestamp: raw.GPSDateStamp ? String(raw.GPSDateStamp) : null
+    };
+  }
+  return { exif, gps, gpsSource };
+}
+
+/** Build a capture-time object from normalized EXIF (wall time + optional offset). */
+function normalizeCaptureTime(exif) {
+  if (!exif) return null;
+  const candidates = [
+    ['DateTimeOriginal', exif.DateTimeOriginal],
+    ['CreateDate', exif.CreateDate],
+    ['ModifyDate', exif.ModifyDate]
+  ];
+  const selected = candidates.find(item => !!item[1]);
+  if (!selected) return null;
+  const parts = captureWallParts(selected[1]);
+  if (!parts) return null;
+  const wall = wallIso(parts);
+  const explicitOffset = parseOffsetSeconds(exif.OffsetTime);
+  return {
+    source: selected[0], raw: String(selected[1]), wallIso: wall,
+    localIso: explicitOffset === null ? wall : wall + offsetText(explicitOffset),
+    utcIso: explicitOffset === null ? null : utcIsoFromWall(wall, explicitOffset),
+    timezone: null, timezoneAbbreviation: explicitOffset === null ? null : 'UTC' + offsetText(explicitOffset),
+    utcOffsetSeconds: explicitOffset,
+    timezoneInferredFromGps: explicitOffset === null,
+    timezoneConfidence: explicitOffset === null ? 'low' : 'high'
+  };
+}
+
+async function fetchJson(url, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    return await response.json();
+  } finally { clearTimeout(to); }
+}
+
+function compassDirection(degrees) {
+  if (degrees === null || degrees === undefined || isNaN(Number(degrees))) return null;
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(((Number(degrees) % 360) + 360) % 360 / 22.5) % 16];
+}
+
+// Reverse geocode via Nominatim (same strategy as Image Context Inspector)
+async function reverseGeocodeCoords(lat, lng) {
+  try {
+    const data = await fetchJson('https://nominatim.openstreetmap.org/reverse?lat=' + lat + '&lon=' + lng + '&format=jsonv2');
+    if (!data || !data.lat) return null;
+    return {
+      displayName: data.display_name || null,
+      city: (data.address && (data.address.city || data.address.town || data.address.village)) || null,
+      county: (data.address && data.address.county) || null,
+      state: (data.address && data.address.state) || null,
+      country: (data.address && data.address.country) || null,
+      fetchedAt: Date.now()
+    };
+  } catch(e) {
+    logWarn('Reverse geocode failed: ' + e.message);
+    return null;
+  }
+}
+
+function weatherEndpoint(kind) {
+  return kind === 'recent' ? 'https://api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
+}
+function weatherUrlFor(kind, lat, lng, dateKey) {
+  return weatherEndpoint(kind) + '?latitude=' + encodeURIComponent(lat) + '&longitude=' + encodeURIComponent(lng) +
+    '&start_date=' + dateKey + '&end_date=' + dateKey + '&hourly=' + WEATHER_FIELDS.join(',') +
+    '&timezone=auto&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch';
+}
+function weatherValue(hourly, key, index) {
+  return hourly && Array.isArray(hourly[key]) && hourly[key][index] !== undefined ? hourly[key][index] : null;
+}
+function applyWeatherTimezone(captureTime, data) {
+  if (!captureTime || !data) return captureTime;
+  captureTime.timezone = data.timezone || captureTime.timezone;
+  captureTime.timezoneAbbreviation = data.timezone_abbreviation || captureTime.timezoneAbbreviation;
+  if (captureTime.utcOffsetSeconds === null || captureTime.utcOffsetSeconds === undefined) {
+    captureTime.utcOffsetSeconds = Number(data.utc_offset_seconds || 0);
+    captureTime.localIso = captureTime.wallIso + offsetText(captureTime.utcOffsetSeconds);
+    captureTime.utcIso = utcIsoFromWall(captureTime.wallIso, captureTime.utcOffsetSeconds);
+    captureTime.timezoneConfidence = captureTime.timezone ? 'medium' : 'low';
+    captureTime.timezoneInferredFromGps = true;
+  }
+  return captureTime;
+}
+/**
+ * Historical/recent weather for an observation time+place.
+ * Returns a rich snapshot whose `.current` mirrors the existing fetchWeather
+ * weatherRaw.current shape so all existing display code keeps working.
+ */
+async function enrichWeatherAt(lat, lng, captureTime) {
+  if (!lat || !lng || !captureTime || !captureTime.wallIso) {
+    return { status: 'unavailable', reason: 'Location or timestamp missing' };
+  }
+  const dateKey = dateKeyFromWall(captureTime.wallIso);
+  const captureEpochMin = wallEpochMinutes(captureTime.wallIso) * 60000;
+  const ageDays = (Date.now() - captureEpochMin) / 86400000;
+  const order = ageDays >= -1 && ageDays <= 7 ? ['recent', 'archive'] : ['archive'];
+  const errors = [];
+  for (const kind of order) {
+    try {
+      const data = await fetchJson(weatherUrlFor(kind, lat, lng, dateKey));
+      if (!data.hourly || !Array.isArray(data.hourly.time)) throw new Error('No hourly series returned');
+      applyWeatherTimezone(captureTime, data);
+      let best = -1, bestDiff = Infinity;
+      data.hourly.time.forEach((time, index) => {
+        const diff = Math.abs(wallEpochMinutes(time) - captureTime.wallIso);
+        if (diff < bestDiff) { best = index; bestDiff = diff; }
+      });
+      if (best < 0) throw new Error('No matching hour');
+      const i = best;
+      const current = {};
+      for (const field of WEATHER_FIELDS) current[field] = weatherValue(data.hourly, field, i);
+      const confidence = captureTime.timezoneConfidence === 'high' && bestDiff <= 30 ? 'high' :
+        bestDiff <= 60 ? 'medium' : 'contextual';
+      return {
+        status: 'ok',
+        apiUrl: weatherUrlFor(kind, lat, lng, dateKey),
+        fetchedAt: Date.now(),
+        sourceTimeLocal: data.hourly.time[i],
+        differenceMinutes: Math.round(wallEpochMinutes(data.hourly.time[i]) - captureTime.wallIso),
+        strategy: kind === 'recent' ? 'recent-data fallback' : 'historical archive',
+        confidence,
+        current,
+        meta: {
+          provider: 'open-meteo', endpoint: weatherEndpoint(kind),
+          dataset: kind === 'recent' ? 'recent forecast blend' : 'historical reanalysis (ERA5-family)',
+          latitude: lat, longitude: lng, elevation: data.elevation ?? null,
+          timezone: data.timezone || null, timezoneAbbreviation: data.timezone_abbreviation || null,
+          utc_offset_seconds: data.utc_offset_seconds, requestedAt: new Date().toISOString()
+        },
+        raw: data
+      };
+    } catch(e) { errors.push(e.message || String(e)); }
+  }
+  return { status: 'error', error: errors.join(' · ') || 'Weather unavailable', fetchedAt: Date.now() };
+}
+
+/* ---- Vision identification via existing OpenRouter-compatible LLM settings ---- */
+function categoryFromSubjectType(subjectType) {
+  const map = { bird:'bird', mammal:'mammal', reptile:'reptile', amphibian:'amphibian', fish:'fish',
+    insect:'insect', arachnid:'arachnid', plant:'plant', fungus:'fungus' };
+  return map[String(subjectType || '').toLowerCase()] || 'other';
+}
+
+async function classifyPhotoObservation(obs, imageDataUrl) {
+  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const key = settings.llmKey;
+  if (!key) throw new Error('No LLM key configured (see Setup)');
+  const model = settings.visionModel || settings.textModel || 'openai/gpt-4.1-mini';
+  const d = obs.createdAt ? new Date(obs.createdAt) : null;
+  const region = obs.geocode ? [obs.geocode.city, obs.geocode.county, obs.geocode.state, obs.geocode.country].filter(Boolean).join(', ') : null;
+  const seasonNames = ['Winter','Winter','Spring','Spring','Spring','Summer','Summer','Summer','Autumn','Autumn','Autumn','Winter'];
+  const contextLines = [
+    'Photograph date: ' + (d ? d.toDateString() : 'unknown'),
+    'Time: ' + (d ? d.toLocaleTimeString() : 'unknown'),
+    'Season: ' + (d ? seasonNames[d.getMonth()] : 'unknown'),
+    region ? 'Approximate region: ' + region + ' (approximate — do not assume more precision)' : 'Region: unknown'
+  ];
+  if (obs.weatherRaw && obs.weatherRaw.current) {
+    const c = obs.weatherRaw.current;
+    const wparts = [];
+    if (c.temperature_2m != null) wparts.push(Math.round(c.temperature_2m) + '\u00b0F');
+    if (c.weather_code != null) wparts.push(weatherCodeLabel(c.weather_code));
+    if (c.relative_humidity_2m != null) wparts.push(c.relative_humidity_2m + '% RH');
+    if (wparts.length) contextLines.push('Weather near capture time: ' + wparts.join(', '));
+  }
+  const prompt = `You are assisting a wildlife field observer.
+${contextLines.join('\n')}
+
+Identify the primary wildlife subject in the attached photograph.
+Rules:
+- It is fine to answer "unknown" or give only genus/family-level identification when unsure.
+- Include up to 3 plausible alternatives with independent confidence values.
+- Confidence must be between 0 and 1 and should honestly reflect uncertainty.
+- life_stage: adult/juvenile/larva/unknown; sex: male/female/unknown.
+Return ONLY valid JSON matching exactly this schema:
+{
+  "subject_type": string ("bird"|"mammal"|"reptile"|"amphibian"|"fish"|"insect"|"arachnid"|"plant"|"fungus"|"unknown"),
+  "common_name": string | null,
+  "scientific_name": string | null,
+  "taxonomic_rank": "species"|"genus"|"family"|"order"|"class"|"unknown",
+  "confidence": number,
+  "alternatives": [{ "common_name": string, "scientific_name": string|null, "confidence": number }],
+  "visible_traits": string[],
+  "life_stage": string | null,
+  "sex": string | null,
+  "count": number | null,
+  "behavior": string | null,
+  "notes": string | null
+}`;
+  const r = await fetch(base + '/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: imageDataUrl } }
+        ]
+      }]
+    })
+  });
+  if (!r.ok) throw new Error('Vision classification HTTP ' + r.status);
+  const data = await r.json();
+  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content ? data.choices[0].message.content : '{}';
+  const clean = content.replace(/```json\s?/i, '').replace(/```/g, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(clean); } catch(e) { throw new Error('Vision model returned invalid JSON'); }
+  return { parsed, rawContent: content, model };
+}
+
+/* ---- Taxonomic normalization via GBIF species match ---- */
+async function normalizeTaxonomy(scientificName) {
+  if (!scientificName) return { status: 'unavailable', reason: 'No scientific name' };
+  try {
+    const data = await fetchJson('https://api.gbif.org/v1/species/match?name=' + encodeURIComponent(scientificName) + '&strict=false&verbose=true');
+    if (!data || data.matchType === 'NONE') {
+      return { status: 'unavailable', reason: 'No GBIF match for "' + scientificName + '"' };
+    }
+    const pick = (data.alternatives && data.alternatives.length) ? data.alternatives[0] : data;
+    return {
+      status: 'ok',
+      source: 'GBIF',
+      usageKey: pick.usageKey || data.usageKey || null,
+      matchType: data.matchType,
+      confidence: data.confidence ?? null,
+      kingdom: pick.kingdom || null, phylum: pick.phylum || null, class: pick.class || null,
+      order: pick.order || null, family: pick.family || null, genus: pick.genus || null,
+      species: pick.species || null,
+      scientificName: pick.scientificName || scientificName,
+      fetchedAt: Date.now()
+    };
+  } catch(e) {
+    return { status: 'error', error: e.message || String(e) };
+  }
+}
+
+/* ========================
+   Photo import workflow
+   ======================== */
+let importReviewObsId = null;
+
+function parseExifFromFile(file) {
+  return new Promise(resolve => {
+    if (typeof window.exifr === 'undefined' || typeof window.exifr.parse !== 'function') {
+      resolve({ status: 'lib-missing', error: 'EXIF library failed to load', exif: null, gps: null, captureTime: null });
+      return;
+    }
+    window.exifr.parse(file, { gps: true, exif: true, tiff: true })
+      .then(raw => {
+        if (!raw || Object.keys(raw).length === 0) {
+          resolve({ status: 'no-exif', exif: null, gps: null, captureTime: null });
+          return;
+        }
+        const normalized = normalizeExif(raw);
+        resolve({
+          status: normalized.gps ? 'ok' : 'no-gps',
+          tagCount: Object.keys(raw).length,
+          exif: normalized.exif,
+          gps: normalized.gps,
+          gpsSource: normalized.gpsSource,
+          captureTime: normalizeCaptureTime(normalized.exif)
+        });
+      })
+      .catch(err => resolve({ status: 'parse-error', error: err && err.message ? err.message : String(err), exif: null, gps: null, captureTime: null }));
+  });
+}
+
+/** Resize AFTER EXIF extraction; returns JPEG derivative blob + dimensions. */
+function resizeImageFile(file, maxEdge = PHOTO_MAX_EDGE) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(blob => {
+          URL.revokeObjectURL(url);
+          if (blob) resolve({ blob, width: canvas.width, height: canvas.height });
+          else reject(new Error('Resize failed'));
+        }, 'image/jpeg', PHOTO_JPEG_QUALITY);
+      } catch(e) { URL.revokeObjectURL(url); reject(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Unable to decode image (HEIC may be unsupported by this browser)')); };
+    img.src = url;
+  });
+}
+
+function photoEnrichmentState(hasGps, hasTime) {
+  return {
+    exif: 'done',
+    location: hasGps ? 'ready' : 'missing_location',
+    timestamp: hasTime ? 'ready' : 'missing_timestamp',
+    geocode: hasGps ? 'pending' : 'unavailable',
+    weather: (hasGps && hasTime) ? 'pending' : 'unavailable',
+    identification: 'pending',
+    taxonomy: 'pending'
+  };
+}
+
+async function importPhotoFile(file) {
+  $('capture-status').textContent = 'Reading photo…';
+  showTab('capture');
+  const localId = 'obs-' + uuid();
+  const now = Date.now();
+
+  // 1. Extract EXIF from the ORIGINAL file first (before any resize)
+  const parsed = await parseExifFromFile(file);
+  if (parsed.status === 'no-exif' || parsed.status === 'parse-error' || parsed.status === 'lib-missing') {
+    logWarn('EXIF extraction issue (' + parsed.status + '): ' + (parsed.error || 'none found'));
+  }
+
+  // 2. Hash original for provenance
+  let sha256 = null;
+  try { sha256 = await sha256Hex(await file.arrayBuffer()); } catch(e) { /* non-fatal */ }
+
+  const hasGps = !!parsed.gps;
+  const hasTime = !!parsed.captureTime;
+
+  // Observation time: EXIF outranks import time. Never silently use import time.
+  const observedMs = hasTime ? (() => {
+    const ct = parsed.captureTime;
+    const ms = ct.utcIso ? Date.parse(ct.utcIso) : NaN;
+    if (!isNaN(ms)) return ms;
+    // No offset info: interpret wall clock in device's local zone, flagged low-confidence
+    const p = captureWallParts(ct.wallIso);
+    return p ? new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second).getTime() : null;
+  })() : null;
+
+  // 3. Resize derivative (original is never persisted to browser storage)
+  let resized = null;
+  try { resized = await resizeImageFile(file); }
+  catch(e) {
+    logError('Photo import failed: ' + e.message);
+    $('capture-status').textContent = 'Import failed: ' + e.message;
+    return;
+  }
+
+  // 4. Persist draft observation immediately (local-first)
+  const photoId = 'photo-' + uuid();
+  const nowTime = observedMs ?? now;
+  const obs = {
+    localId,
+    startedAt: nowTime,
+    stoppedAt: null,
+    durationSeconds: 0,
+    createdAt: nowTime,
+    latitude: hasGps ? parsed.gps.lat : null,
+    longitude: hasGps ? parsed.gps.lng : null,
+    accuracyMeters: null,
+    altitude: hasGps && parsed.gps.altitude != null ? parsed.gps.altitude : null,
+    heading: hasGps && parsed.gps.direction != null ? parsed.gps.direction : null,
+    speed: null,
+    gpsStatus: hasGps ? 'ok' : 'missing',
+    gpsSource: hasGps ? 'exif' : null,
+    weatherStatus: 'pending',
+    weatherApiUrl: null,
+    weatherFetchedAt: null,
+    weatherRaw: null,
+    audioBlobId: null,
+    audioMimeType: null,
+    audioSizeBytes: 0,
+    userNoteText: null,
+    transcriptionStatus: 'not_applicable',
+    transcript: null,
+    classificationStatus: 'pending',
+    subjectCommonName: null,
+    subjectScientificName: null,
+    subjectConfidence: null,
+    category: null,
+    categoryConfidence: null,
+    tags: ['photo_import'],
+    behavior: null,
+    habitat: null,
+    count: null,
+    summary: null,
+    llmRaw: null,
+    tripLocalId: null,
+    backendObservationId: null,
+    backendFileIds: [],
+    photoFileIds: [],
+    photoLocalIds: [photoId],
+    submitStatus: 'local',
+    submitError: null,
+    observationSource: 'photo_import',
+    importedAt: now,
+    timeProvenance: hasTime ? {
+      source: 'exif_' + parsed.captureTime.source,
+      raw: parsed.captureTime.raw,
+      wallIso: parsed.captureTime.wallIso,
+      localIso: parsed.captureTime.localIso,
+      utcIso: parsed.captureTime.utcIso,
+      timezoneConfidence: parsed.captureTime.timezoneConfidence,
+      utcOffsetSeconds: parsed.captureTime.utcOffsetSeconds,
+      timezoneAbbreviation: parsed.captureTime.timezoneAbbreviation
+    } : { source: 'unknown' },
+    exif: parsed.exif || null,
+    exifStatus: parsed.status,
+    exifGpsSource: parsed.gpsSource || null,
+    taxonomy: null,
+    aiIdentification: null,
+    photoEnrichment: photoEnrichmentState(hasGps, hasTime),
+    updatedAt: now
+  };
+
+  const photo = {
+    localPhotoId: photoId,
+    observationLocalId: localId,
+    backendObservationId: null,
+    createdAt: now,
+    blobId: photoId,
+    mimeType: 'image/jpeg',
+    sizeBytes: resized.blob.size,
+    width: resized.width,
+    height: resized.height,
+    originalFilename: file.name || 'photo.jpg',
+    originalMimeType: file.type || null,
+    originalSizeBytes: file.size,
+    originalSha256: sha256,
+    caption: '',
+    uploadStatus: 'pending',
+    backendFileId: null,
+    backendFileUrl: null,
+    uploadError: null,
+    updatedAt: now
+  };
+
+  try {
+    await db.observations.put(obs);
+    await db.photos.put(photo);
+    await db.audioBlobs.put({ blobId: photoId, blob: resized.blob, mimeType: 'image/jpeg', sizeBytes: resized.blob.size, createdAt: now });
+    lastCapturedLocalId = localId;
+    logInfo('Photo observation saved locally ' + localId);
+  } catch(e) {
+    logError('Photo observation save failed: ' + e.message);
+    $('capture-status').textContent = 'Save failed: ' + e.message;
+    return;
+  }
+
+  updateQueueChip();
+  $('capture-status').textContent = 'Photo imported — reviewing…';
+  openImportReview(localId);
+
+  // 5. Run enrichment independently; failures never destroy the record
+  runPhotoEnrichment(localId);
+}
+
+async function saveObs(obs) {
+  obs.updatedAt = Date.now();
+  await db.observations.put(obs);
+}
+
+async function runPhotoEnrichment(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs) return;
+  const en = obs.photoEnrichment || {};
+
+  // Reverse geocode
+  if (en.location === 'ready' && obs.latitude != null && en.geocode !== 'done') {
+    en.geocode = 'running';
+    await saveObs({ ...obs, photoEnrichment: en });
+    const geo = await reverseGeocodeCoords(obs.latitude, obs.longitude);
+    const cur = await db.observations.get(localId);
+    if (!cur) return;
+    cur.geocode = geo;
+    cur.photoEnrichment.geocode = geo ? 'done' : 'error';
+    await saveObs(cur);
+  }
+
+  // Weather at EXIF time + place
+  const cur1 = await db.observations.get(localId);
+  if (cur1 && (cur1.photoEnrichment.weather === 'pending' || cur1.photoEnrichment.weather === 'error')) {
+    if (cur1.latitude == null || (cur1.timeProvenance && cur1.timeProvenance.source === 'unknown')) {
+      cur1.photoEnrichment.weather = cur1.latitude == null ? 'missing_location' : 'missing_timestamp';
+      cur1.weatherStatus = cur1.latitude == null ? 'missing-location' : 'missing-timestamp';
+      await saveObs(cur1);
+    } else {
+      cur1.photoEnrichment.weather = 'running';
+      cur1.weatherStatus = 'pending';
+      await saveObs(cur1);
+      renderImportReviewStatuses(cur1);
+      const tp = cur1.timeProvenance || {};
+      const ct = { wallIso: tp.wallIso, utcOffsetSeconds: tp.utcOffsetSeconds ?? null, timezoneConfidence: tp.timezoneConfidence || 'low', timezone: null, timezoneAbbreviation: null };
+      const result = await enrichWeatherAt(cur1.latitude, cur1.longitude, ct);
+      const cur2 = await db.observations.get(localId);
+      if (!cur2) return;
+      if (result.status === 'ok') {
+        cur2.weatherRaw = result;
+        cur2.weatherStatus = 'ok';
+        cur2.weatherApiUrl = result.apiUrl;
+        cur2.weatherFetchedAt = result.fetchedAt;
+        cur2.weatherSubmitError = null;
+        cur2.photoEnrichment.weather = 'done';
+        cur2.timeProvenance = cur2.timeProvenance || {};
+        cur2.timeProvenance.timezone = ct.timezone || cur2.timeProvenance.timezone;
+        cur2.timeProvenance.timezoneAbbreviation = ct.timezoneAbbreviation || cur2.timeProvenance.timezoneAbbreviation;
+        if (cur2.timeProvenance.utcOffsetSeconds == null) {
+          cur2.timeProvenance.utcOffsetSeconds = ct.utcOffsetSeconds;
+          cur2.timeProvenance.timezoneConfidence = ct.timezoneConfidence;
+        }
+      } else {
+        cur2.weatherStatus = result.status;
+        cur2.weatherSubmitError = result.error || result.reason || null;
+        cur2.photoEnrichment.weather = result.status === 'error' ? 'error' : 'unavailable';
+      }
+      await saveObs(cur2);
+      renderImportReviewStatuses(cur2);
+    }
+  }
+
+  // AI vision identification (uses the resized derivative)
+  const cur3 = await db.observations.get(localId);
+  if (cur3 && (cur3.photoEnrichment.identification === 'pending' || cur3.photoEnrichment.identification === 'error')) {
+    if (!settings.llmKey) {
+      cur3.photoEnrichment.identification = 'unavailable';
+      await saveObs(cur3);
+      renderImportReviewStatuses(cur3);
+    } else {
+      cur3.photoEnrichment.identification = 'running';
+      cur3.classificationError = null;
+      await saveObs(cur3);
+      renderImportReviewStatuses(cur3);
+      try {
+        const rec = await db.audioBlobs.get((cur3.photoLocalIds || [])[0]);
+        if (!rec) throw new Error('Photo blob missing');
+        const dataUrl = await blobToBase64(rec.blob);
+        const cls = await classifyPhotoObservation(cur3, dataUrl);
+        const p = cls.parsed;
+        const cur4 = await db.observations.get(localId);
+        if (!cur4) return;
+        cur4.subjectCommonName = p.common_name || null;
+        cur4.subjectScientificName = p.scientific_name || null;
+        cur4.subjectConfidence = typeof p.confidence === 'number' ? p.confidence : null;
+        cur4.category = categoryFromSubjectType(p.subject_type);
+        cur4.behavior = p.behavior || null;
+        cur4.count = p.count != null ? p.count : null;
+        cur4.summary = Array.isArray(p.visible_traits) && p.visible_traits.length ? 'Traits: ' + p.visible_traits.join('; ') : null;
+        cur4.llmRaw = cls.rawContent;
+        cur4.aiIdentification = {
+          model: cls.model, classifiedAt: Date.now(),
+          subjectType: p.subject_type || null, taxonomicRank: p.taxonomic_rank || null,
+          alternatives: Array.isArray(p.alternatives) ? p.alternatives.slice(0, 3) : [],
+          visibleTraits: Array.isArray(p.visible_traits) ? p.visible_traits : [],
+          lifeStage: p.life_stage || null, sex: p.sex || null, notes: p.notes || null
+        };
+        cur4.classificationStatus = 'done';
+        cur4.classificationError = null;
+        cur4.photoEnrichment.identification = 'done';
+        if (cur4.submitStatus === 'local') cur4.submitStatus = 'ready';
+        await saveObs(cur4);
+        renderImportReviewStatuses(cur4);
+        // Taxonomy normalization follows identification
+        cur4.photoEnrichment.taxonomy = 'running';
+        await saveObs(cur4);
+        const tax = await normalizeTaxonomy(p.scientific_name);
+        const cur5 = await db.observations.get(localId);
+        if (!cur5) return;
+        cur5.taxonomy = tax;
+        cur5.photoEnrichment.taxonomy = tax.status === 'ok' ? 'done' : (tax.status === 'unavailable' ? 'unavailable' : 'error');
+        await saveObs(cur5);
+        renderImportReviewStatuses(cur5);
+      } catch(e) {
+        logWarn('Photo identification failed: ' + e.message);
+        const cur4 = await db.observations.get(localId);
+        if (!cur4) return;
+        cur4.classificationStatus = 'error';
+        cur4.classificationError = e.message;
+        cur4.photoEnrichment.identification = 'error';
+        cur4.photoEnrichment.taxonomy = 'pending';
+        await saveObs(cur4);
+        renderImportReviewStatuses(cur4);
+      }
+    }
+  }
+  refreshStorageStats().catch(() => {});
+}
+
+/* ---- Import review overlay UI ---- */
+const ENRICH_LABELS = [
+  ['PHOTO SAVED', () => 'done'],
+  ['EXIF EXTRACTION', en => en.exif],
+  ['LOCATION RESOLUTION', en => en.geocode === 'done' ? 'done' : (en.location || 'pending')],
+  ['WEATHER', en => en.weather],
+  ['IMAGE IDENTIFICATION', en => en.identification],
+  ['TAXONOMY', en => en.taxonomy]
+];
+
+async function renderImportReviewStatuses(obs) {
+  if (importReviewObsId !== obs.localId) return;
+  const container = document.getElementById('import-status-list');
+  if (!container) return;
+  const en = obs.photoEnrichment || {};
+  container.innerHTML = ENRICH_LABELS.map(([label, get]) => {
+    const state = get(en) || 'pending';
+    let icon = '⏳', cls = 'pending';
+    if (state === 'done') { icon = '✓'; cls = 'done'; }
+    else if (state === 'error' || state === 'retry') { icon = '✗'; cls = 'retry'; }
+    else if (state === 'running') { icon = '⏳'; cls = 'pending'; }
+    else if (state === 'missing_location') { icon = '—'; cls = 'missing_location'; }
+    else if (state === 'missing_timestamp') { icon = '—'; cls = 'missing_timestamp'; }
+    else if (state === 'unavailable') { icon = '—'; cls = 'unavailable'; }
+    const retryable = state === 'error';
+    const retryBtn = retryable ? `<span style="margin-left:auto;"><button class="btn btn-small" data-retry="${label}">Retry</button></span>` : '';
+    return `<div class="enrich-status ${escapeHtml(cls)}"><span>${icon}</span><span>${label}</span><span style="margin-left:auto;color:var(--text-dim);font-size:0.72rem;">${escapeHtml(state)}</span>${retryBtn}</div>`;
+  }).join('');
+  const errEl = document.getElementById('import-enrich-error');
+  if (errEl) {
+    errEl.textContent = [obs.weatherSubmitError, obs.classificationError].filter(Boolean).join(' · ');
+  }
+}
+
+async function openImportReview(localId) {
+  importReviewObsId = localId;
+  const obs = await db.observations.get(localId);
+  if (!obs) return;
+  const overlay = $('import-overlay');
+  const body = $('import-review-body');
+  body.innerHTML = await renderImportReviewBody(obs);
+  overlay.style.display = 'flex';
+  $('import-close').onclick = () => closeImportReview(false);
+  overlay.onclick = ev => { if (ev.target === overlay) closeImportReview(false); };
+  renderImportReviewStatuses(obs);
+  wireImportReview(localId);
+}
+
+async function renderImportReviewBody(obs) {
+  const thumb = await firstPhotoObjectUrl(obs.localId);
+  return reviewTop(obs, thumb) + reviewForm(obs) + reviewDetails(obs);
+}
+
+function reviewTop(obs, thumbUrl) {
+  const tzp = obs.timeProvenance || {};
+  const tzAbbrev = tzp.timezoneAbbreviation ? ' · ' + tzp.timezoneAbbreviation : '';
+  const tzOffset = tzp.utcOffsetSeconds != null ? tzp.utcOffsetSeconds : -new Date().getTimezoneOffset() * 60;
+  const dtLocal = obs.createdAt && isFinite(obs.createdAt) ? new Date(obs.createdAt - tzOffset * 1000).toISOString().slice(0, 16) : '';
+  const e = escapeHtml;
+  const confLabel = obs.subjectConfidence == null ? null :
+    obs.subjectConfidence >= 0.75 ? 'High' : obs.subjectConfidence >= 0.4 ? 'Medium' : 'Low';
+  const tax = obs.taxonomy;
+  const taxHtml = tax && tax.status === 'ok' ?
+    `<div style="font-size:0.78rem;color:var(--text-muted);">Taxonomy (GBIF): ${e([tax.kingdom, tax.phylum, tax.class, tax.order, tax.family, tax.genus, tax.species].filter(Boolean).join(' › '))}</div>` :
+    tax && tax.status === 'unavailable' ? `<div style="font-size:0.78rem;color:var(--warn);">Taxonomy normalization unavailable — AI name retained.</div>` :
+    tax && tax.status === 'error' ? `<div style="font-size:0.78rem;color:var(--danger);">Taxonomy lookup failed. AI name retained.</div>` : '';
+  return `
+    ${thumbUrl ? `<img src="${thumbUrl}" alt="Imported photo" style="width:100%;max-height:260px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);" />` : ''}
+    <div id="import-status-list" style="margin:10px 0;"></div>
+    <div id="import-enrich-error" style="color:var(--danger);font-size:0.78rem;margin-bottom:6px;"></div>
+    <label>Common name</label><input id="imp-common" value="${e(obs.subjectCommonName || '')}" placeholder="e.g. Eastern Fox Squirrel" />
+    <label>Scientific name</label><input id="imp-sci" value="${e(obs.subjectScientificName || '')}" />
+    ${confLabel ? `<div style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">AI confidence: ${confLabel}${obs.subjectConfidence != null ? ' (' + Math.round(obs.subjectConfidence * 100) + '%)' : ''} — draft identification, please verify</div>` : '<div style="font-size:0.82rem;color:var(--warn);">AI identification pending or unavailable — you can enter it manually</div>'}
+    ${taxHtml}
+    <label>Observed date &amp; time ${tzp.source === 'unknown' ? '(not in photo — please supply)' : ''}</label>
+    <input id="imp-datetime" type="datetime-local" value="${dtLocal}" />
+    <div style="font-size:0.76rem;color:var(--text-dim);">${tzp.source === 'unknown' ? 'Source: missing from EXIF — import time was <b>not</b> substituted' : 'Source: EXIF ' + e(tzp.source) + (tzAbbrev ? ' · Timezone: ' + e(tzp.timezone || 'unknown') + tzAbbrev : ' · Timezone: unknown (uncertain, not assumed)')}</div>
+    <div class="form-row" style="display:flex;gap:8px;">
+      <div style="flex:1;"><label>Latitude ${obs.latitude == null ? '(missing — supply)' : ''}</label><input id="imp-lat" type="number" step="any" value="${obs.latitude ?? ''}" /></div>
+      <div style="flex:1;"><label>Longitude ${obs.longitude == null ? '(missing — supply)' : ''}</label><input id="imp-lng" type="number" step="any" value="${obs.longitude ?? ''}" /></div>
+    </div>
+    ${obs.geocode && obs.geocode.displayName ? `<div style="font-size:0.78rem;color:var(--text-muted);">${e(obs.geocode.displayName)}</div>` : ''}
+    ${obs.weatherRaw && obs.weatherRaw.current ? `<div id="imp-weather" style="font-size:0.85rem;color:var(--text);">${e(observationWeather(obs))}</div>` : ''}
+    <label>Behavior / notes</label><textarea id="imp-notes">${e(obs.userNoteText || '')}</textarea>
+    <label>Count</label><input id="imp-count" type="number" min="1" value="${obs.count ?? ''}" />`;
+}
+
+function reviewForm(obs) {
+  const alt = obs.aiIdentification;
+  const e = escapeHtml;
+  const altsHtml = alt && alt.alternatives.length ? alt.alternatives.map(a =>
+    `<div style="font-size:0.82rem;color:var(--text-muted);">${e(a.common_name || 'Unknown')}${a.scientific_name ? ' <em>(' + e(a.scientific_name) + ')</em>' : ''} — ${a.confidence < 0.4 ? 'Low' : a.confidence < 0.75 ? 'Medium' : 'High'} confidence</div>`
+  ).join('') : '';
+  return `
+    ${alt && alt.visibleTraits.length ? `<details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Identification details</summary><ul style="margin:6px 0;padding-left:18px;font-size:0.8rem;color:var(--text-muted);">${alt.visibleTraits.map(t => '<li>' + e(t) + '</li>').join('')}</ul>${altsHtml}</details>` : ''}
+    <div class="btn-group">
+      <button id="imp-save" class="btn btn-primary">Save Observation</button>
+      <button id="imp-retry-all" class="btn">Retry enrichment</button>
+      <button id="imp-delete" class="btn btn-danger">Discard</button>
+    </div>`;
+}
+
+function reviewDetails(obs) {
+  const e = escapeHtml;
+  const alt = obs.aiIdentification;
+  const tzp = obs.timeProvenance || {};
+  return `
+    ${obs.weatherRaw ? `<details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Weather details</summary><div style="font-size:0.8rem;color:var(--text-muted);">Temp: ${e(String(obs.weatherRaw.current?.temperature_2m ?? '?'))}\u00b0F · Apparent ${e(String(obs.weatherRaw.current?.apparent_temperature ?? '?'))}\u00b0F<br/>RH: ${e(String(obs.weatherRaw.current?.relative_humidity_2m ?? '?'))}% · Dew point ${e(String(obs.weatherRaw.current?.dew_point_2m ?? '?'))}\u00b0F<br/>Precip: ${e(String(obs.weatherRaw.current?.precipitation ?? '?'))} in · Snowfall: ${e(String(obs.weatherRaw.current?.snowfall ?? '?'))} in · Cloud cover: ${e(String(obs.weatherRaw.current?.cloud_cover ?? '?'))}%<br/>Wind: ${e(String(obs.weatherRaw.current?.wind_speed_10m ?? '?'))} mph ${e(compassDirection(obs.weatherRaw.current?.wind_direction_10m) || '')}, gusts ${e(String(obs.weatherRaw.current?.wind_gusts_10m ?? '?'))} mph<br/>Pressure: ${e(String(obs.weatherRaw.current?.surface_pressure ?? '?'))} hPa<br/>Elevation: ${e(String(obs.weatherRaw.meta?.elevation ?? '?'))} m<br/>Source: ${e((obs.weatherRaw.meta?.provider || 'open-meteo') + ' · ' + (obs.weatherRaw.strategy || '') + ' · matched hour ' + (obs.weatherRaw.sourceTimeLocal || '?'))}</div></details>` : ''}
+    <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Technical details (EXIF &amp; provenance)</summary><pre style="font-size:0.68rem;white-space:pre-wrap;color:var(--text-dim);max-height:200px;overflow:auto;">${e(JSON.stringify({ exif: obs.exif, gpsSource: obs.exifGpsSource, timeProvenance: tzp, classificationRaw: alt ? { model: alt.model, subjectType: alt.subjectType, rank: alt.taxonomicRank, lifeStage: alt.lifeStage, sex: alt.sex, notes: alt.notes } : null }, null, 2))}</pre></details>`;
+}
+
+function wireImportReview(localId) {
+  const body = $('import-review-body');
+  body.querySelectorAll('[data-retry]').forEach(btn => btn.addEventListener('click', async () => {
+    const cur = await db.observations.get(localId);
+    if (!cur) return;
+    const label = btn.dataset.retry;
+    if (label === 'WEATHER') cur.photoEnrichment.weather = (cur.latitude != null && (cur.timeProvenance || {}).source !== 'unknown') ? 'pending' : 'unavailable';
+    if (label === 'IMAGE IDENTIFICATION') { cur.photoEnrichment.identification = 'pending'; cur.classificationError = null; }
+    if (label === 'TAXONOMY') cur.photoEnrichment.taxonomy = 'pending';
+    await saveObs(cur);
+    renderImportReviewStatuses(cur);
+    runPhotoEnrichment(localId);
+  }));
+
+  const readInputs = async () => {
+    const cur = await db.observations.get(localId);
+    if (!cur) return null;
+    cur.subjectCommonName = $('imp-common').value.trim() || null;
+    cur.subjectScientificName = $('imp-sci').value.trim() || null;
+    cur.userNoteText = $('imp-notes').value.trim() || null;
+    cur.count = $('imp-count').value ? parseInt($('imp-count').value, 10) : null;
+    const latVal = parseFloat($('imp-lat').value);
+    const lngVal = parseFloat($('imp-lng').value);
+    const hadLoc = cur.latitude != null;
+    const prevGeo = cur.photoEnrichment.geocode;
+    if (!isNaN(latVal) && !isNaN(lngVal)) {
+      const locChanged = cur.latitude !== latVal || cur.longitude !== lngVal;
+      cur.latitude = latVal; cur.longitude = lngVal;
+      cur.gpsStatus = 'ok'; cur.gpsSource = hadLoc ? cur.gpsSource : 'user_provided'; cur.accuracyMeters = null;
+      if (locChanged || prevGeo !== 'done') { cur.photoEnrichment.location = 'ready'; cur.photoEnrichment.geocode = 'pending'; }
+      if (locChanged || cur.photoEnrichment.weather === 'missing_location') cur.photoEnrichment.weather = (cur.timeProvenance || {}).source !== 'unknown' ? 'pending' : 'missing_timestamp';
+    } else {
+      cur.latitude = null; cur.longitude = null;
+      cur.gpsStatus = 'missing'; cur.gpsSource = null;
+      cur.photoEnrichment.location = 'missing_location';
+      cur.photoEnrichment.geocode = 'unavailable';
+      cur.photoEnrichment.weather = 'missing_location';
+    }
+    const dtVal = $('imp-datetime').value;
+    if (dtVal) {
+      const ms = Date.parse(dtVal + ':00');
+      if (!isNaN(ms)) {
+        const prevCreated = cur.createdAt;
+        const wasUnknown = (cur.timeProvenance || {}).source === 'unknown';
+        cur.createdAt = ms; cur.startedAt = ms;
+        cur.timeProvenance = (cur.timeProvenance && !wasUnknown) ? cur.timeProvenance : { source: 'user_provided' };
+        if (wasUnknown || cur.createdAt !== prevCreated) {
+          if (cur.photoEnrichment.weather === 'done') { cur.photoEnrichment.weather = 'pending'; cur.weatherRaw = null; cur.weatherStatus = 'stale'; }
+          else if (cur.photoEnrichment.weather === 'missing_timestamp' || cur.photoEnrichment.weather === 'unavailable') cur.photoEnrichment.weather = cur.latitude != null ? 'pending' : 'missing_location';
+        }
+      }
+    } else {
+      cur.timeProvenance = { source: 'unknown' };
+      cur.photoEnrichment.weather = 'missing_timestamp';
+    }
+    await saveObs(cur);
+    return cur;
+  };
+
+  $('imp-save').onclick = async () => {
+    const cur = await readInputs();
+    if (cur) { cur.submitStatus = 'ready'; await saveObs(cur); }
+    logInfo('Photo observation ready ' + localId);
+    closeImportReview(true);
+  };
+  $('imp-retry-all').onclick = async () => {
+    const cur = await readInputs();
+    if (!cur) return;
+    if (cur.latitude != null && (cur.timeProvenance || {}).source !== 'unknown') cur.photoEnrichment.weather = 'pending';
+    if (settings.llmKey) { cur.photoEnrichment.identification = cur.aiIdentification ? 'done' : 'pending'; cur.classificationError = null; }
+    await saveObs(cur);
+    renderImportReviewStatuses(cur);
+    runPhotoEnrichment(localId);
+  };
+  $('imp-delete').onclick = async () => {
+    if (!confirm('Discard this imported photo observation?')) return;
+    const cur = await db.observations.get(localId);
+    if (cur) await deleteObservation(cur);
+    closeImportReview(true);
+  };
+}
+
+function closeImportReview(refresh) {
+  importReviewObsId = null;
+  const overlay = $('import-overlay');
+  if (overlay) overlay.style.display = 'none';
+  if (refresh) {
+    if ($('capture-status')) $('capture-status').textContent = 'Saved locally';
+    loadProcess(); loadHistory(); updateQueueChip(); buildTrips({}).catch(() => {});
+  }
+}
+
 async function buildTrips(options = {}) {
   const all = await db.observations.orderBy('createdAt').toArray();
   const existingTrips = await db.trips.toArray();
@@ -2451,7 +3203,10 @@ async function deleteObservation(obs) {
   await db.observations.delete(obs.localId);
   if (obs.audioBlobId) await db.audioBlobs.delete(obs.audioBlobId);
   const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
-  for (const ph of photos) await db.photos.delete(ph.localPhotoId);
+  for (const ph of photos) {
+    if (ph.blobId) await db.audioBlobs.delete(ph.blobId);
+    await db.photos.delete(ph.localPhotoId);
+  }
   logInfo('Observation deleted locally ' + obs.localId);
 }
 
@@ -2566,6 +3321,7 @@ function loadSetup() {
   $('cfg-llm-key').value = settings.llmKey;
   $('cfg-trans-model').value = settings.transModel;
   $('cfg-text-model').value = settings.textModel;
+  $('cfg-vision-model').value = settings.visionModel || 'openai/gpt-4.1-mini';
   $('cfg-same-key').checked = settings.sameKey;
   $('cfg-max-audio').value = settings.maxAudioSeconds;
   $('cfg-auto-stop').checked = settings.autoStop;
@@ -2588,6 +3344,7 @@ function saveFromSetup() {
   settings.llmKey = $('cfg-llm-key').value.trim();
   settings.transModel = $('cfg-trans-model').value.trim();
   settings.textModel = $('cfg-text-model').value.trim();
+  settings.visionModel = $('cfg-vision-model').value.trim() || 'openai/gpt-4.1-mini';
   settings.sameKey = $('cfg-same-key').checked;
   settings.maxAudioSeconds = parseInt($('cfg-max-audio').value, 10) || 120;
   settings.autoStop = $('cfg-auto-stop').checked;
@@ -2599,7 +3356,7 @@ function saveFromSetup() {
   saveSettings(settings);
 }
 
-[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-token'), $('cfg-llm-provider'), $('cfg-llm-base'), $('cfg-llm-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-same-key'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
+[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-token'), $('cfg-llm-provider'), $('cfg-llm-base'), $('cfg-llm-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-vision-model'), $('cfg-same-key'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
   if (!el) return;
   el.addEventListener('change', saveFromSetup);
   if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('input', saveFromSetup);
@@ -3725,6 +4482,9 @@ async function init() {
   showTab('about');
 }
 init();
+
+// Test hook (used by automated specs; harmless in production)
+window.__WFR_TEST__ = { db, importPhotoFile, parseExifFromFile, normalizeExif, enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex };
 })();
 </script>
 </body>
