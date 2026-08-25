@@ -284,6 +284,42 @@ body.focus-open #workspace{overflow:hidden}
   .focus-context-grid #map-container{height:280px;margin-top:10px}
   .focus-context-grid .environment-context,.focus-context-grid #sightlineSection,.focus-context-grid .capture-ledger{margin-top:10px}
 }
+/* Terrain-aware visibility (v2.2) */
+.sl-terr{display:inline-block;margin-left:7px;padding:1px 6px;border-radius:8px;font-size:.6rem;font-weight:600;letter-spacing:.03em;line-height:1.3;vertical-align:baseline}
+.sl-terr-pending,.sl-terr-evaluating{color:var(--text-faint);background:rgba(146,151,141,.14)}
+.sl-terr-terrain-clear{color:#315c4f;background:rgba(71,117,101,.14)}
+.sl-terr-terrain-uncertain{color:#8a6a2f;background:rgba(198,154,85,.16)}
+.sl-terr-terrain-blocked{color:#a54e3c;background:rgba(165,78,60,.13)}
+.sl-terr-base-blocked-height-unknown{color:#a54e3c;background:rgba(165,78,60,.09);border:1px dotted rgba(165,78,60,.45)}
+.sl-terr-unavailable{color:var(--text-faint);background:transparent;border:1px dotted var(--border-strong)}
+.terrain-note{margin-top:.4rem;font-size:.65rem;color:var(--text-faint)}
+.cand-detail .terr-angle{font-variant-numeric:tabular-nums}
+.terrain-profile-wrap{margin-top:10px;border:1px solid var(--border);border-radius:8px;background:#fffdf7;padding:6px 4px 2px}
+.terrain-profile-wrap svg{display:block;width:100%;height:auto}
+.terrain-source-line{margin-top:8px;font-size:.62rem;line-height:1.5;color:var(--text-faint)}
+/* Focus Map collapsible terrain tray — overlays the map; map sizing untouched */
+.focus-terrain-tray{position:absolute;left:12px;right:12px;bottom:12px;z-index:700;background:rgba(255,253,247,.97);border:1px solid rgba(71,61,45,.28);border-radius:10px;box-shadow:0 16px 40px rgba(47,43,32,.28);overflow:hidden}
+.focus-terrain-tray-head{display:flex;align-items:center;gap:10px;padding:9px 8px 9px 13px;cursor:pointer;user-select:none}
+.focus-terrain-tray-head:hover{background:rgba(71,117,101,.06)}
+.focus-terrain-tray-name{font-family:Georgia,serif;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.focus-terrain-tray-kicker{font-size:7px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--clay)}
+.focus-terrain-tray-toggle{margin-left:auto;font-size:9px;color:var(--text-muted);white-space:nowrap}
+.focus-terrain-tray-close{appearance:none;border:0;background:none;color:var(--text-muted);font-size:15px;line-height:1;cursor:pointer;padding:4px 8px}
+.focus-terrain-tray-close:hover{color:var(--clay)}
+.focus-terrain-tray.collapsed .focus-terrain-tray-body{display:none}
+.focus-terrain-tray-body{padding:0 13px 11px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.focus-terrain-tray-facts{flex:0 1 auto;min-width:190px;font-size:.7rem;line-height:1.55;color:var(--text-muted)}
+.focus-terrain-tray-facts strong{color:var(--text);font-weight:600}
+.focus-terrain-tray-result{font-family:Georgia,serif;font-size:12.5px;color:var(--text);margin-bottom:3px}
+.focus-terrain-tray-graph{flex:1 1 240px;min-width:220px;max-width:440px}
+.focus-terrain-tray-graph svg{display:block;width:100%;height:auto}
+@media(max-width:760px){
+  .focus-terrain-tray{left:8px;right:8px;bottom:8px}
+  .focus-terrain-tray-body{flex-direction:column;gap:10px}
+  .focus-terrain-tray-graph{max-width:none;width:100%}
+  .sightline-candidates li{flex-wrap:wrap}
+  .sightline-candidates .sl-meta{white-space:normal;text-align:right}
+}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
 </style>
 </head>
@@ -503,9 +539,9 @@ body.focus-open #workspace{overflow:hidden}
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.11" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.11" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.11
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.1" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.25.1
   </footer>
 
 <script>
@@ -547,6 +583,8 @@ body.focus-open #workspace{overflow:hidden}
     },
     mapSightlineLayer: null,
     sightlineActiveCandidateId: null,
+    terrainRunId: 0,
+    terrainAbort: null,
     analyzed: false,
     analyzing: false,
     completionChimePlayCount: 0,
@@ -1305,6 +1343,18 @@ body.focus-open #workspace{overflow:hidden}
     catch (e) { return value; }
   }
 
+  /* Evidence snapshot for persistence/hooks: drops transient runtime keys
+   * (e.g. Leaflet `_marker` back-references) so the result is always
+   * structurally cloneable for IndexedDB and postMessage serialization. */
+  function cloneEvidenceSafe(value) {
+    if (!value || typeof value !== 'object') return value;
+    try {
+      return JSON.parse(JSON.stringify(value, function(key, val) {
+        return key && key.charAt(0) === '_' ? undefined : val;
+      }));
+    } catch (e) { return null; }
+  }
+
   function padNumber(value) { return String(value).padStart(2, '0'); }
 
   function captureWallParts(value) {
@@ -1719,7 +1769,7 @@ body.focus-open #workspace{overflow:hidden}
     state.analyzed = false;
     state.analyzing = false;
     state.enrichment = createEmptyEnrichment();
-    resetSightlineWorkspace({ skipRender: true });
+    resetSightlineWorkspace();
     state.width = null;
     state.height = null;
     $('aiQuestion').value = '';
@@ -2452,7 +2502,8 @@ body.focus-open #workspace{overflow:hidden}
         var delta = angularDifference(headingInfo.degrees, bearingDegrees);
 
         var minimalTags = {};
-        ['ref', 'operator', 'wikipedia', 'wikidata'].forEach(function(t) { if (tags[t]) minimalTags[t] = String(tags[t]); });
+        // height/ele/building:levels feed terrain target-elevation resolution.
+        ['ref', 'operator', 'wikipedia', 'wikidata', 'height', 'building:levels', 'ele'].forEach(function(t) { if (tags[t]) minimalTags[t] = String(tags[t]); });
 
         normalized.push({
           id: key,
@@ -2773,6 +2824,405 @@ body.focus-open #workspace{overflow:hidden}
   }
 
 
+  /* ======================================================================
+   * Terrain-Aware Visibility (v2.2)
+   * Deterministic DEM plausibility layer for Sightline candidates.
+   * Answers: does intervening TERRAIN make visibility plausible?
+   * Not visual identification. Vegetation, buildings, atmospheric
+   * refraction and camera pitch are explicitly NOT modeled.
+   * ====================================================================== */
+  var TERRAIN_CANDIDATE_LIMIT = 10;     // pre-terrain candidates analyzed per run
+  var CAMERA_HEIGHT_M = 1.6;            // assumed eye height above DEM ground
+                                        // (future: standing/vehicle/drone override)
+  var TERRAIN_ANGLE_MARGIN_DEG = 0.05;  // uncertainty margin — tiny angular
+                                        // differences must not flip classification
+  var TERRAIN_SAMPLE_SPACING_M = 300;   // aim: one sample every ~250–350 m
+  var TERRAIN_MIN_SAMPLES = 8;
+  var TERRAIN_MAX_SAMPLES = 60;
+  var TERRAIN_BATCH_SIZE = 100;         // Open-Meteo elevation API per-request limit
+  var TERRAIN_ELEVATION_URL = 'https://api.open-meteo.com/v1/elevation';
+  var TERRAIN_SOURCE = {
+    provider: 'Open-Meteo',
+    dataset: 'Copernicus DEM GLO-90',
+    resolutionM: 90
+  };
+  /* Starting heuristics, deliberately centralized and readable.
+   * The base 50/30/20 Sightline score is never rewritten — only adjusted. */
+  var TERRAIN_SCORE_MODIFIERS = {
+    'terrain-clear': 8,
+    'terrain-uncertain': 0,
+    'unavailable': 0,
+    'terrain-blocked': -20,
+    'base-blocked-height-unknown': -8
+  };
+
+  function terrainSampleCount(distanceMeters) {
+    var estimate = Math.round(distanceMeters / TERRAIN_SAMPLE_SPACING_M);
+    return Math.max(TERRAIN_MIN_SAMPLES, Math.min(TERRAIN_MAX_SAMPLES, estimate));
+  }
+
+  /* Interior great-circle sample points camera → candidate.
+   * Endpoints are excluded: neither end may act as its own obstruction. */
+  function generateTerrainPath(lat, lng, bearingDegrees, distanceMeters) {
+    var count = terrainSampleCount(distanceMeters);
+    var points = [];
+    for (var i = 1; i <= count; i++) {
+      var d = distanceMeters * (i / (count + 1));
+      var p = destinationPoint(lat, lng, bearingDegrees, d);
+      points.push({ lat: p[0], lng: p[1], distanceM: Math.round(d) });
+    }
+    return points;
+  }
+
+  /* Spherical ECEF conversion — Earth curvature included naturally.
+   * A full WGS84 ellipsoid is unnecessary at ≤20 km. */
+  function geodeticToEcef(latDeg, lngDeg, elevationM) {
+    var phi = degreesToRadians(latDeg), lambda = degreesToRadians(lngDeg);
+    var r = EARTH_RADIUS_METERS + elevationM;
+    var cosPhi = Math.cos(phi);
+    return {
+      x: r * cosPhi * Math.cos(lambda),
+      y: r * cosPhi * Math.sin(lambda),
+      z: r * Math.sin(phi)
+    };
+  }
+
+  /* Apparent elevation angle of a point above the local horizontal plane at
+   * the camera position, from Earth-centered 3-D coordinates. */
+  function apparentElevationAngleDeg(cameraEcef, targetEcef) {
+    var vx = targetEcef.x - cameraEcef.x;
+    var vy = targetEcef.y - cameraEcef.y;
+    var vz = targetEcef.z - cameraEcef.z;
+    var vLen = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    if (!vLen) return 0;
+    var cLen = Math.sqrt(cameraEcef.x * cameraEcef.x + cameraEcef.y * cameraEcef.y + cameraEcef.z * cameraEcef.z);
+    var cosA = (vx * cameraEcef.x + vy * cameraEcef.y + vz * cameraEcef.z) / (vLen * cLen);
+    return radiansToDegrees(Math.asin(Math.max(-1, Math.min(1, cosA))));
+  }
+
+  function terrainAngleFromCamera(cameraEcef, lat, lng, elevationM) {
+    return apparentElevationAngleDeg(cameraEcef, geodeticToEcef(lat, lng, elevationM));
+  }
+
+  /* Sensible meters / feet only; malformed values are rejected outright. */
+  function parseOsmHeightMeters(rawValue) {
+    if (rawValue === undefined || rawValue === null) return null;
+    var text = String(rawValue).trim().toLowerCase().replace(',', '.');
+    var match = text.match(/^([0-9]+(?:\.[0-9]+)?)\s*(m|meter|meters|metre|metres|ft|feet|foot|')?\s*$/);
+    if (!match) return null;
+    var value = parseFloat(match[1]);
+    if (!isFinite(value) || value <= 0 || value > 1000) return null;
+    if (match[2] === 'ft' || match[2] === 'feet' || match[2] === 'foot' || match[2] === "'") value *= 0.3048;
+    return Math.round(value * 10) / 10;
+  }
+
+  function parseOsmEleMeters(rawValue) {
+    if (rawValue === undefined || rawValue === null) return null;
+    var value = parseFloat(String(rawValue).replace(',', '.'));
+    if (!isFinite(value) || value < -450 || value > 9000) return null;
+    return Math.round(value * 10) / 10;
+  }
+
+  function parseBuildingLevels(rawValue) {
+    var levels = parseInt(String(rawValue), 10);
+    return isFinite(levels) && levels >= 1 && levels <= 150 ? levels : null;
+  }
+
+  /* Towers, masts, lighthouses, silos, bridges, named buildings, power lines…
+   * NOT area facilities (airports, power plants/stations) or linear features
+   * where a "structure height" caveat would read oddly. */
+  function isVerticalStructureCandidate(candidate) {
+    if (!candidate) return false;
+    if (candidate.category === 'natural' || candidate.category === 'place' || candidate.category === 'land use') return false;
+    var type = String(candidate.type || '');
+    if (type === 'airport' || type.indexOf('aeroway') === 0 || type === 'railway' || type === 'road') return false;
+    if (/^power (plant|station|substation|generator)$/.test(type)) return false;
+    return true;
+  }
+
+  /* Target elevation priority:
+   * 1. explicit OSM height  → ground + height ("measured" mapped height)
+   * 2. building:levels      → ground + levels × 3 m ("inferred structure height")
+   * 3. OSM ele              → trusted only when near the DEM value (provenance caveat)
+   * 4. DEM ground           → natural features / unknown structures */
+  function resolveCandidateTarget(candidate, groundElevationM) {
+    var tags = candidate.tags || {};
+    var height = parseOsmHeightMeters(tags.height);
+    if (height !== null) {
+      return { elevationM: Math.round((groundElevationM + height) * 10) / 10, source: 'OSM height', heightM: height };
+    }
+    if (isVerticalStructureCandidate(candidate)) {
+      var levels = parseBuildingLevels(tags['building:levels']);
+      if (levels !== null) {
+        return { elevationM: Math.round((groundElevationM + levels * 3) * 10) / 10, source: 'inferred structure height', heightM: levels * 3 };
+      }
+    }
+    var ele = parseOsmEleMeters(tags.ele);
+    if (ele !== null && Math.abs(ele - groundElevationM) <= 400) {
+      return { elevationM: ele, source: 'OSM ele' };
+    }
+    return { elevationM: Math.round(groundElevationM * 10) / 10, source: 'DEM' };
+  }
+
+  /* Centralized angle comparison. Never presented as a probability. */
+  function classifyTerrainAngles(targetAngleDeg, horizonAngleDeg, options) {
+    options = options || {};
+    var margin = options.marginDeg !== undefined ? options.marginDeg : TERRAIN_ANGLE_MARGIN_DEG;
+    var status;
+    if (targetAngleDeg > horizonAngleDeg + margin) status = 'terrain-clear';
+    else if (horizonAngleDeg > targetAngleDeg + margin) status = 'terrain-blocked';
+    else status = 'terrain-uncertain';
+    /* A structure whose mapped BASE is hidden may still tower above the
+     * horizon when its height is unknown — never call it plainly blocked. */
+    if (status === 'terrain-blocked' && options.structureLike && !options.targetIncludesKnownHeight) {
+      return 'base-blocked-height-unknown';
+    }
+    return status;
+  }
+
+  /* Pure evidence computation for one candidate given sampled terrain.
+   * profilePoints: interior samples [{lat,lng,distanceM,elevationM}].
+   * Geometric refraction is NOT applied (recorded as a limitation). */
+  function computeTerrainEvidence(camera, candidate, profilePoints) {
+    var camEye = camera.groundElevationM + CAMERA_HEIGHT_M;
+    var camEcef = geodeticToEcef(camera.lat, camera.lng, camEye);
+    var horizon = null;
+    profilePoints.forEach(function(pt) {
+      var angle = terrainAngleFromCamera(camEcef, pt.lat, pt.lng, pt.elevationM);
+      pt.angleDeg = angle;
+      if (!horizon || angle > horizon.angleDeg) {
+        horizon = { distanceM: pt.distanceM, elevationM: pt.elevationM, angleDeg: angle };
+      }
+    });
+    var target = resolveCandidateTarget(candidate, candidate.groundElevationM);
+    var targetAngle = terrainAngleFromCamera(camEcef, candidate.lat, candidate.lng, target.elevationM);
+    var horizonAngle = horizon ? horizon.angleDeg : -90;
+    var status = classifyTerrainAngles(targetAngle, horizonAngle, {
+      structureLike: isVerticalStructureCandidate(candidate),
+      targetIncludesKnownHeight: target.source === 'OSM height' || target.source === 'inferred structure height'
+    });
+    var round3 = function(v) { return Math.round(v * 1000) / 1000; };
+    return {
+      status: status,
+      cameraGroundElevationM: Math.round(camera.groundElevationM * 10) / 10,
+      cameraEyeElevationM: Math.round(camEye * 10) / 10,
+      candidateGroundElevationM: Math.round(candidate.groundElevationM * 10) / 10,
+      candidateTargetElevationM: target.elevationM,
+      candidateTargetSource: target.source,
+      candidateHeightM: target.heightM || null,
+      terrainHorizonAngleDeg: horizon ? round3(horizon.angleDeg) : null,
+      candidateAngleDeg: round3(targetAngle),
+      angularClearanceDeg: round3(targetAngle - horizonAngle),
+      obstruction: horizon ? {
+        distanceM: horizon.distanceM,
+        elevationM: horizon.elevationM,
+        angleDeg: round3(horizon.angleDeg)
+      } : null,
+      sampleCount: profilePoints.length
+    };
+  }
+
+  /* ---- Batched retrieval & orchestration ------------------------------ */
+
+  function terrainCoordKey(lat, lng) {
+    return lat.toFixed(6) + ',' + lng.toFixed(6);
+  }
+
+  function cancelTerrainWork() {
+    state.terrainRunId += 1;
+    if (state.terrainAbort) { try { state.terrainAbort.abort(); } catch (e) {} state.terrainAbort = null; }
+  }
+
+  function initTerrainMetadata(snapshot) {
+    snapshot.candidates.forEach(function(c, index) {
+      delete c.terrain;
+      c.baseRank = index + 1;
+      c.terrainAdjustment = 0;
+      c.terrainAdjustedScore = c.rankScore;
+    });
+    snapshot.terrain = {
+      status: 'idle', error: null, runId: null,
+      requestedCandidates: 0, completedCandidates: 0,
+      samplePointsGenerated: 0, batchesRequested: 0, batchesFailed: 0,
+      uniqueCoordinatesRequested: 0,
+      provider: TERRAIN_SOURCE.provider, dataset: TERRAIN_SOURCE.dataset,
+      resolutionM: TERRAIN_SOURCE.resolutionM,
+      atmosphericRefractionModeled: false,
+      cameraHeightMAssumed: CAMERA_HEIGHT_M,
+      completedAt: null
+    };
+  }
+
+  function terrainSourceInfo(retrievedAt) {
+    return {
+      provider: TERRAIN_SOURCE.provider,
+      dataset: TERRAIN_SOURCE.dataset,
+      resolutionM: TERRAIN_SOURCE.resolutionM,
+      retrievedAt: retrievedAt || new Date().toISOString()
+    };
+  }
+
+  /* Analyze terrain along the top pre-terrain Sightline candidates.
+   * Non-fatal by design: Sightline stays fully operational on failure.
+   * Stale-response protection mirrors enrichment/Sightline (AbortController
+   * plus a terrain run token bound to the current sightline run). */
+  async function runTerrainAnalysis() {
+    var snapshot = state.sightline && state.sightline.snapshot;
+    if (!snapshot || !snapshot.terrain || !snapshot.candidates.length ||
+        !snapshot.cameraPosition || !snapshot.cameraPosition.lat) return;
+
+    if (state.terrainAbort) { try { state.terrainAbort.abort(); } catch (e) {} }
+    var controller = new AbortController();
+    state.terrainAbort = controller;
+    var terrainToken = ++state.terrainRunId;
+    var sightlineToken = state.sightlineRunId;
+    var stale = function() { return terrainToken !== state.terrainRunId || sightlineToken !== state.sightlineRunId; };
+
+    var meta = snapshot.terrain;
+    var targets = snapshot.candidates.slice(0, TERRAIN_CANDIDATE_LIMIT).filter(function(c) {
+      return isFinite(c.lat) && isFinite(c.lng) && c.distanceMeters <= snapshot.maxDistanceKm * 1000;
+    });
+    meta.status = 'evaluating';
+    meta.runId = terrainToken;
+    meta.requestedCandidates = targets.length;
+    targets.forEach(function(c) { c.terrain = { status: 'pending' }; });
+    renderSightline();
+    buildContextPreview();
+    updateDiagnostics();
+
+    try {
+      var cam = snapshot.cameraPosition;
+      var camKey = terrainCoordKey(cam.lat, cam.lng);
+      var uniqueCoords = {};
+      uniqueCoords[camKey] = { lat: cam.lat, lng: cam.lng };
+      var plans = targets.map(function(candidate) {
+        var bearing = initialBearingDegrees(cam.lat, cam.lng, candidate.lat, candidate.lng);
+        var distance = haversineMeters(cam.lat, cam.lng, candidate.lat, candidate.lng);
+        var interior = generateTerrainPath(cam.lat, cam.lng, bearing, distance);
+        var keys = [camKey];
+        interior.forEach(function(pt) {
+          var key = terrainCoordKey(pt.lat, pt.lng);
+          uniqueCoords[key] = { lat: pt.lat, lng: pt.lng };
+          keys.push(key);
+        });
+        var candidateKey = terrainCoordKey(candidate.lat, candidate.lng);
+        uniqueCoords[candidateKey] = { lat: candidate.lat, lng: candidate.lng };
+        keys.push(candidateKey);
+        return { candidate: candidate, distanceM: distance, interior: interior, keys: keys, candidateKey: candidateKey };
+      });
+
+      meta.samplePointsGenerated = plans.reduce(function(sum, p) { return sum + p.interior.length; }, 0);
+
+      // Deduplicated coordinate batches — never one request per sample.
+      var coordKeys = Object.keys(uniqueCoords);
+      var batches = [];
+      for (var bStart = 0; bStart < coordKeys.length; bStart += TERRAIN_BATCH_SIZE) {
+        batches.push(coordKeys.slice(bStart, bStart + TERRAIN_BATCH_SIZE));
+      }
+      meta.batchesRequested = batches.length;
+      meta.uniqueCoordinatesRequested = coordKeys.length;
+
+      var elevationsByKey = {};
+      for (var i = 0; i < batches.length; i++) {
+        if (stale()) return;
+        var batchKeys = batches[i];
+        var lats = batchKeys.map(function(k) { return uniqueCoords[k].lat; });
+        var lngs = batchKeys.map(function(k) { return uniqueCoords[k].lng; });
+        var url = TERRAIN_ELEVATION_URL + '?latitude=' + lats.map(function(v) { return v.toFixed(6); }).join(',') +
+          '&longitude=' + lngs.map(function(v) { return v.toFixed(6); }).join(',');
+        try {
+          var response = await fetch(url, { signal: controller.signal, headers: { 'Accept': 'application/json' } });
+          if (stale()) return;
+          if (!response.ok) throw new Error('Elevation service returned HTTP ' + response.status);
+          var data = await response.json();
+          var series = Array.isArray(data.elevation) ? data.elevation : [];
+          batchKeys.forEach(function(key, idx) {
+            var value = Number(series[idx]);
+            if (isFinite(value)) elevationsByKey[key] = value;
+          });
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+          meta.batchesFailed += 1;
+        }
+      }
+
+      // Apply results per candidate; incomplete coverage → unavailable, never a guess.
+      var cameraGround = elevationsByKey[camKey];
+      var retrievedAt = new Date().toISOString();
+      var completed = 0;
+      plans.forEach(function(plan) {
+        var candidate = plan.candidate;
+        if (!isFinite(cameraGround)) {
+          candidate.terrain = { status: 'unavailable', error: 'Camera terrain elevation unavailable', source: terrainSourceInfo(retrievedAt) };
+          return;
+        }
+        var missingSamples = plan.keys.some(function(key) { return !isFinite(elevationsByKey[key]); });
+        if (missingSamples) {
+          candidate.terrain = { status: 'unavailable', error: 'Elevation profile incomplete', source: terrainSourceInfo(retrievedAt) };
+          return;
+        }
+        var profile = plan.interior.map(function(pt, idx) {
+          return { lat: pt.lat, lng: pt.lng, distanceM: pt.distanceM, elevationM: elevationsByKey[plan.keys[idx + 1]] };
+        });
+        var candidateGround = elevationsByKey[plan.candidateKey];
+        var evidence = computeTerrainEvidence(
+          { lat: cam.lat, lng: cam.lng, groundElevationM: cameraGround },
+          {
+            lat: candidate.lat, lng: candidate.lng,
+            groundElevationM: candidateGround,
+            tags: candidate.tags,
+            category: candidate.category,
+            type: candidate.type
+          },
+          profile
+        );
+        evidence.exifAltitudeM = state.gps && state.gps.altitude !== null && state.gps.altitude !== undefined && isFinite(state.gps.altitude)
+          ? state.gps.altitude : null;
+        evidence.representativePointOnly = candidate.geometryKind === 'elongated' || candidate.geometryKind === 'area';
+        evidence.sampleSpacingM = plan.distanceM > 0 ? Math.round(plan.distanceM / (evidence.sampleCount + 1)) : null;
+        // Compact normalized profile [distanceM, elevationM] — enough to redraw
+        // the graph without refetching, small enough for history storage.
+        evidence.samples = [[0, Math.round(cameraGround)]]
+          .concat(profile.map(function(pt) { return [pt.distanceM, Math.round(pt.elevationM)]; }))
+          .concat([[Math.round(plan.distanceM), Math.round(candidateGround)]]);
+        evidence.source = terrainSourceInfo(retrievedAt);
+        candidate.terrain = evidence;
+        completed += 1;
+      });
+
+      // Terrain adjustments never rewrite the base rank score.
+      snapshot.candidates.forEach(function(c) {
+        var modifier = c.terrain && TERRAIN_SCORE_MODIFIERS[c.terrain.status] !== undefined
+          ? TERRAIN_SCORE_MODIFIERS[c.terrain.status] : 0;
+        c.terrainAdjustment = modifier;
+        c.terrainAdjustedScore = Math.round((c.rankScore + modifier) * 10) / 10;
+      });
+      snapshot.candidates.sort(function(a, b2) {
+        return (b2.terrainAdjustedScore - a.terrainAdjustedScore) || (a.baseRank - b2.baseRank);
+      });
+
+      meta.status = completed > 0 || targets.length === 0 ? 'complete' : 'unavailable';
+      meta.error = meta.status === 'unavailable' ? 'Elevation service unavailable' : null;
+      meta.completedCandidates = completed;
+      meta.completedAt = retrievedAt;
+    } catch (err) {
+      if (stale()) return;
+      meta.status = 'error';
+      meta.error = err.message || String(err);
+      targets.forEach(function(c) {
+        if (c.terrain && c.terrain.status === 'pending') c.terrain = { status: 'unavailable', error: meta.error, source: terrainSourceInfo() };
+      });
+    }
+    if (stale()) return;
+    renderSightline();
+    drawSightlineOnMap(false);
+    buildContextPreview();
+    updateDiagnostics();
+    if ($('sightlineDrawer').classList.contains('open')) openSightlineDrawer(state.sightlineActiveCandidateId);
+    if (focus.type === 'map' && focusTerrainTray.candidateId) renderFocusTerrainTray();
+  }
+
+
 
   async function runSightline(options) {
     options = options || {};
@@ -2784,6 +3234,7 @@ body.focus-open #workspace{overflow:hidden}
     var headingInfo = effectiveHeading();
     if (!headingInfo) {
       state.sightlineRunId += 1;
+      cancelTerrainWork();
       if (state.sightlineAbort) { try { state.sightlineAbort.abort(); } catch (e) {} state.sightlineAbort = null; }
       state.sightline = createEmptySightline();
       state.sightline.status = 'no-heading';
@@ -2792,6 +3243,10 @@ body.focus-open #workspace{overflow:hidden}
       buildContextPreview();
       return;
     }
+    // A heading/geographic refresh supersedes the current terrain profile
+    // immediately; do not leave elevation requests running while Overpass
+    // acquires the replacement candidate set.
+    cancelTerrainWork();
     var runId = ++state.sightlineRunId;
     var manualHeading = headingInfo.source === 'manual' ? headingInfo.degrees : state.sightline.manualHeadingDegrees;
     state.sightline = createEmptySightline();
@@ -2828,6 +3283,8 @@ body.focus-open #workspace{overflow:hidden}
       state.sightline.status = 'available';
       state.sightline.snapshot = snapshot;
       state.sightline.restoredSnapshot = false;
+      // Terrain layer attaches progressively — Sightline renders immediately.
+      initTerrainMetadata(snapshot);
       drawSightlineOnMap(true);
     } catch (err) {
       if (runId !== state.sightlineRunId) return;
@@ -2838,12 +3295,14 @@ body.focus-open #workspace{overflow:hidden}
     renderSightline();
     buildContextPreview();
     updateDiagnostics();
+    if (state.sightline.status === 'available') runTerrainAnalysis();
     if (options.announce) showToast(state.sightline.status === 'available' ? 'Sightline candidates updated' : 'Sightline unavailable', 3000);
   }
 
   function resetSightlineWorkspace(internalOptions) {
     internalOptions = internalOptions || {};
     state.sightlineRunId += 1;
+    cancelTerrainWork();
     if (state.sightlineAbort) { try { state.sightlineAbort.abort(); } catch (e) {} state.sightlineAbort = null; }
     state.sightline = createEmptySightline();
     state.sightlineActiveCandidateId = null;
@@ -2901,6 +3360,28 @@ body.focus-open #workspace{overflow:hidden}
   }
 
   /* ---- UI rendering ----------------------------------------------------- */
+
+  /* ---- Terrain status presentation ------------------------------------- */
+
+  function terrainStatusLabel(status) {
+    switch (status) {
+      case 'terrain-clear': return 'terrain clear';
+      case 'terrain-blocked': return 'blocked';
+      case 'terrain-uncertain': return 'uncertain';
+      case 'base-blocked-height-unknown': return 'base blocked';
+      case 'unavailable': return 'terrain n/a';
+      default: return 'terrain…';
+    }
+  }
+
+  /* Compact icon+text chip — never color-only meaning. */
+  function terrainChipHtml(candidate) {
+    if (!candidate || !candidate.terrain) return '';
+    var status = candidate.terrain.status || 'pending';
+    var cls = 'sl-terr sl-terr-' + (['terrain-clear', 'terrain-blocked', 'terrain-uncertain', 'base-blocked-height-unknown', 'unavailable'].indexOf(status) !== -1 ? status : 'pending');
+    var glyph = status === 'terrain-clear' ? '△' : (status === 'terrain-blocked' || status === 'base-blocked-height-unknown') ? '▲' : status === 'terrain-uncertain' ? '◇' : status === 'unavailable' ? '·' : '◌';
+    return '<span class="' + cls + '" title="Terrain visibility along the sightline">' + glyph + ' ' + terrainStatusLabel(status) + '</span>';
+  }
 
   function renderSightline() {
     var facingEl = $('sightlineFacing');
@@ -2999,10 +3480,22 @@ body.focus-open #workspace{overflow:hidden}
       li.setAttribute('data-candidate-id', candidate.id);
       li.innerHTML = '<span class="sl-rank">' + (index + 1) + '.</span>' +
         '<span>' + escapeHtml(candidate.name) + '</span>' +
-        '<span class="sl-meta">' + candidate.distanceKm + ' km · ' + candidate.bearingDegrees + '° · Δ' + candidate.headingDeltaDegrees + '°</span>';
+        '<span class="sl-meta">' + candidate.distanceKm + ' km · ' + candidate.bearingDegrees + '° · Δ' + candidate.headingDeltaDegrees + '°' + terrainChipHtml(candidate) + '</span>';
       li.addEventListener('click', function() { openSightlineDrawer(candidate.id); highlightCandidateOnMap(candidate.id); });
       listEl.appendChild(li);
     });
+
+    if (snapshot.terrain && snapshot.terrain.status === 'evaluating') {
+      var terrainNote = document.createElement('div');
+      terrainNote.className = 'terrain-note';
+      terrainNote.textContent = 'Assessing terrain visibility along sightlines…';
+      noteWrap.appendChild(terrainNote);
+    } else if (snapshot.terrain && (snapshot.terrain.status === 'unavailable' || snapshot.terrain.status === 'error')) {
+      var terrainUnavailableNote = document.createElement('div');
+      terrainUnavailableNote.className = 'terrain-note';
+      terrainUnavailableNote.textContent = 'Terrain analysis unavailable · Sightline ranking remains available.';
+      noteWrap.appendChild(terrainUnavailableNote);
+    }
 
     detailsBtn.disabled = top.length === 0;
 
@@ -3179,10 +3672,15 @@ body.focus-open #workspace{overflow:hidden}
         var marker = L.circleMarker([candidate.lat, candidate.lng], {
           radius: 6, color: '#a9714b', weight: 2, fillColor: '#c99b72', fillOpacity: 0.85, title: candidate.name
         }).addTo(focus.mapInstance);
+        var chip = terrainChipHtml(candidate);
         marker.bindTooltip('<strong>' + escapeHtml(candidate.name) + '</strong><br>' +
-          candidate.distanceKm + ' km · ' + candidate.bearingDegrees + '° · Δ' + candidate.headingDeltaDegrees + '°',
+          candidate.distanceKm + ' km · ' + candidate.bearingDegrees + '° · Δ' + candidate.headingDeltaDegrees + '°' +
+          (chip ? '<br>' + chip : ''),
           { direction: 'top', offset: [0, -6] });
-        marker.on('click', function() { openSightlineDrawer(candidate.id); });
+        marker.on('click', function() {
+          highlightCandidateOnMap(candidate.id);
+          openFocusTerrainTray(candidate.id);
+        });
         bounds.extend([candidate.lat, candidate.lng]);
       });
     } else {
@@ -3192,6 +3690,89 @@ body.focus-open #workspace{overflow:hidden}
     // Leaflet needs explicit resize handling once the container has settled.
     setTimeout(function() { if (focus.type === 'map' && focus.mapInstance) focus.mapInstance.invalidateSize(); }, 80);
     setTimeout(function() { if (focus.type === 'map' && focus.mapInstance) focus.mapInstance.invalidateSize(); }, 250);
+  }
+
+  /* ---- Focus Map collapsible terrain tray ------------------------------- */
+  /* The tray overlays the map bottom edge; the map is never resized. */
+  var focusTerrainTray = { candidateId: null, collapsed: false };
+
+  function findSightlineCandidate(id) {
+    var snapshot = state.sightline && state.sightline.snapshot;
+    if (!snapshot || !snapshot.candidates) return null;
+    return snapshot.candidates.filter(function(c) { return c.id === id; })[0] || null;
+  }
+
+  function openFocusTerrainTray(candidateId) {
+    var candidate = findSightlineCandidate(candidateId);
+    if (!candidate) { closeFocusTerrainTray(); return; }
+    focusTerrainTray.candidateId = candidate.id;
+    var container = $('focusMapContainer');
+    if (!container) return;
+    var host = $('focusTerrainTray');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'focusTerrainTray';
+      host.className = 'focus-terrain-tray';
+      container.appendChild(host);
+    }
+    host.style.display = '';
+    renderFocusTerrainTray();
+  }
+
+  function renderFocusTerrainTray() {
+    var host = $('focusTerrainTray');
+    if (!host || !focusTerrainTray.candidateId) return;
+    var candidate = findSightlineCandidate(focusTerrainTray.candidateId);
+    if (!candidate) { closeFocusTerrainTray(); return; }
+    host.classList.toggle('collapsed', !!focusTerrainTray.collapsed);
+    var t = candidate.terrain;
+    var chip = terrainChipHtml(candidate);
+    var facts = '<div class="focus-terrain-tray-result">' + escapeHtml(candidate.name) + '</div>';
+    if (t && t.status === 'pending') facts += 'Assessing terrain along sightline…';
+    else if (t && t.status !== 'unavailable' && t.status !== undefined && t.terrainHorizonAngleDeg !== undefined && t.terrainHorizonAngleDeg !== null) {
+      facts +=
+        '<div>' + escapeHtml(terrainResultSentence(t)) + '</div>' +
+        '<div>Camera eye <strong>' + Math.round(t.cameraEyeElevationM) + ' m</strong>' +
+        (t.exifAltitudeM !== null && t.exifAltitudeM !== undefined ? ' · EXIF altitude ' + t.exifAltitudeM + ' m' : '') + '</div>' +
+        '<div>Candidate target <strong>' + Math.round(t.candidateTargetElevationM) + ' m</strong> · ' + escapeHtml(humanizeTargetSource(t.candidateTargetSource)) + '</div>' +
+        '<div>Candidate angle <strong class="terr-angle">' + formatSignedDegrees(t.candidateAngleDeg) + '</strong> · horizon <strong class="terr-angle">' + formatSignedDegrees(t.terrainHorizonAngleDeg) + '</strong></div>';
+      if (t.obstruction) facts += '<div>Highest obstruction <strong>' + Math.round(t.obstruction.elevationM) + ' m at ' + (t.obstruction.distanceM / 1000).toFixed(1) + ' km</strong></div>';
+      if (t.representativePointOnly) facts += '<div style="font-style:italic">Assessment applies to the representative point only.</div>';
+      facts += '<div style="font-size:.62rem;color:var(--text-faint)">' + escapeHtml(TERRAIN_SOURCE.dataset) + ' · ' + TERRAIN_SOURCE.resolutionM + ' m · refraction not modeled</div>';
+    } else if (t && t.status === 'unavailable') {
+      facts += '<div>Terrain analysis unavailable' + (t.error ? ' · ' + escapeHtml(t.error) : '') + '</div>';
+    } else {
+      facts += '<div>No terrain analysis for this candidate.</div>';
+    }
+    var svg = t && Array.isArray(t.samples) && t.samples.length > 2 ? buildTerrainProfileSvg(t, { width: 320, height: 118 }) : '';
+    host.innerHTML =
+      '<div class="focus-terrain-tray-head" role="button" tabindex="0" aria-expanded="' + (!focusTerrainTray.collapsed) + '" aria-label="Toggle terrain details">' +
+        '<span><span class="focus-terrain-tray-kicker">Terrain visibility</span><br><span class="focus-terrain-tray-name">' + escapeHtml(candidate.name) + '</span></span>' +
+        chip +
+        '<span class="focus-terrain-tray-toggle">' + (focusTerrainTray.collapsed ? '▲ details' : '▼ details') + '</span>' +
+        '<button type="button" class="focus-terrain-tray-close" aria-label="Close terrain panel">×</button>' +
+      '</div>' +
+      '<div class="focus-terrain-tray-body">' +
+        '<div class="focus-terrain-tray-facts">' + facts + '</div>' +
+        (svg ? '<div class="focus-terrain-tray-graph">' + svg + '</div>' : '') +
+      '</div>';
+    var head = host.querySelector('.focus-terrain-tray-head');
+    head.addEventListener('click', function(e) {
+      if (e.target.closest('.focus-terrain-tray-close')) return;
+      focusTerrainTray.collapsed = !focusTerrainTray.collapsed;
+      renderFocusTerrainTray();
+    });
+    head.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusTerrainTray.collapsed = !focusTerrainTray.collapsed; renderFocusTerrainTray(); }
+    });
+    host.querySelector('.focus-terrain-tray-close').addEventListener('click', closeFocusTerrainTray);
+  }
+
+  function closeFocusTerrainTray() {
+    focusTerrainTray.candidateId = null;
+    focusTerrainTray.collapsed = false;
+    var host = $('focusTerrainTray');
+    if (host) host.remove();
   }
 
   var CONTEXT_MOVE_SELECTOR = ['.location-reading', '#gps-summary', '#map-container', '#environmentContext', '#sightlineSection', '.capture-ledger'];
@@ -3232,6 +3813,7 @@ body.focus-open #workspace{overflow:hidden}
       focus.mapInstance.remove();
       focus.mapInstance = null;
     }
+    if (type === 'map') closeFocusTerrainTray();
 
     focus.type = null;
     if (overlay) {
@@ -3289,6 +3871,116 @@ body.focus-open #workspace{overflow:hidden}
 
 
 
+  /* ---- Terrain evidence presentation ------------------------------------ */
+
+  function formatSignedDegrees(value) {
+    if (value === null || value === undefined || !isFinite(value)) return '—';
+    return (value >= 0 ? '+' : '') + value.toFixed(2) + '°';
+  }
+
+  function terrainResultSentence(terrain) {
+    switch (terrain.status) {
+      case 'terrain-clear': return 'Likely terrain-visible';
+      case 'terrain-blocked': return 'Terrain blocks the candidate base';
+      case 'terrain-uncertain': return 'Terrain uncertain — within DEM margin';
+      case 'base-blocked-height-unknown': return 'Terrain blocks the structure base; unknown structure height may extend above the horizon.';
+      case 'unavailable': return 'Terrain analysis unavailable' + (terrain.error ? ' · ' + terrain.error : '');
+      default: return 'Evaluating terrain along sightline…';
+    }
+  }
+
+  function humanizeTargetSource(source) {
+    switch (source) {
+      case 'OSM height': return 'OSM mapped height';
+      case 'inferred structure height': return 'inferred structure height (levels × 3 m)';
+      case 'OSM ele': return 'OSM ele tag';
+      default: return 'DEM terrain';
+    }
+  }
+
+  /* Field-notebook elevation profile: muted sage terrain, clay sightline,
+   * understated axes. Native SVG — no charting dependency. */
+  function buildTerrainProfileSvg(terrain, options) {
+    options = options || {};
+    var width = options.width || 340;
+    var height = options.height || 128;
+    var padL = 42, padR = 12, padT = 14, padB = 20;
+    var samples = terrain && Array.isArray(terrain.samples) ? terrain.samples : [];
+    if (samples.length < 2) return '';
+    var totalDistance = samples[samples.length - 1][0];
+    if (!totalDistance || totalDistance <= 0) return '';
+    var eye = terrain.cameraEyeElevationM;
+    var target = terrain.candidateTargetElevationM;
+    var minE = Infinity, maxE = -Infinity;
+    samples.forEach(function(s) {
+      if (s[1] < minE) minE = s[1];
+      if (s[1] > maxE) maxE = s[1];
+    });
+    [eye, target].forEach(function(v) { if (isFinite(v)) { if (v < minE) minE = v; if (v > maxE) maxE = v; } });
+    if (!isFinite(minE) || !isFinite(maxE)) return '';
+    var span = Math.max(16, maxE - minE);
+    var lo = minE - span * 0.18, hi = maxE + span * 0.22;
+    var X = function(d) { return padL + (width - padL - padR) * (d / totalDistance); };
+    var Y = function(e) { return padT + (height - padT - padB) * ((hi - e) / (hi - lo)); };
+
+    var linePts = samples.map(function(s) { return X(s[0]).toFixed(1) + ',' + Y(s[1]).toFixed(1); }).join(' ');
+    var areaPts = linePts + ' ' + X(totalDistance).toFixed(1) + ',' + (height - padB).toFixed(1) + ' ' + X(0).toFixed(1) + ',' + (height - padB).toFixed(1);
+
+    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Terrain elevation profile from camera to candidate" preserveAspectRatio="xMidYMid meet">';
+    svg += '<path d="M' + areaPts + '" fill="rgba(71,117,101,.13)" stroke="none"/>';
+    svg += '<polyline points="' + linePts + '" fill="none" stroke="#477565" stroke-width="1.6" stroke-linejoin="round"/>';
+    // Eye-level reference
+    svg += '<line x1="' + padL + '" y1="' + Y(eye).toFixed(1) + '" x2="' + (width - padR) + '" y2="' + Y(eye).toFixed(1) + '" stroke="#92978d" stroke-width="0.7" stroke-dasharray="2 4" opacity="0.7"/>';
+    // Direct sightline
+    svg += '<line x1="' + X(0).toFixed(1) + '" y1="' + Y(eye).toFixed(1) + '" x2="' + X(totalDistance).toFixed(1) + '" y2="' + Y(target).toFixed(1) + '" stroke="#b9674f" stroke-width="1.3" stroke-dasharray="4 3"/>';
+    // Highest intervening obstruction
+    if (terrain.obstruction && terrain.obstruction.distanceM > 0 && isFinite(terrain.obstruction.elevationM)) {
+      var ox = X(Math.min(terrain.obstruction.distanceM, totalDistance)).toFixed(1);
+      var oy = Y(terrain.obstruction.elevationM).toFixed(1);
+      svg += '<circle cx="' + ox + '" cy="' + oy + '" r="5" fill="rgba(198,154,85,.25)" stroke="none"/>';
+      svg += '<circle cx="' + ox + '" cy="' + oy + '" r="2.4" fill="#c69a55" stroke="#fffdf7" stroke-width="0.8"><title>Highest obstruction: ' + Math.round(terrain.obstruction.elevationM) + ' m at ' + (terrain.obstruction.distanceM / 1000).toFixed(1) + ' km</title></circle>';
+    }
+    // Camera & candidate endpoints
+    svg += '<circle cx="' + X(0).toFixed(1) + '" cy="' + Y(eye).toFixed(1) + '" r="2.8" fill="#fffdf7" stroke="#477565" stroke-width="1.6"><title>Camera eye: ' + Math.round(eye) + ' m</title></circle>';
+    svg += '<circle cx="' + X(totalDistance).toFixed(1) + '" cy="' + Y(target).toFixed(1) + '" r="2.8" fill="#b9674f" stroke="#fffdf7" stroke-width="1"><title>Candidate target: ' + Math.round(target) + ' m</title></circle>';
+    // Understated axis labels
+    svg += '<text x="' + (padL - 5) + '" y="' + (Y(maxE) + 3).toFixed(1) + '" text-anchor="end" font-size="7.5" fill="#92978d">' + Math.round(maxE) + ' m</text>';
+    svg += '<text x="' + (padL - 5) + '" y="' + (Y(minE) + 3).toFixed(1) + '" text-anchor="end" font-size="7.5" fill="#92978d">' + Math.round(minE) + ' m</text>';
+    svg += '<text x="' + padL + '" y="' + (height - 7) + '" font-size="7.5" fill="#92978d">0 km</text>';
+    svg += '<text x="' + (width - padR) + '" y="' + (height - 7) + '" text-anchor="end" font-size="7.5" fill="#92978d">' + (totalDistance / 1000).toFixed(1) + ' km</text>';
+    svg += '</svg>';
+    return svg;
+  }
+
+  /* Full TERRAIN VISIBILITY evidence block for the candidate drawer. */
+  function terrainDetailHtml(candidate) {
+    var t = candidate && candidate.terrain;
+    if (!t) return '';
+    var html = '<dt>Terrain visibility</dt><dd>' + escapeHtml(terrainResultSentence(t)) + '</dd>';
+    if (t.status === 'pending') return html;
+    if (t.status !== 'unavailable') {
+      html += '<dt>Camera ground / eye</dt><dd class="terr-angle">' + Math.round(t.cameraGroundElevationM) + ' m / ' + Math.round(t.cameraEyeElevationM) + ' m (DEM ground + assumed ' + CAMERA_HEIGHT_M + ' m eye height)</dd>';
+      if (t.exifAltitudeM !== null && t.exifAltitudeM !== undefined) {
+        html += '<dt>Camera EXIF altitude</dt><dd class="terr-angle">' + t.exifAltitudeM + ' m · shown separately from DEM terrain, not reconciled</dd>';
+      }
+      html += '<dt>Candidate ground / target</dt><dd class="terr-angle">' + Math.round(t.candidateGroundElevationM) + ' m / ' + Math.round(t.candidateTargetElevationM) + ' m · ' + escapeHtml(humanizeTargetSource(t.candidateTargetSource)) +
+        (t.representativePointOnly ? ' · <em>assessment applies to the feature representative point only</em>' : '') + '</dd>';
+      html += '<dt>Candidate angle / horizon</dt><dd class="terr-angle">' + formatSignedDegrees(t.candidateAngleDeg) + ' / ' + formatSignedDegrees(t.terrainHorizonAngleDeg) + '</dd>';
+      html += '<dt>Angular clearance</dt><dd class="terr-angle">' + formatSignedDegrees(t.angularClearanceDeg) + ' (margin ±' + TERRAIN_ANGLE_MARGIN_DEG + '°)</dd>';
+      if (t.obstruction) {
+        html += '<dt>Highest obstruction</dt><dd class="terr-angle">' + Math.round(t.obstruction.elevationM) + ' m at ' + (t.obstruction.distanceM / 1000).toFixed(1) + ' km</dd>';
+      } else {
+        html += '<dt>Highest obstruction</dt><dd>No intervening terrain above the sightline</dd>';
+      }
+      html += '<dt>Coverage</dt><dd>' + t.sampleCount + ' interior samples · ~' + (t.sampleSpacingM || '?') + ' m spacing · geometric sightline, Earth curvature included · atmospheric refraction not modeled</dd>';
+    }
+    html += '<dt>Terrain source</dt><dd>' + escapeHtml(TERRAIN_SOURCE.dataset) + ' via ' + escapeHtml(TERRAIN_SOURCE.provider) + ' · ' + TERRAIN_SOURCE.resolutionM + ' m nominal resolution' + '</dd>';
+    if (Array.isArray(t.samples) && t.samples.length > 2 && t.status !== 'pending') {
+      html += '</dl><div class="terrain-profile-wrap">' + buildTerrainProfileSvg(t) + '</div><dl class="cand-detail" style="border-top:0;padding-top:0;margin-top:2px">';
+    }
+    return html;
+  }
+
   function openSightlineDrawer(candidateId) {
     var snapshot = state.sightline && state.sightline.snapshot;
     if (!snapshot || !snapshot.candidates.length) return;
@@ -3300,10 +3992,12 @@ body.focus-open #workspace{overflow:hidden}
       var li = document.createElement('li');
       if (candidate.id === active.id) li.classList.add('active');
       li.innerHTML = '<span>' + (index + 1) + '. ' + escapeHtml(candidate.name) + '</span>' +
-        '<span class="sl-meta">' + candidate.distanceKm + ' km · ' + candidate.bearingDegrees + '°</span>';
+        '<span class="sl-meta">' + candidate.distanceKm + ' km · ' + candidate.bearingDegrees + '°' + terrainChipHtml(candidate) + '</span>';
       li.addEventListener('click', function() { openSightlineDrawer(candidate.id); highlightCandidateOnMap(candidate.id); });
       list.appendChild(li);
     });
+    var rankNote = active.baseRank && active.baseRank !== (snapshot.candidates.indexOf(active) + 1)
+      ? '<dt>Ranking</dt><dd>Geographic rank #' + active.baseRank + ' · terrain-adjusted rank #' + (snapshot.candidates.indexOf(active) + 1) + '</dd>' : '';
     var tagsBlock = Object.keys(active.tags).length
       ? '<dt>OSM tags</dt><dd>' + Object.keys(active.tags).map(function(k) { return escapeHtml(k + ': ' + active.tags[k]); }).join('<br>') + '</dd>'
       : '<dt>OSM tags</dt><dd>None recorded</dd>';
@@ -3314,10 +4008,12 @@ body.focus-open #workspace{overflow:hidden}
       '<dt>Distance</dt><dd>' + active.distanceKm + ' km (' + active.distanceMeters + ' m)</dd>' +
       '<dt>Bearing from camera</dt><dd>' + active.bearingDegrees + '° ' + escapeHtml(active.bearingCardinal || '') + '</dd>' +
       '<dt>Heading difference</dt><dd>Δ' + active.headingDeltaDegrees + '° from camera heading of ' + snapshot.cameraHeading + '° (' + escapeHtml(snapshot.headingSource) + ')</dd>' +
-      '<dt>Significance</dt><dd>' + escapeHtml(active.significance) + ' · rank score ' + active.rankScore + ' (geometric — not a visual confirmation)</dd>' +
+      '<dt>Significance</dt><dd>' + escapeHtml(active.significance) + ' · rank score ' + active.rankScore + (active.terrainAdjustment ? ' ' + (active.terrainAdjustment > 0 ? '+' : '') + active.terrainAdjustment + ' terrain = ' + active.terrainAdjustedScore : '') + ' (geometric — not a visual confirmation)</dd>' +
+      rankNote +
       '<dt>Geometry</dt><dd>' + escapeHtml(active.geometryKind || active.osmType) + ' · OSM ' + escapeHtml(active.osmType) + ' ' + escapeHtml(String(active.osmId)) +
         (active.osmIds && active.osmIds.length > 1 ? ' (+ ' + (active.osmIds.length - 1) + ' merged segment' + (active.osmIds.length > 2 ? 's' : '') + ')' : '') +
         ' · ' + escapeHtml(active.representativePointNote) + '</dd>' +
+      terrainDetailHtml(active) +
       tagsBlock +
       '<dt>Source</dt><dd>' + escapeHtml(active.provenance.provider) + ' via Overpass API · retrieved ' + escapeHtml(active.provenance.retrievedAt) + '</dd>' +
       '</dl>' +
@@ -3342,9 +4038,11 @@ body.focus-open #workspace{overflow:hidden}
     var sl = state.sightline;
     if (!sl || sl.status !== 'available' || !sl.snapshot || !sl.snapshot.candidates.length) return null;
     var snapshot = sl.snapshot;
+    /* Candidates are already in terrain-adjusted order once terrain completes,
+     * so the AI sees the same ordering the UI shows. */
     var payload = {
       possible_features_in_view: snapshot.candidates.slice(0, SIGHTLINE_AI_LIMIT).map(function(candidate) {
-        return {
+        var entry = {
           name: candidate.name,
           type: candidate.type,
           category: candidate.category,
@@ -3355,6 +4053,29 @@ body.focus-open #workspace{overflow:hidden}
           osm: { type: candidate.osmType, id: candidate.osmId },
           tags: candidate.tags
         };
+        if (candidate.baseRank) {
+          entry.geographic_rank = candidate.baseRank;
+          entry.terrain_adjusted_rank = snapshot.candidates.indexOf(candidate) + 1;
+        }
+        var t = candidate.terrain;
+        if (t) {
+          if (t.status === 'pending') entry.terrain_assessment = 'evaluation-incomplete';
+          else {
+            entry.terrain_assessment = t.status;
+            if (isFinite(t.candidateTargetElevationM)) {
+              entry.candidate_elevation_m = t.candidateTargetElevationM;
+              entry.target_elevation_source = humanizeTargetSource(t.candidateTargetSource);
+            }
+            entry.terrain_horizon_deg = t.terrainHorizonAngleDeg;
+            entry.candidate_angle_deg = t.candidateAngleDeg;
+            if (t.status === 'base-blocked-height-unknown') {
+              entry.note = 'terrain blocks the mapped base, but structure height is unknown';
+            } else if (t.representativePointOnly) {
+              entry.note = 'terrain assessment applies to the feature representative point only';
+            }
+          }
+        }
+        return entry;
       }),
       camera_position: { latitude: snapshot.cameraPosition.lat, longitude: snapshot.cameraPosition.lng },
       camera_heading: { degrees: snapshot.cameraHeading, cardinal: snapshot.headingCardinal, source: snapshot.headingSource },
@@ -3363,6 +4084,26 @@ body.focus-open #workspace{overflow:hidden}
       historical_caveat: 'Feature existence at capture time has not been verified.',
       evidence_note: 'Candidates are geometric possibilities ranked by heading alignment, distance and mapped significance — not visual identifications.'
     };
+    var tm = snapshot.terrain;
+    if (tm && tm.status === 'complete') {
+      payload.terrain_analysis = {
+        provider: tm.provider,
+        dataset: tm.dataset,
+        nominal_resolution_m: tm.resolutionM,
+        method: 'spherical 3-D sightline geometry sampled over the DEM between camera and each candidate',
+        atmospheric_refraction_modeled: false,
+        camera_eye_height_m_above_ground: CAMERA_HEIGHT_M,
+        candidates_evaluated: tm.completedCandidates,
+        limitations: 'Terrain analysis does not account for vegetation, buildings, atmospheric visibility or haze, camera pitch, or unknown structure heights.'
+      };
+    } else if (tm && tm.status === 'evaluating') {
+      payload.terrain_analysis = { status: 'evaluating' };
+    } else if (tm && (tm.status === 'unavailable' || tm.status === 'error')) {
+      payload.terrain_analysis = {
+        status: 'unavailable',
+        note: 'Terrain service failure did not affect the underlying geographic candidate ranking.'
+      };
+    }
     if (snapshot.acquisition) {
       var acq = snapshot.acquisition;
       payload.geographic_acquisition = {
@@ -3458,9 +4199,9 @@ body.focus-open #workspace{overflow:hidden}
         directionRef: state.gps.directionRef || null,
         resolvedLocation: state.reverse || null
       } : null,
-      enrichment: contextSent && contextSent.environmental_context ? cloneEvidence(state.enrichment) : null,
+      enrichment: contextSent && contextSent.environmental_context ? cloneEvidenceSafe(state.enrichment) : null,
       geography: (contextSent && contextSent.sightline_context && state.sightline && state.sightline.snapshot)
-        ? { sightline: cloneEvidence(state.sightline.snapshot) } : null,
+        ? { sightline: cloneEvidenceSafe(state.sightline.snapshot) } : null,
       analysis: {
         question: question,
         model: response.model || settings.model,
@@ -3760,7 +4501,10 @@ body.focus-open #workspace{overflow:hidden}
             'Treat historical weather as reconstructed model context rather than an exact on-site measurement, and retain its source/confidence caveats. ' +
             'If sightline geographic candidates are provided, treat them as geometric possibilities ranked by camera-heading alignment, distance, and mapped significance — ' +
             'not as ground truth or confirmed identifications. They reflect current OpenStreetMap data and may not have existed when the photo was captured. ' +
-            'Compare visible characteristics of the image against candidate type and location rather than blindly selecting the top-ranked candidate; image evidence remains primary. ' +
+            'If terrain assessments are provided for candidates, treat them as DEM-based plausibility evidence only: "terrain-clear" means intervening terrain likely allows a line of sight ' +
+            'and does NOT prove the feature is visible in the photograph; "terrain-blocked" is strong negative evidence for the mapped base of natural/ground features; ' +
+            'a structure whose base is blocked with unknown height may still extend above the terrain horizon. Image evidence remains primary over all geographic context. ' +
+            'Compare visible characteristics of the image against candidate type and location rather than blindly selecting the top-ranked candidate. ' +
             'If GPS coordinates were provided, do not claim a geographic inference came from vision — say it came from image metadata. ' +
             'Call out uncertainty explicitly. Be concise and structured in your answer.'
         },
@@ -4205,6 +4949,38 @@ body.focus-open #workspace{overflow:hidden}
       lines.push('  AI context: ' + acq.aiContext);
       lines.push('  completeness: ' + acq.completeness);
       if (acq.geometryCheck) lines.push('  geometry refinement: checked ' + acq.geometryCheck.checked + ', rescued ' + acq.geometryCheck.rescued + (acq.geometryCheck.error ? ' (' + acq.geometryCheck.error + ')' : ''));
+    }
+    lines.push('');
+    lines.push('Terrain visibility:');
+    var tm = slSnap ? slSnap.terrain : null;
+    if (!tm) {
+      lines.push('  status: not-analyzed (snapshot predates terrain layer)');
+    } else {
+      lines.push('  status: ' + tm.status);
+      lines.push('  provider: ' + tm.provider + ' · dataset: ' + tm.dataset + ' · resolution: ' + tm.resolutionM + ' m');
+      lines.push('  candidates requested: ' + tm.requestedCandidates + ' · completed: ' + tm.completedCandidates);
+      lines.push('  sample points generated: ' + tm.samplePointsGenerated);
+    lines.push('  unique coordinates requested: ' + (tm.uniqueCoordinatesRequested || '-'));
+      lines.push('  elevation batches: ' + tm.batchesRequested + ' (failed: ' + tm.batchesFailed + ')');
+      lines.push('  run id: ' + (tm.runId !== null && tm.runId !== undefined ? tm.runId : '-'));
+      lines.push('  camera eye height assumed: ' + CAMERA_HEIGHT_M + ' m');
+      lines.push('  uncertainty margin: ±' + TERRAIN_ANGLE_MARGIN_DEG + '°');
+      lines.push('  atmospheric refraction: not modeled');
+      if (tm.error) lines.push('  error: ' + tm.error);
+      (slSnap.candidates || []).slice(0, TERRAIN_CANDIDATE_LIMIT).forEach(function(c, idx) {
+        if (!c.terrain) return;
+        var t = c.terrain;
+        lines.push('  #' + (idx + 1) + ' ' + c.name + ':');
+        lines.push('    classification: ' + t.status +
+          (t.sampleCount ? ' · samples=' + t.sampleCount : '') +
+          (isFinite(t.cameraGroundElevationM) ? ' · cam=' + Math.round(t.cameraGroundElevationM) + 'm' : '') +
+          (isFinite(t.candidateTargetElevationM) ? ' · target=' + Math.round(t.candidateTargetElevationM) + 'm (' + (t.candidateTargetSource || '?') + ')' : '') +
+          (isFinite(t.terrainHorizonAngleDeg) ? ' · horizon=' + formatSignedDegrees(t.terrainHorizonAngleDeg) : '') +
+          (isFinite(t.candidateAngleDeg) ? ' · angle=' + formatSignedDegrees(t.candidateAngleDeg) : '') +
+          (isFinite(t.angularClearanceDeg) ? ' · clearance=' + formatSignedDegrees(t.angularClearanceDeg) : ''));
+        lines.push('    score: base ' + c.rankScore + ' → adjustment ' + (c.terrainAdjustment > 0 ? '+' : '') + c.terrainAdjustment + ' → adjusted ' + c.terrainAdjustedScore + ' (geo rank #' + c.baseRank + ', display rank #' + (idx + 1) + ')');
+        if (t.error) lines.push('    error: ' + t.error);
+      });
     }
     lines.push('');
     lines.push('Analysis history:');
@@ -4670,17 +5446,39 @@ body.focus-open #workspace{overflow:hidden}
           sightlineStatus: state.sightline.status,
           sightlineCandidateCount: state.sightline.snapshot ? state.sightline.snapshot.matchedCount : 0,
           sightlineHeadingSource: state.sightline.snapshot ? state.sightline.snapshot.headingSource : null,
-          sightlineRestoredSnapshot: state.sightline.restoredSnapshot
+          sightlineRestoredSnapshot: state.sightline.restoredSnapshot,
+          terrainStatus: state.sightline.snapshot && state.sightline.snapshot.terrain ? state.sightline.snapshot.terrain.status : 'none'
         };
       },
-      getEnrichmentState: function() { return cloneEvidence(state.enrichment); },
+      getEnrichmentState: function() { return cloneEvidenceSafe(state.enrichment); },
+      runTerrainAnalysis: function() { return runTerrainAnalysis(); },
+      cancelTerrainWork: function() { cancelTerrainWork(); },
+      getTerrainState: function() {
+        var snapshot = state.sightline && state.sightline.snapshot;
+        if (!snapshot) return null;
+        return {
+          meta: cloneEvidence(snapshot.terrain),
+          candidates: (snapshot.candidates || []).slice(0, TERRAIN_CANDIDATE_LIMIT).map(function(c, idx) {
+            return {
+              id: c.id, name: c.name, baseRank: c.baseRank || null,
+              displayRank: idx + 1, rankScore: c.rankScore,
+              terrainAdjustment: c.terrainAdjustment || 0,
+              terrainAdjustedScore: typeof c.terrainAdjustedScore === 'number' ? c.terrainAdjustedScore : c.rankScore,
+              lat: c.lat, lng: c.lng, distanceMeters: c.distanceMeters,
+              geometryKind: c.geometryKind || null,
+              tags: cloneEvidence(c.tags) || {},
+              terrain: cloneEvidence(c.terrain) || null
+            };
+          })
+        };
+      },
       getSightlineState: function() {
         return {
           status: state.sightline.status,
           error: state.sightline.error,
           restoredSnapshot: state.sightline.restoredSnapshot,
           manualHeadingDegrees: state.sightline.manualHeadingDegrees,
-          snapshot: cloneEvidence(state.sightline.snapshot),
+          snapshot: cloneEvidenceSafe(state.sightline.snapshot),
           aiContextPayload: sightlineContextPayload()
         };
       },
@@ -4688,7 +5486,7 @@ body.focus-open #workspace{overflow:hidden}
         if (!state.gps) return { passed: false, reason: 'no gps' };
         state.sightline.manualHeadingDegrees = Number(degrees);
         await runSightline();
-        return { passed: true, status: state.sightline.status, snapshot: cloneEvidence(state.sightline.snapshot) };
+        return { passed: true, status: state.sightline.status, snapshot: cloneEvidenceSafe(state.sightline.snapshot) };
       },
       sightlineTestHelpers: {
         angularDifference: angularDifference,
@@ -4705,6 +5503,7 @@ body.focus-open #workspace{overflow:hidden}
           if (snapshot && snapshot.headingSource === 'manual') {
             state.sightline.manualHeadingDegrees = snapshot.cameraHeading;
           }
+          if (!state.sightline.snapshot.terrain) initTerrainMetadata(state.sightline.snapshot);
           renderSightline();
           drawSightlineOnMap(true);
           buildContextPreview();
@@ -4714,6 +5513,51 @@ body.focus-open #workspace{overflow:hidden}
           updateDiagnostics();
           var el = document.getElementById('diagContent');
           return el ? el.textContent : '';
+        },
+        terrainHelpers: {
+          constants: {
+            TERRAIN_CANDIDATE_LIMIT: TERRAIN_CANDIDATE_LIMIT,
+            CAMERA_HEIGHT_M: CAMERA_HEIGHT_M,
+            TERRAIN_ANGLE_MARGIN_DEG: TERRAIN_ANGLE_MARGIN_DEG,
+            TERRAIN_SAMPLE_SPACING_M: TERRAIN_SAMPLE_SPACING_M,
+            TERRAIN_MIN_SAMPLES: TERRAIN_MIN_SAMPLES,
+            TERRAIN_MAX_SAMPLES: TERRAIN_MAX_SAMPLES,
+            TERRAIN_BATCH_SIZE: TERRAIN_BATCH_SIZE,
+            TERRAIN_SCORE_MODIFIERS: TERRAIN_SCORE_MODIFIERS
+          },
+          terrainSampleCount: terrainSampleCount,
+          generateTerrainPath: generateTerrainPath,
+          geodeticToEcef: geodeticToEcef,
+          apparentElevationAngleDeg: apparentElevationAngleDeg,
+          terrainAngleFromCamera: terrainAngleFromCamera,
+          parseOsmHeightMeters: parseOsmHeightMeters,
+          parseBuildingLevels: parseBuildingLevels,
+          isVerticalStructureCandidate: isVerticalStructureCandidate,
+          resolveCandidateTarget: resolveCandidateTarget,
+          classifyTerrainAngles: classifyTerrainAngles,
+          computeTerrainEvidence: computeTerrainEvidence,
+          buildTerrainProfileSvg: buildTerrainProfileSvg
+        },
+        runTerrainAnalysis: function() { return runTerrainAnalysis(); },
+        cancelTerrainWork: function() { cancelTerrainWork(); },
+        getTerrainState: function() {
+          var snapshot = state.sightline && state.sightline.snapshot;
+          if (!snapshot) return null;
+          return {
+            meta: cloneEvidence(snapshot.terrain),
+            candidates: (snapshot.candidates || []).slice(0, TERRAIN_CANDIDATE_LIMIT).map(function(c, idx) {
+              return {
+                id: c.id, name: c.name, baseRank: c.baseRank || null,
+                displayRank: idx + 1, rankScore: c.rankScore,
+                terrainAdjustment: c.terrainAdjustment || 0,
+                terrainAdjustedScore: typeof c.terrainAdjustedScore === 'number' ? c.terrainAdjustedScore : c.rankScore,
+                lat: c.lat, lng: c.lng, distanceMeters: c.distanceMeters,
+                geometryKind: c.geometryKind || null,
+                tags: cloneEvidence(c.tags) || {},
+                terrain: cloneEvidence(c.terrain) || null
+              };
+            })
+          };
         }
       },
       refreshEnrichment: function() { return enrichCurrentImage(); },
