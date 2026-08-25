@@ -1,6 +1,7 @@
 /* Wildlife Field Recorder — photo-import / EXIF / enrichment regression suite */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
+const { createHash } = require('crypto');
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 45000, navigationTimeout: 45000 });
 
@@ -183,6 +184,211 @@ test('page loads with photo-import UI and no camera', async ({ page }) => {
   await expect(page.locator('#import-photo-btn')).toBeVisible();
   expect(await page.locator('#camera-overlay, #camera-capture-btn, #camera-video').count()).toBe(0);
   expect(errors.filter(e => !/analytics/i.test(e))).toEqual([]);
+});
+
+/* ---------- original-file picker / Android EXIF preservation ---------- */
+
+test('PICKER-A: primary original-file input has no image accept restriction', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const input = page.locator('#photo-import-input');
+  expect(await input.getAttribute('accept')).toBeNull();
+  await expect(page.locator('#import-photo-btn')).toContainText('Import Original Photo');
+  await expect(page.locator('.original-photo-hint')).toContainText('original file');
+});
+
+test('PICKER-B: File System Access API is preferred and imports its returned File', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await openCaptureTab(page);
+  await page.evaluate(({ pngB64, exif }) => {
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    window.__pickerCalls = 0;
+    window.__genericInputClicks = 0;
+    document.getElementById('photo-import-input').addEventListener('click', () => { window.__genericInputClicks++; });
+    window.exifr.parse = async () => exif;
+    window.showOpenFilePicker = async options => {
+      window.__pickerCalls++;
+      window.__pickerOptions = options;
+      return [{ getFile: async () => new File([bin], 'original.jpg', { type: 'image/jpeg' }) }];
+    };
+  }, { pngB64: PNG.toString('base64'), exif: FULL_EXIF });
+
+  await page.click('#import-photo-btn');
+  await dbWait(page, 'obs => obs.observationSource === "photo_import"');
+  const result = await page.evaluate(async () => ({
+    pickerCalls: window.__pickerCalls,
+    genericClicks: window.__genericInputClicks,
+    options: window.__pickerOptions,
+    count: await window.__WFR_TEST__.db.observations.count()
+  }));
+  expect(result.pickerCalls).toBe(1);
+  expect(result.genericClicks).toBe(0);
+  expect(result.options).toEqual({ multiple: false });
+  expect(result.count).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('PICKER-C: absent File System Access API falls back to generic file input', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await openCaptureTab(page);
+  await page.evaluate(() => {
+    delete window.showOpenFilePicker;
+    window.exifr.parse = async () => ({});
+  });
+  const chooserPromise = page.waitForEvent('filechooser');
+  await page.click('#import-photo-btn');
+  const chooser = await chooserPromise;
+  await chooser.setFiles({ name: 'fallback.jpg', mimeType: 'image/jpeg', buffer: PNG });
+  await dbWait(page, 'obs => obs.observationSource === "photo_import"');
+  expect(await page.evaluate(() => window.__WFR_TEST__.db.observations.count())).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('PICKER-D: AbortError is a normal cancellation and returns to Ready', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await openCaptureTab(page);
+  await page.evaluate(() => {
+    window.showOpenFilePicker = async () => { throw new DOMException('Cancelled', 'AbortError'); };
+  });
+  await page.click('#import-photo-btn');
+  await expect(page.locator('#capture-status')).toHaveText('Ready');
+  expect(await page.evaluate(() => window.__WFR_TEST__.db.observations.count())).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('PICKER-E: supported MIME and extension combinations are accepted', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const accepted = await page.evaluate(() => {
+    const ok = window.__WFR_TEST__.isSupportedPhotoFile;
+    return [
+      new File(['x'], 'photo.jpg', { type: 'image/jpeg' }),
+      new File(['x'], 'photo.JPEG', { type: '' }),
+      new File(['x'], 'photo.png', { type: 'image/png' }),
+      new File(['x'], 'photo.webp', { type: 'image/webp' }),
+      new File(['x'], 'photo.heic', { type: 'image/heic' }),
+      new File(['x'], 'photo.heif', { type: 'image/heif' }),
+      new File(['x'], 'provider-file', { type: 'image/jpeg' }),
+      new File(['x'], 'provider.jpg', { type: 'application/octet-stream' })
+    ].map(ok);
+  });
+  expect(accepted).toEqual([true, true, true, true, true, true, true, true]);
+});
+
+test('PICKER-F: unsupported documents are rejected before EXIF or observation creation', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await openCaptureTab(page);
+  const result = await page.evaluate(async () => {
+    let exifCalls = 0;
+    window.exifr.parse = async () => { exifCalls++; return {}; };
+    const T = window.__WFR_TEST__;
+    const statuses = [];
+    for (const [name, type] of [['notes.pdf', 'application/pdf'], ['wildlife.txt', 'text/plain'], ['archive.zip', 'application/zip'], ['fake.jpg', 'application/pdf']]) {
+      statuses.push((await T.importPhotoFile(new File(['not a photo'], name, { type }))).status);
+    }
+    return {
+      statuses,
+      exifCalls,
+      observations: await T.db.observations.count(),
+      message: document.getElementById('capture-status').textContent
+    };
+  });
+  expect(result.statuses).toEqual(['unsupported', 'unsupported', 'unsupported', 'unsupported']);
+  expect(result.exifCalls).toBe(0);
+  expect(result.observations).toBe(0);
+  expect(result.message).toContain("isn't a supported photo");
+  expect(result.message).toContain('JPEG, PNG, WebP, HEIC, or HEIF');
+  expect(errors).toEqual([]);
+});
+
+test('PICKER-G/H/I: original bytes reach EXIF first, hash exactly, and retain rich metadata', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+  const expectedHash = createHash('sha256').update(PNG).digest('hex');
+  await page.evaluate(({ pngB64, exif }) => {
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
+    window.__importEvidence = { events: [], exifBytes: null };
+    window.exifr.parse = async file => {
+      window.__importEvidence.events.push('exif');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      window.__importEvidence.exifBytes = Array.from(bytes);
+      return exif;
+    };
+    URL.createObjectURL = blob => {
+      window.__importEvidence.events.push('resize');
+      return nativeCreateObjectURL(blob);
+    };
+    window.showOpenFilePicker = async () => [{
+      getFile: async () => new File([bin], 'camera-original.jpg', { type: 'image/jpeg' })
+    }];
+  }, { pngB64: PNG.toString('base64'), exif: FULL_EXIF });
+
+  await page.click('#import-photo-btn');
+  await dbWait(page, 'obs => obs.weatherStatus === "ok"');
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    const obs = (await T.db.observations.toArray())[0];
+    const photo = (await T.db.photos.toArray())[0];
+    return {
+      events: window.__importEvidence.events,
+      exifBytes: window.__importEvidence.exifBytes,
+      hash: photo.originalSha256,
+      originalName: photo.originalFilename,
+      exif: obs.exif,
+      lat: obs.latitude,
+      lng: obs.longitude,
+      createdAt: obs.createdAt,
+      timeSource: obs.timeProvenance.source,
+      offset: obs.timeProvenance.utcOffsetSeconds,
+      metadataStatus: document.getElementById('original-photo-status').textContent
+    };
+  });
+  expect(result.events.indexOf('exif')).toBeGreaterThanOrEqual(0);
+  expect(result.events.indexOf('resize')).toBeGreaterThan(result.events.indexOf('exif'));
+  expect(Buffer.from(result.exifBytes)).toEqual(PNG);
+  expect(result.hash).toBe(expectedHash);
+  expect(result.originalName).toBe('camera-original.jpg');
+  expect(result.exif.DateTimeOriginal).toBe(FULL_EXIF.DateTimeOriginal);
+  expect(result.exif.OffsetTimeOriginal).toBe('-04:00');
+  expect(result.exif.Make).toBe('TestCam');
+  expect(result.exif.Model).toBe('Mk100');
+  expect(result.lat).toBe(38.355);
+  expect(result.lng).toBe(-87.5381);
+  expect(result.createdAt).toBe(Date.parse('2026-05-14T21:42:00.000Z'));
+  expect(result.timeSource).toBe('exif_DateTimeOriginal');
+  expect(result.offset).toBe(-14400);
+  expect(result.metadataStatus).toContain('Original metadata found');
+  expect(result.metadataStatus).toContain('GPS · capture time · TestCam Mk100');
+  expect(meteo.calls).toContain('2026-05-14');
+  expect(errors).toEqual([]);
+});
+
+test('PICKER-J: metadata-free original still imports without invented GPS or capture time', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await openCaptureTab(page);
+  await page.evaluate(pngB64 => {
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    window.exifr.parse = async () => ({});
+    window.showOpenFilePicker = async () => [{ getFile: async () => new File([bin], 'edited.jpg', { type: 'image/jpeg' }) }];
+  }, PNG.toString('base64'));
+  await page.click('#import-photo-btn');
+  await dbWait(page, 'obs => obs.observationSource === "photo_import"');
+  const obs = await getObs(page);
+  expect(obs.latitude).toBeNull();
+  expect(obs.longitude).toBeNull();
+  expect(obs.gpsStatus).toBe('missing');
+  expect(obs.timeProvenance.source).toBe('unknown');
+  expect(obs.createdAt).not.toBeNull();
+  await expect(page.locator('#original-photo-status')).toContainText('No embedded capture metadata');
+  expect(errors).toEqual([]);
 });
 
 test('import photo with EXIF uses EXIF capture time and GPS, saves ready', async ({ page }) => {
@@ -746,7 +952,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.25.4');
+    expect(post.body.data.appVersion).toBe('2026.08.25.5');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -1379,7 +1585,7 @@ test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing s
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe('~openai/gpt-latest');
   const prompt = calls[0].messages.map(m => m.content).join('\n');
-  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.25.4');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.25.5');
   expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
   expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
   expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);

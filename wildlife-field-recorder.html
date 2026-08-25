@@ -221,6 +221,13 @@ html[data-theme="light"] .leaflet-control-attribution { background: rgba(255,255
 html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 .import-btn { width: 160px; height: 160px; border-radius: 24px; border: 3px dashed var(--accent-dim); background: var(--bg-3); color: var(--accent-bright); font-size: 1.1rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; box-shadow: var(--shadow); transition: transform .15s, background .15s; cursor: pointer; }
 .import-btn:active { transform: scale(0.96); }
+.original-photo-hint { max-width: 330px; margin: 10px auto 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.4; }
+.original-photo-status { min-height: 1.2em; max-width: 380px; margin: 6px auto 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.4; white-space: pre-line; }
+.original-photo-status.ok { color: var(--accent-bright); }
+.original-photo-status.warn { color: var(--warn); }
+.metadata-result { margin: 8px 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-3); color: var(--text-muted); font-size: 0.8rem; line-height: 1.4; }
+.metadata-result.ok { color: var(--accent-bright); border-color: var(--accent-dim); }
+.metadata-result.warn { color: var(--warn); }
 .history-trip { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .history-trip-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--bg-3); cursor: pointer; flex-wrap: wrap; }
 .history-trip-head .trip-title { font-weight: 700; color: var(--accent-bright); flex: 1 1 auto; }
@@ -334,7 +341,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
     <div class="card-title">How this works</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:0.82rem;color:var(--text-muted);">
       <span class="chip">🎙 Voice</span> /
-      <span class="chip">🖼 Import Photo</span> →
+      <span class="chip">🖼 Import Original Photo</span> →
       <span class="chip">Local Queue</span> →
       <span class="chip">Process Audio</span> →
       <span class="chip">Classify Subject</span> →
@@ -371,11 +378,13 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
       <span id="capture-label">Capture</span>
       <span id="capture-sub" style="font-size:0.75rem;font-weight:500;opacity:0.9;">Tap to record</span>
     </button>
-    <button id="import-photo-btn" class="import-btn" aria-label="Import a photo to create an observation">
+    <button id="import-photo-btn" class="import-btn" aria-label="Import an original photo file to preserve capture metadata">
       <span>🖼️</span>
-      <span style="font-size:0.8rem;font-weight:600;">Import Photo</span>
+      <span style="font-size:0.8rem;font-weight:600;">Import Original Photo</span>
     </button>
-    <input type="file" id="photo-import-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" style="display:none;" />
+    <input type="file" id="photo-import-input" style="display:none;" />
+    <div class="original-photo-hint">Uses the original file so GPS and capture metadata are preserved.</div>
+    <div id="original-photo-status" class="original-photo-status" role="status" aria-live="polite"></div>
     <div class="capture-hint" id="capture-status">Ready</div>
     <div id="capture-discard-wrap" style="display:none;margin-top:10px;">
       <button id="capture-discard" class="btn btn-danger">Discard</button>
@@ -673,9 +682,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.5
 </footer>
 </div>
 
@@ -683,7 +692,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.25.4';
+const APP_VERSION = '2026.08.25.5';
 
 /* ========================
    DB (Dexie)
@@ -1731,11 +1740,15 @@ $('capture-another').addEventListener('click', () => {
 $('capture-add-photo').addEventListener('click', () => {
   if (lastCapturedLocalId) openPhotoPicker(lastCapturedLocalId);
 });
-$('import-photo-btn').addEventListener('click', () => { $('photo-import-input').click(); });
+$('import-photo-btn').addEventListener('click', () => { chooseOriginalPhoto(); });
 $('photo-import-input').addEventListener('change', async e => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
-  if (file) await importPhotoFile(file);
+  if (!file) {
+    $('capture-status').textContent = 'Ready';
+    return;
+  }
+  await importPhotoFile(file);
 });
 
 // Cleanup on page unload
@@ -2498,6 +2511,82 @@ async function normalizeTaxonomy(scientificName) {
    ======================== */
 let importReviewObsId = null;
 
+const SUPPORTED_PHOTO_MIME_TYPES = new Set([
+  'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'
+]);
+const SUPPORTED_PHOTO_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
+
+/** The primary picker is deliberately generic; validate the returned document here. */
+function isSupportedPhotoFile(file) {
+  if (!file) return false;
+  const mime = String(file.type || '').split(';', 1)[0].trim().toLowerCase();
+  const match = String(file.name || '').toLowerCase().match(/\.([^.]+)$/);
+  const extension = match ? match[1] : '';
+  if (SUPPORTED_PHOTO_MIME_TYPES.has(mime)) return true;
+  // Empty/generic MIME metadata is common with document providers; otherwise a
+  // trustworthy non-image MIME wins over a misleading filename extension.
+  if (mime && mime !== 'application/octet-stream' && mime !== 'binary/octet-stream') return false;
+  return SUPPORTED_PHOTO_EXTENSIONS.has(extension);
+}
+
+function openGenericPhotoInput() {
+  const input = $('photo-import-input');
+  input.value = '';
+  input.click();
+  return { status: 'fallback' };
+}
+
+/** Prefer a document/file handle. The hidden no-accept input covers other browsers. */
+async function chooseOriginalPhoto() {
+  if (typeof window.showOpenFilePicker !== 'function') return openGenericPhotoInput();
+  try {
+    const handles = await window.showOpenFilePicker({ multiple: false });
+    const handle = handles && handles[0];
+    if (!handle) {
+      $('capture-status').textContent = 'Ready';
+      return { status: 'cancelled' };
+    }
+    const file = await handle.getFile();
+    if (!file) {
+      $('capture-status').textContent = 'Ready';
+      return { status: 'cancelled' };
+    }
+    return await importPhotoFile(file);
+  } catch(e) {
+    if (e && e.name === 'AbortError') {
+      $('capture-status').textContent = 'Ready';
+      return { status: 'cancelled' };
+    }
+    // Unsupported/permission-limited implementations still get a normal document chooser.
+    return openGenericPhotoInput();
+  }
+}
+
+function photoMetadataResult(parsed) {
+  const exif = parsed && parsed.exif ? parsed.exif : {};
+  const details = [];
+  if (parsed && parsed.gps) details.push('GPS');
+  if (parsed && parsed.captureTime) details.push('capture time');
+  const camera = [exif.Make, exif.Model].filter(Boolean).join(' ');
+  if (camera) details.push(camera);
+  if (details.length) {
+    return { className: 'ok', title: '✓ Original metadata found', detail: details.join(' · ') };
+  }
+  return {
+    className: 'warn',
+    title: 'No embedded capture metadata found in this file.',
+    detail: 'Choose the original camera file if available.'
+  };
+}
+
+function showPhotoMetadataResult(parsed) {
+  const result = photoMetadataResult(parsed);
+  const el = $('original-photo-status');
+  el.className = 'original-photo-status ' + result.className;
+  el.textContent = result.title + (result.detail ? '\n' + result.detail : '');
+  return result;
+}
+
 function parseExifFromFile(file) {
   return new Promise(resolve => {
     if (typeof window.exifr === 'undefined' || typeof window.exifr.parse !== 'function') {
@@ -2565,6 +2654,13 @@ function photoEnrichmentState(hasGps, hasTime) {
 }
 
 async function importPhotoFile(file) {
+  if (!isSupportedPhotoFile(file)) {
+    $('capture-status').textContent = "That file isn't a supported photo. Choose JPEG, PNG, WebP, HEIC, or HEIF.";
+    const meta = $('original-photo-status');
+    meta.className = 'original-photo-status warn';
+    meta.textContent = "That file isn't a supported photo.\nChoose JPEG, PNG, WebP, HEIC, or HEIF.";
+    return { status: 'unsupported' };
+  }
   $('capture-status').textContent = 'Reading photo…';
   showTab('capture');
   const localId = 'obs-' + uuid();
@@ -2572,6 +2668,7 @@ async function importPhotoFile(file) {
 
   // 1. Extract EXIF from the ORIGINAL file first (before any resize)
   const parsed = await parseExifFromFile(file);
+  showPhotoMetadataResult(parsed);
   if (parsed.status === 'no-exif' || parsed.status === 'parse-error' || parsed.status === 'lib-missing') {
     logWarn('EXIF extraction issue (' + parsed.status + '): ' + (parsed.error || 'none found'));
   }
@@ -2599,7 +2696,7 @@ async function importPhotoFile(file) {
   catch(e) {
     logError('Photo import failed: ' + e.message);
     $('capture-status').textContent = 'Import failed: ' + e.message;
-    return;
+    return { status: 'decode-error', error: e.message };
   }
 
   // 4. Persist draft observation immediately (local-first)
@@ -2703,7 +2800,7 @@ async function importPhotoFile(file) {
   } catch(e) {
     logError('Photo observation save failed: ' + e.message);
     $('capture-status').textContent = 'Save failed: ' + e.message;
-    return;
+    return { status: 'save-error', error: e.message };
   }
 
   updateQueueChip();
@@ -2712,6 +2809,7 @@ async function importPhotoFile(file) {
 
   // 5. Run enrichment independently; failures never destroy the record
   runPhotoEnrichment(localId);
+  return { status: 'imported', localId };
 }
 
 async function saveObs(obs) {
@@ -2982,6 +3080,11 @@ function reviewTop(obs, thumbUrl) {
   const confLabel = obs.subjectConfidence == null ? null :
     obs.subjectConfidence >= 0.75 ? 'High' : obs.subjectConfidence >= 0.4 ? 'Medium' : 'Low';
   const tax = obs.taxonomy;
+  const metadata = photoMetadataResult({
+    exif: obs.exif,
+    gps: obs.exifGpsSource && obs.latitude != null && obs.longitude != null ? { lat: obs.latitude, lng: obs.longitude } : null,
+    captureTime: obs.timeProvenance && String(obs.timeProvenance.source || '').startsWith('exif_') ? obs.timeProvenance : null
+  });
   const taxHtml = tax && tax.status === 'ok' ?
     `<div style="font-size:0.78rem;color:var(--text-muted);">Taxonomy (GBIF): ${e([tax.kingdom, tax.phylum, tax.class, tax.order, tax.family, tax.genus, tax.species].filter(Boolean).join(' › '))}</div>` :
     tax && tax.status === 'ambiguous' ? `<div style="font-size:0.78rem;color:var(--warn);">Taxonomy match ambiguous (${e(tax.matchType || '')}) — AI name retained.</div>` :
@@ -2989,6 +3092,7 @@ function reviewTop(obs, thumbUrl) {
     tax && tax.status === 'error' ? `<div style="font-size:0.78rem;color:var(--danger);">Taxonomy lookup failed. AI name retained.</div>` : '';
   return `
     ${thumbUrl ? `<img src="${thumbUrl}" alt="Imported photo" style="width:100%;max-height:260px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);" />` : ''}
+    <div class="metadata-result ${metadata.className}"><strong>${e(metadata.title)}</strong>${metadata.detail ? `<br>${e(metadata.detail)}` : ''}</div>
     <div id="import-status-list" style="margin:10px 0;"></div>
     <div id="import-enrich-error" style="color:var(--danger);font-size:0.78rem;margin-bottom:6px;"></div>
     <label>Common name</label><input id="imp-common" value="${e(obs.subjectCommonName || '')}" placeholder="e.g. Eastern Fox Squirrel" />
@@ -5476,7 +5580,8 @@ init();
 // Test hook (used by automated specs; harmless in production)
 window.__WFR_TEST__ = {
   db, settings,
-  importPhotoFile, parseExifFromFile, normalizeExif, normalizeCaptureTime,
+  importPhotoFile, chooseOriginalPhoto, openGenericPhotoInput, isSupportedPhotoFile,
+  photoMetadataResult, parseExifFromFile, normalizeExif, normalizeCaptureTime,
   enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex,
   compassDirection, wallEpochMinutes, captureWallParts, wallIso,
   applyObservationTime, observationWallInputValue,
