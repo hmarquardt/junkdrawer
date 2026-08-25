@@ -746,7 +746,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.25.1');
+    expect(post.body.data.appVersion).toBe('2026.08.25.2');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -783,5 +783,295 @@ test('voice capture button handles denied microphone gracefully', async ({ page 
   await expect(page.locator('#capture-btn')).not.toHaveClass(/recording/);
   const queue = await page.textContent('#queue-chip');
   expect(queue).toBe('Queue 0');
+  expect(errors).toEqual([]);
+});
+
+/* ========================
+   OpenRouter-only LLM setup + provider-grouped model pickers
+   ======================== */
+
+const OR_MODELS_URL = '**openrouter.ai/api/v1/models**';
+
+function catalogPayload() {
+  const mk = (id, name, input, output) => ({
+    id, name,
+    architecture: { input_modalities: input, output_modalities: output },
+    pricing: { prompt: '0.0000001', completion: '0.0000004' }
+  });
+  return { data: [
+    mk('openai/gpt-4.1-mini', 'OpenAI: GPT-4.1 Mini', ['text', 'image'], ['text']),
+    mk('openai/gpt-4.1', 'OpenAI: GPT-4.1', ['text'], ['text']),
+    mk('openai/omni-moderation-latest', 'OpenAI: Omni Moderation', ['text'], ['text']),
+    mk('anthropic/claude-sonnet-4', 'Anthropic: Claude Sonnet 4', ['text', 'image'], ['text']),
+    mk('google/gemini-2.5-flash', 'Google: Gemini 2.5 Flash', ['text', 'image', 'audio'], ['text']),
+    mk('google/gemini-2.5-flash-lite', 'Google: Gemini 2.5 Flash Lite', ['text', 'audio'], ['text']),
+    mk('deepseek/deepseek-chat-v4', 'DeepSeek: DeepSeek Chat V4', ['text'], ['text']),
+    mk('mistralai/mistral-medium-3', 'Mistral AI: Mistral Medium 3', ['text'], ['text']),
+    mk('openai/text-embedding-3-large', 'OpenAI: Text Embedding 3 Large', ['text'], []),
+    mk('openai/dall-e-3', 'OpenAI: DALL-E 3', ['text'], ['image'])
+  ]};
+}
+
+/** Seed localStorage settings before any page script runs. Merges with any
+ *  already-stored settings so a reload does not wipe the app's own saves. */
+function seedSettings(context, overrides = {}, catalog = null) {
+  context.addInitScript(({ overrides, catalog }) => {
+    let existing = {};
+    try { existing = JSON.parse(localStorage.getItem('wfr_settings') || '{}'); } catch(e) {}
+    localStorage.setItem('wfr_settings', JSON.stringify({ llmKey: 'sk-or-test', ...existing, ...overrides }));
+    if (catalog) {
+      localStorage.setItem('wfr_openrouter_catalog', JSON.stringify({ fetchedAt: Date.now(), models: catalog }));
+    }
+  }, { overrides, catalog });
+}
+
+async function mockCatalog(page, payload = catalogPayload()) {
+  await page.route(OR_MODELS_URL, route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }));
+}
+
+async function selectValues(page, id) {
+  return page.evaluate(id => Array.from(document.getElementById(id).options).map(o => o.value), id);
+}
+async function selectedValue(page, id) {
+  return page.evaluate(id => document.getElementById(id).value, id);
+}
+
+/** Wait until the OpenRouter model catalog has been rendered into the selects
+ *  (cache, fallback, or live). */
+async function dbWaitQuiet(page, timeout = 15000) {
+  await page.waitForFunction(`(() => {
+    const el = document.getElementById('or-catalog-status');
+    const opts = document.getElementById('cfg-text-model');
+    return !!el && !!opts && opts.options.length > 0 && el.textContent.length > 0;
+  })()`, undefined, { timeout });
+}
+
+test('OR-A/B: generic provider UI removed; exactly one OpenRouter key field', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.click('nav#tabs button[data-tab="admin"]');
+
+  // A — generic provider controls gone from the LLM card (LabBox API base must remain)
+  await expect(page.locator('#cfg-llm-provider')).toHaveCount(0);
+  await expect(page.locator('#cfg-llm-base')).toHaveCount(0);
+  await expect(page.locator('#cfg-same-key')).toHaveCount(0);
+  const llmCard = page.locator('#llm-test-result').locator('xpath=ancestor::div[contains(@class,"card")]');
+  await expect(llmCard).not.toContainText('API base URL');
+  await expect(llmCard).toContainText('OpenRouter API key');
+  const labboxCard = page.locator('#cfg-api-base').locator('xpath=ancestor::div[contains(@class,"card")]');
+  await expect(labboxCard).toContainText('API base URL'); // untouched LabBox field
+  expect(await page.locator('#test-llm').innerText()).toBe('Test OpenRouter');
+
+  // B — exactly one OpenRouter key control
+  expect(await page.locator('#cfg-or-key[type="password"]').count()).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('OR-C: model dropdowns group by vendor with human labels', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  seedSettings(page.context());
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await dbWaitQuiet(page);
+
+  const groups = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('#cfg-text-model optgroup')).map(g => g.label));
+  for (const expected of ['OpenAI', 'Anthropic', 'Google', 'DeepSeek']) {
+    expect(groups).toContain(expected);
+  }
+  // Human-readable option text, raw ID as value
+  const optTexts = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('#cfg-text-model option')).map(o => ({ t: o.textContent, v: o.value })));
+  const mini = optTexts.find(o => o.v === 'openai/gpt-4.1-mini');
+  expect(mini.t).toBe('GPT-4.1 Mini');
+  expect(errors).toEqual([]);
+});
+
+test('OR-D/E/F: vision, classification, and transcription filtering', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  seedSettings(page.context());
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await dbWaitQuiet(page);
+
+  // D — only image-input + text-output models in Photo identification
+  const vision = await selectValues(page, 'cfg-vision-model');
+  expect(vision.sort()).toEqual([
+    'anthropic/claude-sonnet-4', 'google/gemini-2.5-flash', 'openai/gpt-4.1-mini'
+  ]);
+  expect(vision).not.toContain('openai/gpt-4.1');           // text-only
+  expect(vision).not.toContain('openai/dall-e-3');          // image-output
+
+  // E — chat-capable text models in Classification; utilities excluded
+  const cls = await selectValues(page, 'cfg-text-model');
+  for (const expected of ['openai/gpt-4.1-mini', 'openai/gpt-4.1', 'anthropic/claude-sonnet-4',
+    'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite', 'deepseek/deepseek-chat-v4',
+    'mistralai/mistral-medium-3']) {
+    expect(cls).toContain(expected);
+  }
+  expect(cls).not.toContain('openai/text-embedding-3-large'); // embedding (no text output)
+  expect(cls).not.toContain('openai/omni-moderation-latest'); // moderation utility
+  expect(cls).not.toContain('openai/dall-e-3');               // image generation
+
+  // F — only audio-input + text-output models in Transcription
+  const trans = await selectValues(page, 'cfg-trans-model');
+  expect(trans.sort()).toEqual(['google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite']);
+  expect(trans).not.toContain('mistralai/mistral-medium-3');  // ordinary chat model
+  expect(trans).not.toContain('openai/gpt-4.1-mini');
+  expect(errors).toEqual([]);
+});
+
+test('OR-G: three selections persist across reload', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  seedSettings(page.context());
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.click('nav#tabs button[data-tab="admin"]');
+  await dbWaitQuiet(page);
+
+  await page.selectOption('#cfg-trans-model', 'google/gemini-2.5-flash');
+  await page.selectOption('#cfg-text-model', 'anthropic/claude-sonnet-4');
+  await page.selectOption('#cfg-vision-model', 'google/gemini-2.5-flash');
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await dbWaitQuiet(page);
+
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('google/gemini-2.5-flash');
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4');
+  expect(await selectedValue(page, 'cfg-vision-model')).toBe('google/gemini-2.5-flash');
+
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('wfr_settings')));
+  expect(stored.transModel).toBe('google/gemini-2.5-flash');
+  expect(stored.textModel).toBe('anthropic/claude-sonnet-4');
+  expect(stored.visionModel).toBe('google/gemini-2.5-flash');
+  expect(errors).toEqual([]);
+});
+
+test('OR-H: legacy direct-provider model IDs migrate or are preserved', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockCatalog(page);
+  seedSettings(page.context(), {
+    transModel: 'whisper-1',        // not mappable -> preserved with unavailable label
+    textModel: 'gpt-4.1-mini',      // bare slug -> openai/gpt-4.1-mini
+    visionModel: 'openai/gpt-4.1-mini' // already an OpenRouter ID
+  });
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await dbWaitQuiet(page);
+
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('openai/gpt-4.1-mini');
+  expect(await selectedValue(page, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini');
+
+  const transOpts = await page.evaluate(() =>
+    Array.from(document.getElementById('cfg-trans-model').options).map(o => ({ v: o.value, t: o.textContent })));
+  const whisper = transOpts.find(o => o.v === 'whisper-1');
+  expect(whisper).toBeTruthy();
+  expect(whisper.t).toMatch(/Current saved model — unavailable in catalog/);
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('whisper-1'); // not silently replaced
+  expect(errors).toEqual([]);
+});
+
+test('OR-I: cached catalog survives refresh failure; fallback list without cache', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page); // openrouter blocked -> refresh fails
+
+  // I-1: cache present -> selectors populate from cache despite failed refresh
+  const cachedModels = [
+    { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', provider: 'anthropic',
+      inputModalities: ['text', 'image'], outputModalities: ['text'],
+      supportsText: true, supportsVision: true, supportsAudioInput: false, supportsTranscription: false, source: 'catalog' },
+    { id: 'google/gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', provider: 'google',
+      inputModalities: ['text', 'audio'], outputModalities: ['text'],
+      supportsText: true, supportsVision: false, supportsAudioInput: true, supportsTranscription: true, source: 'catalog' }
+  ];
+  seedSettings(page.context(), { textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini' }, cachedModels);
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await dbWaitQuiet(page);
+
+  expect((await selectValues(page, 'cfg-text-model'))).toContain('anthropic/claude-sonnet-4');
+  expect((await selectValues(page, 'cfg-trans-model'))).toEqual(['google/gemini-2.5-flash-lite']);
+  expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4'); // selection preserved
+  expect(await page.textContent('#or-catalog-status')).toMatch(/cached/i);
+
+  // I-2: no cache at all -> built-in fallback keeps the app usable
+  const ctx2 = await page.context().browser().newContext();
+  const page2 = await ctx2.newPage();
+  const errors2 = collectErrors(page2);
+  blockExternal(page2);
+  seedSettings(ctx2, {});
+  await page2.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page2.waitForLoadState('networkidle');
+  await page2.waitForTimeout(400);
+  expect((await selectValues(page2, 'cfg-text-model'))).toContain('openai/gpt-4.1-mini');
+  expect(await selectedValue(page2, 'cfg-text-model')).toBe('openai/gpt-4.1-mini');
+  expect(await selectedValue(page2, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini'); // vision default despite no vision-capable fallback entry beyond mini
+  expect(errors2).toEqual([]);
+  await ctx2.close();
+  expect(errors).toEqual([]);
+});
+
+test('OR-J: transcription + classification + vision all hit OpenRouter endpoints', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockMeteo(page);
+  await mockGbif(page);
+  let openAiCalls = 0;
+  await page.route('**api.openai.com**', route => { openAiCalls++; return route.abort(); });
+
+  const orCalls = [];
+  await page.route('**/chat/completions', async route => {
+    const url = new URL(route.request().url());
+    orCalls.push({ host: url.host, body: route.request().postDataJSON() });
+    if (route.request().headers()['content-type']?.includes('multipart')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: '' }) });
+    }
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(VISION_JSON) } }] })
+    });
+  });
+
+  seedSettings(page.context(), { visionModel: 'openai/gpt-4.1-mini', textModel: 'openai/gpt-4.1-mini', transModel: 'google/gemini-2.5-flash-lite' });
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await dbWaitQuiet(page);
+
+  // Runtime transcription call through the app's own helper
+  await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    // Minimal WAV-shaped blob: decode will fail on empty PCM and fall back to raw passthrough.
+    const bytes = new Uint8Array(64);
+    bytes.set([82, 73, 70, 70], 0); // 'RIFF'
+    await T.db.audioBlobs.put({ blobId: 'tmp-audio', blob: new Blob([bytes], { type: 'audio/wav' }), mimeType: 'audio/wav', sizeBytes: 64, createdAt: Date.now() });
+    const rec = await T.db.audioBlobs.get('tmp-audio');
+    await T.transcribeAudio(rec.blob, 'audio/wav');
+  });
+
+  // Vision call through the real photo-import flow
+  await importPhoto(page, FULL_EXIF);
+  await dbWait(page, o => o.classificationStatus === 'done' || o.classificationError);
+
+  expect(orCalls.length).toBeGreaterThanOrEqual(1);
+  for (const call of orCalls) {
+    expect(call.host).toBe('openrouter.ai');
+    expect(call.body.model).toMatch(/^[a-z0-9~_-]+\/[a-z0-9._-]+$/i); // OpenRouter-style ID
+  }
+  const transcribeCall = orCalls.find(c => JSON.stringify(c.body).includes('input_audio'));
+  expect(transcribeCall).toBeTruthy();
+  expect(transcribeCall.body.model).toBe('google/gemini-2.5-flash-lite');
+  expect(openAiCalls).toBe(0); // no direct OpenAI traffic whatsoever
   expect(errors).toEqual([]);
 });

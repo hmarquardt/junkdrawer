@@ -443,31 +443,21 @@ th { color: var(--text-muted); font-weight: 600; }
   </div>
 
   <div class="card">
-    <div class="card-title">LLM / Transcription</div>
-    <label>Provider</label>
-    <select id="cfg-llm-provider">
-      <option value="openai">OpenAI-compatible</option>
-      <option value="openrouter">OpenRouter-compatible</option>
-      <option value="custom">Custom endpoint</option>
-      <option value="manual">Manual-only / no cloud</option>
-    </select>
-    <label>API base URL</label>
-    <input id="cfg-llm-base" placeholder="https://api.openai.com/v1" />
-    <label>API key</label>
-    <input id="cfg-llm-key" type="password" placeholder="API key" />
-    <label>Transcription model</label>
-    <input id="cfg-trans-model" value="whisper-1" />
-    <label>Text/classification model</label>
-    <input id="cfg-text-model" value="gpt-4.1-mini" />
-    <label>Vision model (photo identification)</label>
-    <input id="cfg-vision-model" value="openai/gpt-4.1-mini" />
-    <div class="form-row" style="margin-top:8px;">
-      <input type="checkbox" id="cfg-same-key" />
-      <label for="cfg-same-key" style="margin:0;">Use same key for transcription and text</label>
+    <div class="card-title">LLM / OpenRouter</div>
+    <label for="cfg-or-key">OpenRouter API key</label>
+    <input id="cfg-or-key" type="password" autocomplete="off" placeholder="sk-or-v1-…" />
+    <p style="font-size:0.76rem;color:var(--text-dim);margin:4px 0 0;">Stored only in this browser; sent directly to openrouter.ai. One key covers transcription, classification, and photo identification.</p>
+    <div class="btn-group" style="margin-top:10px;">
+      <button id="test-llm" class="btn btn-primary">Test OpenRouter</button>
+      <button id="refresh-models" class="btn">Refresh models</button>
     </div>
-    <div class="btn-group">
-      <button id="test-llm" class="btn btn-primary">Test LLM</button>
-    </div>
+    <div id="or-catalog-status" role="status" aria-live="polite" style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;"></div>
+    <label style="margin-top:12px;">Transcription model</label>
+    <select id="cfg-trans-model"></select>
+    <label style="margin-top:8px;">Observation classification model</label>
+    <select id="cfg-text-model"></select>
+    <label style="margin-top:8px;">Photo identification model</label>
+    <select id="cfg-vision-model"></select>
     <pre id="llm-test-result" style="margin-top:8px;font-size:0.8rem;background:var(--bg-3);padding:8px;border-radius:var(--radius-sm);display:none;"></pre>
   </div>
 
@@ -564,9 +554,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.2
 </footer>
 </div>
 
@@ -574,7 +564,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.25.1';
+const APP_VERSION = '2026.08.25.2';
 
 /* ========================
    DB (Dexie)
@@ -589,6 +579,226 @@ db.version(1).stores({
 });
 
 /* ========================
+   OpenRouter (the single AI provider)
+   ======================== */
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+const CATALOG_STORAGE_KEY = 'wfr_openrouter_catalog';
+const CATALOG_FRESH_MS = 12 * 60 * 60 * 1000; // 12h freshness window
+const DEFAULT_TRANS_MODEL = 'google/gemini-2.5-flash-lite';
+const DEFAULT_TEXT_MODEL = 'openai/gpt-4.1-mini';
+const DEFAULT_VISION_MODEL = 'openai/gpt-4.1-mini';
+
+// Human-readable vendor labels for <optgroup>s; unknown prefixes fall back to title case.
+const PROVIDER_LABELS = {
+  openai: 'OpenAI', anthropic: 'Anthropic', google: 'Google', meta: 'Meta',
+  mistralai: 'Mistral AI', 'x-ai': 'xAI', deepseek: 'DeepSeek', qwen: 'Qwen',
+  amazon: 'Amazon', microsoft: 'Microsoft', nvidia: 'NVIDIA', cohere: 'Cohere',
+  perplexity: 'Perplexity', moonshotai: 'Moonshot AI', minimax: 'MiniMax',
+  openrouter: 'OpenRouter', thinkingmachines: 'Thinking Machines', xiaomi: 'Xiaomi',
+  liquid: 'Liquid AI', ai21: 'AI21 Labs', nousresearch: 'Nous Research',
+  nous: 'Nous Research', gryphe: 'Gryphe', sao10k: 'Sao10K', etherealindustries: 'Ethereal Industries'
+};
+function providerLabel(prefix) {
+  if (!prefix) return 'Other';
+  // "~vendor" ids are OpenRouter's rolling-latest aliases — same vendor naming.
+  const clean = String(prefix).replace(/^~/, '');
+  return PROVIDER_LABELS[clean.toLowerCase()] ||
+    clean.charAt(0).toUpperCase() + clean.slice(1).replace(/[-_]/g, ' ');
+}
+
+// Built-in fallback used ONLY when no cached/live catalog exists.
+const FALLBACK_CATALOG = [
+  { id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+  { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+  { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
+  { id: 'anthropic/claude-haiku-4', name: 'Claude Haiku 4' },
+  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+  { id: 'google/gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
+  { id: 'meta/llama-4-scout', name: 'Llama 4 Scout' },
+  { id: 'mistralai/mistral-medium-3', name: 'Mistral Medium 3' }
+].map(m => ({ ...m, source: 'fallback', inputModalities: ['text'], outputModalities: ['text'],
+  supportsText: true, supportsVision: false, supportsAudioInput: false, supportsTranscription: false }));
+
+/** Adapt the live OpenRouter /models payload into normalized internal entries. */
+function normalizeOpenRouterModels(data) {
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.data)) ? data.data : [];
+  return list.map(m => {
+    const arch = m.architecture || {};
+    const input = Array.isArray(arch.input_modalities) ? arch.input_modalities : [];
+    const output = Array.isArray(arch.output_modalities) ? arch.output_modalities : [];
+    const supportsText = input.includes('text') && output.includes('text');
+    return {
+      id: m.id,
+      name: m.name || m.id,
+      // "~vendor" rolling-latest aliases group with their named vendor.
+      provider: (String(m.id || '').split('/')[0] || 'other').replace(/^~/, ''),
+      inputModalities: input,
+      outputModalities: output,
+      supportsText,
+      supportsVision: input.includes('image') && supportsText,
+      supportsAudioInput: input.includes('audio') && supportsText,
+      supportsTranscription: input.includes('audio') && output.includes('text'),
+      source: 'catalog'
+    };
+  }).filter(m => m.id);
+}
+
+/** Secondary guard for utility models when relying on modality metadata alone. */
+function looksLikeUtilityModel(m) {
+  return /embed|moderation|rerank|guard|dall-e|stable-diffusion|imagen|flux|sora|veo|whisper|tts/i.test(m.id + ' ' + m.name);
+}
+
+function filterModelsFor(kind, models) {
+  const usable = models.filter(m => {
+    if (!m.supportsText) return false;
+    // Exclude image/audio OUTPUT models from text tasks unless metadata is missing entirely
+    if (m.source !== 'fallback' && m.outputModalities.length && !m.outputModalities.includes('text')) return false;
+    if (m.source !== 'fallback' && m.inputModalities.length && looksLikeUtilityModel(m) &&
+        !(kind === 'transcription' && m.supportsTranscription)) return false;
+    return true;
+  });
+  if (kind === 'vision') return usable.filter(m => m.supportsVision);
+  if (kind === 'transcription') return usable.filter(m => m.supportsTranscription);
+  return usable; // classification
+}
+
+function sortAndGroup(models) {
+  const groups = new Map();
+  for (const m of models.slice().sort((a, b) => a.name.localeCompare(b.name))) {
+    const key = m.provider;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  }
+  return [...groups.entries()].sort((a, b) => providerLabel(a[0]).localeCompare(providerLabel(b[0])));
+}
+
+function modelDisplayName(m) {
+  // Catalog names look like "Google: Gemini 2.5 Flash" — the optgroup already shows the vendor.
+  const colon = m.name.indexOf(': ');
+  return colon > 0 && colon < 40 ? m.name.slice(colon + 2) : m.name;
+}
+
+function renderModelSelect(select, models, currentValue, fallbackLabel = null) {
+  select.innerHTML = '';
+  const seen = new Set();
+  for (const [providerKey, entries] of sortAndGroup(models)) {
+    const og = document.createElement('optgroup');
+    og.label = providerLabel(providerKey);
+    for (const m of entries) {
+      og.append(new Option(modelDisplayName(m), m.id));
+      seen.add(m.id);
+    }
+    select.append(og);
+  }
+  // Preserve an unmapped saved value rather than silently replacing it.
+  if (currentValue && !seen.has(currentValue)) {
+    select.append(new Option('Current saved model — unavailable in catalog', currentValue));
+  }
+  select.value = currentValue || '';
+}
+
+/** Map a legacy stored model value to a current OpenRouter ID where obvious. */
+function migrateModelId(value, models) {
+  const v = String(value || '').trim();
+  if (!v) return { value: '', mapped: false };
+  if (models.some(m => m.id === v)) return { value: v, mapped: true };
+  const suffixMatches = models.filter(m => m.id === v.split('/').pop() || m.id.endsWith('/' + v));
+  if (suffixMatches.length >= 1) return { value: suffixMatches[0].id, mapped: true };
+  return { value: v, mapped: false }; // preserve internally; UI shows it as unavailable
+}
+
+function readCatalogCache() {
+  try {
+    const raw = localStorage.getItem(CATALOG_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.models) || !parsed.models.length) return null;
+    return parsed;
+  } catch(e) { return null; }
+}
+
+function writeCatalogCache(models) {
+  try { localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify({ fetchedAt: Date.now(), models })); }
+  catch(e) { /* storage pressure — cache is optional */ }
+}
+
+async function fetchOpenRouterCatalog() {
+  const headers = openRouterHeaders();
+  const res = await fetch(OPENROUTER_BASE + '/models', { headers });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return normalizeOpenRouterModels(await res.json());
+}
+
+let modelCatalogState = { models: [], source: 'none', fetchedAt: 0 };
+
+/** Populate selectors from cache immediately; refresh in background when stale. */
+async function initModelCatalog({ refreshIfStale = true } = {}) {
+  const cached = readCatalogCache();
+  if (cached) {
+    modelCatalogState = { models: cached.models, source: 'cached', fetchedAt: cached.fetchedAt };
+  } else {
+    modelCatalogState = { models: FALLBACK_CATALOG, source: 'fallback', fetchedAt: 0 };
+  }
+  applyModelCatalogToUI();
+  // Background refresh only for configured users; never a keyless hidden call.
+  const stale = !cached || Date.now() - cached.fetchedAt > CATALOG_FRESH_MS;
+  if (refreshIfStale && navigator.onLine && settings.llmKey && stale) {
+    refreshModelCatalog({ silent: true }).catch(() => {});
+  }
+}
+
+async function refreshModelCatalog({ silent = false } = {}) {
+  const statusEl = $('or-catalog-status');
+  if (!silent) statusEl.textContent = 'Loading models…';
+  try {
+    const models = await fetchOpenRouterCatalog();
+    modelCatalogState = { models, source: 'loaded', fetchedAt: Date.now() };
+    writeCatalogCache(models);
+    applyModelCatalogToUI();
+    statusEl.textContent = `Loaded ${models.length} models · updated just now`;
+    return models.length;
+  } catch(e) {
+    applyModelCatalogToUI(); // retain whatever was already rendered
+    if (modelCatalogState.source === 'cached') {
+      statusEl.textContent = `Refresh failed — using cached catalog (${e.message})`;
+    } else {
+      statusEl.textContent = `Refresh failed (${e.message}) — using built-in fallback list`;
+    }
+    throw e;
+  }
+}
+
+function applyModelCatalogToUI() {
+  const models = modelCatalogState.models;
+  migrateStoredModelSettings(); // idempotent; runs whenever a (new) catalog becomes available
+  const trans = filterModelsFor('transcription', models);
+  const cls = filterModelsFor('classification', models);
+  const vision = filterModelsFor('vision', models);
+  renderModelSelect($('cfg-trans-model'), trans, settings.transModel);
+  renderModelSelect($('cfg-text-model'), cls, settings.textModel);
+  renderModelSelect($('cfg-vision-model'), vision, settings.visionModel);
+  if (modelCatalogState.source === 'fallback') {
+    $('or-catalog-status').textContent = navigator.onLine
+      ? 'Showing built-in fallback models — refresh or enter your OpenRouter key to load the live catalog'
+      : 'Offline — showing built-in fallback models';
+  } else if (modelCatalogState.fetchedAt) {
+    const age = Date.now() - modelCatalogState.fetchedAt;
+    const mins = Math.round(age / 60000);
+    const ageText = mins < 1 ? 'just now' : mins < 60 ? mins + ' min ago' : Math.round(mins / 60) + ' h ago';
+    $('or-catalog-status').textContent =
+      `Model catalog: ${models.length} available · updated ${ageText} (${modelCatalogState.source})`;
+  }
+}
+
+function openRouterHeaders(extra = {}) {
+  return {
+    Authorization: `Bearer ${settings.llmKey}`,
+    'X-Title': 'Wildlife Field Recorder',
+    ...extra
+  };
+}
+
+/* ========================
    State / Settings
    ======================== */
 const defaultSettings = {
@@ -597,14 +807,11 @@ const defaultSettings = {
   observationsResource: 'observations',
   tripsResource: 'trips',
   token: '',
-  llmProvider: 'openai',
-  llmBase: '',
+  // OpenRouter is the single AI provider; base URL is an implementation constant.
   llmKey: '',
-  transModel: 'whisper-1',
-  textModel: 'gpt-4.1-mini',
-  // Empty = resolved per endpoint via resolveVisionModel() (OpenRouter vs direct OpenAI)
-  visionModel: '',
-  sameKey: true,
+  transModel: DEFAULT_TRANS_MODEL,
+  textModel: DEFAULT_TEXT_MODEL,
+  visionModel: DEFAULT_VISION_MODEL,
   maxAudioSeconds: 120,
   autoStop: true,
   weatherTimeout: 8,
@@ -1201,17 +1408,6 @@ async function processObservation(obs) {
       obs.updatedAt = Date.now();
       await db.observations.put(obs);
       statusMsg = 'No audio — marked ready';
-    } else if (settings.llmProvider === 'manual') {
-      obs.transcriptionStatus = 'done';
-      obs.transcript = obs.transcript || '';
-      obs.classificationStatus = 'done';
-      obs.submitStatus = 'ready';
-      obs.transcriptionError = null;
-      obs.transcriptionErrorType = null;
-      obs.classificationError = null;
-      obs.updatedAt = Date.now();
-      await db.observations.put(obs);
-      statusMsg = 'Manual mode — marked ready';
     } else {
       if (obs.transcriptionStatus !== 'done') {
         try {
@@ -1274,30 +1470,61 @@ async function processObservation(obs) {
   return statusMsg;
 }
 
+/** Transcription via OpenRouter: there is no /audio/transcriptions endpoint, so
+ *  audio goes through chat/completions as an input_audio content part.
+ *  WAV is produced via WebAudio for universal provider compatibility when the
+ *  recording is decodable; otherwise the original bytes are passed through. */
 async function transcribeAudio(blob, mime) {
-  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const key = settings.llmKey;
-  if (!key) throw new Error('No LLM key');
-  const fd = new FormData();
-  const audioMime = mime || blob.type || 'audio/webm';
-  const ext = audioMime.includes('mp4') ? '.m4a' : audioMime.includes('ogg') ? '.ogg' : audioMime.includes('wav') ? '.wav' : '.webm';
-  fd.append('file', new File([blob], 'recording' + ext, { type: audioMime }));
-  fd.append('model', settings.transModel || 'whisper-1');
-  const r = await fetch(base + '/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
+  if (!settings.llmKey) throw new Error('No OpenRouter key');
+  let payloadBlob = blob;
+  let format = transcribeFormatForMime(mime || blob.type);
+  try {
+    const context = createAudioContext();
+    try {
+      const decoded = await decodeAudioBlob(blob, context);
+      payloadBlob = encodeAudioBufferAsWav(decoded);
+      format = 'wav';
+    } finally {
+      await context.close().catch(() => {});
+    }
+  } catch(e) { /* undecodable in this browser — send original bytes */ }
+  const b64 = await blobToBase64(payloadBlob);
+  const r = await fetch(OPENROUTER_BASE + '/chat/completions', {
+    method: 'POST',
+    headers: openRouterHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      model: settings.transModel || DEFAULT_TRANS_MODEL,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Transcribe this field recording verbatim. Return only the transcript text.' },
+          { type: 'input_audio', input_audio: { data: b64, format } }
+        ]
+      }]
+    })
+  });
   if (!r.ok) {
     const error = await httpError(r);
     error.message = 'Transcription ' + error.message;
-    if (r.status === 400 && /invalid file format/i.test(error.message)) error.errorType = 'invalid_audio_format';
     throw error;
   }
   const data = await r.json();
-  return data.text || '';
+  return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
+}
+
+function transcribeFormatForMime(mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('wav')) return 'wav';
+  if (m.includes('mp4') || m.includes('m4a') || m.includes('aac')) return 'm4a';
+  if (m.includes('ogg')) return 'ogg';
+  if (m.includes('mpeg')) return 'mp3';
+  if (m.includes('flac')) return 'flac';
+  if (m.includes('webm')) return 'webm';
+  return 'wav';
 }
 
 async function classifyObservation(obs) {
-  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const key = settings.llmKey;
-  if (!key) throw new Error('No LLM key');
+  if (!settings.llmKey) throw new Error('No OpenRouter key');
   const weatherSummary = obs.weatherRaw && obs.weatherRaw.current ? `${obs.weatherRaw.current.temperature_2m}°F, ${obs.weatherRaw.current.relative_humidity_2m}% RH` : 'n/a';
   const prompt = `You are helping classify a wildlife field observation from a short voice note.
 Return ONLY valid JSON.
@@ -1323,10 +1550,10 @@ Extract:
   "needsHumanReview": boolean,
   "reviewReason": string | null
 }`;
-  const r = await fetch(base + '/chat/completions', {
+  const r = await fetch(OPENROUTER_BASE + '/chat/completions', {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: settings.textModel || 'gpt-4.1-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.2 })
+    headers: openRouterHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ model: settings.textModel || DEFAULT_TEXT_MODEL, messages: [{ role: 'user', content: prompt }], temperature: 0.2 })
   });
   if (!r.ok) throw new Error('Classification HTTP ' + r.status);
   const data = await r.json();
@@ -1694,23 +1921,7 @@ async function enrichWeatherAt(lat, lng, captureTime) {
   return { status: 'error', error: errors.join(' · ') || 'Weather unavailable', fetchedAt: Date.now() };
 }
 
-/* ---- Vision identification via existing OpenRouter-compatible LLM settings ---- */
-/** Resolve which vision model slug fits the configured endpoint.
- *  OpenRouter-style bases use vendor-prefixed slugs ("openai/gpt-4.1-mini");
- *  direct OpenAI-compatible bases use bare names ("gpt-4.1-mini").
- *  Explicit user-entered model names are preserved exactly. */
-function isOpenRouterBase() {
-  return settings.llmProvider === 'openrouter' || /openrouter\.ai/i.test(settings.llmBase || '');
-}
-function resolveVisionModel() {
-  const explicit = (settings.visionModel || '').trim();
-  if (!explicit) return isOpenRouterBase() ? 'openai/gpt-4.1-mini' : 'gpt-4.1-mini';
-  // The historical built-in default was an OpenRouter-flavored slug; translate it
-  // only when it is still exactly that default AND the endpoint is not OpenRouter.
-  if (!isOpenRouterBase() && explicit === 'openai/gpt-4.1-mini') return 'gpt-4.1-mini';
-  return explicit;
-}
-
+/* ---- Vision identification via OpenRouter ---- */
 function categoryFromSubjectType(subjectType) {
   const key = String(subjectType || '').toLowerCase();
   if (key === 'unknown') return 'unknown';
@@ -1720,10 +1931,8 @@ function categoryFromSubjectType(subjectType) {
 }
 
 async function classifyPhotoObservation(obs, imageDataUrl) {
-  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const key = settings.llmKey;
-  if (!key) throw new Error('No LLM key configured (see Setup)');
-  const model = resolveVisionModel();
+  if (!settings.llmKey) throw new Error('No OpenRouter key configured (see Setup)');
+  const model = settings.visionModel || DEFAULT_VISION_MODEL;
   // The vision API requires a complete data URL, not a raw base64 payload.
   const imageUrl = /^data:[^,;]+;base64,/.test(imageDataUrl) ? imageDataUrl : `data:image/jpeg;base64,${imageDataUrl}`;
   const d = obs.createdAt ? new Date(obs.createdAt) : null;
@@ -1767,9 +1976,9 @@ Return ONLY valid JSON matching exactly this schema:
   "behavior": string | null,
   "notes": string | null
 }`;
-  const r = await fetch(base + '/chat/completions', {
+  const r = await fetch(OPENROUTER_BASE + '/chat/completions', {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+    headers: openRouterHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       model,
       temperature: 0.2,
@@ -3564,15 +3773,11 @@ function loadSetup() {
   $('cfg-obs-resource').value = settings.observationsResource;
   $('cfg-trip-resource').value = settings.tripsResource;
   $('cfg-token').value = settings.token;
-  $('cfg-llm-provider').value = settings.llmProvider;
-  $('cfg-llm-base').value = settings.llmBase;
-  $('cfg-llm-key').value = settings.llmKey;
-  $('cfg-trans-model').value = settings.transModel;
-  $('cfg-text-model').value = settings.textModel;
-  const visionInput = $('cfg-vision-model');
-  visionInput.value = settings.visionModel || '';
-  visionInput.placeholder = resolveVisionModel();
-  $('cfg-same-key').checked = settings.sameKey;
+  $('cfg-or-key').value = settings.llmKey;
+  // Model selects hydrate from cache/fallback immediately; a stale catalog
+  // refreshes in the background when online. applyModelCatalogToUI() also
+  // migrates legacy stored model IDs against whichever list is available.
+  initModelCatalog().catch(e => logWarn('Model catalog init failed: ' + e.message));
   $('cfg-max-audio').value = settings.maxAudioSeconds;
   $('cfg-auto-stop').checked = settings.autoStop;
   $('cfg-weather-timeout').value = settings.weatherTimeout;
@@ -3583,19 +3788,34 @@ function loadSetup() {
   refreshStorageStats();
 }
 
+/** Normalize legacy direct-provider model IDs to OpenRouter IDs where obvious.
+ *  Unmappable values are preserved exactly; the UI labels them unavailable. */
+function migrateStoredModelSettings() {
+  const models = modelCatalogState.models;
+  if (!models.length) return;
+  for (const field of ['transModel', 'textModel', 'visionModel']) {
+    const current = String(settings[field] || '').trim();
+    if (!current) { settings[field] = defaultSettings[field]; continue; }
+    const { value, mapped } = migrateModelId(current, models);
+    if (mapped && value !== current) {
+      logInfo(`Migrated ${field} '${current}' -> '${value}'`);
+      settings[field] = value;
+    }
+    // unmapped values are kept as-is and rendered with an "unavailable" option
+  }
+}
+
 function saveFromSetup() {
   settings.apiBase = $('cfg-api-base').value.trim();
   settings.appId = $('cfg-app-id').value.trim();
   settings.observationsResource = $('cfg-obs-resource').value.trim();
   settings.tripsResource = $('cfg-trip-resource').value.trim();
   settings.token = $('cfg-token').value.trim();
-  settings.llmProvider = $('cfg-llm-provider').value;
-  settings.llmBase = $('cfg-llm-base').value.trim();
-  settings.llmKey = $('cfg-llm-key').value.trim();
+  settings.llmKey = $('cfg-or-key').value.trim();
   settings.transModel = $('cfg-trans-model').value.trim();
   settings.textModel = $('cfg-text-model').value.trim();
   settings.visionModel = $('cfg-vision-model').value.trim();
-  settings.sameKey = $('cfg-same-key').checked;
+  delete settings.llmProvider; delete settings.llmBase; delete settings.sameKey; // obsolete generic-provider state
   settings.maxAudioSeconds = parseInt($('cfg-max-audio').value, 10) || 120;
   settings.autoStop = $('cfg-auto-stop').checked;
   settings.weatherTimeout = parseInt($('cfg-weather-timeout').value, 10) || 8;
@@ -3606,7 +3826,7 @@ function saveFromSetup() {
   saveSettings(settings);
 }
 
-[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-token'), $('cfg-llm-provider'), $('cfg-llm-base'), $('cfg-llm-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-vision-model'), $('cfg-same-key'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
+[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-token'), $('cfg-or-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-vision-model'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
   if (!el) return;
   el.addEventListener('change', saveFromSetup);
   if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('input', saveFromSetup);
@@ -3655,14 +3875,32 @@ $('test-backend').addEventListener('click', async () => {
 $('test-llm').addEventListener('click', async () => {
   const el = $('llm-test-result');
   el.style.display = 'block';
-  el.textContent = 'Testing...';
-  const base = (settings.llmBase || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const key = settings.llmKey;
-  if (!key) { el.textContent = 'No API key'; return; }
+  if (!settings.llmKey) { el.textContent = 'No OpenRouter key'; return; }
+  el.textContent = 'Testing OpenRouter…';
   try {
-    const r = await fetch(base + '/models', { headers: { Authorization: 'Bearer ' + key } });
-    el.textContent = 'Models endpoint: HTTP ' + r.status;
-  } catch(e) { el.textContent = 'Error: ' + e.message; }
+    // Lightweight authorized check: the key endpoint validates credentials
+    // without spending inference tokens; the catalog gives a useful count.
+    let label = 'OpenRouter connected';
+    try {
+      const kr = await fetch(OPENROUTER_BASE + '/key', { headers: openRouterHeaders() });
+      if (!kr.ok) throw new Error('HTTP ' + kr.status);
+    } catch(keyErr) {
+      // Older gateways may not expose /key — fall back to the public catalog.
+      const mr = await fetch(OPENROUTER_BASE + '/models', { headers: openRouterHeaders() });
+      if (!mr.ok) throw new Error('HTTP ' + mr.status);
+    }
+    const count = await refreshModelCatalog({ silent: true }).catch(() => null);
+    el.textContent = count != null ? `${label}\nModels loaded: ${count}` : label;
+  } catch(e) { el.textContent = 'OpenRouter test failed: ' + e.message; }
+});
+
+$('refresh-models').addEventListener('click', async () => {
+  if (!navigator.onLine) {
+    $('or-catalog-status').textContent = 'Offline — using cached model catalog';
+    return;
+  }
+  try { await refreshModelCatalog(); }
+  catch(e) { /* status already explains; dropdowns retain prior contents */ }
 });
 
 async function refreshStorageStats() {
@@ -4739,8 +4977,11 @@ window.__WFR_TEST__ = {
   importPhotoFile, parseExifFromFile, normalizeExif, normalizeCaptureTime,
   enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex,
   compassDirection, wallEpochMinutes, captureWallParts, wallIso,
-  applyObservationTime, observationWallInputValue, resolveVisionModel,
-  categoryFromSubjectType, submitObservation
+  applyObservationTime, observationWallInputValue,
+  categoryFromSubjectType, submitObservation,
+  OPENROUTER_BASE, DEFAULT_TRANS_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL,
+  normalizeOpenRouterModels, filterModelsFor, migrateModelId, initModelCatalog,
+  refreshModelCatalog, modelCatalogState, transcribeAudio
 };
 })();
 </script>
