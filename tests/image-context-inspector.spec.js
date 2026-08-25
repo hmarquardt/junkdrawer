@@ -430,7 +430,27 @@ test.describe(PAGE_LABEL + " terrain integration", () => {
       expect(c.terrain.samples[0]).toEqual([0, 100]);
     }
     await expect(page.locator("#sightlineCandidates .sl-terr").first()).toContainText("terrain clear");
+    await expect(page.locator("#sightlineFacing .sightline-summary")).toContainText("2 candidates · 2 terrain analyzed");
+    await expect(page.locator("#sightlineCandidates .sl-terr").first()).toHaveCSS("text-transform", "uppercase");
     for (const size of mock.requests) expect(size).toBeLessThanOrEqual(100);
+  });
+
+  test("v2.2.1 progress: candidates render immediately with EVALUATING badges", async () => {
+    await mountOverpassEmpty(page);
+    await mountElevationMock(page, { delayMs: 450, elev: () => 100 });
+    await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => !!window.__ICI_TEST__);
+    await page.evaluate((c) => window.__ICI_TEST__.exerciseLocation(c[0], c[1]), [CAM.lat, CAM.lng]);
+    await page.evaluate(() => window.__ICI_TEST__.simulateLoadedPhoto("progress-photo.jpg"));
+    const cands = [makeCandidate("Fisher Knobs", 13.8, { bearing: 90 }), makeCandidate("Progress Hill", 8, { bearing: 80 })];
+    await page.evaluate((snap) => window.__ICI_TEST__.sightlineTestHelpers.injectSnapshot(snap), buildSnapshot(cands, 90));
+    await expect(page.locator("#sightlineFacing .sightline-summary")).toContainText("2 candidates · evaluating terrain…");
+    await expect(page.locator("#sightlineCandidates .sl-terr")).toHaveCount(2);
+    await expect(page.locator("#sightlineCandidates .sl-terr").first()).toContainText("evaluating");
+    await page.evaluate(() => { window.__terrainProgressTest = window.__ICI_TEST__.sightlineTestHelpers.runTerrainAnalysis(); });
+    await expect(page.locator("#sightlineCandidates .sl-terr").first()).toContainText("evaluating");
+    await waitForTerrainSettled(page);
+    await expect(page.locator("#sightlineCandidates .sl-terr").first()).not.toContainText("evaluating");
   });
 
   test("44i. blocking ridge integration: evidence, drawer detail, SVG profile, diagnostics", async () => {
@@ -454,6 +474,7 @@ test.describe(PAGE_LABEL + " terrain integration", () => {
     await expect(drawer).toContainText("Copernicus DEM GLO-90");
     await expect(drawer).toContainText("atmospheric refraction not modeled");
     await expect(drawer.locator(".terrain-profile-wrap svg")).toBeVisible();
+    await expect(page.locator("#sightlineDrawerList .sl-terr").first()).toContainText("terrain blocked");
 
     const diag = await page.evaluate(() => window.__ICI_TEST__.sightlineTestHelpers.getDiagnosticsText());
     expect(diag).toMatch(/Terrain visibility:\n  status: complete/);
@@ -529,6 +550,18 @@ test.describe(PAGE_LABEL + " terrain integration", () => {
     expect(unavailable.length + classified.length).toBe(st.meta.requestedCandidates);
     for (const c of unavailable) expect(c.terrain.error).toBeTruthy();
     expect(st.meta.completedCandidates).toBe(classified.length); // no fabricated results
+    await expect(page.locator("#sightlineFacing .sightline-summary")).toContainText(`10 candidates · terrain available for ${classified.length}`);
+    await expect(page.locator("#sightlineCandidates .sl-terr-unavailable")).toHaveCount(unavailable.length);
+  });
+
+  test("v2.2.1 complete elevation failure leaves Sightline usable and visibly unavailable", async () => {
+    const candidates = [makeCandidate("Unavailable Peak", 8, {}), makeCandidate("Unavailable Hill", 5, {})];
+    await setupTerrainWorkspace(page, candidates, { failBatchIndexes: [0, 1, 2, 3, 4] });
+    await expect(page.locator("#sightlineFacing .sightline-summary")).toContainText("2 candidates · terrain unavailable");
+    await expect(page.locator("#sightlineCandidates li")).toHaveCount(2);
+    await expect(page.locator("#sightlineCandidates .sl-terr-unavailable")).toHaveCount(2);
+    await expect(page.locator("#sightlineCandidates .sl-terr-unavailable").first()).toContainText("unavailable");
+    await expect(page.locator("#sightlineDetailsBtn")).toBeEnabled();
   });
 
   test("51a. Clear cancels terrain work: requests aborted, state cleared, nothing attaches", async () => {
@@ -647,7 +680,7 @@ test.describe(PAGE_LABEL + " terrain integration", () => {
     await page.waitForFunction(() => !!window.__ICI_TEST__);
     await page.evaluate((c) => window.__ICI_TEST__.exerciseLocation(c[0], c[1]), [CAM.lat, CAM.lng]);
     await page.evaluate(() => window.__ICI_TEST__.simulateLoadedPhoto("spec-photo.jpg"));
-    await page.evaluate((snap) => window.__ICI_TEST__.sightlineTestHelpers.injectSnapshot(snap), buildSnapshot([makeCandidate("Unanalyzed Peak", 9, {})], 90));
+    await page.evaluate((snap) => window.__ICI_TEST__.sightlineTestHelpers.injectSnapshot(snap, true), buildSnapshot([makeCandidate("Unanalyzed Peak", 9, {})], 90));
     const chipCount = await page.locator("#sightlineCandidates .sl-terr").count();
     expect(chipCount).toBe(0);
     await page.locator("#sightlineCandidates li").first().click();
@@ -759,6 +792,8 @@ test.describe(PAGE_LABEL + " Focus Map terrain tray", () => {
     await page.waitForSelector("#focusMapContainer.leaflet-container", { timeout: 15000 });
     const mapBoxBefore = await page.locator(".focus-map-container").boundingBox();
 
+    await page.locator(".focus-map-container path.leaflet-interactive").first().hover();
+    await expect(page.locator(".focus-map-container .leaflet-tooltip")).toContainText("Terrain: terrain clear");
     await page.locator(".focus-map-container path.leaflet-interactive").first().click();
     const tray = page.locator("#focusTerrainTray");
     await expect(tray).toBeVisible();
@@ -815,4 +850,67 @@ test.describe(PAGE_LABEL + " Focus Map terrain tray", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
     expect(pageErrors).toEqual([]);
   });
+});
+
+/* ---------------------------------------------------------------------- *
+ * v2.2.1 screenshot acceptance — normal Sightline visibility
+ * ---------------------------------------------------------------------- */
+test.describe(PAGE_LABEL + " terrain visibility screenshots", () => {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1904, height: 832 },
+    { width: 390, height: 844 }
+  ]) {
+    test(`${viewport.width}x${viewport.height}: normal Sightline badges remain readable without clipping`, async ({ page }) => {
+      const pageErrors = [];
+      page.on("pageerror", (e) => pageErrors.push(e.message));
+      await blockExternalServices(page);
+      await mountOverpassEmpty(page);
+      await page.setViewportSize(viewport);
+      await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => !!window.__ICI_TEST__);
+      await page.evaluate((c) => window.__ICI_TEST__.exerciseLocation(c[0], c[1]), [CAM.lat, CAM.lng]);
+      await page.evaluate(() => window.__ICI_TEST__.simulateLoadedPhoto("southern-indiana.jpg"));
+
+      const fisher = makeCandidate("Fisher Knobs", 13.8, { bearing: 335, rankScore: 72 });
+      fisher.headingDeltaDegrees = 0.9;
+      fisher.terrain = { status: "terrain-uncertain" };
+      fisher.baseRank = 1;
+      fisher.terrainAdjustment = 0;
+      fisher.terrainAdjustedScore = 72;
+      const rosa = makeCandidate("Mount Rosa", 15.3, { bearing: 338, rankScore: 69 });
+      rosa.headingDeltaDegrees = 3.1;
+      rosa.terrain = { status: "terrain-blocked" };
+      rosa.baseRank = 2;
+      rosa.terrainAdjustment = -20;
+      rosa.terrainAdjustedScore = 49;
+      const tower = makeCandidate("Henderson Water Tower", 6.3, { bearing: 329, type: "water tower", category: "landmark", rankScore: 64 });
+      tower.headingDeltaDegrees = 5.1;
+      tower.terrain = { status: "base-blocked-height-unknown" };
+      tower.baseRank = 3;
+      tower.terrainAdjustment = -8;
+      tower.terrainAdjustedScore = 56;
+      const snap = buildSnapshot([fisher, tower, rosa], 334.1);
+      snap.matchedCount = 3;
+      snap.terrain = {
+        status: "complete", requestedCandidates: 3, completedCandidates: 3,
+        provider: "Open-Meteo", dataset: "Copernicus DEM GLO-90", resolutionM: 90,
+        samplePointsGenerated: 0, batchesRequested: 0, batchesFailed: 0
+      };
+      await page.evaluate((snapshot) => window.__ICI_TEST__.sightlineTestHelpers.injectSnapshot(snapshot), snap);
+
+      const section = page.locator("#sightlineSection");
+      await section.scrollIntoViewIfNeeded();
+      await expect(page.locator("#sightlineFacing .sightline-summary")).toContainText("3 candidates · 3 terrain analyzed");
+      await expect(page.locator("#sightlineCandidates li", { hasText: "Fisher Knobs" })).toContainText("uncertain");
+      await expect(page.locator("#sightlineCandidates li", { hasText: "Mount Rosa" })).toContainText("terrain blocked");
+      await expect(page.locator("#sightlineCandidates li", { hasText: "Henderson Water Tower" })).toContainText("base blocked");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width + 1);
+      const clippedRows = await page.locator("#sightlineCandidates li").evaluateAll((rows) =>
+        rows.filter((row) => row.scrollWidth > row.clientWidth + 1).length);
+      expect(clippedRows).toBe(0);
+      await page.screenshot({ path: `/tmp/image-context-inspector-terrain-${viewport.width}x${viewport.height}.png` });
+      expect(pageErrors).toEqual([]);
+    });
+  }
 });
