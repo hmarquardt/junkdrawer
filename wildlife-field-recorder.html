@@ -554,9 +554,9 @@ th { color: var(--text-muted); font-weight: 600; }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.3
 </footer>
 </div>
 
@@ -564,7 +564,7 @@ th { color: var(--text-muted); font-weight: 600; }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.25.2';
+const APP_VERSION = '2026.08.25.3';
 
 /* ========================
    DB (Dexie)
@@ -584,7 +584,7 @@ db.version(1).stores({
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const CATALOG_STORAGE_KEY = 'wfr_openrouter_catalog';
 const CATALOG_FRESH_MS = 12 * 60 * 60 * 1000; // 12h freshness window
-const DEFAULT_TRANS_MODEL = 'google/gemini-2.5-flash-lite';
+const DEFAULT_TRANS_MODEL = 'openai/whisper-1';
 const DEFAULT_TEXT_MODEL = 'openai/gpt-4.1-mini';
 const DEFAULT_VISION_MODEL = 'openai/gpt-4.1-mini';
 
@@ -619,8 +619,14 @@ const FALLBACK_CATALOG = [
 ].map(m => ({ ...m, source: 'fallback', inputModalities: ['text'], outputModalities: ['text'],
   supportsText: true, supportsVision: false, supportsAudioInput: false, supportsTranscription: false }));
 
+const FALLBACK_TRANSCRIPTION_CATALOG = [
+  { id: 'openai/whisper-1', name: 'Whisper 1' }
+].map(m => ({ ...m, provider: 'openai', source: 'fallback', inputModalities: ['audio'],
+  outputModalities: ['transcription'], supportsText: false, supportsVision: false,
+  supportsAudioInput: true, supportsTranscription: true }));
+
 /** Adapt the live OpenRouter /models payload into normalized internal entries. */
-function normalizeOpenRouterModels(data) {
+function normalizeOpenRouterModels(data, { dedicatedTranscription = false } = {}) {
   const list = Array.isArray(data) ? data : (data && Array.isArray(data.data)) ? data.data : [];
   return list.map(m => {
     const arch = m.architecture || {};
@@ -637,7 +643,9 @@ function normalizeOpenRouterModels(data) {
       supportsText,
       supportsVision: input.includes('image') && supportsText,
       supportsAudioInput: input.includes('audio') && supportsText,
-      supportsTranscription: input.includes('audio') && output.includes('text'),
+      // Dedicated STT availability comes only from the filtered transcription
+      // catalog, never from a general chat model merely accepting audio input.
+      supportsTranscription: dedicatedTranscription,
       source: 'catalog'
     };
   }).filter(m => m.id);
@@ -712,81 +720,122 @@ function readCatalogCache() {
     const raw = localStorage.getItem(CATALOG_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.models) || !parsed.models.length) return null;
-    return parsed;
+    if (!parsed) return null;
+    // .2 stored { fetchedAt, models }. Treat that array as the still-valid
+    // general catalog and independently refresh the missing STT catalog.
+    const generalModels = Array.isArray(parsed.generalModels) ? parsed.generalModels :
+      (Array.isArray(parsed.models) ? parsed.models : []);
+    const transcriptionModels = Array.isArray(parsed.transcriptionModels) ? parsed.transcriptionModels : [];
+    if (!generalModels.length && !transcriptionModels.length) return null;
+    return {
+      generalModels,
+      transcriptionModels,
+      generalFetchedAt: parsed.generalFetchedAt || parsed.fetchedAt || 0,
+      transcriptionFetchedAt: parsed.transcriptionFetchedAt || 0
+    };
   } catch(e) { return null; }
 }
 
-function writeCatalogCache(models) {
-  try { localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify({ fetchedAt: Date.now(), models })); }
+function writeCatalogCache() {
+  const cache = {
+    fetchedAt: Math.max(modelCatalogState.generalFetchedAt, modelCatalogState.transcriptionFetchedAt),
+    generalFetchedAt: modelCatalogState.generalFetchedAt,
+    transcriptionFetchedAt: modelCatalogState.transcriptionFetchedAt,
+    generalModels: modelCatalogState.generalSource === 'fallback' ? [] : modelCatalogState.generalModels,
+    transcriptionModels: modelCatalogState.transcriptionSource === 'fallback' ? [] : modelCatalogState.transcriptionModels
+  };
+  try { localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify(cache)); }
   catch(e) { /* storage pressure — cache is optional */ }
 }
 
-async function fetchOpenRouterCatalog() {
+async function fetchOpenRouterCatalog({ transcription = false } = {}) {
   const headers = openRouterHeaders();
-  const res = await fetch(OPENROUTER_BASE + '/models', { headers });
+  const url = OPENROUTER_BASE + '/models' + (transcription ? '?output_modalities=transcription' : '');
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error('HTTP ' + res.status);
-  return normalizeOpenRouterModels(await res.json());
+  return normalizeOpenRouterModels(await res.json(), { dedicatedTranscription: transcription });
 }
 
-let modelCatalogState = { models: [], source: 'none', fetchedAt: 0 };
+let modelCatalogState = {
+  generalModels: [], transcriptionModels: [],
+  generalSource: 'none', transcriptionSource: 'none',
+  generalFetchedAt: 0, transcriptionFetchedAt: 0
+};
 
 /** Populate selectors from cache immediately; refresh in background when stale. */
 async function initModelCatalog({ refreshIfStale = true } = {}) {
   const cached = readCatalogCache();
-  if (cached) {
-    modelCatalogState = { models: cached.models, source: 'cached', fetchedAt: cached.fetchedAt };
-  } else {
-    modelCatalogState = { models: FALLBACK_CATALOG, source: 'fallback', fetchedAt: 0 };
-  }
+  modelCatalogState = {
+    generalModels: cached && cached.generalModels.length ? cached.generalModels : FALLBACK_CATALOG,
+    transcriptionModels: cached && cached.transcriptionModels.length ? cached.transcriptionModels : FALLBACK_TRANSCRIPTION_CATALOG,
+    generalSource: cached && cached.generalModels.length ? 'cached' : 'fallback',
+    transcriptionSource: cached && cached.transcriptionModels.length ? 'cached' : 'fallback',
+    generalFetchedAt: cached ? cached.generalFetchedAt : 0,
+    transcriptionFetchedAt: cached ? cached.transcriptionFetchedAt : 0
+  };
   applyModelCatalogToUI();
   // Background refresh only for configured users; never a keyless hidden call.
-  const stale = !cached || Date.now() - cached.fetchedAt > CATALOG_FRESH_MS;
-  if (refreshIfStale && navigator.onLine && settings.llmKey && stale) {
-    refreshModelCatalog({ silent: true }).catch(() => {});
+  const staleGeneral = !modelCatalogState.generalFetchedAt || Date.now() - modelCatalogState.generalFetchedAt > CATALOG_FRESH_MS;
+  const staleTranscription = !modelCatalogState.transcriptionFetchedAt || Date.now() - modelCatalogState.transcriptionFetchedAt > CATALOG_FRESH_MS;
+  if (refreshIfStale && navigator.onLine && settings.llmKey && (staleGeneral || staleTranscription)) {
+    refreshModelCatalog({ silent: true, general: staleGeneral, transcription: staleTranscription }).catch(() => {});
   }
 }
 
-async function refreshModelCatalog({ silent = false } = {}) {
+async function refreshModelCatalog({ silent = false, general = true, transcription = true } = {}) {
   const statusEl = $('or-catalog-status');
   if (!silent) statusEl.textContent = 'Loading models…';
-  try {
-    const models = await fetchOpenRouterCatalog();
-    modelCatalogState = { models, source: 'loaded', fetchedAt: Date.now() };
-    writeCatalogCache(models);
-    applyModelCatalogToUI();
-    statusEl.textContent = `Loaded ${models.length} models · updated just now`;
-    return models.length;
-  } catch(e) {
-    applyModelCatalogToUI(); // retain whatever was already rendered
-    if (modelCatalogState.source === 'cached') {
-      statusEl.textContent = `Refresh failed — using cached catalog (${e.message})`;
-    } else {
-      statusEl.textContent = `Refresh failed (${e.message}) — using built-in fallback list`;
-    }
-    throw e;
-  }
+  const tasks = [];
+  if (general) tasks.push({ kind: 'general', promise: fetchOpenRouterCatalog() });
+  if (transcription) tasks.push({ kind: 'transcription', promise: fetchOpenRouterCatalog({ transcription: true }) });
+  const results = await Promise.allSettled(tasks.map(t => t.promise));
+  const failures = [];
+  results.forEach((result, i) => {
+    const kind = tasks[i].kind;
+    if (result.status === 'fulfilled') {
+      const now = Date.now();
+      if (kind === 'general') {
+        modelCatalogState.generalModels = result.value;
+        modelCatalogState.generalSource = 'loaded';
+        modelCatalogState.generalFetchedAt = now;
+      } else {
+        modelCatalogState.transcriptionModels = result.value.length ? result.value : FALLBACK_TRANSCRIPTION_CATALOG;
+        modelCatalogState.transcriptionSource = result.value.length ? 'loaded' : 'fallback';
+        modelCatalogState.transcriptionFetchedAt = now;
+      }
+    } else failures.push(`${kind}: ${result.reason.message}`);
+  });
+  writeCatalogCache();
+  applyModelCatalogToUI();
+  const total = modelCatalogState.generalModels.length + modelCatalogState.transcriptionModels.length;
+  if (!failures.length) statusEl.textContent = `Loaded ${total} models · updated just now`;
+  else if (failures.length < tasks.length) statusEl.textContent = `Models partly refreshed — ${failures.join('; ')}; retained cached/fallback choices`;
+  else statusEl.textContent = `Refresh failed — using cached/fallback catalogs (${failures.join('; ')})`;
+  if (failures.length === tasks.length) throw new Error(failures.join('; '));
+  return total;
 }
 
 function applyModelCatalogToUI() {
-  const models = modelCatalogState.models;
   migrateStoredModelSettings(); // idempotent; runs whenever a (new) catalog becomes available
-  const trans = filterModelsFor('transcription', models);
-  const cls = filterModelsFor('classification', models);
-  const vision = filterModelsFor('vision', models);
+  const generalModels = modelCatalogState.generalModels;
+  const trans = modelCatalogState.transcriptionModels.filter(m => m.supportsTranscription);
+  const cls = filterModelsFor('classification', generalModels);
+  const vision = filterModelsFor('vision', generalModels);
   renderModelSelect($('cfg-trans-model'), trans, settings.transModel);
   renderModelSelect($('cfg-text-model'), cls, settings.textModel);
   renderModelSelect($('cfg-vision-model'), vision, settings.visionModel);
-  if (modelCatalogState.source === 'fallback') {
+  if (modelCatalogState.generalSource === 'fallback' || modelCatalogState.transcriptionSource === 'fallback') {
     $('or-catalog-status').textContent = navigator.onLine
       ? 'Showing built-in fallback models — refresh or enter your OpenRouter key to load the live catalog'
       : 'Offline — showing built-in fallback models';
-  } else if (modelCatalogState.fetchedAt) {
-    const age = Date.now() - modelCatalogState.fetchedAt;
+  } else if (modelCatalogState.generalFetchedAt || modelCatalogState.transcriptionFetchedAt) {
+    const fetchedAt = Math.min(modelCatalogState.generalFetchedAt || Infinity, modelCatalogState.transcriptionFetchedAt || Infinity);
+    const age = Date.now() - fetchedAt;
     const mins = Math.round(age / 60000);
     const ageText = mins < 1 ? 'just now' : mins < 60 ? mins + ' min ago' : Math.round(mins / 60) + ' h ago';
     $('or-catalog-status').textContent =
-      `Model catalog: ${models.length} available · updated ${ageText} (${modelCatalogState.source})`;
+      `Model catalog: ${generalModels.length + trans.length} available · updated ${ageText} ` +
+      `(${modelCatalogState.generalSource}/${modelCatalogState.transcriptionSource})`;
   }
 }
 
@@ -1470,9 +1519,8 @@ async function processObservation(obs) {
   return statusMsg;
 }
 
-/** Transcription via OpenRouter: there is no /audio/transcriptions endpoint, so
- *  audio goes through chat/completions as an input_audio content part.
- *  WAV is produced via WebAudio for universal provider compatibility when the
+/** Transcription via OpenRouter's dedicated speech-to-text endpoint.
+ *  WAV is produced via WebAudio for provider compatibility when the
  *  recording is decodable; otherwise the original bytes are passed through. */
 async function transcribeAudio(blob, mime) {
   if (!settings.llmKey) throw new Error('No OpenRouter key');
@@ -1489,18 +1537,12 @@ async function transcribeAudio(blob, mime) {
     }
   } catch(e) { /* undecodable in this browser — send original bytes */ }
   const b64 = await blobToBase64(payloadBlob);
-  const r = await fetch(OPENROUTER_BASE + '/chat/completions', {
+  const r = await fetch(OPENROUTER_BASE + '/audio/transcriptions', {
     method: 'POST',
     headers: openRouterHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       model: settings.transModel || DEFAULT_TRANS_MODEL,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Transcribe this field recording verbatim. Return only the transcript text.' },
-          { type: 'input_audio', input_audio: { data: b64, format } }
-        ]
-      }]
+      input_audio: { data: b64, format }
     })
   });
   if (!r.ok) {
@@ -1509,7 +1551,7 @@ async function transcribeAudio(blob, mime) {
     throw error;
   }
   const data = await r.json();
-  return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
+  return String(data.text || '').trim();
 }
 
 function transcribeFormatForMime(mime) {
@@ -3789,20 +3831,40 @@ function loadSetup() {
 }
 
 /** Normalize legacy direct-provider model IDs to OpenRouter IDs where obvious.
- *  Unmappable values are preserved exactly; the UI labels them unavailable. */
+ *  The .2 transcription picker could save audio-capable chat models. Once a
+ *  dedicated STT catalog is available, explicitly migrate those invalid values
+ *  to the known-good STT default while leaving text and vision untouched. */
 function migrateStoredModelSettings() {
-  const models = modelCatalogState.models;
-  if (!models.length) return;
-  for (const field of ['transModel', 'textModel', 'visionModel']) {
+  const generalModels = modelCatalogState.generalModels;
+  const transcriptionModels = modelCatalogState.transcriptionModels;
+  let changed = false;
+  for (const field of ['textModel', 'visionModel']) {
     const current = String(settings[field] || '').trim();
-    if (!current) { settings[field] = defaultSettings[field]; continue; }
-    const { value, mapped } = migrateModelId(current, models);
+    if (!current) { settings[field] = defaultSettings[field]; changed = true; continue; }
+    const { value, mapped } = migrateModelId(current, generalModels);
     if (mapped && value !== current) {
       logInfo(`Migrated ${field} '${current}' -> '${value}'`);
       settings[field] = value;
+      changed = true;
     }
-    // unmapped values are kept as-is and rendered with an "unavailable" option
   }
+  const currentTrans = String(settings.transModel || '').trim();
+  const transMigration = migrateModelId(currentTrans, transcriptionModels);
+  if (transMigration.mapped && transMigration.value !== currentTrans) {
+    logInfo(`Migrated transModel '${currentTrans}' -> '${transMigration.value}'`);
+    settings.transModel = transMigration.value;
+    changed = true;
+  } else if (!currentTrans) {
+    settings.transModel = DEFAULT_TRANS_MODEL;
+    changed = true;
+  } else if (!transMigration.mapped && transcriptionModels.some(m => m.id === DEFAULT_TRANS_MODEL) &&
+      (modelCatalogState.transcriptionSource !== 'fallback' ||
+       generalModels.some(m => m.id === currentTrans && m.supportsAudioInput))) {
+    logInfo(`Migrated invalid .2 transModel '${currentTrans}' -> '${DEFAULT_TRANS_MODEL}' using dedicated STT catalog`);
+    settings.transModel = DEFAULT_TRANS_MODEL;
+    changed = true;
+  }
+  if (changed) saveSettings(settings);
 }
 
 function saveFromSetup() {
@@ -4981,7 +5043,7 @@ window.__WFR_TEST__ = {
   categoryFromSubjectType, submitObservation,
   OPENROUTER_BASE, DEFAULT_TRANS_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL,
   normalizeOpenRouterModels, filterModelsFor, migrateModelId, initModelCatalog,
-  refreshModelCatalog, modelCatalogState, transcribeAudio
+  refreshModelCatalog, modelCatalogState, transcribeAudio, processObservation
 };
 })();
 </script>

@@ -746,7 +746,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.25.2');
+    expect(post.body.data.appVersion).toBe('2026.08.25.3');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -812,22 +812,62 @@ function catalogPayload() {
   ]};
 }
 
+function transcriptionCatalogPayload() {
+  const mk = (id, name) => ({
+    id, name,
+    architecture: { input_modalities: ['audio'], output_modalities: ['transcription'] }
+  });
+  return { data: [
+    mk('openai/whisper-1', 'OpenAI: Whisper 1'),
+    mk('openai/gpt-4o-mini-transcribe', 'OpenAI: GPT-4o Mini Transcribe'),
+    mk('deepgram/nova-3', 'Deepgram: Nova-3')
+  ] };
+}
+
+function normalizeFixture(payload, dedicatedTranscription) {
+  return payload.data.map(m => {
+    const inputModalities = m.architecture.input_modalities;
+    const outputModalities = m.architecture.output_modalities;
+    const supportsText = inputModalities.includes('text') && outputModalities.includes('text');
+    return {
+      id: m.id, name: m.name, provider: m.id.split('/')[0], inputModalities, outputModalities,
+      supportsText, supportsVision: inputModalities.includes('image') && supportsText,
+      supportsAudioInput: inputModalities.includes('audio') && supportsText,
+      supportsTranscription: dedicatedTranscription, source: 'catalog'
+    };
+  });
+}
+
 /** Seed localStorage settings before any page script runs. Merges with any
  *  already-stored settings so a reload does not wipe the app's own saves. */
-function seedSettings(context, overrides = {}, catalog = null) {
-  context.addInitScript(({ overrides, catalog }) => {
+function seedSettings(context, overrides = {}, catalog = null, transcriptionCatalog = null) {
+  context.addInitScript(({ overrides, catalog, transcriptionCatalog }) => {
     let existing = {};
     try { existing = JSON.parse(localStorage.getItem('wfr_settings') || '{}'); } catch(e) {}
     localStorage.setItem('wfr_settings', JSON.stringify({ llmKey: 'sk-or-test', ...existing, ...overrides }));
     if (catalog) {
-      localStorage.setItem('wfr_openrouter_catalog', JSON.stringify({ fetchedAt: Date.now(), models: catalog }));
+      const cache = { fetchedAt: Date.now(), models: catalog };
+      if (transcriptionCatalog) {
+        cache.generalModels = catalog;
+        cache.transcriptionModels = transcriptionCatalog;
+        cache.generalFetchedAt = cache.fetchedAt;
+        cache.transcriptionFetchedAt = cache.fetchedAt;
+        delete cache.models;
+      }
+      localStorage.setItem('wfr_openrouter_catalog', JSON.stringify(cache));
     }
-  }, { overrides, catalog });
+  }, { overrides, catalog, transcriptionCatalog });
 }
 
-async function mockCatalog(page, payload = catalogPayload()) {
-  await page.route(OR_MODELS_URL, route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }));
+async function mockCatalog(page, payload = catalogPayload(), transcriptionPayload = transcriptionCatalogPayload()) {
+  await page.route(OR_MODELS_URL, route => {
+    const isTranscription = new URL(route.request().url()).searchParams.get('output_modalities') === 'transcription';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(isTranscription ? transcriptionPayload : payload)
+    });
+  });
 }
 
 async function selectValues(page, id) {
@@ -893,7 +933,7 @@ test('OR-C: model dropdowns group by vendor with human labels', async ({ page })
   expect(errors).toEqual([]);
 });
 
-test('OR-D/E/F: vision, classification, and transcription filtering', async ({ page }) => {
+test('OR-D/E/F: general and dedicated transcription catalogs populate only their selectors', async ({ page }) => {
   const errors = collectErrors(page);
   blockExternal(page);
   await mockCatalog(page);
@@ -921,9 +961,11 @@ test('OR-D/E/F: vision, classification, and transcription filtering', async ({ p
   expect(cls).not.toContain('openai/omni-moderation-latest'); // moderation utility
   expect(cls).not.toContain('openai/dall-e-3');               // image generation
 
-  // F — only audio-input + text-output models in Transcription
+  // F — only the dedicated output_modalities=transcription result is used.
   const trans = await selectValues(page, 'cfg-trans-model');
-  expect(trans.sort()).toEqual(['google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite']);
+  expect(trans.sort()).toEqual(['deepgram/nova-3', 'openai/gpt-4o-mini-transcribe', 'openai/whisper-1']);
+  expect(trans).not.toContain('google/gemini-2.5-flash'); // audio-capable chat model must not leak in
+  expect(trans).not.toContain('google/gemini-2.5-flash-lite');
   expect(trans).not.toContain('mistralai/mistral-medium-3');  // ordinary chat model
   expect(trans).not.toContain('openai/gpt-4.1-mini');
   expect(errors).toEqual([]);
@@ -939,7 +981,7 @@ test('OR-G: three selections persist across reload', async ({ page }) => {
   await page.click('nav#tabs button[data-tab="admin"]');
   await dbWaitQuiet(page);
 
-  await page.selectOption('#cfg-trans-model', 'google/gemini-2.5-flash');
+  await page.selectOption('#cfg-trans-model', 'openai/gpt-4o-mini-transcribe');
   await page.selectOption('#cfg-text-model', 'anthropic/claude-sonnet-4');
   await page.selectOption('#cfg-vision-model', 'google/gemini-2.5-flash');
 
@@ -947,12 +989,12 @@ test('OR-G: three selections persist across reload', async ({ page }) => {
   await page.waitForLoadState('networkidle');
   await dbWaitQuiet(page);
 
-  expect(await selectedValue(page, 'cfg-trans-model')).toBe('google/gemini-2.5-flash');
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/gpt-4o-mini-transcribe');
   expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4');
   expect(await selectedValue(page, 'cfg-vision-model')).toBe('google/gemini-2.5-flash');
 
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('wfr_settings')));
-  expect(stored.transModel).toBe('google/gemini-2.5-flash');
+  expect(stored.transModel).toBe('openai/gpt-4o-mini-transcribe');
   expect(stored.textModel).toBe('anthropic/claude-sonnet-4');
   expect(stored.visionModel).toBe('google/gemini-2.5-flash');
   expect(errors).toEqual([]);
@@ -963,7 +1005,7 @@ test('OR-H: legacy direct-provider model IDs migrate or are preserved', async ({
   blockExternal(page);
   await mockCatalog(page);
   seedSettings(page.context(), {
-    transModel: 'whisper-1',        // not mappable -> preserved with unavailable label
+    transModel: 'whisper-1',        // confidently maps to dedicated OpenRouter STT ID
     textModel: 'gpt-4.1-mini',      // bare slug -> openai/gpt-4.1-mini
     visionModel: 'openai/gpt-4.1-mini' // already an OpenRouter ID
   });
@@ -974,12 +1016,25 @@ test('OR-H: legacy direct-provider model IDs migrate or are preserved', async ({
   expect(await selectedValue(page, 'cfg-text-model')).toBe('openai/gpt-4.1-mini');
   expect(await selectedValue(page, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini');
 
-  const transOpts = await page.evaluate(() =>
-    Array.from(document.getElementById('cfg-trans-model').options).map(o => ({ v: o.value, t: o.textContent })));
-  const whisper = transOpts.find(o => o.v === 'whisper-1');
-  expect(whisper).toBeTruthy();
-  expect(whisper.t).toMatch(/Current saved model — unavailable in catalog/);
-  expect(await selectedValue(page, 'cfg-trans-model')).toBe('whisper-1'); // not silently replaced
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/whisper-1');
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('wfr_settings')));
+  expect(stored.transModel).toBe('openai/whisper-1');
+  expect(errors).toEqual([]);
+});
+
+test('OR-H2: cached .2 audio-chat transcription selection migrates to STT fallback', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const oldGeneralCache = normalizeFixture(catalogPayload(), false);
+  seedSettings(page.context(), { transModel: 'google/gemini-2.5-flash-lite' }, oldGeneralCache);
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await dbWaitQuiet(page);
+
+  expect(await selectedValue(page, 'cfg-trans-model')).toBe('openai/whisper-1');
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('wfr_settings')));
+  expect(stored.transModel).toBe('openai/whisper-1');
+  expect(await selectValues(page, 'cfg-trans-model')).not.toContain('google/gemini-2.5-flash-lite');
   expect(errors).toEqual([]);
 });
 
@@ -996,13 +1051,16 @@ test('OR-I: cached catalog survives refresh failure; fallback list without cache
       inputModalities: ['text', 'audio'], outputModalities: ['text'],
       supportsText: true, supportsVision: false, supportsAudioInput: true, supportsTranscription: true, source: 'catalog' }
   ];
-  seedSettings(page.context(), { textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini' }, cachedModels);
+  const cachedStt = [{ id: 'openai/whisper-1', name: 'Whisper 1', provider: 'openai',
+    inputModalities: ['audio'], outputModalities: ['transcription'], supportsText: false,
+    supportsVision: false, supportsAudioInput: true, supportsTranscription: true, source: 'catalog' }];
+  seedSettings(page.context(), { textModel: 'anthropic/claude-sonnet-4', visionModel: 'openai/gpt-4.1-mini' }, cachedModels, cachedStt);
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
   await dbWaitQuiet(page);
 
   expect((await selectValues(page, 'cfg-text-model'))).toContain('anthropic/claude-sonnet-4');
-  expect((await selectValues(page, 'cfg-trans-model'))).toEqual(['google/gemini-2.5-flash-lite']);
+  expect((await selectValues(page, 'cfg-trans-model'))).toEqual(['openai/whisper-1']);
   expect(await selectedValue(page, 'cfg-text-model')).toBe('anthropic/claude-sonnet-4'); // selection preserved
   expect(await page.textContent('#or-catalog-status')).toMatch(/cached/i);
 
@@ -1018,12 +1076,33 @@ test('OR-I: cached catalog survives refresh failure; fallback list without cache
   expect((await selectValues(page2, 'cfg-text-model'))).toContain('openai/gpt-4.1-mini');
   expect(await selectedValue(page2, 'cfg-text-model')).toBe('openai/gpt-4.1-mini');
   expect(await selectedValue(page2, 'cfg-vision-model')).toBe('openai/gpt-4.1-mini'); // vision default despite no vision-capable fallback entry beyond mini
+  expect(await selectedValue(page2, 'cfg-trans-model')).toBe('openai/whisper-1');
   expect(errors2).toEqual([]);
   await ctx2.close();
   expect(errors).toEqual([]);
 });
 
-test('OR-J: transcription + classification + vision all hit OpenRouter endpoints', async ({ page }) => {
+test('OR-I2: dedicated STT catalog failure preserves general results and STT fallback', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await page.route(OR_MODELS_URL, route => {
+    const isTranscription = new URL(route.request().url()).searchParams.get('output_modalities') === 'transcription';
+    if (isTranscription) return route.abort();
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(catalogPayload()) });
+  });
+  seedSettings(page.context());
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => /partly refreshed/i.test(document.getElementById('or-catalog-status').textContent));
+
+  expect(await selectValues(page, 'cfg-trans-model')).toEqual(['openai/whisper-1']);
+  expect(await selectValues(page, 'cfg-text-model')).toContain('anthropic/claude-sonnet-4');
+  expect(await selectValues(page, 'cfg-vision-model')).toContain('openai/gpt-4.1-mini');
+  expect(await page.textContent('#or-catalog-status')).toMatch(/retained cached\/fallback choices/i);
+  expect(errors).toEqual([]);
+});
+
+test('OR-J: endpoint regression keeps STT dedicated and classification/vision on OpenRouter chat', async ({ page }) => {
   const errors = collectErrors(page);
   blockExternal(page);
   await mockMeteo(page);
@@ -1031,20 +1110,23 @@ test('OR-J: transcription + classification + vision all hit OpenRouter endpoints
   let openAiCalls = 0;
   await page.route('**api.openai.com**', route => { openAiCalls++; return route.abort(); });
 
-  const orCalls = [];
+  const chatCalls = [];
   await page.route('**/chat/completions', async route => {
     const url = new URL(route.request().url());
-    orCalls.push({ host: url.host, body: route.request().postDataJSON() });
-    if (route.request().headers()['content-type']?.includes('multipart')) {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: '' }) });
-    }
+    chatCalls.push({ host: url.host, path: url.pathname, body: route.request().postDataJSON() });
     return route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(VISION_JSON) } }] })
     });
   });
+  const sttCalls = [];
+  await page.route('**/audio/transcriptions', async route => {
+    const url = new URL(route.request().url());
+    sttCalls.push({ host: url.host, path: url.pathname, body: route.request().postDataJSON() });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: 'Red-tailed hawk circling over the field.' }) });
+  });
 
-  seedSettings(page.context(), { visionModel: 'openai/gpt-4.1-mini', textModel: 'openai/gpt-4.1-mini', transModel: 'google/gemini-2.5-flash-lite' });
+  seedSettings(page.context(), { visionModel: 'openai/gpt-4.1-mini', textModel: 'openai/gpt-4.1-mini', transModel: 'openai/whisper-1' });
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');
   await dbWaitQuiet(page);
@@ -1064,14 +1146,80 @@ test('OR-J: transcription + classification + vision all hit OpenRouter endpoints
   await importPhoto(page, FULL_EXIF);
   await dbWait(page, o => o.classificationStatus === 'done' || o.classificationError);
 
-  expect(orCalls.length).toBeGreaterThanOrEqual(1);
-  for (const call of orCalls) {
+  expect(sttCalls).toHaveLength(1);
+  expect(chatCalls).toHaveLength(1); // photo identification only
+  for (const call of [...sttCalls, ...chatCalls]) {
     expect(call.host).toBe('openrouter.ai');
     expect(call.body.model).toMatch(/^[a-z0-9~_-]+\/[a-z0-9._-]+$/i); // OpenRouter-style ID
   }
-  const transcribeCall = orCalls.find(c => JSON.stringify(c.body).includes('input_audio'));
-  expect(transcribeCall).toBeTruthy();
-  expect(transcribeCall.body.model).toBe('google/gemini-2.5-flash-lite');
+  expect(sttCalls[0].path).toBe('/api/v1/audio/transcriptions');
+  expect(sttCalls[0].body.model).toBe('openai/whisper-1');
+  expect(sttCalls[0].body.input_audio.format).toBe('wav');
+  expect(sttCalls[0].body.input_audio.data).toBeTruthy();
+  expect(sttCalls[0].body).not.toHaveProperty('messages');
+  expect(chatCalls[0].path).toBe('/api/v1/chat/completions');
+  expect(chatCalls[0].body).toHaveProperty('messages');
   expect(openAiCalls).toBe(0); // no direct OpenAI traffic whatsoever
+  expect(errors).toEqual([]);
+});
+
+test('OR-K: voice pipeline passes STT result.text into one chat classification request', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const general = normalizeFixture(catalogPayload(), false);
+  const stt = normalizeFixture(transcriptionCatalogPayload(), true);
+  seedSettings(page.context(), {
+    transModel: 'openai/whisper-1', textModel: 'openai/gpt-4.1-mini'
+  }, general, stt);
+
+  const sttCalls = [];
+  await page.route('**/audio/transcriptions', route => {
+    sttCalls.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ text: 'Red-tailed hawk circling over the field.' })
+    });
+  });
+  const chatCalls = [];
+  await page.route('**/chat/completions', route => {
+    chatCalls.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        subjectCommonName: 'Red-tailed Hawk', subjectScientificName: 'Buteo jamaicensis',
+        subjectConfidence: 0.96, category: 'bird', categoryConfidence: 0.99,
+        behavior: 'circling', habitat: 'field', count: 1, tags: ['raptor'],
+        summary: 'One Red-tailed Hawk circling.', needsHumanReview: false, reviewReason: null
+      }) } }] })
+    });
+  });
+
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    const bytes = new Uint8Array(64);
+    bytes.set([82, 73, 70, 70], 0);
+    const blob = new Blob([bytes], { type: 'audio/wav' });
+    await T.db.audioBlobs.put({ blobId: 'voice-pipeline-audio', blob, mimeType: 'audio/wav', sizeBytes: blob.size, createdAt: Date.now() });
+    const obs = {
+      localId: 'voice-pipeline-observation', createdAt: Date.now(), updatedAt: Date.now(),
+      audioBlobId: 'voice-pipeline-audio', audioMimeType: 'audio/wav', transcript: '',
+      transcriptionStatus: 'pending', classificationStatus: 'pending', submitStatus: 'local',
+      latitude: null, longitude: null, weatherRaw: null, userNoteText: ''
+    };
+    await T.db.observations.put(obs);
+    await T.processObservation(obs);
+    return T.db.observations.get(obs.localId);
+  });
+
+  expect(sttCalls).toHaveLength(1);
+  expect(chatCalls).toHaveLength(1);
+  expect(sttCalls[0]).not.toHaveProperty('messages');
+  expect(chatCalls[0].messages[0].content).toContain('Red-tailed hawk circling over the field.');
+  expect(result.transcript).toBe('Red-tailed hawk circling over the field.');
+  expect(result.subjectCommonName).toBe('Red-tailed Hawk');
+  expect(result.category).toBe('bird');
+  expect(result.submitStatus).toBe('ready');
   expect(errors).toEqual([]);
 });
