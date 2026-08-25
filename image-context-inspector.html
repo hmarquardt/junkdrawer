@@ -503,9 +503,9 @@ body.focus-open #workspace{overflow:hidden}
     <div class="diag-content" id="diagContent" style="display:none"></div>
   </div>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.10" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.10" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.10
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.24.11" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.24.11" style="margin: 0.5rem auto 0; padding: 0.5rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.7rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    © 2026 Hank Marquardt · Image Context Inspector · version 2026.08.24.11
   </footer>
 
 <script>
@@ -2340,7 +2340,7 @@ body.focus-open #workspace{overflow:hidden}
     if (tags.natural === 'peak') return { type: 'peak', category: 'natural', significance: tags.name ? 'high' : 'medium' };
     if (tags.natural === 'cliff') return { type: 'cliff', category: 'natural', significance: 'high' };
     if (tags.natural === 'bay') return { type: 'bay', category: 'natural', significance: 'high' };
-    if (tags.natural === 'water') return { type: tags.water ? String(tags.water) : 'water', category: 'natural', significance: 'medium' };
+    if (tags.natural === 'water') return { type: tags.water ? String(tags.water) : 'water', category: 'natural', significance: tags.name ? 'medium' : 'low' };
     if (has('waterway', ['river'])) return { type: 'river', category: 'natural', significance: tags.name ? 'high' : 'medium' };
     if (has('waterway', ['canal'])) return { type: 'canal', category: 'natural', significance: 'medium' };
     // Landmark / structure
@@ -2386,66 +2386,142 @@ body.focus-open #workspace{overflow:hidden}
   }
 
 
-  function buildSightlineSnapshot(gps, headingInfo, elements, endpointUsed) {
+  /* Geometry representation for ranking caveats. */
+  function geometryKindFor(tags, elType) {
+    tags = tags || {};
+    if (tags.waterway === 'river' || tags.waterway === 'canal') return 'elongated';
+    if (tags.railway === 'rail' || tags.railway === 'light_rail' || tags.railway === 'subway') return 'elongated';
+    if (tags.highway && tags.ref) return 'elongated';
+    if (tags.bridge) return 'elongated';
+    if (tags.natural === 'water' || tags.water || tags.boundary ||
+        tags.leisure === 'park' || tags.leisure === 'nature_reserve' ||
+        tags.place || tags.aeroway === 'aerodrome' ||
+        tags.natural === 'bay' || tags.natural === 'cliff') return 'area';
+    return elType === 'node' ? 'point' : 'area';
+  }
+
+  function logicalFeatureKey(candidate) {
+    // Only merge segmentation-prone features that share a name and type.
+    if (!candidate.named || !candidate.name) return null;
+    if (candidate.geometryKind !== 'elongated' && candidate.geometryKind !== 'area') return null;
+    return candidate.name.trim().toLowerCase() + '|' + candidate.type;
+  }
+
+  function rescoreCandidate(candidate) {
+    var alignmentScore = 1 - candidate.headingDeltaDegrees / VIEW_HALF_ANGLE;
+    var distanceScore = 1 - Math.min(candidate.distanceMeters / (VIEW_MAX_DISTANCE_KM * 1000), 1);
+    var sig = SIGNIFICANCE_VALUES[candidate.significance] || 0.3;
+    candidate.rankScore = Math.round((50 * alignmentScore + 30 * distanceScore + 20 * sig) * 10) / 10;
+  }
+
+
+  function buildSightlineSnapshot(gps, headingInfo, classResults, endpointUsed) {
     var maxMeters = VIEW_MAX_DISTANCE_KM * 1000;
+    // Back-compat: a plain elements array is treated as one natural-class result.
+    if (Array.isArray(classResults)) {
+      classResults = { natural: { elements: classResults, endpoint: endpointUsed || 'test', truncated: false, error: null } };
+    }
     var seen = {};
-    var candidates = [];
-    (elements || []).forEach(function(el) {
-      var lat = el.lat !== undefined ? el.lat : el.center && el.center.lat;
-      var lng = el.lon !== undefined ? el.lon : el.center && el.center.lon;
-      if (!isFinite(lat) || !isFinite(lng)) return;
-      var key = el.type + '/' + el.id;
-      if (seen[key]) return;
-      seen[key] = true;
-      var tags = el.tags || {};
-      var classification = classifyCandidate(tags);
-      if (!classification) return;
-      var named = !!(tags.name || tags.ref || tags.operator || tags.wikidata || tags.wikipedia);
-      // Prefer named features; drop anonymous low-significance clutter entirely.
-      if (!named && classification.significance === 'low') return;
-      if (!named && classification.category === 'structure') return;
-      var distanceMeters = haversineMeters(gps.lat, gps.lng, lat, lng);
-      if (distanceMeters > maxMeters) return;
-      var bearingDegrees = initialBearingDegrees(gps.lat, gps.lng, lat, lng);
-      var delta = angularDifference(headingInfo.degrees, bearingDegrees);
-      if (delta > VIEW_HALF_ANGLE) return;
+    var normalized = [];
+    var classStats = {};
 
-      var alignmentScore = 1 - delta / VIEW_HALF_ANGLE;
-      var distanceScore = 1 - Math.min(distanceMeters / maxMeters, 1);
-      var sig = SIGNIFICANCE_VALUES[classification.significance] || 0.3;
-      var rankScore = 50 * alignmentScore + 30 * distanceScore + 20 * sig;
+    SIGHTLINE_CLASS_KEYS.forEach(function(classKey) {
+      var result = (classResults && classResults[classKey]) || { elements: [], endpoint: null, truncated: false, error: 'not requested' };
+      var stats = { endpoint: result.endpoint || null, rawElements: (result.elements || []).length, normalized: 0, error: result.error || null, truncated: !!result.truncated };
+      classStats[classKey] = stats;
 
-      var minimalTags = {};
-      ['ref', 'operator', 'wikipedia', 'wikidata'].forEach(function(t) { if (tags[t]) minimalTags[t] = String(tags[t]); });
+      (result.elements || []).forEach(function(el) {
+        var lat = el.lat !== undefined ? el.lat : el.center && el.center.lat;
+        var lng = el.lon !== undefined ? el.lon : el.center && el.center.lon;
+        if (!isFinite(lat) || !isFinite(lng)) return;
+        var key = el.type + '/' + el.id;
+        if (seen[key]) return;
+        seen[key] = true;
+        var tags = el.tags || {};
+        var classification = classifyCandidate(tags);
+        if (!classification) return;
+        var named = !!(tags.name || tags.ref || tags.operator || tags.wikidata || tags.wikipedia);
+        // Prefer named features; drop anonymous low-significance clutter entirely.
+        if (!named && classification.significance === 'low') return;
+        if (!named && classification.category === 'structure') return;
 
-      candidates.push({
-        id: key,
-        osmType: el.type,
-        osmId: el.id,
-        name: candidateLabel(tags, classification),
-        type: classification.type,
-        category: classification.category,
-        geometryType: el.type,
-        representativePointNote: el.type === 'node' ? 'node coordinate' : 'Overpass center — approximate for elongated features',
-        lat: lat,
-        lng: lng,
-        distanceMeters: Math.round(distanceMeters),
-        distanceKm: Math.round(distanceMeters / 100) / 10,
-        bearingDegrees: Math.round(bearingDegrees * 10) / 10,
-        bearingCardinal: compassDirection16(bearingDegrees),
-        headingDeltaDegrees: Math.round(delta * 10) / 10,
-        significance: classification.significance,
-        rankScore: Math.round(rankScore * 10) / 10,
-        named: named,
-        tags: minimalTags,
-        provenance: {
-          provider: 'OpenStreetMap',
-          endpoint: endpointUsed,
-          retrievedAt: new Date().toISOString()
-        }
+        stats.normalized += 1;
+
+        var distanceMeters = haversineMeters(gps.lat, gps.lng, lat, lng);
+        var bearingDegrees = initialBearingDegrees(gps.lat, gps.lng, lat, lng);
+        var delta = angularDifference(headingInfo.degrees, bearingDegrees);
+
+        var minimalTags = {};
+        ['ref', 'operator', 'wikipedia', 'wikidata'].forEach(function(t) { if (tags[t]) minimalTags[t] = String(tags[t]); });
+
+        normalized.push({
+          id: key,
+          osmType: el.type,
+          osmId: el.id,
+          osmIds: [{ type: el.type, id: el.id }],
+          name: candidateLabel(tags, classification),
+          type: classification.type,
+          category: classification.category,
+          geometryKind: geometryKindFor(tags, el.type),
+          representativePointNote: el.type === 'node' ? 'node coordinate' : 'Overpass center — approximate for elongated features',
+          lat: lat,
+          lng: lng,
+          distanceMeters: Math.round(distanceMeters),
+          distanceKm: Math.round(distanceMeters / 100) / 10,
+          bearingDegrees: Math.round(bearingDegrees * 10) / 10,
+          bearingCardinal: compassDirection16(bearingDegrees),
+          headingDeltaDegrees: Math.round(delta * 10) / 10,
+          significance: classification.significance,
+          rankScore: 0,
+          named: named,
+          retrievalClasses: [classKey],
+          tags: minimalTags,
+          provenance: {
+            provider: 'OpenStreetMap',
+            endpoint: result.endpoint || endpointUsed || null,
+            retrievalClass: classKey,
+            retrievedAt: new Date().toISOString()
+          }
+        });
+        rescoreCandidate(normalized[normalized.length - 1]);
       });
     });
-    candidates.sort(function(a, b) { return b.rankScore - a.rankScore; });
+
+    // Merge segmentation-prone duplicates (e.g. many river way segments) into
+    // one logical feature, keeping the segment most useful for the camera/view
+    // axis (smallest heading delta, then nearest).
+    var byLogical = {};
+    var mergedList = [];
+    normalized.forEach(function(candidate) {
+      var logicalKey = logicalFeatureKey(candidate);
+      if (!logicalKey) { mergedList.push(candidate); return; }
+      var existing = byLogical[logicalKey];
+      if (!existing) { byLogical[logicalKey] = candidate; mergedList.push(candidate); return; }
+      existing.osmIds.push({ type: candidate.osmType, id: candidate.osmId });
+      candidate.retrievalClasses.forEach(function(rc) {
+        if (existing.retrievalClasses.indexOf(rc) === -1) existing.retrievalClasses.push(rc);
+      });
+      existing.provenance.mergedCount = (existing.provenance.mergedCount || 1) + 1;
+      var better = candidate.headingDeltaDegrees < existing.headingDeltaDegrees - 0.05 ||
+        (Math.abs(candidate.headingDeltaDegrees - existing.headingDeltaDegrees) <= 0.05 &&
+         candidate.distanceMeters < existing.distanceMeters);
+      if (better) {
+        existing.lat = candidate.lat; existing.lng = candidate.lng;
+        existing.distanceMeters = candidate.distanceMeters;
+        existing.distanceKm = candidate.distanceKm;
+        existing.bearingDegrees = candidate.bearingDegrees;
+        existing.bearingCardinal = candidate.bearingCardinal;
+        existing.headingDeltaDegrees = candidate.headingDeltaDegrees;
+        rescoreCandidate(existing);
+      }
+    });
+    mergedList.sort(function(a, b) { return b.rankScore - a.rankScore; });
+
+    // Sector filtering stays strictly local, after merging.
+    var insideDistance = mergedList.filter(function(c) { return c.distanceMeters <= maxMeters; }).length;
+    var candidates = mergedList.filter(function(c) {
+      return c.distanceMeters <= maxMeters && c.headingDeltaDegrees <= VIEW_HALF_ANGLE;
+    });
 
     var captureDate = state.exif && (state.exif.DateTimeOriginal || state.exif.CreateDate || state.exif.ModifyDate);
     var captureAgeYears = null;
@@ -2453,6 +2529,24 @@ body.focus-open #workspace{overflow:hidden}
       var parsed = captureDate instanceof Date ? captureDate : captureDate ? new Date(String(captureDate).replace(' ', 'T')) : null;
       if (parsed && !isNaN(parsed.getTime())) captureAgeYears = (Date.now() - parsed.getTime()) / (365.25 * 24 * 3600 * 1000);
     } catch (e) {}
+
+    var anyError = SIGHTLINE_CLASS_KEYS.some(function(k) { return !!classStats[k].error; });
+    var anyTruncated = SIGHTLINE_CLASS_KEYS.some(function(k) { return classStats[k].truncated; });
+    var totalRawElements = SIGHTLINE_CLASS_KEYS.reduce(function(sum, k) { return sum + classStats[k].rawElements; }, 0);
+    // Degenerate case: all classes answered but returned nothing — treat as
+    // unreliable rather than a comprehensive empty result.
+    var completeness = anyError ? 'partial'
+      : (anyTruncated || totalRawElements === 0) ? 'possibly-truncated' : 'complete';
+
+    // Retain named elongated/area features whose representative centroid fell
+    // outside the sector — a long river often crosses the sector even when its
+    // centroid does not. Capped to bound snapshot size.
+    var inSectorIds = {};
+    candidates.forEach(function(c) { inSectorIds[c.id] = true; });
+    var outsideSector = mergedList.filter(function(c) {
+      return !inSectorIds[c.id] && c.named &&
+        (c.geometryKind === 'elongated' || c.geometryKind === 'area');
+    }).slice(0, 150);
 
     return {
       cameraPosition: { lat: gps.lat, lng: gps.lng },
@@ -2464,17 +2558,35 @@ body.focus-open #workspace{overflow:hidden}
       sectorFromDegrees: Math.round(normalizeDegrees(headingInfo.degrees - VIEW_HALF_ANGLE)),
       sectorToDegrees: Math.round(normalizeDegrees(headingInfo.degrees + VIEW_HALF_ANGLE)),
       provider: 'OpenStreetMap',
-      endpoint: endpointUsed,
+      endpoint: endpointUsed || null,
       retrievedAt: new Date().toISOString(),
-      totalRawElements: (elements || []).length,
+      totalRawElements: totalRawElements,
       matchedCount: candidates.length,
       historicalCaveat: sightlineCaveatText(captureAgeYears),
       captureAgeYears: captureAgeYears === null ? null : Math.round(captureAgeYears * 10) / 10,
+      acquisition: {
+        classes: classStats,
+        completeness: completeness,
+        mergedNormalized: normalized.length,
+        deduped: mergedList.length,
+        insideMaxDistance: insideDistance,
+        insideViewSector: candidates.length,
+        ranked: candidates.length,
+        uiShown: Math.min(SIGHTLINE_DISPLAY_LIMIT, candidates.length),
+        aiContext: Math.min(SIGHTLINE_AI_LIMIT, candidates.length)
+      },
+      outsideSector: outsideSector,
       candidates: candidates
     };
   }
 
   /* ---- Overpass request ---------------------------------------------- */
+  /* v2.1.2: three targeted retrieval classes so dominant geography cannot
+   * be crowded out of one broad output-capped response. */
+
+  var SIGHTLINE_CLASS_KEYS = ['natural', 'structures', 'places'];
+  var SIGHTLINE_CLASS_LIMITS = { natural: 400, structures: 400, places: 200 };
+  var SIGHTLINE_CLASS_LABELS = { natural: 'major natural / geographic features', structures: 'prominent structures / infrastructure', places: 'named places / landmarks' };
 
   function overpassBbox(lat, lng, distanceKm) {
     var latDelta = distanceKm / 111.32;
@@ -2485,34 +2597,45 @@ body.focus-open #workspace{overflow:hidden}
     return south + ',' + west + ',' + north + ',' + east;
   }
 
-  function buildOverpassQuery(bbox) {
-    var filters = [
-      'nwr["man_made"~"^(tower|water_tower|chimney|mast|lighthouse|silo|works|communication_tower|storage_tank|minaret|mineshaft)$"]',
-      'nwr["historic"]',
-      'nwr["tourism"~"^(attraction|viewpoint)$"]',
-      'nwr["bridge"]["name"]',
-      'nwr["power"~"^(plant|station|generator|substation|tower)$"]',
-      'nwr["aeroway"]',
-      'nwr["railway"~"^(rail|light_rail|subway)$"]',
-      'nwr["highway"]["ref"]',
-      'nwr["natural"~"^(peak|cliff|bay|water)$"]',
-      'nwr["waterway"~"^(river|canal)$"]',
-      'nwr["place"~"^(city|town|village)$"]',
-      'nwr["leisure"~"^(park|nature_reserve)$"]',
-      'nwr["boundary"~"^(national_park|protected_area)$"]',
-      'nwr["amenity"="place_of_worship"]["name"]',
-      'nwr["building"]["name"]["building"!~"^(house|residential|apartments|garage|shed|hut|detached|terrace|retail|commercial|roof)$"]'
-    ];
+  function buildOverpassQuery(bbox) { return buildClassOverpassQuery('natural', bbox) ; }
+
+  function buildClassOverpassQuery(classKey, bbox) {
+    var filters = [];
+    if (classKey === 'natural') {
+      // Class A — major natural / geographic features (nodes, ways AND relations)
+      filters.push('nwr["natural"~"^(peak|cliff|bay)$"]');
+      filters.push('nwr["natural"="water"]["name"]');
+      filters.push('nwr["water"~"^(lake|reservoir|pond)$"]["name"]');
+      filters.push('nwr["waterway"~"^(river|canal)$"]');
+      filters.push('nwr["boundary"~"^(national_park|protected_area)$"]');
+      filters.push('nwr["leisure"="nature_reserve"]');
+    } else if (classKey === 'structures') {
+      // Class B — prominent structures / infrastructure
+      filters.push('nwr["man_made"~"^(tower|water_tower|chimney|mast|lighthouse|silo|works|communication_tower|storage_tank|minaret|mineshaft)$"]');
+      filters.push('nwr["bridge"="yes"]["name"]');
+      filters.push('nwr["power"~"^(plant|station|tower)$"]');
+      filters.push('nwr["aeroway"~"^(aerodrome|runway|helipad)$"]');
+      filters.push('nwr["historic"]');
+      filters.push('nwr["railway"~"^(rail|light_rail|subway)$"]');
+      filters.push('nwr["building"]["name"]["building"!~"^(house|residential|apartments|garage|shed|hut|detached|terrace|retail|commercial|roof)$"]');
+    } else {
+      // Class C — named places / landmarks
+      filters.push('nwr["place"~"^(city|town|village)$"]');
+      filters.push('nwr["tourism"~"^(attraction|viewpoint)$"]');
+      filters.push('nwr["amenity"="place_of_worship"]["name"]');
+      filters.push('nwr["leisure"="park"]["name"]');
+      filters.push('nwr["highway"]["ref"]');
+    }
     var body = filters.map(function(f) { return f + '(' + bbox + ');'; }).join('');
-    return '[out:json][timeout:25];(' + body + ');out center tags 400;';
+    return '[out:json][timeout:25];(' + body + ');out center tags ' + SIGHTLINE_CLASS_LIMITS[classKey] + ';';
   }
 
 
-  async function fetchSightlineElements(gps) {
-    var controller = new AbortController();
-    state.sightlineAbort = controller;
-    var bbox = overpassBbox(gps.lat, gps.lng, VIEW_MAX_DISTANCE_KM);
-    var query = buildOverpassQuery(bbox);
+  /* One attempt chain per class: primary endpoint, then one fallback.
+   * Classes run sequentially to stay polite to public infrastructure.
+   * A shared AbortController lets Clear/image-change cancel everything. */
+  async function fetchSightlineClass(classKey, bbox, signal) {
+    var query = buildClassOverpassQuery(classKey, bbox);
     var lastError = null;
     for (var i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
       try {
@@ -2520,21 +2643,136 @@ body.focus-open #workspace{overflow:hidden}
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'data=' + encodeURIComponent(query),
-          signal: controller.signal
+          signal: signal
         });
         if (!response.ok) throw new Error('Overpass endpoint returned HTTP ' + response.status);
         var data = await response.json();
         if (!data || !Array.isArray(data.elements)) throw new Error('Overpass returned an unexpected response shape');
-        return { elements: data.elements, endpoint: OVERPASS_ENDPOINTS[i] };
+        var elements = data.elements;
+        return {
+          elements: elements,
+          endpoint: OVERPASS_ENDPOINTS[i],
+          truncated: elements.length >= SIGHTLINE_CLASS_LIMITS[classKey],
+          error: null
+        };
       } catch (err) {
         if (err && err.name === 'AbortError') throw err;
         lastError = err;
       }
     }
-    throw lastError || new Error('Overpass request failed');
+    return { elements: [], endpoint: null, truncated: false, error: lastError ? (lastError.message || String(lastError)) : 'request failed' };
   }
 
-  /* ---- Runner --------------------------------------------------------- */
+  async function fetchAllSightlineClasses(gps) {
+    var controller = new AbortController();
+    state.sightlineAbort = controller;
+    var bbox = overpassBbox(gps.lat, gps.lng, VIEW_MAX_DISTANCE_KM);
+    var runIdAtStart = state.sightlineRunId;
+    var results = {};
+    for (var i = 0; i < SIGHTLINE_CLASS_KEYS.length; i++) {
+      var key = SIGHTLINE_CLASS_KEYS[i];
+      if (runIdAtStart !== state.sightlineRunId) throw new DOMException('Aborted', 'AbortError');
+      try {
+        results[key] = await fetchSightlineClass(key, bbox, controller.signal);
+      } catch (err) {
+        if (err && err.name === 'AbortError') throw err;
+        results[key] = { elements: [], endpoint: null, truncated: false, error: err.message || String(err) };
+      }
+    }
+    return results;
+  }
+
+  /* ---- Elongated-feature sector refinement ----------------------------- */
+  /* A long river's centroid can sit outside the view sector while the river
+   * itself crosses it. For named elongated way-based features that missed the
+   * sector, fetch their geometry once (compact `out geom`) and test nodes
+   * locally. Not a polygon-intersection engine — just per-node checks. */
+
+  async function refineElongatedSector(snapshot, signal) {
+    var acq = snapshot.acquisition;
+    var maxMeters = snapshot.maxDistanceKm * 1000;
+    var cam = snapshot.cameraPosition;
+    var misses = (snapshot.outsideSector || []).filter(function(c) {
+      return c.geometryKind === 'elongated' &&
+        c.distanceMeters <= maxMeters &&
+        c.osmIds.every(function(o) { return o.type === 'way'; });
+    }).slice(0, 25);
+    if (!misses.length) { acq.geometryCheck = { checked: 0, rescued: 0 }; return snapshot; }
+
+    var wayIds = [];
+    misses.forEach(function(c) {
+      c.osmIds.forEach(function(o) { if (o.type === 'way' && wayIds.indexOf(o.id) === -1) wayIds.push(o.id); });
+    });
+    var query = '[out:json][timeout:25];way(id:' + wayIds.join(',') + ';);out geom;';
+    var lastError = null;
+    for (var i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
+      try {
+        var response = await fetch(OVERPASS_ENDPOINTS[i], {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(query),
+          signal: signal
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var data = await response.json();
+        var byId = {};
+        (data.elements || []).forEach(function(el) { if (el.type === 'way' && el.geometry) byId[el.id] = el.geometry; });
+
+        var rescued = [];
+        misses.forEach(function(candidate) {
+          var best = null;
+          candidate.osmIds.forEach(function(o) {
+            var geom = o.type === 'way' ? byId[o.id] : null;
+            if (!geom) return;
+            geom.forEach(function(node) {
+              if (!node || !isFinite(node.lat) || !isFinite(node.lon)) return;
+              var d = haversineMeters(cam.lat, cam.lng, node.lat, node.lon);
+              if (d > maxMeters) return;
+              var b = initialBearingDegrees(cam.lat, cam.lng, node.lat, node.lon);
+              var delta = angularDifference(snapshot.cameraHeading, b);
+              if (delta > VIEW_HALF_ANGLE) return;
+              if (!best || delta < best.delta || (delta === best.delta && d < best.d)) {
+                best = { lat: node.lat, lng: node.lon, d: d, b: b, delta: delta };
+              }
+            });
+          });
+          if (best) {
+            rescued.push({ candidate: candidate, best: best });
+          }
+        });
+
+        rescued.forEach(function(r) {
+          var c = r.candidate;
+          c.lat = r.best.lat; c.lng = r.best.lng;
+          c.distanceMeters = Math.round(r.best.d);
+          c.distanceKm = Math.round(r.best.d / 100) / 10;
+          c.bearingDegrees = Math.round(r.best.b * 10) / 10;
+          c.bearingCardinal = compassDirection16(r.best.b);
+          c.headingDeltaDegrees = Math.round(r.best.delta * 10) / 10;
+          c.representativePointNote = 'geometry-derived point on feature';
+          rescoreCandidate(c);
+          snapshot.candidates.push(c);
+        });
+        if (rescued.length) {
+          snapshot.candidates.sort(function(a, b) { return b.rankScore - a.rankScore; });
+          snapshot.matchedCount = snapshot.candidates.length;
+          acq.insideViewSector = snapshot.candidates.length;
+          acq.ranked = snapshot.candidates.length;
+          acq.uiShown = Math.min(SIGHTLINE_DISPLAY_LIMIT, snapshot.candidates.length);
+          acq.aiContext = Math.min(SIGHTLINE_AI_LIMIT, snapshot.candidates.length);
+        }
+        acq.geometryCheck = { checked: misses.length, rescued: rescued.length };
+        return snapshot;
+      } catch (err) {
+        if (err && err.name === 'AbortError') throw err;
+        lastError = err;
+      }
+    }
+    acq.geometryCheck = { checked: misses.length, rescued: 0, error: lastError ? String(lastError.message || lastError) : 'failed' };
+    return snapshot;
+  }
+
+
 
   async function runSightline(options) {
     options = options || {};
@@ -2562,9 +2800,31 @@ body.focus-open #workspace{overflow:hidden}
     renderSightline();
 
     try {
-      var result = await fetchSightlineElements(state.gps);
+      var classResults = await fetchAllSightlineClasses(state.gps);
       if (runId !== state.sightlineRunId) return;
-      var snapshot = buildSightlineSnapshot(state.gps, headingInfo, result.elements, result.endpoint);
+      var snapshot = buildSightlineSnapshot(state.gps, headingInfo, classResults);
+      if (runId !== state.sightlineRunId) return;
+      // Partial success is valid; total failure of every class is not.
+      var allClassesFailed = SIGHTLINE_CLASS_KEYS.every(function(k) {
+        return !!snapshot.acquisition.classes[k].error;
+      });
+      if (allClassesFailed) {
+        state.sightline.status = 'error';
+        state.sightline.error = 'All geographic queries failed';
+        clearSightlineMapLayers();
+        renderSightline();
+        buildContextPreview();
+        updateDiagnostics();
+        return;
+      }
+      // Second-chance geometry pass for out-of-centroid elongated features.
+      try {
+        snapshot = await refineElongatedSector(snapshot, state.sightlineAbort ? state.sightlineAbort.signal : undefined);
+      } catch (refineError) {
+        if (refineError && refineError.name === 'AbortError') return;
+        snapshot.acquisition.geometryCheck = { checked: 0, rescued: 0, error: refineError.message || String(refineError) };
+      }
+      if (runId !== state.sightlineRunId) return;
       state.sightline.status = 'available';
       state.sightline.snapshot = snapshot;
       state.sightline.restoredSnapshot = false;
@@ -2722,6 +2982,9 @@ body.focus-open #workspace{overflow:hidden}
     summary.className = 'sightline-summary';
     summary.textContent = snapshot.matchedCount + ' candidate feature' + (snapshot.matchedCount === 1 ? '' : 's') +
       ' ahead · sector ' + snapshot.sectorFromDegrees + '°–' + snapshot.sectorToDegrees + '° · ≤ ' + snapshot.maxDistanceKm + ' km';
+    if (snapshot.acquisition && snapshot.acquisition.completeness !== 'complete') {
+      summary.textContent += ' · geographic search may be incomplete';
+    }
     facingEl.appendChild(summary);
 
     var top = snapshot.candidates.slice(0, SIGHTLINE_DISPLAY_LIMIT);
@@ -3052,7 +3315,9 @@ body.focus-open #workspace{overflow:hidden}
       '<dt>Bearing from camera</dt><dd>' + active.bearingDegrees + '° ' + escapeHtml(active.bearingCardinal || '') + '</dd>' +
       '<dt>Heading difference</dt><dd>Δ' + active.headingDeltaDegrees + '° from camera heading of ' + snapshot.cameraHeading + '° (' + escapeHtml(snapshot.headingSource) + ')</dd>' +
       '<dt>Significance</dt><dd>' + escapeHtml(active.significance) + ' · rank score ' + active.rankScore + ' (geometric — not a visual confirmation)</dd>' +
-      '<dt>Geometry</dt><dd>OSM ' + escapeHtml(active.osmType) + ' ' + escapeHtml(String(active.osmId)) + ' · ' + escapeHtml(active.representativePointNote) + '</dd>' +
+      '<dt>Geometry</dt><dd>' + escapeHtml(active.geometryKind || active.osmType) + ' · OSM ' + escapeHtml(active.osmType) + ' ' + escapeHtml(String(active.osmId)) +
+        (active.osmIds && active.osmIds.length > 1 ? ' (+ ' + (active.osmIds.length - 1) + ' merged segment' + (active.osmIds.length > 2 ? 's' : '') + ')' : '') +
+        ' · ' + escapeHtml(active.representativePointNote) + '</dd>' +
       tagsBlock +
       '<dt>Source</dt><dd>' + escapeHtml(active.provenance.provider) + ' via Overpass API · retrieved ' + escapeHtml(active.provenance.retrievedAt) + '</dd>' +
       '</dl>' +
@@ -3077,7 +3342,7 @@ body.focus-open #workspace{overflow:hidden}
     var sl = state.sightline;
     if (!sl || sl.status !== 'available' || !sl.snapshot || !sl.snapshot.candidates.length) return null;
     var snapshot = sl.snapshot;
-    return {
+    var payload = {
       possible_features_in_view: snapshot.candidates.slice(0, SIGHTLINE_AI_LIMIT).map(function(candidate) {
         return {
           name: candidate.name,
@@ -3098,6 +3363,22 @@ body.focus-open #workspace{overflow:hidden}
       historical_caveat: 'Feature existence at capture time has not been verified.',
       evidence_note: 'Candidates are geometric possibilities ranked by heading alignment, distance and mapped significance — not visual identifications.'
     };
+    if (snapshot.acquisition) {
+      var acq = snapshot.acquisition;
+      payload.geographic_acquisition = {
+        provider: 'OpenStreetMap / Overpass',
+        completeness: acq.completeness,
+        coverage: SIGHTLINE_CLASS_KEYS.reduce(function(map, key) {
+          var stats = acq.classes[key] || {};
+          map[key] = stats.error ? 'unavailable' : (stats.truncated ? 'possibly-truncated' : 'available');
+          return map;
+        }, {})
+      };
+      if (acq.completeness !== 'complete') {
+        payload.geographic_acquisition.note = 'Candidate list may be incomplete; absence of a feature here does not mean it does not exist or is not visible.';
+      }
+    }
+    return payload;
   }
 
 
@@ -3900,6 +4181,32 @@ body.focus-open #workspace{overflow:hidden}
     lines.push('Legacy catalog removed: ' + (state.legacyCatalogRemoved ? 'yes' : 'no'));
     lines.push('  origin: ' + location.origin);
     lines.push('');
+    lines.push('Sightline acquisition:');
+    var slSnap = state.sightline && state.sightline.snapshot;
+    if (!slSnap || !slSnap.acquisition) {
+      lines.push('  status: ' + (state.sightline ? state.sightline.status : 'idle') + ' (no snapshot)');
+    } else {
+      var acq = slSnap.acquisition;
+      SIGHTLINE_CLASS_KEYS.forEach(function(key) {
+        var cs = acq.classes[key] || {};
+        lines.push('  ' + key + ':');
+        lines.push('    endpoint: ' + (cs.endpoint || '-'));
+        lines.push('    raw elements: ' + cs.rawElements);
+        lines.push('    normalized: ' + cs.normalized);
+        lines.push('    truncated: ' + (cs.truncated ? 'yes' : 'no'));
+        lines.push('    error: ' + (cs.error || 'none'));
+      });
+      lines.push('  merged normalized: ' + acq.mergedNormalized);
+      lines.push('  deduped: ' + acq.deduped);
+      lines.push('  inside max distance: ' + acq.insideMaxDistance);
+      lines.push('  inside view sector: ' + acq.insideViewSector);
+      lines.push('  ranked: ' + acq.ranked);
+      lines.push('  UI shown: ' + acq.uiShown);
+      lines.push('  AI context: ' + acq.aiContext);
+      lines.push('  completeness: ' + acq.completeness);
+      if (acq.geometryCheck) lines.push('  geometry refinement: checked ' + acq.geometryCheck.checked + ', rescued ' + acq.geometryCheck.rescued + (acq.geometryCheck.error ? ' (' + acq.geometryCheck.error + ')' : ''));
+    }
+    lines.push('');
     lines.push('Analysis history:');
     lines.push('  database version: ' + SETTINGS_DB_VERSION);
     lines.push('  history backend: IndexedDB');
@@ -4402,6 +4709,11 @@ body.focus-open #workspace{overflow:hidden}
           drawSightlineOnMap(true);
           buildContextPreview();
           return true;
+        },
+        getDiagnosticsText: function() {
+          updateDiagnostics();
+          var el = document.getElementById('diagContent');
+          return el ? el.textContent : '';
         }
       },
       refreshEnrichment: function() { return enrichCurrentImage(); },
