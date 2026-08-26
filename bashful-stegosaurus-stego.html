@@ -1757,14 +1757,44 @@
   }
 
   function saveHistory(history) {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    let working = history;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(working));
+        return true;
+      } catch (e) {
+        if (working.length > 1) {
+          const evicted = working.pop();
+          idbDelete(evicted.id).catch(() => {});
+        } else {
+          break;
+        }
+      }
+    }
+    try { showToast('Could not save encode history — local storage quota exceeded.', 'error'); } catch {}
+    return false;
   }
+
+  // Byte budget for the localStorage history blob. Text carriers live in
+  // IndexedDB and image entries keep only small previews, so this should
+  // rarely trigger — it backstops old-format inline data and large payloads.
+  const MAX_HISTORY_BYTES = 1500000;
 
   async function saveHistoryRecord(record) {
     const history = loadHistory();
     const finger = await hashBytes(utf8ToBytes(record.passphrase || ''));
     const entryId = record.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
     const entryType = record.type || 'image';
+    let carrierData = '';
+    let carrierStoredInIdb = false;
+    if (entryType === 'text' && typeof record.carrierData === 'string' && record.carrierData.length > 0) {
+      // Text carriers can be arbitrarily large — offload the full encoded
+      // text to IndexedDB and keep only length metadata in localStorage.
+      await idbSave(entryId, { text: record.carrierData });
+      carrierStoredInIdb = true;
+    } else {
+      carrierData = record.carrierData || '';
+    }
     const entry = {
       id: entryId,
       timestamp: new Date().toISOString(),
@@ -1777,16 +1807,24 @@
       encrypted: record.encrypted || false,
       apodSource: record.apodSource || false,
       bip39Source: record.bip39Source || false,
-      carrierData: record.carrierData || '',
+      carrierData,
       carrierMime: record.carrierMime || (entryType === 'image' ? 'image/png' : (entryType === 'text' ? 'text/plain' : null)),
+      carrierLength: typeof record.carrierData === 'string' ? record.carrierData.length : (record.carrierLength || 0),
       carrierPreview: record.carrierPreview || '',
       width: record.width || 0,
       height: record.height || 0
     };
+    if (carrierStoredInIdb) entry.carrierStoredInIdb = true;
     history.unshift(entry);
     if (history.length > MAX_HISTORY) {
       const removed = history.splice(MAX_HISTORY);
       removed.forEach(e => idbDelete(e.id).catch(() => {}));
+    }
+    // Byte-budget eviction: drop oldest entries until the serialized
+    // history fits the budget, always keeping at least the newest entry.
+    while (history.length > 1 && JSON.stringify(history).length > MAX_HISTORY_BYTES) {
+      const evicted = history.pop();
+      idbDelete(evicted.id).catch(() => {});
     }
     saveHistory(history);
     return entry;
@@ -1795,7 +1833,7 @@
   async function loadHistoryWithCarriers() {
     const history = loadHistory();
     const withCarriers = await Promise.all(history.map(async entry => {
-      if (entry.width > 0 && entry.height > 0) {
+      if ((entry.width > 0 && entry.height > 0) || entry.carrierStoredInIdb) {
         try {
           entry._carrierData = await idbLoad(entry.id);
         } catch {
@@ -1825,7 +1863,7 @@
       const bip39Badge = entry.bip39Source ? '<span style="background:rgba(217,119,6,.15);color:var(--accent-2);padding:1px 6px;border-radius:10px;font-size:.72rem;margin-left:4px;">BIP-39</span>' : '';
       let carrierPreview = '';
       const storedCarrier = entry._carrierData || null;
-      const rawData = entry.carrierData || '';
+      const rawData = entry.carrierData || (storedCarrier && storedCarrier.text) || '';
       const isImageEntry = (entry.carrierMime && entry.carrierMime.startsWith('image/')) || (entry.type === 'image' && (entry.carrierPreview || entry.width || entry.height));
       const isTextEntry = entry.carrierMime === 'text/plain' || entry.type === 'text';
       if (isImageEntry) {
@@ -1837,6 +1875,8 @@
           : '<div style="font-size:.7rem;color:var(--danger);margin-top:4px;">Full encoded image missing. Thumbnail cannot be decoded.</div>';
       } else if (rawData && isTextEntry) {
         carrierPreview = `<div style="margin-top:6px;max-width:480px;"><textarea readonly rows="4" style="width:100%;max-height:160px;overflow-y:scroll;resize:none;padding:6px 8px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:6px;font-size:.78rem;font-family:ui-monospace,monospace;color:var(--ink);line-height:1.5;box-sizing:border-box;display:block;">${escapeHtml(rawData)}</textarea></div>`;
+      } else if (isTextEntry && entry.carrierStoredInIdb && !storedCarrier) {
+        carrierPreview = '<div style="font-size:.7rem;color:var(--danger);margin-top:4px;">Carrier text missing from IndexedDB and cannot be decoded.</div>';
       }
       return `<div style="padding:10px 12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:start;gap:10px;">
         <div style="flex:1;min-width:0;">
@@ -2215,7 +2255,7 @@
             const fullImageData = resultCanvas.getContext('2d').getImageData(0, 0, resultCanvas.width, resultCanvas.height);
             await idbSave(entryId, { imageData: fullImageData, width: fullImageData.width, height: fullImageData.height });
             const previewCanvas = document.createElement('canvas');
-            const maxPreview = 320;
+            const maxPreview = 160;
             const pr = Math.min(maxPreview / fullImageData.width, maxPreview / fullImageData.height, 1);
             previewCanvas.width = Math.round(fullImageData.width * pr);
             previewCanvas.height = Math.round(fullImageData.height * pr);
@@ -2224,7 +2264,7 @@
             fullSizeCanvas.height = fullImageData.height;
             fullSizeCanvas.getContext('2d').putImageData(fullImageData, 0, 0);
             previewCanvas.getContext('2d').drawImage(fullSizeCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
-            const carrierPreview = previewCanvas.toDataURL('image/jpeg', 0.7);
+            const carrierPreview = previewCanvas.toDataURL('image/jpeg', 0.6);
             await saveHistoryRecord({
               id: entryId,
               type: 'image',
@@ -2999,7 +3039,7 @@
     if (tabId === 'history') renderHistory();
   }
 
-  function loadHistoryEntry(entry) {
+  async function loadHistoryEntry(entry) {
     const type = entry.type;
     const carrierObj = entry._carrierData || null;
     if (type === 'image') {
@@ -3037,7 +3077,41 @@
     } else if (type === 'text') {
       switchTab('text-reveal');
       const inputArea = document.getElementById('text-rev-input');
-      inputArea.value = entry.carrierData || '';
+      let carrierText = entry.carrierData || '';
+      if (!carrierText && entry.carrierStoredInIdb) {
+        try {
+          const rec = await idbLoad(entry.id);
+          carrierText = (rec && rec.text) || '';
+        } catch {}
+      }
+      if (!carrierText) {
+        if (entry.carrierStoredInIdb) {
+          inputArea.value = '';
+          document.getElementById('text-rev-decode').disabled = true;
+          logStatus('Carrier text is missing from IndexedDB and cannot be decoded.', 'error');
+          showToast('Stored carrier text is missing — it may have been evicted or deleted.', 'error');
+          return;
+        }
+      }
+      // Lazy migration: old entries kept the full carrier inline in
+      // localStorage. Move it to IndexedDB the first time it is used.
+      if (carrierText && !entry.carrierStoredInIdb) {
+        try {
+          await idbSave(entry.id, { text: carrierText });
+          const h = loadHistory();
+          const target = h.find(e => e.id === entry.id);
+          if (target) {
+            target.carrierStoredInIdb = true;
+            target.carrierLength = target.carrierLength || carrierText.length;
+            target.carrierData = '';
+            saveHistory(h);
+          }
+          entry.carrierStoredInIdb = true;
+          entry._carrierData = { text: carrierText };
+          delete entry.carrierData;
+        } catch {}
+      }
+      inputArea.value = carrierText;
       const decodeBtn = document.getElementById('text-rev-decode');
       decodeBtn.disabled = false;
       if (entry.encrypted && entry.passphrase) {
@@ -3101,11 +3175,26 @@
   } else {
     init();
   }
+
+  // Non-visual test hook (no UI impact). Exposes read-only introspection
+  // for local automated checks of history size, count, and IDB carriers.
+  window.__STEGO_TEST__ = {
+    historySize() {
+      try { return (localStorage.getItem(HISTORY_KEY) || '').length; } catch { return -1; }
+    },
+    historyCount() {
+      const h = loadHistory();
+      return Array.isArray(h) ? h.length : 0;
+    },
+    getCarrierFromIdb(id) {
+      return idbLoad(id).catch(() => null);
+    }
+  };
 })();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; Hank Marquardt 2026 &middot; Version 2026.06.01.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; Hank Marquardt 2026 &middot; Version 2026.08.26.1
   </footer>
 </body>
 </html>

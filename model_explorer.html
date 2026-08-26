@@ -1509,9 +1509,9 @@
       </section>
     </main>
 
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.06.01.1
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; 2026 Hank Marquardt &middot; Model Explorer &middot; version 2026.08.26.1
     </footer>
   </div>
 
@@ -1698,7 +1698,7 @@
     function toast(message, type = 'info') {
       const container = $('#toast-container');
       const el = document.createElement('div');
-      el.className = `toast ${type}`;
+      el.className = `toast ${type || ''}`;
       el.textContent = message;
       container.appendChild(el);
       setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 3000);
@@ -1838,9 +1838,36 @@
     // ==========================================
     // STORAGE
     // ==========================================
+    // Deep-copies in-memory state into a slim shape for persistence:
+    // - provider models lose the bulky `raw` upstream object
+    // - history entries lose `raw` (full API response, may embed base64 audio)
+    //   and `payload` (full request body); small metadata/usage/timing fields stay
+    // - audio-producing entries keep a `hadAudio: true` flag instead of media data
+    function slimStateForStorage() {
+      const slim = deepClone(state);
+      Object.keys(slim.providers || {}).forEach(key => {
+        const p = slim.providers[key];
+        if (Array.isArray(p.models)) {
+          p.models = p.models.map(m => {
+            if (!m || typeof m !== 'object' || !('raw' in m)) return m;
+            const { raw, ...rest } = m;
+            return rest;
+          });
+        }
+      });
+      slim.history = (slim.history || []).map(h => {
+        if (!h || typeof h !== 'object') return h;
+        const { raw, payload, ...rest } = h;
+        rest.mediaStripped = true;
+        if (h.hadAudio === true || h.mode === 'audio') rest.hadAudio = true;
+        return rest;
+      });
+      return slim;
+    }
+
     function saveState() {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(slimStateForStorage()));
       } catch (e) {
         logDebug({ msg: 'Failed to save state: ' + e.message, level: 'error' });
       }
@@ -1849,9 +1876,9 @@
 
     function loadState() {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
+        const rawStr = localStorage.getItem(STORAGE_KEY);
+        if (rawStr) {
+          const parsed = JSON.parse(rawStr);
           // Only keep providers that are defined in defaultState (prevents stale providers like opencode_zen from persisting)
           const cleanedProviders = {};
           Object.keys(defaultState.providers).forEach(key => {
@@ -2867,6 +2894,12 @@
       renderModeSelect();
       showModePanel(h.mode);
 
+      // Raw output / request payload are intentionally not persisted; note that
+      // when loading a reloaded (slimmed) entry instead of crashing on them.
+      if (h.mediaStripped) {
+        toast('Details not persisted after reload — raw output & inputs unavailable' + (h.hadAudio ? ' (audio removed)' : ''));
+      }
+
       // Restore personality if present
       if (h.personality) {
         state.selectedPersonality = h.personality;
@@ -3113,6 +3146,7 @@
         if (found) model = found;
       });
       if (!model) { toast('Model not found', 'err'); return; }
+      if (!model.raw) { toast('Raw metadata not persisted after reload — re-fetch the model list', 'err'); return; }
       const raw = JSON.stringify(model.raw, null, 2);
       const modal = document.createElement('div');
       modal.className = 'modal-overlay active';
@@ -3302,6 +3336,18 @@
     window.toggleCollapsible = toggleCollapsible;
     window.switchTextView = switchTextView;
     window.openFullscreenPreview = openFullscreenPreview;
+
+    // Non-visual test hook
+    window.__ME_TEST__ = {
+      persistedStateSize() {
+        const v = localStorage.getItem(STORAGE_KEY);
+        return v == null ? 0 : new Blob([v]).size;
+      },
+      slimStateForStorage,
+      historyCount() {
+        return Array.isArray(state.history) ? state.history.length : 0;
+      }
+    };
 
     document.addEventListener('DOMContentLoaded', init);
   </script>

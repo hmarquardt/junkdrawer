@@ -643,7 +643,7 @@
           <button id="addBtn" class="btn primary">Add to timeline</button>
           <button id="clearDraftBtn" class="btn">Clear draft</button>
         </div>
-        <p class="hint">Storage is local to this browser. Uploaded images are converted to base64 data URLs and saved with the item.</p>
+        <p class="hint">Storage is local to this browser. Uploaded images are kept on this device and saved with the item.</p>
       </aside>
     </section>
 
@@ -692,6 +692,15 @@
 
   <script>
     const STORAGE_KEY = "collection-of-absurdities:v1";
+    const MIGRATION_MARKER_KEY = "collection-of-absurdities:migration.v2";
+    const DB_NAME = "collection-of-absurdities";
+    const DB_VERSION = 1;
+    const ITEM_STORE = "items";
+
+    let storageMode = "idb";
+    let storageBoot = null;
+    let storageReady = false;
+    let persistenceChain = Promise.resolve();
 
     const els = {
       entryText: document.getElementById("entryText"),
@@ -718,7 +727,7 @@
     };
 
     let state = {
-      items: loadItems(),
+      items: [],
       uploadDataUrl: null,
       uploadName: null,
       snapshotDates: [],
@@ -729,8 +738,20 @@
 
     function init() {
       bindEvents();
-      rebuildSlider(true);
-      render();
+      storageBoot = bootstrapStorage()
+        .then(items => {
+          state.items = Array.isArray(items) ? items : [];
+          storageReady = true;
+          rebuildSlider(true);
+          render();
+        })
+        .catch(error => {
+          console.warn("Collection of Absurdities: storage startup failed; starting empty.", error);
+          storageMode = "legacy";
+          storageReady = true;
+          rebuildSlider(true);
+          render();
+        });
     }
 
     function bindEvents() {
@@ -763,20 +784,230 @@
       });
     }
 
-    function loadItems() {
+    function bootstrapStorage() {
+      return migrateLegacyIfNeeded();
+    }
+
+    function migrateLegacyIfNeeded() {
+      const raw = readLegacyRaw();
+      if (!raw) {
+        storageMode = "idb";
+        return idbOpen()
+          .then(() => idbGetAllRecords())
+          .then(records => records.map(recordToDisplayItem))
+          .catch(error => {
+            storageMode = "legacy";
+            console.warn("Collection of Absurdities: IndexedDB unavailable; staying on legacy localStorage.", error);
+            return [];
+          });
+      }
+
+      let parsedItems = [];
       try {
-        const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) parsedItems = parsed;
+      } catch (error) {
+        storageMode = "legacy";
+        console.warn("Collection of Absurdities: legacy data could not be parsed; leaving it untouched.", error);
         return [];
+      }
+
+      console.warn("Collection of Absurdities: migrating legacy localStorage archive to IndexedDB…");
+      return Promise.all(parsedItems.map(item => itemToRecord(item)))
+        .then(records => idbPutAll(records))
+        .then(() => idbCount())
+        .then(count => {
+          if (count < parsedItems.length) {
+            throw new Error(`Verification failed: expected at least ${parsedItems.length} items in IndexedDB, found ${count}.`);
+          }
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.setItem(MIGRATION_MARKER_KEY, JSON.stringify({
+            migratedAt: new Date().toISOString(),
+            count: count
+          }));
+          storageMode = "idb";
+          return idbGetAllRecords().then(records => records.map(recordToDisplayItem));
+        })
+        .catch(error => {
+          storageMode = "legacy";
+          console.warn("Collection of Absurdities: migration failed; legacy localStorage data kept.", error);
+          return parsedItems.map(hydrateLegacyItem);
+        });
+    }
+
+    function readLegacyRaw() {
+      try {
+        return localStorage.getItem(STORAGE_KEY);
+      } catch {
+        return null;
       }
     }
 
+    function idbOpen() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(ITEM_STORE)) {
+            db.createObjectStore(ITEM_STORE, { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error("IndexedDB open failed."));
+        request.onblocked = () => reject(new Error("IndexedDB open blocked."));
+      });
+    }
+
+    function idbPutAll(records) {
+      return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ITEM_STORE, "readwrite");
+        const store = tx.objectStore(ITEM_STORE);
+        records.forEach(record => store.put(record));
+        tx.oncomplete = () => { db.close(); resolve(records.length); };
+        tx.onabort = tx.onerror = () => { db.close(); reject(tx.error || new Error("IndexedDB write failed.")); };
+      }));
+    }
+
+    function idbReplaceAll(records) {
+      return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ITEM_STORE, "readwrite");
+        const store = tx.objectStore(ITEM_STORE);
+        store.clear();
+        records.forEach(record => store.put(record));
+        tx.oncomplete = () => { db.close(); resolve(records.length); };
+        tx.onabort = tx.onerror = () => { db.close(); reject(tx.error || new Error("IndexedDB write failed.")); };
+      }));
+    }
+
+    function idbGetAllRecords() {
+      return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ITEM_STORE, "readonly");
+        const request = tx.objectStore(ITEM_STORE).getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error || new Error("IndexedDB read failed."));
+        tx.oncomplete = () => db.close();
+        tx.onabort = () => reject(tx.error || new Error("IndexedDB read aborted."));
+      }));
+    }
+
+    function idbCount() {
+      return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ITEM_STORE, "readonly");
+        const request = tx.objectStore(ITEM_STORE).count();
+        request.onsuccess = () => resolve(request.result || 0);
+        request.onerror = () => reject(request.error || new Error("IndexedDB count failed."));
+        tx.oncomplete = () => db.close();
+        tx.onabort = () => reject(tx.error || new Error("IndexedDB count aborted."));
+      }));
+    }
+
+    function urlOrBlobToBlob(value) {
+      if (!value) return Promise.resolve(null);
+      if (value instanceof Blob) return Promise.resolve(value);
+      return fetch(value)
+        .then(response => {
+          if (!response.ok) throw new Error(`Could not read image data (${response.status}).`);
+          return response.blob();
+        });
+    }
+
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        if (!blob) {
+          resolve(null);
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error("Could not encode image data."));
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function itemToRecord(item) {
+      const record = {
+        id: String(item.id),
+        createdAt: item.createdAt,
+        text: item.text || "",
+        uploadName: item.uploadName || null,
+        detectedType: item.detectedType || null,
+        imageBlob: null
+      };
+      const source = item.imageBlob instanceof Blob ? item.imageBlob : item.uploadDataUrl;
+      return urlOrBlobToBlob(source).then(blob => {
+        record.imageBlob = blob;
+        return record;
+      });
+    }
+
+    function recordToDisplayItem(record) {
+      const blob = record.imageBlob instanceof Blob ? record.imageBlob : null;
+      return {
+        id: record.id,
+        createdAt: record.createdAt,
+        text: record.text || "",
+        uploadName: record.uploadName || null,
+        detectedType: record.detectedType || null,
+        imageBlob: blob,
+        uploadDataUrl: blob ? URL.createObjectURL(blob) : null
+      };
+    }
+
+    function hydrateLegacyItem(item) {
+      return {
+        id: item.id,
+        createdAt: item.createdAt,
+        text: item.text || "",
+        uploadName: item.uploadName || null,
+        detectedType: item.detectedType || detectType(item.text || "", item.uploadDataUrl),
+        imageBlob: null,
+        uploadDataUrl: item.uploadDataUrl || null
+      };
+    }
+
+    function toStorableLegacyItem(item) {
+      return {
+        id: item.id,
+        createdAt: item.createdAt,
+        text: item.text || "",
+        uploadDataUrl: item.uploadDataUrl || null,
+        uploadName: item.uploadName || null,
+        detectedType: item.detectedType || null
+      };
+    }
+
     function saveItems() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.items));
+      persistenceChain = persistenceChain.then(() =>
+        persistItems().catch(error => {
+          console.warn("Collection of Absurdities: saving failed.", error);
+          toast("Heads up: your last change could not be saved.");
+        })
+      );
+      return persistenceChain;
+    }
+
+    function persistItems() {
+      if (storageMode === "legacy") {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.items.map(toStorableLegacyItem)));
+          return Promise.resolve();
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+      return Promise.all(state.items.map(itemToRecord)).then(records => idbReplaceAll(records));
+    }
+
+    function requireStorageReady() {
+      if (!storageReady) {
+        toast("One moment — still opening your archive.");
+        return false;
+      }
+      return true;
     }
 
     function addItem() {
+      if (!requireStorageReady()) return;
       const rawText = els.entryText.value.trim();
       if (!rawText && !state.uploadDataUrl) {
         toast("Give me at least one fresh specimen of ridiculousness.");
@@ -1029,6 +1260,7 @@
     }
 
     function deleteItem(id) {
+      if (!requireStorageReady()) return;
       const item = state.items.find(entry => entry.id === id);
       if (!item) return;
       const ok = confirm("Delete this archived absurdity?");
@@ -1041,21 +1273,50 @@
     }
 
     function exportJson() {
-      const payload = JSON.stringify({ exportedAt: new Date().toISOString(), items: state.items }, null, 2);
-      const blob = new Blob([payload], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `collection-of-absurdities-${new Date().toISOString().slice(0,10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      if (!requireStorageReady()) return;
+      Promise.all(state.items.map(itemToExportShape))
+        .then(exported => {
+          const payload = JSON.stringify({ exportedAt: new Date().toISOString(), items: exported }, null, 2);
+          const blob = new Blob([payload], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `collection-of-absurdities-${new Date().toISOString().slice(0,10)}.json`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        })
+        .catch(error => toast(`Export failed: ${error.message}`));
+    }
+
+    function itemToExportShape(item) {
+      const exported = toStorableLegacyItem(item);
+      const source = String(item.uploadDataUrl || "");
+      if (item.imageBlob instanceof Blob) {
+        return blobToDataUrl(item.imageBlob).then(dataUrl => {
+          exported.uploadDataUrl = dataUrl;
+          return exported;
+        });
+      }
+      if (source.indexOf("blob:") === 0) {
+        return urlOrBlobToBlob(source)
+          .then(blobToDataUrl)
+          .then(dataUrl => {
+            exported.uploadDataUrl = dataUrl;
+            return exported;
+          });
+      }
+      return Promise.resolve(exported);
     }
 
     function importJson(event) {
       const file = event.target.files && event.target.files[0];
       if (!file) return;
+      if (!requireStorageReady()) {
+        els.importFile.value = "";
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => {
         try {
@@ -1091,6 +1352,7 @@
     }
 
     function wipeCollection() {
+      if (!requireStorageReady()) return;
       if (!state.items.length) {
         toast("Nothing to wipe.");
         return;
@@ -1265,10 +1527,17 @@
       els.toast.classList.add("show");
       toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2600);
     }
+
+    window.__COA_TEST__ = {
+      getItems: () => state.items,
+      idbCount: () => idbCount(),
+      migrateLegacyIfNeeded: () => migrateLegacyIfNeeded(),
+      storageMode: () => storageMode
+    };
   </script>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; Hank Marquardt 2026 &middot; Version 2026.06.01.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; Hank Marquardt 2026 &middot; Version 2026.08.26.1
   </footer>
 </body>
 </html>

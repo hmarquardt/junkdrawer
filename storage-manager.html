@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Storage Manager — Junkdrawer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗄️</text></svg>" />
+<script
+  src="analytics-lite.js"
+  data-site-id="junkdrawer"
+  data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+  defer>
+</script>
+<style>
+  :root {
+    --bg: #0a0f1c;
+    --card: #111a2e;
+    --card-border: #22304e;
+    --text: #e8eef8;
+    --muted: #93a4c0;
+    --accent: #5b8cff;
+    --accent-soft: rgba(91, 140, 255, 0.14);
+    --ok: #38d9a9;
+    --warn: #ffd166;
+    --danger: #ff6b6b;
+    --orange: #ffa94d;
+    --focus: #a8c1ff;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+
+  body {
+    margin: 0;
+    padding: clamp(1rem, 4vw, 2.5rem) 1rem 0;
+    background:
+      radial-gradient(1000px 500px at 50% -10%, rgba(91, 140, 255, 0.12), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 400 1rem/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main { max-width: 75rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1.1rem; }
+
+  h1 { margin: 0; font-size: clamp(1.5rem, 4.5vw, 2.1rem); font-weight: 700; letter-spacing: 0.01em; }
+  .sub { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.95rem; max-width: 60rem; }
+
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.025), transparent 40%), var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 1rem;
+    padding: 1rem 1.15rem;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+
+  h2 { margin: 0 0 0.6rem; font-size: 1.15rem; }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+    gap: 0.8rem;
+  }
+  .stat { background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 0.75rem; padding: 0.75rem 0.9rem; }
+  .stat .label { color: var(--muted); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .stat .value { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.35rem; font-weight: 700; margin-top: 0.2rem; }
+  .stat .hint { color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }
+
+  .quotabar { height: 0.55rem; margin-top: 0.6rem; border-radius: 999px; background: rgba(255,255,255,0.07); overflow: hidden; }
+  .quotabar-fill { height: 100%; width: 0%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #7dd3fc); transition: width 0.3s ease; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+  .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #0a0f1c; }
+
+  button {
+    appearance: none;
+    border: 1px solid var(--card-border);
+    border-radius: 0.55rem;
+    padding: 0.45rem 0.8rem;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font: 600 0.85rem/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+  }
+  button:hover:not(:disabled) { background: rgba(255,255,255,0.09); border-color: #31446b; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.danger { border-color: rgba(255,107,107,0.5); color: var(--danger); }
+  button.danger:hover:not(:disabled) { background: rgba(255,107,107,0.14); border-color: var(--danger); }
+  button.small { padding: 0.3rem 0.6rem; font-size: 0.78rem; }
+
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 0.35rem; }
+
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.7rem; }
+  .toolbar .grow { flex: 1; }
+  .muted { color: var(--muted); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th { text-align: left; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--card-border); }
+  td { padding: 0.45rem 0.5rem; border-bottom: 1px solid rgba(34, 48, 78, 0.55); vertical-align: top; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  td.key-cell { font-family: var(--mono); font-size: 0.8rem; word-break: break-all; max-width: 26rem; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+  .badge { display: inline-block; padding: 0.12rem 0.5rem; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(255,255,255,0.04); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge.green { color: var(--ok); border-color: rgba(56,217,169,0.4); }
+  .badge.yellow { color: var(--warn); border-color: rgba(255,209,102,0.4); }
+  .badge.orange { color: var(--orange); border-color: rgba(255,169,77,0.4); }
+  .badge.red { color: var(--danger); border-color: rgba(255,107,107,0.45); }
+  .badge.dim { color: var(--muted); }
+
+  details.preview { margin: 0; }
+  details.preview summary { cursor: pointer; color: var(--muted); font-size: 0.78rem; list-style-position: inside; }
+  details.preview pre {
+    margin: 0.35rem 0 0; padding: 0.55rem 0.7rem; background: #0c1424; border: 1px solid var(--card-border);
+    border-radius: 0.5rem; font-family: var(--mono); font-size: 0.74rem; line-height: 1.45;
+    white-space: pre-wrap; word-break: break-all; max-height: 14rem; overflow: auto; color: #c9d6ee;
+  }
+
+  .db-block { border: 1px solid var(--card-border); border-radius: 0.75rem; padding: 0.8rem 0.95rem; margin-bottom: 0.8rem; background: rgba(255,255,255,0.02); }
+  .db-block header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 0.9rem; margin-bottom: 0.4rem; }
+  .db-block h3 { margin: 0; font-size: 1rem; font-family: var(--mono); }
+  .store-line { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; padding: 0.25rem 0; font-size: 0.84rem; color: var(--muted); }
+  .store-line .store-name { font-family: var(--mono); color: var(--text); }
+
+  .rec-list { margin: 0.3rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .rec-list li { font-size: 0.9rem; }
+  .rec-section { margin-top: 0.8rem; }
+  .rec-section h3 { margin: 0 0 0.3rem; font-size: 0.95rem; }
+
+  .status { min-height: 1.3rem; font-size: 0.85rem; color: var(--muted); margin: 0.4rem 0 0; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--danger); }
+
+  .danger-zone { border-color: rgba(255,107,107,0.4); }
+  .danger-zone summary { cursor: pointer; font-weight: 700; color: var(--danger); list-style-position: inside; }
+  .danger-zone .body { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.6rem; }
+
+  dialog {
+    border: 1px solid var(--card-border); border-radius: 1rem; padding: 0;
+    width: min(92vw, 27rem); background: var(--card); color: var(--text);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+  }
+  dialog::backdrop { background: rgba(5, 9, 18, 0.72); }
+  .dialog-body { display: flex; flex-direction: column; gap: 0.8rem; padding: 1.25rem; }
+  .dialog-body h2 { margin: 0; font-size: 1.15rem; }
+  .dialog-body p { margin: 0; font-size: 0.9rem; }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.3rem; }
+  input[type="text"] {
+    width: 100%; padding: 0.5rem 0.6rem; border-radius: 0.5rem; border: 1px solid var(--card-border);
+    background: #0c1424; color: var(--text);
+    font: 400 0.95rem/1.3 var(--mono);
+  }
+  select {
+    padding: 0.4rem 0.5rem; border-radius: 0.5rem; border: 1px solid var(--card-border);
+    background: #0c1424; color: var(--text); font: 600 0.85rem system-ui, sans-serif;
+  }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  @media (max-width: 640px) {
+    td.key-cell { max-width: 12rem; }
+    .overview-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>🗄️ Storage Manager</h1>
+    <p class="sub">See what this origin's tools store in your browser, who owns it, and reclaim space deliberately.
+    Quota figures come from <code class="mono">navigator.storage.estimate()</code> and are browser-specific estimates, not exact numbers.</p>
+  </header>
+
+  <div class="toolbar">
+    <button type="button" id="refreshBtn" class="toolbar-refresh">Refresh</button>
+    <span class="grow"></span>
+    <span class="muted" id="persistStatus" aria-live="polite"></span>
+    <button type="button" id="persistBtn" class="small">Request persistent storage</button>
+  </div>
+
+  <section class="card" aria-labelledby="overviewH">
+    <h2 id="overviewH">Overview</h2>
+    <div class="overview-grid">
+      <div class="stat">
+        <div class="label">Origin usage</div>
+        <div class="value" id="statUsage">—</div>
+        <div class="hint" id="statUsageHint">browser estimate</div>
+        <div class="quotabar" role="img" aria-label="Storage quota usage bar"><div class="quotabar-fill" id="quotaFill"></div></div>
+      </div>
+      <div class="stat">
+        <div class="label">Quota</div>
+        <div class="value" id="statQuota">—</div>
+        <div class="hint" id="statQuotaHint">estimated by browser</div>
+      </div>
+      <div class="stat">
+        <div class="label">localStorage</div>
+        <div class="value" id="statLS">—</div>
+        <div class="hint" id="statLSKeys">— keys</div>
+      </div>
+      <div class="stat">
+        <div class="label">IndexedDB</div>
+        <div class="value" id="statIDB">—</div>
+        <div class="hint" id="statIDBHint">browser estimate</div>
+      </div>
+      <div class="stat">
+        <div class="label">Cache storage</div>
+        <div class="value" id="statCache">—</div>
+        <div class="hint">caches on this origin</div>
+      </div>
+    </div>
+    <p class="status" id="overviewStatus" role="status"></p>
+  </section>
+
+  <div class="tabs" role="tablist" aria-label="Storage sections">
+    <button type="button" role="tab" id="tab-ls" aria-selected="true" aria-controls="panel-ls">localStorage</button>
+    <button type="button" role="tab" id="tab-idb" aria-selected="false" aria-controls="panel-idb">IndexedDB</button>
+    <button type="button" role="tab" id="tab-cache" aria-selected="false" aria-controls="panel-cache">Cache Storage</button>
+    <button type="button" role="tab" id="tab-rec" aria-selected="false" aria-controls="panel-rec">Diagnostics</button>
+  </div>
+
+  <section class="card" id="panel-ls" role="tabpanel" aria-labelledby="tab-ls">
+    <h2>localStorage inspector</h2>
+    <div class="toolbar">
+      <label class="muted" for="lsSort">Sort</label>
+      <select id="lsSort">
+        <option value="size">Size (largest first)</option>
+        <option value="key">Key (A→Z)</option>
+        <option value="app">App (A→Z)</option>
+      </select>
+      <label class="muted" for="lsFilter">Filter</label>
+      <input type="text" id="lsFilter" style="max-width: 14rem;" placeholder="key or app…" autocomplete="off" />
+      <span class="grow"></span>
+      <span class="mono muted" id="lsTotal"></span>
+    </div>
+    <div id="lsTableWrap"></div>
+  </section>
+
+  <section class="card" id="panel-idb" role="tabpanel" aria-labelledby="tab-idb" hidden>
+    <h2>IndexedDB inspector</h2>
+    <p class="sub" style="margin-bottom:0.6rem;">Record counts are exact. Per-database byte sizes are marked
+    <strong>unavailable</strong> — browsers do not report them; the Overview total is the only browser-provided size.</p>
+    <div id="idbList"></div>
+  </section>
+
+  <section class="card" id="panel-cache" role="tabpanel" aria-labelledby="tab-cache" hidden>
+    <h2>Cache Storage inspector</h2>
+    <div id="cacheList"></div>
+  </section>
+
+  <section class="card" id="panel-rec" role="tabpanel" aria-labelledby="tab-rec" hidden>
+    <h2>Diagnostics &amp; recommendations</h2>
+    <div id="recContent"></div>
+  </section>
+
+  <details class="card danger-zone">
+    <summary>Danger zone — full origin reset</summary>
+    <div class="body">
+      <p class="muted">This deletes <strong>every</strong> localStorage key, IndexedDB database, and Cache Storage
+      entry on this origin — for all Junkdrawer tools at once. It cannot be undone. Never run it if any tool on this
+      origin holds data you care about.</p>
+      <button type="button" id="originResetBtn" class="danger">Delete ALL origin storage…</button>
+    </div>
+  </details>
+</main>
+
+<dialog id="confirmDialog" aria-labelledby="confirmTitle">
+  <div class="dialog-body">
+    <h2 id="confirmTitle">Confirm</h2>
+    <p id="confirmMessage"></p>
+    <div class="dialog-actions">
+      <button type="button" id="confirmCancel">Cancel</button>
+      <button type="button" id="confirmOk" class="danger">Delete</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="typedDialog" aria-labelledby="typedTitle">
+  <form class="dialog-body" id="typedForm">
+    <h2 id="typedTitle">Type to confirm</h2>
+    <p id="typedMessage"></p>
+    <label class="sr-only" for="typedInput">Confirmation phrase</label>
+    <input type="text" id="typedInput" autocomplete="off" spellcheck="false" />
+    <div class="dialog-actions">
+      <button type="button" id="typedCancel">Cancel</button>
+      <button type="submit" id="typedOk" class="danger" disabled>Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="sr-only" id="liveRegion" aria-live="polite"></div>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Storage Manager · version 2026.08.26.1
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  // =====================================================================
+  // Application ownership map.
+  // Built from the repo-wide storage audit (docs/storage-audit-2026-08.md).
+  // To register a new tool, add an entry: keys/prefixes it writes and the
+  // IndexedDB databases it owns. Unmatched storage shows as "Unrecognized".
+  // =====================================================================
+  var APP_MAP = [
+    { app: 'Junkdrawer Home', file: 'index.html', keys: [], prefixes: ['junkDrawer:'] },
+    { app: 'Analytics Dashboard', file: 'analytics-dashboard.html', keys: [], prefixes: ['junkstats.dashboard.'] },
+    { app: 'Analytics Lite (tracker)', file: 'analytics-lite.js', keys: ['junkstats.visitor_id'] },
+    { app: 'Time to Click', file: 'time-to-click.html', keys: [], prefixes: ['timeToClick.'] },
+    { app: 'Weather Nerd', file: 'weather_nerd.html', keys: ['spcOutlookVis', 'openrouterKey', 'openrouterModels', 'spcTheme', 'spcAutoRefresh', 'spcModel', 'spcLat', 'spcLon', 'spcRadius'], prefixes: ['weatherNerdAnnounced', 'spcWarn_'] },
+    { app: 'Idea Bench', file: 'idea-bench.html', keys: [], prefixes: ['ideaBench.'], dbs: ['idea-bench-db'] },
+    { app: 'Dating Pyramid Zeitgeist', file: 'dating_pyramid_zeitgeist.html', keys: [], prefixes: ['dpz_'] },
+    { app: 'Local AI Scratchpad', file: 'local-ai-scratchpad.html', keys: ['geminiApiKey', 'geminiSelectedModel', 'geminiModelSource', 'geminiCustomModel', 'geminiCompareEnabled', 'geminiCachedModels', 'geminiModelsLastFetchedAt', 'localAiScratchpadSystemPrompt', 'las_history'] },
+    { app: 'Image Context Inspector', file: 'image-context-inspector.html', keys: [], prefixes: ['image-context-inspector-'], dbs: ['junkdrawer-image-context-inspector'] },
+    { app: 'UI Jerry Evaluator', file: 'ui-jerry-evaluator.html', keys: ['uje-theme'], prefixes: ['uje.'], dbs: ['uje-evaluator'] },
+    { app: 'Play Editor', file: 'play_editor.html', keys: ['playEditor.settings.v1'] },
+    { app: 'Polymarket Pulse', file: 'polymarket_pulse.html', keys: [], prefixes: ['polymarketPulse.'], dbs: ['PolymarketPulseDB'] },
+    { app: 'WebGPU Particle Playground', file: 'webgpu-particle-playground.html', keys: [], prefixes: ['wgpu_pp_'] },
+    { app: 'Global Weirdness Radar', file: 'global-weirdness-radar.html', dbs: ['globalWeirdnessRadarDB'] },
+    { app: 'MAIBA Response Quality', file: 'maiba_rubric_evaluator_response_quality.html', keys: [], prefixes: ['maibaResponseQuality:'], dbs: ['maiba-response-quality-db'] },
+    { app: 'MAIBA Rubric Evaluator (v1/v2)', file: 'maiba_rubric_evaluator*.html', keys: [], prefixes: ['maiba.'], dbs: ['maibaRubricEvaluatorDB'] },
+    { app: 'MAIBA Deterministic', file: 'maiba_rubric_evaluator_deterministic.html', keys: [], prefixes: ['maibaDeterministic.'], dbs: ['maibaDeterministicHistory'] },
+    { app: 'ADUBench Verifier', file: 'adubench_verifier.html', keys: ['adubenchVerifierSettings'], dbs: ['adubenchVerifierDB'] },
+    { app: 'OpenAI Image Batch Generator', file: 'openai_image_batch_generator.html', keys: [], prefixes: ['openaiImageBatch.'], dbs: ['junkdrawer-openai-image-batch'] },
+    { app: 'Wildlife Pattern Lab', file: 'wildlife-pattern-lab.html', keys: ['wpl_settings_v1'], dbs: ['WildlifePatternLab'] },
+    { app: 'Browser Capability Audit', file: 'browser-capability-audit.html', keys: ['bca-theme'] },
+    { app: 'Modern Open Agent Stack', file: 'modern-open-agent-stack.html', keys: ['open-agent-stack-theme'] },
+    { app: 'Bookmarklets', file: 'bookmarklets.html', keys: ['bookmarklet-collection:v1'] },
+    { app: 'Wildlife Field Recorder', file: 'wildlife-field-recorder.html', keys: [], prefixes: ['wfr_'], dbs: ['WildlifeFieldRecorder'] },
+    { app: 'Atlas Observatory', file: 'atlas-observatory.html', keys: ['atlasObservatory_settings'], dbs: ['atlasObservatoryDB'] },
+    { app: 'Collection of Absurdities', file: 'collectionofabsurdities.html', keys: ['collection-of-absurdities:v1'] },
+    { app: 'ADU-Bench Deterministic (gen 1)', file: 'ADU-Bench-Deterministic.html', keys: ['aduBenchDeterministic.history.v1'] },
+    { app: 'UI Berry 3R Evaluator', file: 'ui-berry-3r-evaluator.html', keys: ['berry3r.theme'], prefixes: ['berry3r.'], dbs: ['berry3r-evaluator'] },
+    { app: 'Quack Drawer v2', file: 'quack_drawer_v2.html', keys: [], prefixes: ['qd2_'] },
+    { app: 'Quack Drawer (v1)', file: 'quack_drawer.html', keys: ['quack_drawer_saved_queries'] },
+    { app: 'Low-Fat Pancreatitis Guide', file: 'food-that-doesnt-suck-low-fat-pancreatitis.html', keys: [], prefixes: ['lowFatPancreatitisGuide'] },
+    { app: 'Resume Job Matcher', file: 'resume_job_matcher.html', keys: [], prefixes: ['junkdrawer.resumeMatcher.'], dbs: ['JunkDrawerResumeMatcher'] },
+    { app: 'Datecheck', file: 'datecheck.html', dbs: ['datecheck_db'] },
+    { app: 'GBIF Explorer', file: 'gbif_explorer.html', keys: ['gbif-theme', 'gbif-recent', 'gbif-taxa', 'quack-drawer-import'], dbs: ['GBIFExplorerCache'] },
+    { app: 'Chat Image Transcriber', file: 'chat_image_transcriber.html', keys: ['chatTranscriber'] },
+    { app: 'Kraken Market Radar', file: 'kraken_market_radar.html', keys: ['kraken_radar_v2', 'kraken_radar'] },
+    { app: 'Model Explorer', file: 'model_explorer.html', keys: ['model_explorer_state_v1'] },
+    { app: 'Domain Taxonomy Verifier', file: 'domain_taxonomy_verifier.html', keys: ['domainTaxonomyVerifierSettings'], dbs: ['domainTaxonomyVerifierDB'] },
+    { app: 'The Watchtower', file: 'the-watchtower.html', keys: ['watchtower-settings'], dbs: ['watchtowerDB'] },
+    { app: 'RWS Timer', file: 'rwstime.html', keys: ['rwsBlocks'] },
+    { app: 'Crypto Mood Ring', file: 'crypto-mood-ring.html', keys: [], prefixes: ['cryptoMoodRing.'], dbs: ['CryptoMoodRingDB'] },
+    { app: 'Waypoint Route Builder', file: 'waypoint-route-builder.html', keys: [], prefixes: ['waypointRouteBuilder.'] },
+    { app: 'Space Weather Situation Room', file: 'space-weather-situation-room.html', keys: [], prefixes: ['nasaDonki.'] },
+    { app: 'What Should I Eat', file: 'whatshouldIeat.html', keys: [], prefixes: ['whatShouldIEat.'], dbs: ['whatShouldIEatDB'] },
+    { app: 'Gibson Wildlife Wetland Explorer', file: 'gibson-wildlife-wetland-explorer.html', keys: [], prefixes: ['gibson_wetlands_'], dbs: ['GCWWE_DB'] },
+    { app: 'SongForge AI', file: 'ai_song_factory.html', keys: ['songforge_state'], dbs: ['songforge_images'] },
+    { app: 'Bashful Stegosaurus Stego', file: 'bashful-stegosaurus-stego.html', keys: [], prefixes: ['bashful-stego-'], dbs: ['bashful-stego-carriers'] },
+    { app: 'Pontifex Daily Desk', file: 'pontifex-daily-desk.html', keys: [], prefixes: ['pontifexDailyDesk.'] },
+    { app: 'Signal Drawer', file: 'signal-drawer.html', keys: [], prefixes: ['signal-drawer:'] },
+    { app: 'Hornet HRU-7', file: 'hornet-hru-7.html', keys: ['hornet:mission'] },
+    { app: 'China AI Decel Psyop Explainer', file: 'china-ai-decel-psyop-explainer.html', keys: ['jd-ai-psyop-theme'] },
+    { app: 'Manual Party Line', file: 'manual-party-line.html', keys: ['manualPartyLine.preferences.v1'] },
+    { app: 'Princeton Churches', file: 'princton_churches.html', keys: [], prefixes: ['princeton-churches-'] },
+    { app: 'Member Review Board', file: 'member-review-board.html', dbs: ['member-review-board'] },
+    { app: 'Content Radar', file: 'content-radar.html', dbs: ['contentRadarDB'] },
+    { app: 'Ground Grid Growth', file: 'ground-grid-growth.html', keys: [], prefixes: ['ggg:'], dbs: ['ground-grid-growth'] },
+    { app: 'Lexical Exhaust Cloud', file: 'lexical_exhaust_cloud.html', keys: [], prefixes: ['lexical_exhaust_cloud.'] },
+    { app: 'Conversation Reverser', file: 'conversation_reverser.html', keys: ['conversationReverser.v1'] },
+    { app: 'DuckDB (Quack Drawer v2)', file: 'quack_drawer_v2.html', keys: [], prefixes: [], dbs: [], note: 'Uses OPFS file quack_drawer.db (not enumerable here).' }
+  ];
+
+  // Storage written by retired/superseded app generations. Safe to delete if
+  // you no longer use the old tool — verified against the repo, nothing
+  // current writes them.
+  var LEGACY_STORAGE = [
+    { match: 'quack-drawer-import', owner: 'GBIF Explorer', why: 'Cross-app handoff to Quack Drawer; no consumer exists in the repo. Safe to delete.' },
+    { match: 'gbif-taxa', owner: 'GBIF Explorer', why: 'Remnant of a removed "saved taxa" feature; never written by current code.' },
+    { match: 'quack_drawer_saved_queries', owner: 'Quack Drawer (v1)', why: 'v1 saved queries; v2 uses the qd2_ namespace and never migrates this.' },
+    { match: 'kraken_radar', owner: 'Kraken Market Radar', why: 'Pre-v2 key. Only kraken_radar_v2 is written by current code.' },
+    { match: 'wgpu_pp_saved', owner: 'WebGPU Particle Playground', why: 'Write-only dead key — no code ever reads it back.' },
+    { match: 'aduBenchDeterministic.history.v1', owner: 'ADU-Bench Deterministic (gen 1)', why: 'Older generation; the verifier keeps separate storage. Delete if the old page is unused.' },
+    { match: 'image-context-inspector-settings', owner: 'Image Context Inspector', why: 'Legacy settings key; current version migrated it into IndexedDB and self-cleans.' },
+    { match: 'image-context-inspector-model-catalog', owner: 'Image Context Inspector', why: 'Legacy catalog key; current version self-cleans it at startup.' }
+  ];
+
+  // Audit findings used by the Diagnostics tab (risk badge + advice).
+  var AUDIT_NOTES = [
+    { match: 'songforge_state', risk: 'red', note: 'SongForge: entire app state incl. base64 images in one blob. Migrated: image payloads now live in IndexedDB (songforge_images); older payloads rehydrate and shrink on next save.' },
+    { match: 'model_explorer_state_v1', risk: 'red', note: 'Model Explorer: state blob embeds raw API responses + full model catalogs. Migrated: raw/payload and base64 audio are no longer persisted; caches slimmed.' },
+    { match: 'bashful-stego-history', risk: 'red', note: 'Stego history had no byte budget (base64 previews + carrier text). Migrated: previews downscaled, carrier payloads offloaded to IndexedDB, ~1.5 MB cap.' },
+    { match: 'chatTranscriber', risk: 'red', note: 'Chat Transcriber stored full-resolution screenshot data URLs as "thumbs". Migrated: real 160px thumbnails; writes guarded.' },
+    { match: 'collection-of-absurdities:v1', risk: 'red', note: 'Legacy localStorage array with full-size base64 images. Migrated to IndexedDB; if this key reappears it is pre-migration legacy data and safe to import/delete by opening the app.' },
+    { match: 'dpz_source_content_', risk: 'orange', note: 'Dating Pyramid: up to 50 K chars of fetched page text per source, unbounded key count. Candidate to move to IndexedDB.' },
+    { match: 'pontifexDailyDesk.history.v1', risk: 'orange', note: 'Pontifex run history — now capped at 200 entries (oldest evicted). Consider IndexedDB if you need more.' },
+    { match: 'nasaDonki.cache.v1.', risk: 'orange', note: 'Space Weather API cache: one key per endpoint+range. Now evicted when older than 7 days on page load.' },
+    { match: 'lexical_exhaust_cloud.openrouter_models', risk: 'yellow', note: 'Full provider catalog with raw objects (~0.5–1 MB). Candidate for slimming or IndexedDB.' },
+    { match: 'signal-drawer:cache', risk: 'yellow', note: 'Feed cache rewritten each refresh; bounded by sources but can reach a few hundred KB.' },
+    { match: 'las_history', risk: 'yellow', note: 'Local AI Scratchpad fallback history — only written if IndexedDB fails. Safe to delete; app re-creates storage in IDB.' },
+    { match: 'waypointRouteBuilder.history.v1', risk: 'yellow', note: 'Route history grows unbounded (small records). Full clear/delete UI exists in-app.' },
+    { match: 'wfr_openrouter_catalog', risk: 'green', note: 'Wildlife Field Recorder model catalog cache, self-replacing (~100–150 KB).' }
+  ];
+
+  // ---------------------------------------------------------------------
+  // Utilities
+  // ---------------------------------------------------------------------
+  function $(id) { return document.getElementById(id); }
+  var liveRegion = $('liveRegion');
+
+  function announce(msg) {
+    liveRegion.textContent = '';
+    setTimeout(function () { liveRegion.textContent = msg; }, 30);
+  }
+  function setStatus(el, msg, kind) {
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+  function formatBytes(n) {
+    if (!isFinite(n)) return '—';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+  function byteLength(str) {
+    // localStorage values are UTF-16: ~2 bytes/char (surrogate pairs still 2 units).
+    return (str.length * 2);
+  }
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function ownerForKey(key) {
+    for (var i = 0; i < LEGACY_STORAGE.length; i += 1) {
+      if (key === LEGACY_STORAGE[i].match || key.indexOf(LEGACY_STORAGE[i].match) === 0) return LEGACY_STORAGE[i].owner;
+    }
+    for (var j = 0; j < APP_MAP.length; j += 1) {
+      var e = APP_MAP[j];
+      var keys = e.keys || [];
+      var prefixes = e.prefixes || [];
+      if (keys.indexOf(key) >= 0) return e.app;
+      for (var p = 0; p < prefixes.length; p += 1) {
+        if (key.indexOf(prefixes[p]) === 0) return e.app;
+      }
+    }
+    return 'Unrecognized';
+  }
+  function ownerForDb(name) {
+    for (var i = 0; i < APP_MAP.length; i += 1) {
+      if (APP_MAP[i].dbs && APP_MAP[i].dbs.indexOf(name) >= 0) return APP_MAP[i].app;
+    }
+    return 'Unrecognized';
+  }
+  function legacyInfo(key) {
+    for (var i = 0; i < LEGACY_STORAGE.length; i += 1) {
+      var l = LEGACY_STORAGE[i];
+      if (key === l.match || key.indexOf(l.match) === 0) return l;
+    }
+    return null;
+  }
+  function auditInfo(key) {
+    var best = null;
+    for (var i = 0; i < AUDIT_NOTES.length; i += 1) {
+      if (key.indexOf(AUDIT_NOTES[i].match) === 0) {
+        if (!best || AUDIT_NOTES[i].match.length > best.match.length) best = AUDIT_NOTES[i];
+      }
+    }
+    return best;
+  }
+
+  function summarizeShape(raw) {
+    var s = String(raw);
+    if (s.charAt(0) === '[' || s.charAt(0) === '{') {
+      try {
+        var v = JSON.parse(s);
+        if (Array.isArray(v)) return 'JSON · Array(' + v.length + ' records)';
+        if (v && typeof v === 'object') return 'JSON · Object(' + Object.keys(v).length + ' keys)';
+        return 'JSON · ' + typeof v;
+      } catch (e) { return 'Text (invalid JSON)'; }
+    }
+    if (s === 'true' || s === 'false') return 'Boolean string';
+    if (s !== '' && !isNaN(Number(s))) return 'Numeric string';
+    if (s.indexOf('data:') === 0) return 'Data URL';
+    return 'String(' + s.length + ' chars)';
+  }
+  function previewText(raw, max) {
+    var s = String(raw);
+    if (s.length > max) return s.slice(0, max) + '… (' + s.length + ' chars total)';
+    return s;
+  }
+
+  // ---------------------------------------------------------------------
+  // localStorage scanning
+  // ---------------------------------------------------------------------
+  function scanLocalStorage() {
+    var rows = [];
+    var n = window.localStorage ? localStorage.length : 0;
+    for (var i = 0; i < n; i += 1) {
+      var key = localStorage.key(i);
+      if (key === null) continue;
+      var val = '';
+      try { val = localStorage.getItem(key) || ''; } catch (e) { /* unreadable */ }
+      rows.push({ key: key, size: byteLength(key) + byteLength(val), shape: summarizeShape(val), raw: val, owner: ownerForKey(key) });
+    }
+    return rows;
+  }
+
+  var lsRows = [];
+
+  function renderLsTable() {
+    var wrap = $('lsTableWrap');
+    var sort = $('lsSort').value;
+    var filter = $('lsFilter').value.trim().toLowerCase();
+    var rows = lsRows.filter(function (r) {
+      return !filter || r.key.toLowerCase().indexOf(filter) >= 0 || r.owner.toLowerCase().indexOf(filter) >= 0;
+    });
+    rows.sort(function (a, b) {
+      if (sort === 'key') return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
+      if (sort === 'app') return a.owner < b.owner ? -1 : (a.owner > b.owner ? 1 : (b.size - a.size));
+      return b.size - a.size;
+    });
+
+    var total = lsRows.reduce(function (acc, r) { return acc + r.size; }, 0);
+    $('lsTotal').textContent = lsRows.length + ' keys · ' + formatBytes(total);
+
+    if (!lsRows.length) {
+      wrap.innerHTML = '<p class="muted">localStorage is empty on this origin.</p>';
+      return;
+    }
+    if (!rows.length) {
+      wrap.innerHTML = '<p class="muted">No keys match this filter.</p>';
+      return;
+    }
+
+    var html = ['<table><thead><tr><th scope="col">Key</th><th scope="col">App</th><th scope="col" class="num">Size</th><th scope="col">Shape</th><th scope="col">Preview</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>'];
+    rows.forEach(function (r) {
+      var legacy = legacyInfo(r.key);
+      var audit = auditInfo(r.key);
+      var riskBadge = legacy ? '<span class="badge red" title="' + escapeHTML(legacy.why) + '">legacy</span> '
+        : (audit && audit.risk !== 'green' ? '<span class="badge ' + audit.risk + '">' + audit.risk + '</span>' : '');
+      html.push(
+        '<tr data-ls-key="' + escapeHTML(r.key) + '">' +
+        '<td class="key-cell">' + escapeHTML(r.key) + (riskBadge ? '<br />' + riskBadge : '') + '</td>' +
+        '<td>' + escapeHTML(r.owner) + '</td>' +
+        '<td class="num" data-size="' + r.size + '">' + formatBytes(r.size) + '</td>' +
+        '<td class="muted">' + escapeHTML(r.shape) + '</td>' +
+        '<td><details class="preview"><summary>preview</summary><pre>' + escapeHTML(previewText(r.raw, 600)) + '</pre></details></td>' +
+        '<td><button type="button" class="small danger ls-delete">Delete</button></td>' +
+        '</tr>'
+      );
+    });
+    html.push('</tbody></table>');
+    wrap.innerHTML = html.join('');
+  }
+
+  // ---------------------------------------------------------------------
+  // IndexedDB inspection
+  // ---------------------------------------------------------------------
+  function listDatabases() {
+    if (!('indexedDB' in window) || !indexedDB.databases) return Promise.resolve(null);
+    return new Promise(function (resolve) {
+      var result;
+      try { result = indexedDB.databases(); } catch (e) { resolve(null); return; }
+      if (result && typeof result.then === 'function') {
+        // Modern browsers return a Promise.
+        result.then(function (dbs) { resolve(dbs || []); }, function () { resolve(null); });
+      } else if (result && typeof result.onsuccess !== 'undefined') {
+        // Legacy request-style response (defensive).
+        result.onsuccess = function () { resolve(result.result || []); };
+        result.onerror = function () { resolve(null); };
+      } else {
+        resolve(null);
+      }
+    });
+  }
+
+  function inspectDatabase(name) {
+    return new Promise(function (resolve) {
+      var open;
+      try { open = indexedDB.open(name); } catch (e) { resolve({ name: name, error: 'Could not open: ' + e.message }); return; }
+      // Never set a version here — opening versionless does not create-or-upgrade
+      // existing DBs and lets us read metadata safely.
+      var timer = setTimeout(function () {
+        try { open.result && open.result.close(); } catch (e) {}
+        resolve({ name: name, error: 'Timed out opening (possibly blocked by another tab).' });
+      }, 8000);
+      open.onsuccess = function () {
+        var db = open.result;
+        clearTimeout(timer);
+        var stores = [];
+        var names = Array.from(db.objectStoreNames || []);
+        var pending = names.length;
+        var finished = false;
+        var finish = function () {
+          if (finished) return;
+          finished = true;
+          try { db.close(); } catch (e) {}
+          resolve({ name: name, version: db.version, stores: stores });
+        };
+        if (!pending) { finish(); return; }
+        names.forEach(function (storeName) {
+          var entry = { name: storeName, keyPath: null, count: null, autoIncrement: false };
+          stores.push(entry);
+          try {
+            var tx = db.transaction(storeName, 'readonly');
+            var store = tx.objectStore(storeName);
+            entry.keyPath = store.keyPath === null ? '(out-of-line keys)' : String(store.keyPath);
+            entry.autoIncrement = !!store.autoIncrement;
+            var countReq = store.count();
+            countReq.onsuccess = function () { entry.count = countReq.result; if (--pending === 0) finish(); };
+            countReq.onerror = function () { entry.count = null; if (--pending === 0) finish(); };
+          } catch (e) {
+            entry.error = 'unreadable';
+            if (--pending === 0) finish();
+          }
+        });
+      };
+      open.onupgradeneeded = function () {
+        // Should not happen for existing DBs opened without a version; if a
+        // fresh DB was somehow created, close it and move on.
+      };
+      open.onerror = function () {
+        clearTimeout(timer);
+        resolve({ name: name, error: (open.error && open.error.message) || 'Open failed' });
+      };
+      open.onblocked = function () { /* timer will resolve */ };
+    });
+  }
+
+  function renderIdbList(dbs) {
+    var wrap = $('idbList');
+    if (dbs === null) {
+      wrap.innerHTML = '<p class="muted">This browser does not support <code class="mono">indexedDB.databases()</code>, so databases cannot be enumerated here. Per-app databases are still listed on the Diagnostics tab.</p>';
+      return;
+    }
+    if (!dbs.length) {
+      wrap.innerHTML = '<p class="muted">No IndexedDB databases found on this origin.</p>';
+      return;
+    }
+    // Sort alphabetically for stable output; store inspection results arrive async.
+    var sorted = dbs.slice().sort(function (a, b) {
+      var an = typeof a === 'string' ? a : a.name;
+      var bn = typeof b === 'string' ? b : b.name;
+      return an < bn ? -1 : 1;
+    });
+    wrap.innerHTML = sorted.map(function (d) {
+      var name = typeof d === 'string' ? d : d.name;
+      var ver = typeof d === 'object' && d.version ? d.version : null;
+      return '<div class="db-block" data-db="' + escapeHTML(name) + '">' +
+        '<header><h3>' + escapeHTML(name) + '</h3>' +
+        (ver ? '<span class="badge dim">version ' + escapeHTML(String(ver)) + '</span>' : '') +
+        '<span class="badge dim">' + escapeHTML(ownerForDb(name)) + '</span>' +
+        '<span class="badge dim">size: unavailable</span>' +
+        '<span class="grow" style="flex:1"></span>' +
+        '<button type="button" class="small danger idb-delete" data-db="' + escapeHTML(name) + '">Delete database…</button>' +
+        '</header><div class="stores muted">Reading stores…</div></div>';
+    }).join('');
+
+    sorted.forEach(function (d) {
+      var name = typeof d === 'string' ? d : d.name;
+      inspectDatabase(name).then(function (info) {
+        var block = wrap.querySelector('.db-block[data-db="' + window.CSS.escape(name) + '"]');
+        if (!block) return;
+        var storesEl = block.querySelector('.stores');
+        if (info.error) {
+          storesEl.innerHTML = '<span class="status err">' + escapeHTML(info.error) + '</span>';
+          return;
+        }
+        if (info.version) {
+          block.querySelector('header').insertAdjacentHTML('afterbegin', '<span class="badge dim">version ' + info.version + '</span>');
+        }
+        if (!info.stores.length) {
+          storesEl.innerHTML = '<span class="muted">No object stores.</span>';
+          return;
+        }
+        storesEl.innerHTML = info.stores.map(function (s) {
+          return '<div class="store-line"><span class="store-name">' + escapeHTML(s.name) + '</span>' +
+            '<span>key: ' + escapeHTML(s.keyPath || '?') + (s.autoIncrement ? ' · auto-increment' : '') + '</span>' +
+            '<span>' + (s.count === null ? 'count unavailable' : s.count + ' records <span class="sr-only">(exact count)</span>') + '</span></div>';
+        }).join('');
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Cache Storage inspection
+  // ---------------------------------------------------------------------
+  function renderCacheList() {
+    var wrap = $('cacheList');
+    if (!('caches' in window)) {
+      wrap.innerHTML = '<p class="muted">Cache Storage is not available in this browser/context.</p>';
+      return Promise.resolve();
+    }
+    return caches.keys().then(function (names) {
+      if (!names.length) {
+        wrap.innerHTML = '<p class="muted">No Cache Storage entries on this origin. (No Junkdrawer tool currently uses the Cache API.)</p>';
+        return;
+      }
+      wrap.innerHTML = names.map(function (n) {
+        return '<div class="db-block" data-cache="' + escapeHTML(n) + '"><header><h3>' + escapeHTML(n) + '</h3>' +
+          '<span class="badge dim cache-count">counting…</span><span class="grow" style="flex:1"></span>' +
+          '<button type="button" class="small danger cache-delete" data-cache="' + escapeHTML(n) + '">Delete cache…</button></header></div>';
+      }).join('');
+      names.forEach(function (n) {
+        caches.open(n).then(function (c) {
+          return c.keys();
+        }).then(function (reqs) {
+          var block = wrap.querySelector('.db-block[data-cache="' + window.CSS.escape(n) + '"] .cache-count');
+          if (block) block.textContent = reqs.length + ' ' + (reqs.length === 1 ? 'entry' : 'entries');
+        }).catch(function () {});
+      });
+    }).catch(function (e) {
+      wrap.innerHTML = '<p class="status err">Cache Storage enumeration failed: ' + escapeHTML(e.message) + '</p>';
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Overview
+  // ---------------------------------------------------------------------
+  function refreshOverview() {
+    var lsRowsNow = scanLocalStorage();
+    var lsTotal = lsRowsNow.reduce(function (acc, r) { return acc + r.size; }, 0);
+    $('statLS').textContent = formatBytes(lsTotal);
+    $('statLSKeys').textContent = lsRowsNow.length + ' keys';
+
+    var cacheCount = '—';
+    if ('caches' in window) {
+      caches.keys().then(function (names) {
+        $('statCache').textContent = String(names.length);
+      }).catch(function () { $('statCache').textContent = '?'; });
+    } else {
+      $('statCache').textContent = 'n/a';
+    }
+
+    var idbEstimate = null;
+    if (navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate().then(function (est) {
+        var usage = est.usage || 0;
+        var quota = est.quota || 0;
+        $('statUsage').textContent = formatBytes(usage);
+        $('statQuota').textContent = quota ? formatBytes(quota) : 'unavailable';
+        var pct = quota ? Math.min(100, (usage / quota) * 100) : 0;
+        $('quotaFill').style.width = pct.toFixed(2) + '%';
+        $('statUsageHint').textContent = pct ? pct.toFixed(pct < 1 ? 2 : 1) + '% of quota (estimate)' : 'browser estimate';
+        var details = est.usageDetails || {};
+        if (typeof details.indexedDB === 'number') {
+          idbEstimate = details.indexedDB;
+          $('statIDB').textContent = formatBytes(details.indexedDB);
+          $('statIDBHint').textContent = 'browser estimate';
+        } else if (typeof details.caches === 'number') {
+          $('statIDBHint').textContent = 'per-DB breakdown unavailable';
+        } else {
+          $('statIDB').textContent = '—';
+          $('statIDBHint').textContent = 'breakdown not reported';
+        }
+        if (typeof details.caches === 'number') {
+          $('statCache').setAttribute('title', 'Browser-estimated cache bytes: ' + formatBytes(details.caches));
+        }
+      }).catch(function () {
+        $('statUsage').textContent = 'unavailable';
+      });
+    } else {
+      $('statUsage').textContent = 'unavailable';
+      $('statQuota').textContent = 'unavailable';
+    }
+
+    if (navigator.storage && navigator.storage.persisted) {
+      navigator.storage.persisted().then(function (p) {
+        $('persistStatus').textContent = p
+          ? 'Persistent storage: granted (data is exempt from automatic eviction)'
+          : 'Persistent storage: not granted (browser may evict data under pressure)';
+      }).catch(function () {});
+    }
+
+    return { lsTotal: lsTotal, count: lsRowsNow.length };
+  }
+
+  // ---------------------------------------------------------------------
+  // Diagnostics / recommendations
+  // ---------------------------------------------------------------------
+  function renderRecommendations() {
+    var el = $('recContent');
+    var html = [];
+    var lsTotal = lsRows.reduce(function (acc, r) { return acc + r.size; }, 0);
+
+    // Largest localStorage consumers
+    var top = lsRows.slice().sort(function (a, b) { return b.size - a.size; }).slice(0, 8);
+    html.push('<div class="rec-section"><h3>Largest localStorage consumers</h3><ul class="rec-list">');
+    if (!top.length) html.push('<li class="muted">localStorage is empty.</li>');
+    top.forEach(function (r) {
+      var audit = auditInfo(r.key);
+      var legacy = legacyInfo(r.key);
+      var risk = legacy ? 'red' : (audit ? audit.risk : (r.size > 256 * 1024 ? 'red' : (r.size > 64 * 1024 ? 'orange' : (r.size > 8 * 1024 ? 'yellow' : 'green'))));
+      html.push('<li><span class="badge ' + risk + '">' + risk + '</span> <span class="mono">' + escapeHTML(r.key) + '</span> — ' +
+        formatBytes(r.size) + ' — ' + escapeHTML(r.owner) +
+        (r.size && lsTotal ? ' <span class="muted">(' + ((r.size / lsTotal) * 100).toFixed(1) + '% of localStorage)</span>' : '') +
+        (audit ? '<br /><span class="muted">' + escapeHTML(audit.note) + '</span>' : '') +
+        (legacy ? '<br /><span class="muted">' + escapeHTML(legacy.why) + '</span>' : '') +
+        '</li>');
+    });
+    html.push('</ul></div>');
+
+    // Legacy / orphan suspects actually present
+    var present = [];
+    var seen = {};
+    lsRows.forEach(function (r) {
+      var l = legacyInfo(r.key);
+      if (l && !seen[l.match]) { present.push({ key: r.key, info: l }); seen[l.match] = true; }
+    });
+    html.push('<div class="rec-section"><h3>Potential cleanup — legacy/orphaned keys present right now</h3><ul class="rec-list">');
+    if (!present.length) html.push('<li class="muted">None detected. 🎉</li>');
+    present.forEach(function (p) {
+      html.push('<li><span class="mono">' + escapeHTML(p.key) + '</span> — ' + escapeHTML(p.info.owner) + ': ' + escapeHTML(p.info.why) + '</li>');
+    });
+    html.push('</ul></div>');
+
+    // Unrecognized storage
+    var unknown = lsRows.filter(function (r) { return r.owner === 'Unrecognized'; });
+    html.push('<div class="rec-section"><h3>Unrecognized keys (not in the ownership map)</h3><ul class="rec-list">');
+    if (!unknown.length) html.push('<li class="muted">Every key maps to a known app.</li>');
+    unknown.forEach(function (r) {
+      html.push('<li><span class="mono">' + escapeHTML(r.key) + '</span> — ' + formatBytes(r.size) + ' — ' + escapeHTML(r.shape) + '. If nothing uses it, it may be orphaned; verify before deleting.</li>');
+    });
+    html.push('</ul></div>');
+
+    // Standing guidance from the audit
+    html.push('<div class="rec-section"><h3>Repository guidance (from docs/storage-audit-2026-08.md)</h3><ul class="rec-list">' +
+      '<li>localStorage is for kilobytes of preferences — never images, base64 payloads, growing histories, or raw API responses.</li>' +
+      '<li>Growing data belongs in IndexedDB record stores with an intentional retention policy (count cap, age cap, or explicit clear UI).</li>' +
+      '<li>Known in-app retention gaps (no auto-prune): Polymarket time-series/logs, Crypto Mood Ring llmAnalyses/fetchLogs, Watchtower events, Content Radar items, Wildlife Pattern Lab logs, Berry 3R archives (orphaned on row delete), SongForge image blobs (orphans before the fix).</li>' +
+      '<li>API keys in localStorage are an accepted repo convention but stay opt-in; several apps expose clear-key controls — prefer those over deleting keys here.</li>' +
+      '</ul></div>');
+
+    el.innerHTML = html.join('');
+  }
+
+  // ---------------------------------------------------------------------
+  // Full refresh
+  // ---------------------------------------------------------------------
+  var refreshing = false;
+  var refreshQueued = false;
+  function refreshAll() {
+    if (refreshing) { refreshQueued = true; return Promise.resolve(); }
+    refreshing = true;
+    var status = $('overviewStatus');
+    setStatus(status, 'Scanning storage…');
+    lsRows = scanLocalStorage();
+    renderLsTable();
+    refreshOverview();
+    renderRecommendations();
+    return listDatabases().then(function (dbs) {
+      renderIdbList(dbs);
+      return renderCacheList();
+    }).catch(function (e) {
+      setStatus(status, 'Scan problem: ' + e.message, 'err');
+    }).then(function () {
+      refreshing = false;
+      if (refreshQueued) {
+        refreshQueued = false;
+        return refreshAll();
+      }
+      setStatus(status, 'Scan complete.', 'ok');
+      announce('Storage scan complete.');
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Tabs
+  // ---------------------------------------------------------------------
+  var tabs = [
+    { btn: 'tab-ls', panel: 'panel-ls' },
+    { btn: 'tab-idb', panel: 'panel-idb' },
+    { btn: 'tab-cache', panel: 'panel-cache' },
+    { btn: 'tab-rec', panel: 'panel-rec' }
+  ];
+  tabs.forEach(function (t) {
+    $(t.btn).addEventListener('click', function () {
+      tabs.forEach(function (t2) {
+        var selected = t2.btn === t.btn;
+        $(t2.btn).setAttribute('aria-selected', selected ? 'true' : 'false');
+        $(t2.panel).hidden = !selected;
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Confirmation dialogs
+  // ---------------------------------------------------------------------
+  var confirmDlg = $('confirmDialog');
+  var confirmOk = $('confirmOk');
+  var confirmCancel = $('confirmCancel');
+  var confirmMessage = $('confirmMessage');
+  var confirmResolve = null;
+
+  function askConfirm(title, message, okLabel) {
+    $('confirmTitle').textContent = title;
+    confirmMessage.textContent = message;
+    confirmOk.textContent = okLabel || 'Delete';
+    try { confirmDlg.showModal(); } catch (e) { confirmDlg.setAttribute('open', ''); }
+    return new Promise(function (resolve) { confirmResolve = resolve; });
+  }
+  confirmOk.addEventListener('click', function () {
+    try { confirmDlg.close(); } catch (e) { confirmDlg.removeAttribute('open'); }
+    if (confirmResolve) { confirmResolve(true); confirmResolve = null; }
+  });
+  confirmCancel.addEventListener('click', function () {
+    try { confirmDlg.close(); } catch (e) { confirmDlg.removeAttribute('open'); }
+    if (confirmResolve) { confirmResolve(false); confirmResolve = null; }
+  });
+  confirmDlg.addEventListener('cancel', function (e) {
+    e.preventDefault();
+    try { confirmDlg.close(); } catch (err) { confirmDlg.removeAttribute('open'); }
+    if (confirmResolve) { confirmResolve(false); confirmResolve = null; }
+  });
+
+  var typedDlg = $('typedDialog');
+  var typedInput = $('typedInput');
+  var typedOk = $('typedOk');
+  var typedForm = $('typedForm');
+  var typedResolve = null;
+  var typedPhrase = '';
+
+  function askTyped(title, message, phrase) {
+    $('typedTitle').textContent = title;
+    $('typedMessage').textContent = message;
+    typedPhrase = phrase;
+    typedInput.value = '';
+    typedOk.disabled = true;
+    try { typedDlg.showModal(); } catch (e) { typedDlg.setAttribute('open', ''); }
+    typedInput.focus();
+    return new Promise(function (resolve) { typedResolve = resolve; });
+  }
+  typedInput.addEventListener('input', function () {
+    typedOk.disabled = typedInput.value !== typedPhrase;
+  });
+  typedForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (typedInput.value !== typedPhrase) return;
+    try { typedDlg.close(); } catch (err) { typedDlg.removeAttribute('open'); }
+    if (typedResolve) { typedResolve(true); typedResolve = null; }
+  });
+  $('typedCancel').addEventListener('click', function () {
+    try { typedDlg.close(); } catch (err) { typedDlg.removeAttribute('open'); }
+    if (typedResolve) { typedResolve(false); typedResolve = null; }
+  });
+  typedDlg.addEventListener('cancel', function (e) {
+    e.preventDefault();
+    try { typedDlg.close(); } catch (err) { typedDlg.removeAttribute('open'); }
+    if (typedResolve) { typedResolve(false); typedResolve = null; }
+  });
+
+  // ---------------------------------------------------------------------
+  // Destructive actions
+  // ---------------------------------------------------------------------
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('button');
+    if (!btn) return;
+
+    if (btn.classList.contains('ls-delete')) {
+      var row = btn.closest('tr');
+      var key = row.getAttribute('data-ls-key');
+      var size = row.querySelector('[data-size]');
+      var sizeText = size ? formatBytes(Number(size.getAttribute('data-size'))) : '';
+      var legacy = legacyInfo(key);
+      askConfirm(
+        'Delete localStorage key?',
+        'This permanently deletes "' + key + '" (' + sizeText + (legacy ? ', legacy data' : '') + ') for ' + ownerForKey(key) + '. The owning app may recreate it with default content.',
+        'Delete key'
+      ).then(function (yes) {
+        if (!yes) { announce('Deletion cancelled — data untouched.'); return; }
+        try {
+          localStorage.removeItem(key);
+          setStatus($('overviewStatus'), 'Deleted key: ' + key, 'ok');
+          announce('Deleted localStorage key ' + key);
+          refreshAll();
+        } catch (err) {
+          setStatus($('overviewStatus'), 'Delete failed: ' + err.message, 'err');
+        }
+      });
+      return;
+    }
+
+    if (btn.classList.contains('idb-delete')) {
+      var dbName = btn.getAttribute('data-db');
+      askTyped(
+        'Delete IndexedDB database?',
+        'This permanently deletes the database "' + dbName + '" owned by ' + ownerForDb(dbName) + ', including all of its records. Type the database name exactly to confirm. If other tabs have it open the delete may be blocked until they are closed.',
+        dbName
+      ).then(function (yes) {
+        if (!yes) { announce('Deletion cancelled — data untouched.'); return; }
+        var req = indexedDB.deleteDatabase(dbName);
+        req.onsuccess = function () {
+          setStatus($('overviewStatus'), 'Deleted database: ' + dbName, 'ok');
+          announce('Deleted IndexedDB database ' + dbName);
+          refreshAll();
+        };
+        req.onerror = function () {
+          setStatus($('overviewStatus'), 'Delete failed: ' + (req.error && req.error.message), 'err');
+        };
+        req.onblocked = function () {
+          setStatus($('overviewStatus'), 'Delete blocked — close other tabs using "' + dbName + '" and refresh.', 'err');
+        };
+      });
+      return;
+    }
+
+    if (btn.classList.contains('cache-delete')) {
+      var cacheName = btn.getAttribute('data-cache');
+      askConfirm(
+        'Delete cache?',
+        'This permanently deletes Cache Storage "' + cacheName + '". Cached entries will be re-fetched by whatever created them.',
+        'Delete cache'
+      ).then(function (yes) {
+        if (!yes) { announce('Deletion cancelled — data untouched.'); return; }
+        caches.delete(cacheName).then(function (ok) {
+          setStatus($('overviewStatus'), ok ? 'Deleted cache: ' + cacheName : 'Cache already gone.', ok ? 'ok' : '');
+          announce('Deleted cache ' + cacheName);
+          refreshAll();
+        }).catch(function (err) {
+          setStatus($('overviewStatus'), 'Delete failed: ' + err.message, 'err');
+        });
+      });
+      return;
+    }
+  });
+
+  $('originResetBtn').addEventListener('click', function () {
+    listDatabases().then(function (dbs) {
+      var names = (dbs || []).map(function (d) { return typeof d === 'string' ? d : d.name; });
+      var listing = names.length ? names.join(', ') : '(no IndexedDB databases found)';
+      return askTyped(
+        'Delete ALL storage on this origin?',
+        'Every localStorage key, every IndexedDB database (' + listing + '), and every Cache Storage entry will be permanently deleted for ALL Junkdrawer tools on this origin. Type RESET to confirm.',
+        'RESET'
+      );
+    }).then(function (yes) {
+      if (!yes) { announce('Origin reset cancelled — data untouched.'); return; }
+      var lsCount = lsRows.length;
+      try { localStorage.clear(); } catch (err) {}
+      var p1 = ('caches' in window)
+        ? caches.keys().then(function (names) { return Promise.all(names.map(function (n) { return caches.delete(n); })); })
+        : Promise.resolve();
+      var p2 = listDatabases().then(function (dbs2) {
+        var names2 = (dbs2 || []).map(function (d) { return typeof d === 'string' ? d : d.name; });
+        return Promise.all(names2.map(function (n) {
+          return new Promise(function (resolve) {
+            var req = indexedDB.deleteDatabase(n);
+            req.onsuccess = req.onerror = req.onblocked = function () { resolve(); };
+          });
+        }));
+      });
+      Promise.all([p1, p2]).then(function () {
+        setStatus($('overviewStatus'), 'Origin storage reset: ' + lsCount + ' localStorage keys, all databases and caches deleted.', 'ok');
+        announce('Origin storage reset complete.');
+        refreshAll();
+      });
+    });
+  });
+
+  $('persistBtn').addEventListener('click', function () {
+    if (!(navigator.storage && navigator.storage.persist)) {
+      setStatus($('overviewStatus'), 'Persistent storage is not supported here.', 'err');
+      return;
+    }
+    navigator.storage.persist().then(function (granted) {
+      setStatus($('overviewStatus'), granted ? 'Persistent storage granted.' : 'Browser declined persistent storage (usually means low engagement or not installed).', granted ? 'ok' : 'err');
+      if (navigator.storage.persisted) navigator.storage.persisted().then(function (p) {
+        $('persistStatus').textContent = p ? 'Persistent storage: granted' : 'Persistent storage: not granted';
+      });
+    }).catch(function (err) {
+      setStatus($('overviewStatus'), 'Request failed: ' + err.message, 'err');
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Wiring + test hook (non-visual, for automated tests only)
+  // ---------------------------------------------------------------------
+  $('refreshBtn').addEventListener('click', refreshAll);
+  $('lsSort').addEventListener('change', renderLsTable);
+  $('lsFilter').addEventListener('input', renderLsTable);
+
+  window.__SM_TEST__ = {
+    scanLocalStorage: scanLocalStorage,
+    listDatabases: listDatabases,
+    inspectDatabase: inspectDatabase,
+    ownerForKey: ownerForKey,
+    legacyInfo: legacyInfo,
+    auditInfo: auditInfo,
+    summarizeShape: summarizeShape,
+    refreshAll: refreshAll,
+    lsRowCount: function () { return lsRows.length; }
+  };
+
+  refreshAll();
+})();
+</script>
+</body>
+</html>

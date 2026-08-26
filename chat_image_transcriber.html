@@ -653,6 +653,7 @@
   // CONSTANTS
   // =======================================================================
   const LS_KEY = 'chatTranscriber';
+  const THUMB_MAX_EDGE = 160;
   const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
   const DEFAULT_VISION_MODELS = [
     { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o' },
@@ -666,7 +667,8 @@
   // =======================================================================
   // STATE
   // =======================================================================
-  let images = []; // { id, file, thumbUrl, status }
+  let images = []; // { id, file, dataUrl (full-res, API/lightbox only), thumb (small, displayed/persisted), status }
+  let lastThumbEdgePx = null;
   let isProcessing = false;
   let currentTheme = 'dark';
   let sessionHistory = [];
@@ -803,15 +805,35 @@
 
   function saveSettings() {
     const lastModelList = Array.from(modelSelect.options).map(o => ({ id: o.value, name: o.textContent }));
-    const s = {
+    const base = {
       apiKey: saveKeyCheck.checked ? apiKeyInput.value : '',
       model: modelSelect.value,
       theme: currentTheme,
       saveKey: saveKeyCheck.checked,
-      history: sessionHistory,
+      history: [],
       lastModelList: lastModelList.length > 0 ? lastModelList : undefined
     };
-    localStorage.setItem(LS_KEY, JSON.stringify(s));
+    const limits = [Infinity, 25, 10, 0];
+    const fullCount = sessionHistory.length;
+    let savedCount = null;
+    for (const limit of limits) {
+      const candidate = limit === Infinity ? sessionHistory : sessionHistory.slice(0, limit);
+      try {
+        base.history = candidate;
+        localStorage.setItem(LS_KEY, JSON.stringify(base));
+        savedCount = candidate.length;
+        break;
+      } catch (e) {
+        // Quota exceeded or write failed — retry with a smaller slice
+      }
+    }
+    if (savedCount === null) {
+      showToast('Storage full: history was trimmed to fit storage but could not be saved.', 'error');
+      updateStatus('Error: storage full. History was trimmed to fit storage.', 'error');
+    } else if (savedCount < fullCount) {
+      showToast(`Storage nearly full: history trimmed ${fullCount} → ${savedCount} sessions to fit storage.`, 'warning');
+      updateStatus(`History was trimmed to ${savedCount} sessions to fit storage.`);
+    }
   }
 
   function saveHistory() {
@@ -888,6 +910,26 @@
   // =======================================================================
   // UPLOAD & IMAGE LIST
   // =======================================================================
+  function makeThumb(dataUrl) {
+    return new Promise((resolve) => {
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(im.naturalWidth, im.naturalHeight));
+          const w = Math.max(1, Math.round(im.naturalWidth * scale));
+          const h = Math.max(1, Math.round(im.naturalHeight * scale));
+          const c = document.createElement('canvas');
+          c.width = w; c.height = h;
+          c.getContext('2d').drawImage(im, 0, 0, w, h);
+          lastThumbEdgePx = Math.max(w, h);
+          resolve(c.toDataURL('image/jpeg', 0.7));
+        } catch { resolve(null); }
+      };
+      im.onerror = () => resolve(null);
+      im.src = dataUrl;
+    });
+  }
+
   function handleFiles(fileList) {
     if (isProcessing) return;
     const accepted = Array.from(fileList).filter(f => f.type.startsWith('image/'));
@@ -898,8 +940,10 @@
   function addImage(file) {
     const id = 'img_' + Math.random().toString(36).slice(2, 10);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const imgObj = { id, file, thumbUrl: e.target.result, status: 'pending' };
+    reader.onload = async (e) => {
+      const dataUrl = e.target.result;
+      const thumb = await makeThumb(dataUrl);
+      const imgObj = { id, file, dataUrl, thumb, status: 'pending' };
       images.push(imgObj);
       renderImageList();
       updateStatus(`${images.length} image${images.length > 1 ? 's' : ''} ready.`, 'ready');
@@ -928,7 +972,7 @@
       const imgName = img.file ? img.file.name : (img.name || 'Image');
       card.innerHTML = `
         <div class="drag-handle" aria-label="Drag to reorder">&#x2630;</div>
-        <img class="thumb" src="${escapeHtml(img.thumbUrl)}" alt="${escapeHtml(imgName)}">
+        <img class="thumb" src="${escapeHtml(img.thumb || img.dataUrl)}" alt="${escapeHtml(imgName)}">
         <div class="image-meta">
           <span class="image-name">${escapeHtml(imgName)}</span>
           <span class="image-status ${img.status}" id="status-${img.id}">${capitalize(img.status)}</span>
@@ -1039,7 +1083,7 @@
       images.forEach(img => {
         content.push({
           type: 'image_url',
-          image_url: { url: img.thumbUrl, detail: 'high' }
+          image_url: { url: img.dataUrl, detail: 'high' }
         });
       });
 
@@ -1098,7 +1142,7 @@
       title: images.length > 0 ? ((images[0].file ? images[0].file.name : (images[0].name || 'Image')).replace(/\.[^.]+$/, '')) + (images.length > 1 ? ` +${images.length - 1}` : '') : 'Transcript',
       imageCount: images.length,
       transcript: transcriptEditor.value,
-      imageThumbs: images.slice(0, 3).map(img => img.thumbUrl)
+      imageThumbs: images.slice(0, 3).map(img => img.thumb).filter(Boolean)
     };
     sessionHistory.unshift(session);
     // Keep last 50 sessions
@@ -1216,9 +1260,11 @@
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     const id = 'cam_' + Math.random().toString(36).slice(2, 10);
     const name = `Camera_${String(cameraImages.length + 1).padStart(3, '0')}.jpg`;
-    cameraImages.push({ id, name, thumbUrl: dataUrl, status: 'pending' });
-    renderCameraStrip();
-    if (navigator.vibrate) navigator.vibrate(40);
+    makeThumb(dataUrl).then((thumb) => {
+      cameraImages.push({ id, name, dataUrl, thumb, status: 'pending' });
+      renderCameraStrip();
+      if (navigator.vibrate) navigator.vibrate(40);
+    });
   }
 
   function renderCameraStrip() {
@@ -1228,7 +1274,7 @@
       const item = document.createElement('div');
       item.className = 'camera-strip-item';
       item.innerHTML = `
-        <img src="${escapeHtml(img.thumbUrl)}" alt="${escapeHtml(img.name)}">
+        <img src="${escapeHtml(img.thumb || img.dataUrl)}" alt="${escapeHtml(img.name)}">
         <button class="camera-strip-delete" data-id="${img.id}" aria-label="Delete ${escapeHtml(img.name)}">&times;</button>
       `;
       item.querySelector('img').addEventListener('click', () => showCameraLightbox(img.id));
@@ -1251,7 +1297,7 @@
     const img = cameraImages.find(i => i.id === id);
     if (!img) return;
     lightboxImageId = id;
-    cameraLightboxImg.src = img.thumbUrl;
+    cameraLightboxImg.src = img.dataUrl || img.thumb;
     cameraLightbox.style.display = 'flex';
   }
 
@@ -1350,13 +1396,30 @@
   }
 
   // =======================================================================
+  // TEST HOOK (non-visual)
+  // =======================================================================
+  window.__CIT_TEST__ = {
+    lsSize() {
+      const raw = localStorage.getItem(LS_KEY);
+      return raw === null ? 0 : new TextEncoder().encode(raw).length;
+    },
+    historyCount() {
+      try {
+        const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+        return Array.isArray(s.history) ? s.history.length : 0;
+      } catch { return 0; }
+    },
+    lastThumbMaxEdge() { return lastThumbEdgePx; }
+  };
+
+  // =======================================================================
   // START
   // =======================================================================
   init();
 </script>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.05.22.7" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.05.22.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Chat Screenshot Transcriber · version 2026.05.22.7
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Chat Screenshot Transcriber · version 2026.08.26.1
 </footer>
 </body>
 </html>

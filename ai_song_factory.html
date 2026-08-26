@@ -921,9 +921,9 @@ pre.debug {
   </div>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.06.01.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 0 auto; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · SongForge AI · version 2026.08.26.1
 </footer>
 
 <script>
@@ -1171,10 +1171,14 @@ Output: Pass / Warnings / Recommended fixes.`
 }
 
 /* ── Init ── */
-function initApp() {
+async function initApp() {
   loadState();
   applyTheme(state.settings.theme);
   document.getElementById('theme-select').value = state.settings.theme;
+  // Open IndexedDB and rehydrate blob-backed image URLs BEFORE any rendering
+  // that may display images, so rehydrated views are visible on first paint.
+  try { await ensureIDB(); } catch (e) { console.warn('IDB init failed', e); }
+  await rehydrateImageUrls();
   populateSettingsUI();
   renderProjectList();
   if (state.projects.length) {
@@ -1185,7 +1189,6 @@ function initApp() {
   }
   updateStatus('Ready');
   setupAutosave();
-  initIndexedDB().catch(e => console.warn('IDB init failed', e));
 }
 
 function setupAutosave() {
@@ -1218,13 +1221,33 @@ function loadState() {
   }
 }
 
+function buildPersistableState() {
+  // Persist a shallow-cloned state where runtime image payloads are stripped:
+  // data:/blob: URLs on generated_images / thumbnail_assets become '' (blobs
+  // live in IndexedDB and are rehydrated on load); http(s) URLs stay as-is.
+  const clone = { ...state };
+  const stripUrl = (u) => (typeof u === 'string' && (u.startsWith('data:') || u.startsWith('blob:'))) ? '' : (u || '');
+  if (Array.isArray(state.generated_images)) {
+    clone.generated_images = state.generated_images.map(img =>
+      img && typeof img === 'object' ? { ...img, image_url: stripUrl(img.image_url) } : img);
+  }
+  if (Array.isArray(state.thumbnail_assets)) {
+    clone.thumbnail_assets = state.thumbnail_assets.map(t =>
+      t && typeof t === 'object' ? { ...t, image_url: stripUrl(t.image_url) } : t);
+  }
+  return clone;
+}
+
 function saveState() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(buildPersistableState()));
     updateStorageEstimate();
   } catch (e) {
     console.error('saveState error', e);
-    showError('Failed to save state. Storage may be full.');
+    const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014);
+    showError(isQuota
+      ? 'Storage quota exceeded — your changes could NOT be saved. Export or delete old projects/data and try again.'
+      : 'Failed to save state. Storage may be full.');
   }
 }
 
@@ -1274,6 +1297,87 @@ function deleteImageBlob(id) {
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
+}
+
+let idbInitPromise = null;
+function ensureIDB() {
+  if (db) return Promise.resolve(db);
+  if (!idbInitPromise) {
+    idbInitPromise = initIndexedDB().catch(e => { idbInitPromise = null; throw e; });
+  }
+  return idbInitPromise;
+}
+
+// Small read helper: resolves the full record ({ id, blob, saved_at }) or null.
+function idbGet(id) {
+  return new Promise((resolve) => {
+    try {
+      if (!db || !id) { resolve(null); return; }
+      const tx = db.transaction('images', 'readonly');
+      const req = tx.objectStore('images').get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+}
+
+async function ensureImageBlobStored(id, url) {
+  // Store a data: URL payload as a blob in IndexedDB under `id`.
+  if (!id || !url || !url.startsWith('data:')) return;
+  try {
+    await ensureIDB();
+  } catch (e) { console.warn('Blob storage failed (IDB)', e); return; }
+  try {
+    const blob = await (await fetch(url)).blob();
+    await storeImageBlob(id, blob);
+  } catch (e) { console.warn('Blob storage failed', e); }
+}
+
+/* ── Blob-URL rehydration ──
+   Object URLs created from IndexedDB blobs are tracked here. They are only
+   ever revoked when the item they back is deleted/replaced — never while a
+   rendered <img> may still reference them. */
+const activeObjectUrls = new Set();
+function trackObjectURL(url) {
+  activeObjectUrls.add(url);
+  return url;
+}
+function revokeTrackedObjectURL(url) {
+  if (url && url.startsWith('blob:') && activeObjectUrls.has(url)) {
+    activeObjectUrls.delete(url);
+    try { URL.revokeObjectURL(url); } catch (e) { /* noop */ }
+  }
+}
+
+async function rehydrateImageUrls() {
+  // After loading persisted state, restore image_url for items whose data
+  // payloads were stripped at save time. Legacy data: URLs are migrated into
+  // IndexedDB first so they survive future saves.
+  if (!state) return;
+  try { await ensureIDB(); } catch (e) { console.warn('IDB init failed', e); return; }
+  const items = [
+    ...(Array.isArray(state.generated_images) ? state.generated_images : []),
+    ...(Array.isArray(state.thumbnail_assets) ? state.thumbnail_assets : [])
+  ];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const u = item.image_url;
+    if (u && u.startsWith('data:')) {
+      try {
+        const blob = await (await fetch(u)).blob();
+        if (blob) {
+          try { await storeImageBlob(item.id, blob); } catch (e) { console.warn('Legacy blob migration failed', e); }
+          item.image_url = trackObjectURL(URL.createObjectURL(blob));
+        }
+      } catch (e) { console.warn('Rehydrate (data:) failed for ' + item.id, e); }
+    } else if (!u) {
+      try {
+        const rec = await idbGet(item.id);
+        if (rec && rec.blob) item.image_url = trackObjectURL(URL.createObjectURL(rec.blob));
+      } catch (e) { console.warn('Rehydrate failed for ' + item.id, e); }
+    }
+    // http(s), blob: or other non-empty urls are left untouched.
+  }
 }
 
 /* ── Themes ── */
@@ -1982,7 +2086,7 @@ async function generateImageWithRetry(job, projectId) {
       saveState();
       renderSections();
       if (result.url && result.url.startsWith('data:')) {
-        try { const blob = await (await fetch(result.url)).blob(); await storeImageBlob(img.id, blob); } catch (e) { console.warn('Blob storage failed', e); }
+        ensureImageBlobStored(img.id, result.url);
       }
       return result;
     } catch (err) {
@@ -3321,6 +3425,7 @@ function renderSections() {
           <button class="btn small" onclick="acceptGeneratedImage('${img.id}')">✅ Accept</button>
           <button class="btn small danger" onclick="rejectGeneratedImage('${img.id}')">❌ Reject</button>
           <button class="btn small" onclick="downloadImage('${img.id}')">⬇ Download</button>
+          <button class="btn small danger" onclick="deleteGeneratedImage('${img.id}')" title="Delete this image and its stored blob" aria-label="Delete image ${escapeHTML(img.id)}">🗑</button>
         </div>
       </div>`;
     });
@@ -3405,6 +3510,18 @@ function acceptGeneratedImage(imgId) {
 function rejectGeneratedImage(imgId) {
   const img = state.generated_images.find(i => i.id === imgId);
   if (img) { img.status = 'Rejected'; img.accepted = false; saveState(); renderSections(); }
+}
+async function deleteGeneratedImage(imgId) {
+  const idx = state.generated_images.findIndex(i => i.id === imgId);
+  if (idx === -1) return;
+  const [removed] = state.generated_images.splice(idx, 1);
+  // Release the tracked blob: URL only after the record is gone from state
+  // and the view has been re-rendered, so nothing displayed still uses it.
+  saveState();
+  renderSections();
+  revokeTrackedObjectURL(removed.image_url);
+  try { await deleteImageBlob(imgId); } catch (e) { console.warn('Blob delete failed', e); }
+  updateStatus('Image deleted');
 }
 async function downloadImage(imgId) {
   const img = state.generated_images.find(i => i.id === imgId);
@@ -3540,11 +3657,16 @@ function generateThumbnailImage() {
   updateStatus('Generating thumbnail image…');
   callImageModel(promptText, { aspect: 'wide' })
     .then(res => {
+      let record = thumb;
       if (thumb) { thumb.image_url = res.url; thumb.status = 'Generated'; }
-      else state.thumbnail_assets.push({ id: 'thumb_' + Date.now().toString(36), song_id: proj.id, strategy: '', title_text: '', subtitle: '', composition: '', character: '', background: '', font_direction: '', text_placement: '', high_contrast: true, include_text: true, no_text: false, prompt: promptText, image_url: res.url, status: 'Generated' });
+      else {
+        record = { id: 'thumb_' + Date.now().toString(36), song_id: proj.id, strategy: '', title_text: '', subtitle: '', composition: '', character: '', background: '', font_direction: '', text_placement: '', high_contrast: true, include_text: true, no_text: false, prompt: promptText, image_url: res.url, status: 'Generated' };
+        state.thumbnail_assets.push(record);
+      }
       saveState();
       populateThumbnailFields();
       updateStatus('Thumbnail generated');
+      if (res.url && res.url.startsWith('data:') && record) ensureImageBlobStored(record.id, res.url);
     })
     .catch(err => { showError(err.message); updateStatus('Error'); })
     .finally(() => setLoading(false));
@@ -3559,12 +3681,14 @@ function generateThumbnailVariants() {
   setLoading(true);
   updateStatus('Generating 4 thumbnail variants…');
   const promises = [1,2,3,4].map(() => callImageModel(promptText + ' (variant)', { aspect: 'wide' }).then(res => {
-    state.generated_images.push({
+    const img = {
       id: 'img_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,5),
       song_id: proj.id, image_prompt_id: thumb?.id || '', section_id: '',
       provider: res.provider, model: res.model, prompt: promptText,
       image_url: res.url, status: 'Generated', accepted: false, created_at: new Date().toISOString(), error: ''
-    });
+    };
+    state.generated_images.push(img);
+    if (res.url && res.url.startsWith('data:')) ensureImageBlobStored(img.id, res.url);
   }).catch(e => console.error('Variant error', e)));
   Promise.all(promises).then(() => {
     saveState();
@@ -4234,7 +4358,11 @@ function copyDebugReport() {
 }
 
 function exportRawState() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  // Export a sanitized copy: no API keys, and no data:/blob: image payloads
+  // (use buildPersistableState) — the live in-memory state is never mutated.
+  const exported = buildPersistableState();
+  exported.settings = { ...(exported.settings || {}), text_key: '', image_key: '', review_key: '' };
+  const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'songforge_raw_state.json';
@@ -4293,6 +4421,37 @@ function escapeHTML(value) {
   const str = String(value);
   return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
+
+/* ── Test hook (non-visual) ── */
+function describeImageUrl(u) {
+  const s = typeof u === 'string' ? u : '';
+  return { prefix: s.slice(0, 24), is_data: s.startsWith('data:') };
+}
+window.__SF_TEST__ = {
+  persistedStateSize() {
+    return (localStorage.getItem(STORAGE_KEY) || '').length;
+  },
+  async imageBlobCount() {
+    let database = db;
+    if (!database) { try { database = await ensureIDB(); } catch (e) { return 0; } }
+    return new Promise((resolve) => {
+      try {
+        const req = database.transaction('images', 'readonly').objectStore('images').count();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(0);
+      } catch (e) { resolve(0); }
+    });
+  },
+  stateImageUrls() {
+    if (!state) return [];
+    const urls = [];
+    (state.generated_images || []).forEach(i => urls.push(describeImageUrl(i?.image_url)));
+    (state.thumbnail_assets || []).forEach(t => urls.push(describeImageUrl(t?.image_url)));
+    return urls;
+  },
+  deleteImageBlob,
+  storeImageBlob
+};
 
 /* ── Boot ── */
 document.addEventListener('DOMContentLoaded', initApp);

@@ -591,6 +591,8 @@
     const API_KEY_STORAGE = "nasaDonki.apiKey.v1";
     const CACHE_PREFIX = "nasaDonki.cache.v1";
     const CACHE_TTL_MS = 30 * 60 * 1000;
+    const CACHE_AGE_LIMIT_MS = 7 * 24 * 3600 * 1000;
+    const CACHE_MAX_KEYS = 24;
     const BASE_URL = "https://api.nasa.gov/DONKI";
 
     const DONKI_ENDPOINTS = {
@@ -623,6 +625,7 @@
     function initApp() {
       document.querySelectorAll("[id]").forEach(node => { el[node.id] = node; });
       state.apiKey = localStorage.getItem(API_KEY_STORAGE) || "DEMO_KEY";
+      sweepStaleCache();
       el.apiKey.value = state.apiKey;
       setDefaultDates();
       renderEndpointSelector();
@@ -1228,6 +1231,41 @@
       } catch (error) {
         showToast("Cache write failed. Local storage may be full.", true);
       }
+      sweepStaleCache();
+    }
+
+    function sweepStaleCache() {
+      try {
+        const now = Date.now();
+        const liveEntries = [];
+        Object.keys(localStorage).filter(key => key.startsWith(CACHE_PREFIX)).forEach(key => {
+          try {
+            const item = JSON.parse(localStorage.getItem(key) || "null");
+            const fetchedAt = item && typeof item.fetchedAt === "string" ? new Date(item.fetchedAt).getTime() : Number.NaN;
+            if (!Number.isFinite(fetchedAt)) {
+              localStorage.removeItem(key);
+              return;
+            }
+            if (now - fetchedAt > CACHE_AGE_LIMIT_MS) {
+              localStorage.removeItem(key);
+              return;
+            }
+            liveEntries.push({ key, fetchedAt });
+          } catch (error) {
+            localStorage.removeItem(key);
+          }
+        });
+        liveEntries.sort((a, b) => a.fetchedAt - b.fetchedAt);
+        while (liveEntries.length > CACHE_MAX_KEYS) {
+          localStorage.removeItem(liveEntries.shift().key);
+        }
+      } catch (error) {
+        /* noop */
+      }
+    }
+
+    function cacheKeyCount() {
+      return Object.keys(localStorage).filter(key => key.startsWith(CACHE_PREFIX)).length;
     }
 
     function clearCache() {
@@ -1384,10 +1422,12 @@
     function esc(value) {
       return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     }
+
+    window.__SWSR_TEST__ = { sweepStaleCache, cacheKeyCount, getCacheKey, readCache, writeCache };
   </script>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; Hank Marquardt 2026 &middot; Version 2026.06.01.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; Hank Marquardt 2026 &middot; Version 2026.08.26.1
   </footer>
 </body>
 </html>
