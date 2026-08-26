@@ -343,7 +343,7 @@ test('explicit prohibition overrides an attractive extra feature', async ({ page
     s.decisions = { aesthetics: { option: 'A is better', advantages: [{ claim: 'Attractive decorative background', relevance: 'lens-quality', usedAsWinning: true }] }, functionality: { advantages: [] }, overall: { advantages: [] } };
     return __BERRY3R_TEST__.relevanceIssues();
   });
-  expect(issues.join(' ')).toContain('violating explicit prohibition');
+  expect(issues.join(' ')).toContain('violating the explicit requirement');
 });
 
 test('both names with only a nominal Website B mention is flagged', async ({ page }) => {
@@ -549,7 +549,9 @@ test('structured Overall and semantic QA override lexical uncertainty', async ({
     return t.overallAssessment('Website B is better because Website A offers the stronger presentation, while Website B answers the brief more directly. The latter matters more for this particular request.');
   });
   expect(out.pass).toBe(true);
-  expect(out.advisory).toContain('Lexical heuristic is uncertain');
+  expect(out.advisory).toBe('');
+  const telemetry = await page.evaluate(() => window.__BERRY3R_TEST__.lexicalTelemetry());
+  expect(telemetry).toContain('Lexical heuristic is uncertain');
 });
 
 test('archived structure suggests is blocked from submission voice', async ({ page }) => {
@@ -633,7 +635,7 @@ test('advisory-only lexical uncertainty does not prevent READY', async ({ page }
   }, {aesthetics:autoReasons.aesthetics,functionality:autoReasons.functionality});
   expect(out.valid).toBe(true);
   expect(out.blocking).toEqual([]);
-  expect(out.advisory.join(' ')).toContain('Lexical heuristic is uncertain');
+  expect(out.advisory.join(' ')).not.toContain('Lexical heuristic is uncertain');
   expect(out.checks.filter(x=>!x.pass&&x.severity==='blocking')).toHaveLength(0);
 });
 // ---------- Phase 4.1: UX Cleanup Regression ----------
@@ -1168,4 +1170,261 @@ test('origin-wide cleanup requires explicit per-key confirmation and leaves neig
   await page.waitForTimeout(200);
   expect(await page.evaluate(() => localStorage.getItem('junkdrawer.sacrificial.key'))).toBe(null);
   expect(await page.evaluate(() => localStorage.getItem('junkdrawer.other.tool'))).toBe('precious');
+});
+
+// ---------- Phase 5: Repair Architecture Hardening ----------
+
+function compileCase(page, dim, option, text) {
+  return page.evaluate(({ dim, option, text }) => window.__BERRY3R_TEST__.compileFinalReason(dim, option, text), { dim, option, text });
+}
+
+test('compiler forces the Website B opening without any AI call', async ({ page }) => {
+  await open(page);
+  const out = await compileCase(page, 'functionality', 'B is better', 'B is better because it presents more requested configuration controls, while Website A stops at the baseline timer content.');
+  expect(out.startsWith('Website B is better because ')).toBe(true);
+});
+
+test('compiler forces the Website A opening for A is better', async ({ page }) => {
+  await open(page);
+  const out = await compileCase(page, 'aesthetics', 'A is better', 'A is better because its spacing and hierarchy feel deliberate across every section of the interface versus Website B.');
+  expect(out.startsWith('Website A is better because ')).toBe(true);
+});
+
+test('bare candidate references are canonicalized safely', async ({ page }) => {
+  await open(page);
+  const out = await compileCase(page, 'overall', 'B is better', 'B is better because site A keeps a cleaner palette while site B answers more requirements; the first one looks calmer than the second one overall.');
+  expect(out).toContain('Website A');
+  expect(out).not.toMatch(/\bsite [AB]\b/i);
+  expect(out).not.toMatch(/the (first|second) (one|site)/i);
+  const bare = await compileCase(page, 'aesthetics', 'A is better', 'A is better because the typography and spacing stay disciplined in Website A but drift in B across repeated views.');
+  expect(bare).toContain('drift in Website B');
+  const intact = await page.evaluate(() => window.__BERRY3R_TEST__.canonicalizeCandidates('The plan B fallback and vitamin A intake remain untouched words.'));
+  expect(intact).toContain('plan B fallback');
+  expect(intact).toContain('vitamin A');
+});
+
+test('mechanical compilation preserves substantive evidence text', async ({ page }) => {
+  await open(page);
+  const tail = 'its centered composition survives verbatim including concrete observations about spacing rhythm and palette discipline across all screens of both implementations.';
+  const out = await compileCase(page, 'aesthetics', 'A is better', `A is better because ${tail}`);
+  expect(out.endsWith(tail)).toBe(true);
+});
+
+test('mechanical corrections consume zero repair rounds or API calls', async ({ page }) => {
+  const errors = await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await installAutomationMock(page, automationResponses());
+  await page.evaluate(auto => {
+    const T = __BERRY3R_TEST__, s = T.state;
+    s.final.aestheticsOption = 'A is better';
+    s.final.aestheticsReason = auto.aesthetics.replace(/^Website A is better because /, 'A is better because ');
+    s.final.functionalityOption = 'B is better';
+    s.final.functionalityReason = auto.functionality;
+    s.final.overallOption = 'B is better';
+    s.final.overallReason = auto.overall;
+    s.decisions = { aesthetics: { advantages: [] }, functionality: { advantages: [] }, overall: { option: 'B is better', advantages: [], visualSide: { winner: 'A', summary: 'Website A leads presentation.' }, functionalSide: { winner: 'B', summary: 'Website B answers the brief.' }, tradeoff: { moreImportantSide: 'functionality', why: 'Configuration is central.' } } };
+    s.qa = { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: [] };
+  }, AUTO);
+  const callsBefore = await page.evaluate(() => __BERRY3R_TEST__.state.aiCalls);
+  const v = await page.evaluate(async () => {
+    const T = __BERRY3R_TEST__;
+    return await T.automaticRepair([{ field: 'aesthetics', severity: 'blocking', type: 'option-reason', message: 'Aesthetics: Open with “Website A is better because…”' }]);
+  });
+  const out = await page.evaluate(() => ({
+    calls: __BERRY3R_TEST__.state.aiCalls,
+    reason: __BERRY3R_TEST__.state.final.aestheticsReason.slice(0, 26),
+    compilerEntries: __BERRY3R_TEST__.state.repairs.filter(r => r.source === 'compiler').length
+  }));
+  const residual = await page.evaluate(() => {
+    const v2 = __BERRY3R_TEST__.validateAll(), hay = v2.hard.join(' ');
+    return { open: hay.includes('Open with'), names: hay.includes('full names'), valid: v2.valid };
+  });
+  expect(out.calls).toBe(callsBefore);
+  expect(out.reason.startsWith('Website A is better')).toBe(true);
+  expect(residual.open).toBe(false);
+  expect(residual.names).toBe(false);
+  expect(residual.valid).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+async function setupProhibitionConflict(page) {
+  await page.evaluate(() => {
+    const T = __BERRY3R_TEST__, s = T.state;
+    s.requirements = [{ id: 'r4', kind: 'prohibition', importance: 'core', requirement: 'Do not use background music.', sourceText: 'Do not use background music.', sourceStart: 0, sourceEnd: 27, lens: 'functionality', websiteA: 'met', websiteB: 'missed', evidence: '' }];
+    s.decisions = { functionality: { option: 'B is better', rationalePlan: '', advantages: [{ claim: 'Visual polish advantage', relevance: 'explicit', usedAsWinning: true }] }, aesthetics: { option: 'A is better', advantages: [] }, overall: { option: 'B is better', visualSide: { winner: 'A', summary: '' }, functionalSide: { winner: 'B', summary: '' }, tradeoff: { moreImportantSide: 'functionality', why: '' }, advantages: [] } };
+  });
+}
+
+const PROHIBITION_SENTENCE = 'violating the explicit requirement: “Do not use background music.”';
+
+const AUTO = {
+  aesthetics: 'Website A is better because its balanced spacing, crisp typography, restrained palette, and centered hierarchy create a clearer visual focus, while Website B uses denser spacing, a less consistent heading scale, and more competing accents that fight the calm composition. Website B stays readable and coherent, yet its busier edges dilute the resting emphasis a polished overview deserves across repeated viewing.',
+  functionality: 'Website B is better because Website B includes the requested mode controls, settings panel, and state-change structure, while Website A includes the timer and reset control but has no comparable configuration flow for personalizing durations or notifications. Website B therefore represents more core requirements through clearly labeled sections, giving recurring users a workable path to adjust every important preference without duplication.',
+  overall: 'Website B is better because Website A has the more polished hierarchy, steadier spacing, and cleaner palette, but Website B represents the requested settings and mode-control structure more completely through dedicated panels and persistent preferences. That functional advantage outweighs the visual refinement gap because dependable daily customization matters more here than calmer surfaces.'
+};
+
+test('a real prohibition conflict is classified DECISION_SEMANTIC with readable wording', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await setupProhibitionConflict(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__, v = T.validateAll();
+    const msg = v.blocking.find(x => x.includes('r4')) || '';
+    return { msg, cls: T.classifyIssue(msg), conflicts: T.decisionProhibitionConflicts().length };
+  });
+  expect(out.conflicts).toBe(2); // functionality + overall selected B
+  expect(out.msg).toContain(PROHIBITION_SENTENCE);
+  expect(out.msg).toContain('was selected primarily for visual polish advantage');
+  expect(out.cls).toBe('DECISION_SEMANTIC');
+});
+
+test('prohibition conflict triggers targeted re-decision instead of reason-only repair', async ({ page }) => {
+  const errors = await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await setupProhibitionConflict(page);
+  await page.evaluate(() => { const st = __BERRY3R_TEST__.state; st.qa = { issues: [{ field: 'functionality', severity: 'blocking', type: 'relevance', message: 'Functionality: selected winner violates an explicit core prohibition.' }] }; });
+  const reasonA = AUTO.aesthetics;
+  await page.evaluate(({ reasonA, auto }) => {
+    const s = __BERRY3R_TEST__.state;
+    s.final = { aestheticsOption: 'A is better', aestheticsReason: reasonA, functionalityOption: 'B is better', functionalityReason: auto.functionality, overallOption: 'B is better', overallReason: auto.overall };
+  }, { reasonA, auto: AUTO });
+  await page.evaluate(payload => {
+    window.__stages = [];
+    const resp = payload.resp;
+    window.__BERRY3R_TEST__.setAiTransport(async stage => { window.__stages.push(stage); if (stage === 'redecide-functionality') return structuredClone(resp); throw new Error('unexpected stage ' + stage); });
+  }, { resp: { option: 'A is better', rationalePlan: 'Prohibition wins.', advantages: [{ claim: 'Meets the prohibition', relevance: 'explicit', usedAsWinning: true }], caveats: [], reason: AUTO.aesthetics } });
+  await page.evaluate(async () => { await __BERRY3R_TEST__.automaticRepair([{ field: 'functionality', severity: 'blocking', type: 'relevance', message: 'Functionality: selected winner violates an explicit core prohibition.' }]); });
+  const out = await page.evaluate(() => ({ stages: window.__stages, final: __BERRY3R_TEST__.state.final, repairs: __BERRY3R_TEST__.state.repairs }));
+  expect(out.stages).toEqual(['redecide-functionality']);
+  expect(out.stages).not.toContain('repair-functionality');
+  expect(out.final.functionalityOption).toBe('A is better');
+  expect(out.final.functionalityReason.startsWith('Website A is better because')).toBe(true);
+  expect(out.repairs.some(r => r.source === 'ai-redecide' && r.field === 'functionality')).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('only the re-decided dimension regenerates; siblings keep their prose', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await setupProhibitionConflict(page);
+  await page.evaluate(() => { const st = __BERRY3R_TEST__.state; st.qa = { issues: [{ field: 'functionality', severity: 'blocking', type: 'relevance', message: 'Functionality: decision contradicts shared facts.' }] }; });
+  const seeds = AUTO;
+  await page.evaluate(seeds => { Object.assign(__BERRY3R_TEST__.state.final, { aestheticsOption: 'A is better', aestheticsReason: seeds.aesthetics }); }, seeds);
+  const before = await page.evaluate(() => __BERRY3R_TEST__.state.final.aestheticsReason);
+  await page.evaluate(seeds => {
+    window.__BERRY3R_TEST__.setAiTransport(async () => ({ option: 'A is better', rationalePlan: '', advantages: [{ claim: 'Allowed control set', relevance: 'explicit', usedAsWinning: true }], caveats: [], reason: seeds.aesthetics }));
+  }, seeds);
+  await page.evaluate(async () => { await __BERRY3R_TEST__.automaticRepair([{ field: 'functionality', severity: 'blocking', type: 'relevance', message: 'Functionality: decision contradicts shared facts.' }]); });
+  const after = await page.evaluate(() => __BERRY3R_TEST__.state.final.aestheticsReason);
+  expect(after).toBe(before);
+});
+
+test('purported prohibitions without negative source language are downgraded with provenance', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__, input = document.getElementById('request');
+    T.state.task.userRequest.sourceTruncated = false;
+    input.value = 'Design a premium storefront. Add luxury branding presence. Include gift wrapping.';
+    T.state.task.userRequest.text = input.value;
+    const res = T.sanitizeDecomposition({ purpose: 'x', requirements: [{ id: 'inv', text: 'Add luxury branding presence.', kind: 'prohibition', importance: 'core' }] });
+    const r = res.requirements[0];
+    return { kind: r.kind, evidence: r.evidence, start: r.sourceStart, end: r.sourceEnd, sourceText: r.sourceText };
+  });
+  expect(out.kind).not.toBe('prohibition');
+  expect(out.evidence).toContain('prohibition-downgraded');
+  expect(out.start).toBeGreaterThanOrEqual(0);
+  expect(out.sourceText.toLowerCase()).toContain('luxury branding');
+});
+
+test('explicit negative intent keeps prohibition status with request traceability', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__;
+    const raw = 'Design a status page. Do not use autoplaying video. Provide uptime numbers without external requests. The header must not include ads.';
+    const reqs = T.decomposeLocal(raw).requirements;
+    return reqs.filter(r => r.kind === 'prohibition').map(r => ({ t: r.requirement, s: r.sourceStart, e: r.sourceEnd, src: r.sourceText }));
+  });
+  expect(out.length).toBe(3);
+  for (const r of out) {
+    expect(r.s).toBeGreaterThanOrEqual(0);
+    expect(r.e).toBeGreaterThan(r.s);
+    expect(r.src.toLowerCase()).toMatch(/do not|without|must not/);
+  }
+  const kinds = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__;
+    return { dn: T.requirementKind('Do not track users.'), wo: T.requirementKind('Build it without jQuery.'), mn: T.requirementKind('You must not refresh automatically.'), pos: T.requirementKind('The dashboard should feel minimal.') };
+  });
+  expect(kinds.dn).toBe('prohibition'); expect(kinds.wo).toBe('prohibition'); expect(kinds.mn).toBe('prohibition');
+  expect(kinds.pos).not.toBe('prohibition');
+});
+
+test('blocking UI shows the requirement text and clicking highlights its matrix row', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await setupProhibitionConflict(page);
+  const seeds = AUTO;
+  await page.evaluate(seeds => { __BERRY3R_TEST__.applyAiResult({ aesthetics: { option: 'A is better', reason: seeds.aesthetics, confidence: .8 }, functionality: { option: 'B is better', reason: seeds.functionality, confidence: .8 }, overall: { option: 'B is better', reason: seeds.overall, confidence: .8 } }); }, seeds);
+  await expect(page.locator('#ready')).toContainText(PROHIBITION_SENTENCE);
+  const issueRow = page.locator('#allIssues li.hard', { hasText: '(r4)' }).first();
+  await expect(issueRow).toContainText('(r4)');
+  await page.locator('#analysisDetails > summary').click();
+  await page.locator('#analysisDetails > summary').click(); // close again so the click-through must reopen it
+  const wasOpen = await page.evaluate(() => document.getElementById('analysisDetails').open);
+  expect(wasOpen).toBe(false);
+  await issueRow.click();
+  const after = await page.evaluate(() => ({ open: document.getElementById('analysisDetails').open, flashed: !!document.querySelector('#reqBody tr.req-flash'), rowVisible: (() => { const el = document.querySelector('#reqBody tr[data-i="0"]'); return el && el.getBoundingClientRect().height > 0; })() }));
+  expect(after.open).toBe(true);
+  expect(after.flashed || after.rowVisible).toBe(true);
+});
+
+test('lexical uncertainty stays out of Final QA when structured + semantic agree', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.evaluate(() => {
+    const s = __BERRY3R_TEST__.state;
+    s.decisions = { overall: { option: 'B is better', visualSide: { winner: 'A', summary: 'Website A leads presentation.' }, functionalSide: { winner: 'B', summary: 'Website B answers the brief.' }, tradeoff: { moreImportantSide: 'functionality', why: 'Configuration is central.' }, advantages: [] }, aesthetics: { advantages: [] }, functionality: { advantages: [] } };
+    s.qa = { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: [] };
+  });
+  const seeds = AUTO;
+  await page.evaluate(seeds => { __BERRY3R_TEST__.applyAiResult({ aesthetics: { option: 'A is better', reason: seeds.aesthetics, confidence: .8 }, functionality: { option: 'B is better', reason: seeds.functionality, confidence: .8 }, overall: { option: 'B is better', reason: 'Website B is better because Website A offers an expressive treatment with memorable character, while Website B answers the brief in a more direct manner that carries greater weight for this particular request and its central user goal.', confidence: .8 } }); }, seeds);
+  await expect(page.locator('#qaList')).not.toContainText('Lexical heuristic is uncertain');
+  await expect(page.locator('#allIssues')).not.toContainText('Lexical heuristic');
+  const tele = await page.evaluate(() => window.__BERRY3R_TEST__.lexicalTelemetry());
+  expect(tele).toContain('uncertain');
+});
+
+test('lexical telemetry remains visible in Debug only', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.evaluate(() => {
+    const s = __BERRY3R_TEST__.state;
+    s.decisions = { overall: { option: 'B is better', visualSide: { winner: 'A', summary: 'A leads presentation.' }, functionalSide: { winner: 'B', summary: 'B answers the brief.' }, tradeoff: { moreImportantSide: 'functionality', why: 'Configuration is central.' }, advantages: [] }, aesthetics: { advantages: [] }, functionality: { advantages: [] } };
+    s.qa = { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: [] };
+  });
+  const seeds = AUTO;
+  await page.evaluate(seeds => { __BERRY3R_TEST__.applyAiResult({ aesthetics: { option: 'A is better', reason: seeds.aesthetics, confidence: .8 }, functionality: { option: 'B is better', reason: seeds.functionality, confidence: .8 }, overall: { option: 'B is better', reason: 'Website B is better because Website A offers an expressive treatment with memorable character and emotional appeal, while Website B answers the brief directly, which carries greater weight for this request audience overall outcome consideration entirely.', confidence: .8 } }); }, seeds);
+  await page.getByRole('button', { name: 'Debug' }).click();
+  await expect(page.locator('#dbgValidation')).toContainText('Lexical telemetry:');
+  await page.getByRole('button', { name: 'Evaluate' }).click();
+  await expect(page.locator('#qaList')).not.toContainText('Lexical heuristic is uncertain');
+});
+
+test('READY title states internally consistent field-issue and blocking-check counts', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  // leave fields untouched -> Choose an option/Write a reason hard failures across three dims
+  const computed = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__, v = T.validateAll(), checks = T.qaChecks(v);
+    return { fields: [...v.hard, ...v.blocking].length, failingChecks: checks.filter(x => !x.pass && x.severity === 'blocking').length };
+  });
+  const title = await page.locator('#readyTitle').textContent();
+  const m = title.match(/(\d+) field issues? across (\d+) blocking checks?/);
+  expect(m).toBeTruthy();
+  expect(Number(m[1])).toBe(computed.fields);
+  expect(Number(m[2])).toBe(computed.failingChecks);
+  const failBadges = await page.locator('#qaList .qa-item.fail').count();
+  expect(failBadges).toBe(computed.failingChecks);
+});
+
+test('final answers cannot reach READY while a decision-semantic contradiction stands', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await setupProhibitionConflict(page);
+  const seeds = AUTO;
+  await page.evaluate(seeds => { __BERRY3R_TEST__.applyAiResult({ aesthetics: { option: 'A is better', reason: seeds.aesthetics, confidence: .9 }, functionality: { option: 'B is better', reason: seeds.functionality, confidence: .9 }, overall: { option: 'B is better', reason: seeds.overall, confidence: .9 } }); }, seeds);
+  const out = await page.evaluate(() => ({ valid: __BERRY3R_TEST__.validateAll().valid, title: document.getElementById('readyTitle').textContent }));
+  expect(out.valid).toBe(false);
+  expect(out.title).not.toContain('READY TO SUBMIT');
+  expect(out.title).toMatch(/field issue/);
 });
