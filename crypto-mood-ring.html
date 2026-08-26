@@ -648,6 +648,7 @@
 
     const SETTINGS_KEY = "cryptoMoodRing.settings.v1";
     const OPENAI_KEY_STORAGE = "cryptoMoodRing.openaiKey.v1";
+    const RETENTION_CAPS = { priceTicks: 50000, newsArticles: 2000, llmAnalyses: 200, fetchLogs: 500 };
     const DEFAULT_SETTINGS = {
       theme: "dark",
       marketProviderPriority: ["binance-websocket", "coingecko-rest"],
@@ -1886,6 +1887,7 @@
 
     async function saveLlmAnalysis(record) {
       await db.llmAnalyses.add(record);
+      capStoreRows(db.llmAnalyses, RETENTION_CAPS.llmAnalyses);
     }
 
     async function loadLatestAnalysis() {
@@ -2322,12 +2324,25 @@
       showToast("localStorage settings cleared");
     }
 
+    async function capStoreRows(table, max, orderField = ":id") {
+      try {
+        const count = await table.count();
+        if (count <= max) return;
+        const overflowKeys = await table.orderBy(orderField).limit(count - max).primaryKeys();
+        if (overflowKeys.length) await table.bulkDelete(overflowKeys);
+      } catch {}
+    }
+
     async function pruneOldData() {
       if (!db?.priceTicks || !db?.newsArticles) return;
       const priceCutoff = Date.now() - settings.priceRetentionDays * 86400000;
       const newsCutoff = Date.now() - settings.newsRetentionDays * 86400000;
       await db.priceTicks.where("timestamp").below(priceCutoff).delete();
       await db.newsArticles.where("fetchedAt").below(newsCutoff).delete();
+      await capStoreRows(db.priceTicks, RETENTION_CAPS.priceTicks);
+      await capStoreRows(db.newsArticles, RETENTION_CAPS.newsArticles);
+      await capStoreRows(db.llmAnalyses, RETENTION_CAPS.llmAnalyses);
+      await capStoreRows(db.fetchLogs, RETENTION_CAPS.fetchLogs);
       logEvent("prune", "Old data pruned");
     }
 
@@ -2373,13 +2388,13 @@
     function logEvent(type, message) {
       const row = { timestamp: Date.now(), level: "info", type, message };
       logs.push(row);
-      db?.fetchLogs?.add(row).catch(() => {});
+      db?.fetchLogs?.add(row).then(() => capStoreRows(db.fetchLogs, RETENTION_CAPS.fetchLogs)).catch(() => {});
     }
 
     function logError(type, message) {
       const row = { timestamp: Date.now(), level: "error", type, message };
       logs.push(row);
-      db?.fetchLogs?.add(row).catch(() => {});
+      db?.fetchLogs?.add(row).then(() => capStoreRows(db.fetchLogs, RETENTION_CAPS.fetchLogs)).catch(() => {});
     }
 
     async function safeStep(label, fn) {
@@ -2579,9 +2594,9 @@
       setTimeout(() => node.remove(), 4200);
     }
   </script>
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; Hank Marquardt 2026 &middot; Version 2026.06.01.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.2" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; Hank Marquardt 2026 &middot; Version 2026.08.26.2
   </footer>
 </body>
 </html>

@@ -61,9 +61,9 @@ test("legacy/orphan keys are flagged with risk badges", async ({ page }) => {
   await page.evaluate(() => window.__SM_TEST__.refreshAll());
   await page.waitForTimeout(400);
 
-  await expect(page.locator("tr", { hasText: "quack-drawer-import" }).locator(".badge.red")).toHaveText("legacy");
-  await expect(page.locator("tr", { hasText: "wgpu_pp_saved" }).locator(".badge.red")).toHaveText("legacy");
-  const themeRow = page.locator("tr", { hasText: "bca-theme" });
+  await expect(page.locator("#lsTableWrap tr", { hasText: "quack-drawer-import" }).locator(".badge.red")).toHaveText("legacy");
+  await expect(page.locator("#lsTableWrap tr", { hasText: "wgpu_pp_saved" }).locator(".badge.red")).toHaveText("legacy");
+  const themeRow = page.locator("#lsTableWrap tr", { hasText: "bca-theme" });
   await expect(themeRow).toBeVisible();
   await expect(themeRow.locator(".badge.red")).toHaveCount(0);
   expect(errors.length).toBe(0);
@@ -248,5 +248,87 @@ test("origin reset requires typing RESET and actually clears storage", async ({ 
   expect(dbs).not.toContain("reset_fixture");
   const cachesLeft = await page.evaluate(() => caches.keys());
   expect(cachesLeft).not.toContain("reset-cache");
+  expect(errors.length).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2: Applications health view (growth/retention classifications).
+// ---------------------------------------------------------------------------
+
+test("Applications tab renders growth and health classifications from live data", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => {
+    localStorage.setItem("songforge_state", JSON.stringify({ projects: [] }));
+    localStorage.setItem("whatShouldIEat.settings.v1", "{}");
+  });
+  await page.evaluate(() => window.__SM_TEST__.refreshAll());
+  await page.click("#tab-apps");
+  await expect(page.locator("#appsTableWrap table")).toBeVisible();
+
+  // Migrated apps classified from the audit metadata
+  const dpzRow = page.locator("#appsTableWrap tr", { hasText: "Dating Pyramid Zeitgeist" });
+  await expect(dpzRow.locator(".badge", { hasText: "USER-MANAGED" })).toBeVisible();
+  await expect(dpzRow.locator(".badge", { hasText: "GOOD" })).toBeVisible();
+
+  const pmRow = page.locator("#appsTableWrap tr", { hasText: "Polymarket Pulse" });
+  await expect(pmRow.locator(".badge", { hasText: "AGE-PRUNED" })).toBeVisible();
+  await expect(pmRow.locator(".badge", { hasText: "GOOD" })).toBeVisible();
+
+  const wtRow = page.locator("#appsTableWrap tr", { hasText: "The Watchtower" });
+  await expect(wtRow.locator(".badge", { hasText: "AGE-PRUNED" })).toBeVisible();
+
+  // Live per-app localStorage size is computed, not invented
+  const songforgeSize = await page.evaluate(() => window.__SM_TEST__.appLiveLsSize("SongForge AI"));
+  expect(songforgeSize).toBeGreaterThan(0);
+  const songforgeRow = page.locator("#appsTableWrap tr", { hasText: "SongForge AI" });
+  await expect(songforgeRow).toContainText("B");
+
+  expect(errors.length).toBe(0);
+});
+
+test("unbounded apps are surfaced; healthy large-IDB apps are not marked unhealthy for size", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => window.__SM_TEST__.refreshAll());
+  await page.click("#tab-rec");
+
+  await expect(page.locator("#recContent")).toContainText("Apps still growing without bounds");
+  await expect(page.locator("#recContent li", { hasText: "Local AI Scratchpad" }).first()).toBeVisible();
+  await expect(page.locator("#recContent")).toContainText("Flagged for review");
+
+  // Healthy-despite-large note present
+  await expect(page.locator("#recContent")).toContainText("Large-but-healthy IndexedDB apps");
+
+  const ici = await page.evaluate(() => window.__SM_TEST__.appHealth["Image Context Inspector"]);
+  expect(ici.health).toBe("GOOD");
+  const bca = await page.evaluate(() => window.__SM_TEST__.appHealth["UI Berry 3R Evaluator"]);
+  expect(bca.note).toContain("excluded");
+  expect(errors.length).toBe(0);
+});
+
+test("oversized-key diagnostic lists big keys with sizes", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => localStorage.setItem("dpz_source_content_huge", "z".repeat(80000)));
+  await page.evaluate(() => window.__SM_TEST__.refreshAll());
+  await page.click("#tab-rec");
+  const oversizedSection = page.locator("#recContent .rec-section", { hasText: "Oversized localStorage keys" });
+  await expect(oversizedSection.locator("li", { hasText: "dpz_source_content_huge" })).toBeVisible();
+  expect(errors.length).toBe(0);
+});
+
+test("legacy candidates still display and deletion remains confirmation-gated", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => localStorage.setItem("kraken_radar", "{}"));
+  await page.evaluate(() => window.__SM_TEST__.refreshAll());
+  await page.waitForTimeout(300);
+  await expect(page.locator("tr", { hasText: "kraken_radar" }).locator(".badge.red")).toHaveText("legacy");
+  // guard: deleting requires the modal, and cancelling keeps data
+  await page.locator("#lsTableWrap tr", { hasText: "kraken_radar" }).locator(".ls-delete").click();
+  await expect(page.locator("#confirmDialog")).toBeVisible();
+  await page.click("#confirmCancel");
+  expect(await page.evaluate(() => localStorage.getItem("kraken_radar"))).toBe("{}");
   expect(errors.length).toBe(0);
 });

@@ -188,3 +188,53 @@ except dating_pyramid (flagged ORANGE).
 
 See `tests/storage-manager.spec.js` and the per-app migration tests added under `tests/`.
 Fresh-profile, legacy-profile, idempotency, and no-console-error coverage included.
+
+---
+
+# Phase 2 — Storage Debt Cleanup (2026-08-26, later same day)
+
+Follow-up pass on the remaining known debt. Berry 3R intentionally excluded (active development).
+
+## Fixed
+
+| Item | App | Change |
+| --- | --- | --- |
+| Corpus in localStorage | dating_pyramid_zeitgeist | `dpz_source_content_<id>` corpus (≤50 K chars/source, unbounded count) migrated to IndexedDB `dpz-zeitgeist-corpus` v1, store `corpus`, keyPath `id`, records `{id, text ≤50K, origin: 'fetched'\|'manual', storedAt, length}`. One-transaction import → verify → remove legacy keys → tiny `dpz_corpus_migrated.v2` marker. Idempotent; interrupted migration falls back to legacy reads without data loss. localStorage keeps only prefs. |
+| Manual-only pruning | polymarket_pulse | `pruneStaleData` now runs at init (silent); hard caps: marketTicks 20 000, orderBooks/snapshots 5 000 each, fetchLogs 500, llmAnalyses 200 — applied at init and after writes. |
+| Partial pruning | crypto-mood-ring | `pruneOldData` extended with hard caps: priceTicks 50 000, newsArticles 2 000, llmAnalyses 200, fetchLogs 500; log/LLM write paths self-cap. |
+| No retention | the-watchtower | New `pruneRetention()`: events older than 30 days deleted (starred exempt) + 5 000-event hard cap + 500-scan cap; runs at init and debounced after watch inserts. |
+| Dead cross-app write | gbif_explorer | "Prepare for Quack Drawer" downloaded a CSV instead of writing `quack-drawer-import` to localStorage (no reader ever existed). |
+| Misclassification | storage-manager | `aduBenchDeterministic.history.v1` removed from legacy list — ADU-Bench-Deterministic is a shipped, visible page actively using it. |
+
+## Verified Healthy (inspected, intentionally unchanged)
+
+- **Polymarket news pruning**: already automatic (`pruneNews()` on every refresh) — untouched beyond caps.
+- **image-context-inspector, wildlife-field-recorder, openai-image-batch, whatshouldIeat, gibson**: large-by-design IndexedDB blob stores with explicit cleanup UI and correct cascade semantics — healthy despite size.
+- **ui-jerry-evaluator**: opt-in MHTML archives cascade-delete with evaluations — correct.
+- **ADU-Bench-Deterministic**: 30-run capped history — the model small-history design.
+- **Pass-1 migrations** (absurdities, SongForge, stego, transcriber): delete paths verified — replace-all transactions, wired blob deletes, eviction deletes carriers, guarded writes.
+- All GREEN preference-key apps from Phase 1 — untouched.
+
+## Cleanup Candidates (user-deletable via Storage Manager; nothing auto-deletes)
+
+- `quack-drawer-import` (writer removed; existing copies orphaned)
+- `gbif-taxa`, `kraken_radar` (v1), `wgpu_pp_saved`, `quack_drawer_saved_queries` (v1 page still shipped), `image-context-inspector-settings` / `-model-catalog` (self-cleaning)
+- Hidden-generation MAIBA v1/v2 keys + `maibaRubricEvaluatorDB` (pages hidden from index; data preserved until user removes them)
+
+## Remaining Debt
+
+- **lexical_exhaust_cloud** `openrouter_models` cache (~0.5–1 MB, `raw` provider objects embedded) — slimming candidate.
+- **gbif_explorer** `searches` IDB store is append-only with a dead read path — prune or remove feature.
+- **content-radar / global-weirdness-radar** IDB item/article stores lack age-based retention (manual purge only).
+- **wildlife-pattern-lab** IDB `logs` store unbounded.
+- **resume_job_matcher** evaluations embed full PII documents with no retention (clear-all exists).
+- **local-ai-scratchpad** `las_history` localStorage fallback is uncapped (only active if IndexedDB fails).
+- **waypoint-route-builder** history unbounded (small records, clear UI exists).
+- **Berry 3R** archives orphaning — intentionally out of scope.
+
+## Guardrail helper
+
+`jd-storage.js` — a ~100-line dependency-free guarded localStorage helper (`setString/setJSON` with
+optional evict-and-retry on QuotaExceededError, never throws; `getJSON` with fallback). New or
+modified pages storing more than trivial preferences should prefer it over bare `localStorage.setItem`.
+Existing pages were not mechanically retrofitted to avoid churn.

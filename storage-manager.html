@@ -220,6 +220,7 @@
 
   <div class="tabs" role="tablist" aria-label="Storage sections">
     <button type="button" role="tab" id="tab-ls" aria-selected="true" aria-controls="panel-ls">localStorage</button>
+    <button type="button" role="tab" id="tab-apps" aria-selected="false" aria-controls="panel-apps">Applications</button>
     <button type="button" role="tab" id="tab-idb" aria-selected="false" aria-controls="panel-idb">IndexedDB</button>
     <button type="button" role="tab" id="tab-cache" aria-selected="false" aria-controls="panel-cache">Cache Storage</button>
     <button type="button" role="tab" id="tab-rec" aria-selected="false" aria-controls="panel-rec">Diagnostics</button>
@@ -240,6 +241,21 @@
       <span class="mono muted" id="lsTotal"></span>
     </div>
     <div id="lsTableWrap"></div>
+  </section>
+
+  <section class="card" id="panel-apps" role="tabpanel" aria-labelledby="tab-apps" hidden>
+    <h2>Application storage health</h2>
+    <p class="sub" style="margin-bottom:0.6rem;">Health reflects <strong>architecture and growth behavior</strong> from the
+    repository audit — not current size. A large app with intentional retention can be GOOD; a small unbounded
+    localStorage history can be REVIEW. IndexedDB byte sizes are unavailable per-database in browsers; the
+    Overview total is the only browser-provided figure.</p>
+    <div class="toolbar">
+      <label class="muted" for="appFilter">Filter</label>
+      <input type="text" id="appFilter" style="max-width: 14rem;" placeholder="app or status…" autocomplete="off" />
+      <span class="grow"></span>
+      <span class="mono muted" id="appCount"></span>
+    </div>
+    <div id="appsTableWrap"></div>
   </section>
 
   <section class="card" id="panel-idb" role="tabpanel" aria-labelledby="tab-idb" hidden>
@@ -296,9 +312,9 @@
 
 <div class="sr-only" id="liveRegion" aria-live="polite"></div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Storage Manager · version 2026.08.26.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Storage Manager · version 2026.08.26.2
 </footer>
 
 <script>
@@ -375,17 +391,86 @@
 
   // Storage written by retired/superseded app generations. Safe to delete if
   // you no longer use the old tool — verified against the repo, nothing
-  // current writes them.
+  // current writes them. (ADU-Bench-Deterministic is NOT listed: although it
+  // is an older generation, the page is still shipped and actively reads and
+  // writes its key.)
   var LEGACY_STORAGE = [
-    { match: 'quack-drawer-import', owner: 'GBIF Explorer', why: 'Cross-app handoff to Quack Drawer; no consumer exists in the repo. Safe to delete.' },
+    { match: 'quack-drawer-import', owner: 'GBIF Explorer', why: 'Dead cross-app handoff: no reader ever existed and the writer was removed from GBIF Explorer (2026.08). Existing copies are safe to delete.' },
     { match: 'gbif-taxa', owner: 'GBIF Explorer', why: 'Remnant of a removed "saved taxa" feature; never written by current code.' },
-    { match: 'quack_drawer_saved_queries', owner: 'Quack Drawer (v1)', why: 'v1 saved queries; v2 uses the qd2_ namespace and never migrates this.' },
+    { match: 'quack_drawer_saved_queries', owner: 'Quack Drawer (v1)', why: 'v1 saved queries; v2 uses the qd2_ namespace and never migrates this. Delete only if you do not use the v1 page (still shipped).' },
     { match: 'kraken_radar', owner: 'Kraken Market Radar', why: 'Pre-v2 key. Only kraken_radar_v2 is written by current code.' },
-    { match: 'wgpu_pp_saved', owner: 'WebGPU Particle Playground', why: 'Write-only dead key — no code ever reads it back.' },
-    { match: 'aduBenchDeterministic.history.v1', owner: 'ADU-Bench Deterministic (gen 1)', why: 'Older generation; the verifier keeps separate storage. Delete if the old page is unused.' },
+    { match: 'wgpu_pp_saved', owner: 'WebGPU Particle Playground', why: 'Was a write-only dead key; the write was removed (2026.08). Existing copies are never read.' },
     { match: 'image-context-inspector-settings', owner: 'Image Context Inspector', why: 'Legacy settings key; current version migrated it into IndexedDB and self-cleans.' },
     { match: 'image-context-inspector-model-catalog', owner: 'Image Context Inspector', why: 'Legacy catalog key; current version self-cleans it at startup.' }
   ];
+
+  // Per-application storage health metadata — sourced from the repo-wide
+  // audit (docs/storage-audit-2026-08.md) and verified against current code.
+  // growth: STATIC | BOUNDED | AGE-PRUNED | USER-MANAGED | UNBOUNDED | UNKNOWN
+  // health: GOOD | REVIEW | MIGRATE | LEGACY | UNKNOWN
+  // rec: whether the stored data is re-creatable (cache/re-fetchable).
+  // Apps missing here default to UNKNOWN.
+  var APP_HEALTH = {
+    'Junkdrawer Home': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Analytics Dashboard': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Analytics Lite (tracker)': { growth: 'STATIC', retention: 'n/a', rec: true, health: 'GOOD' },
+    'Time to Click': { growth: 'USER-MANAGED', retention: 'user-created timers', rec: false, health: 'GOOD' },
+    'Weather Nerd': { growth: 'BOUNDED', retention: '100-id caps; self-replacing caches', rec: true, health: 'GOOD' },
+    'Idea Bench': { growth: 'USER-MANAGED', retention: 'manual per-run delete', rec: false, health: 'GOOD' },
+    'Dating Pyramid Zeitgeist': { growth: 'USER-MANAGED', retention: '50K chars/source; per-source delete', rec: 'partial', health: 'GOOD', note: 'Corpus migrated to IndexedDB (dpz-zeitgeist-corpus, 2026.08). localStorage keeps only prefs.' },
+    'Local AI Scratchpad': { growth: 'UNBOUNDED', retention: 'IDB: manual delete/clear; LS fallback: none', rec: false, health: 'REVIEW', note: 'Healthy IDB path; the las_history localStorage fallback (used only when IndexedDB fails) is uncapped.' },
+    'Image Context Inspector': { growth: 'USER-MANAGED', retention: 'manual delete/clear-all', rec: false, health: 'GOOD', note: 'Large-by-design: stores original photo blobs in IndexedDB with explicit cleanup. Large but healthy.' },
+    'UI Jerry Evaluator': { growth: 'USER-MANAGED', retention: 'manual delete/clear; opt-in archives cascade-deleted', rec: false, health: 'GOOD' },
+    'Play Editor': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Polymarket Pulse': { growth: 'AGE-PRUNED', retention: '3/7/2-day settings + caps: ticks 20k, books/snapshots 5k, logs 500, LLM 200', rec: true, health: 'GOOD', note: 'Auto-prune added at init (2026.08); previously manual-only.' },
+    'WebGPU Particle Playground': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Global Weirdness Radar': { growth: 'UNBOUNDED', retention: 'manual purge only', rec: true, health: 'REVIEW', note: 'Articles accumulate until the explicit purge; candidate for age-based retention.' },
+    'MAIBA Response Quality': { growth: 'USER-MANAGED', retention: 'manual prune (7/30/90d, keep-N)', rec: false, health: 'GOOD' },
+    'MAIBA Rubric Evaluator (v1/v2)': { growth: 'USER-MANAGED', retention: 'manual prune', rec: false, health: 'LEGACY', note: 'Pages hidden from the index (superseded by Response Quality); their keys and maibaRubricEvaluatorDB remain until unused.' },
+    'MAIBA Deterministic': { growth: 'BOUNDED', retention: '100 records (configurable)', rec: false, health: 'REVIEW', note: 'Draft + backup keys briefly duplicate the full transcript in localStorage.' },
+    'ADUBench Verifier': { growth: 'USER-MANAGED', retention: 'manual per-run delete / clear-all', rec: false, health: 'GOOD' },
+    'OpenAI Image Batch Generator': { growth: 'USER-MANAGED', retention: 'manual per-run delete / clear', rec: false, health: 'GOOD', note: 'Image blobs in IndexedDB by design; quota failures handled.' },
+    'Wildlife Pattern Lab': { growth: 'UNBOUNDED', retention: 'none on the logs store', rec: false, health: 'REVIEW', note: 'IndexedDB logs grow indefinitely; add retention.' },
+    'Browser Capability Audit': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Modern Open Agent Stack': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Bookmarklets': { growth: 'USER-MANAGED', retention: 'manual delete', rec: false, health: 'GOOD' },
+    'Wildlife Field Recorder': { growth: 'USER-MANAGED', retention: 'per-observation cascade delete; clear-all', rec: false, health: 'GOOD', note: 'Large-by-design: field audio/photos as IndexedDB blobs with cascade deletes. Large but healthy.' },
+    'Atlas Observatory': { growth: 'USER-MANAGED', retention: 'per-dataset/note delete', rec: false, health: 'GOOD' },
+    'Collection of Absurdities': { growth: 'USER-MANAGED', retention: 'per-item delete', rec: false, health: 'GOOD', note: 'Items + images migrated to IndexedDB (2026.08); legacy localStorage array is auto-imported then removed.' },
+    'ADU-Bench Deterministic (gen 1)': { growth: 'BOUNDED', retention: '30 runs hard cap', rec: false, health: 'GOOD', note: 'Older generation but still a shipped, visible page with model small-history design.' },
+    'UI Berry 3R Evaluator': { growth: 'UNKNOWN', retention: 'unknown', rec: false, health: 'UNKNOWN', note: 'Intentionally excluded from storage passes — under active development.' },
+    'Quack Drawer v2': { growth: 'BOUNDED', retention: 'history capped (default 100)', rec: false, health: 'GOOD' },
+    'Quack Drawer (v1)': { growth: 'USER-MANAGED', retention: 'none on saved queries', rec: false, health: 'LEGACY', note: 'Still shipped but superseded by v2; saved queries are not migrated between generations.' },
+    'Low-Fat Pancreatitis Guide': { growth: 'BOUNDED', retention: 'AI history capped at 5', rec: false, health: 'GOOD' },
+    'Resume Job Matcher': { growth: 'UNBOUNDED', retention: 'manual delete / clear-all', rec: false, health: 'REVIEW', note: 'Evaluations embed full resumes + PII with no auto-retention.' },
+    'Datecheck': { growth: 'USER-MANAGED', retention: 'per-case delete', rec: false, health: 'GOOD' },
+    'GBIF Explorer': { growth: 'UNBOUNDED', retention: 'manual clear-cache', rec: true, health: 'REVIEW', note: 'searches cache store is append-only and its read path is dead code; the quack-drawer-import write was removed (2026.08).' },
+    'Chat Image Transcriber': { growth: 'BOUNDED', retention: '50 sessions; real 160px thumbnails; quota-trim fallback', rec: false, health: 'GOOD' },
+    'Kraken Market Radar': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Model Explorer': { growth: 'BOUNDED', retention: '50-entry history (slimmed), 100-entry debug log', rec: true, health: 'GOOD', note: 'Raw API responses/base64 audio no longer persisted (2026.08).' },
+    'Domain Taxonomy Verifier': { growth: 'USER-MANAGED', retention: 'per-run delete', rec: false, health: 'GOOD' },
+    'The Watchtower': { growth: 'AGE-PRUNED', retention: '30 days + 5,000-event cap (starred exempt) + 500 scans', rec: true, health: 'GOOD', note: 'Retention added 2026.08; previously unbounded.' },
+    'RWS Timer': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Crypto Mood Ring': { growth: 'AGE-PRUNED', retention: '7d prices / 14d news + caps: ticks 50k, news 2k, LLM 200, logs 500', rec: true, health: 'GOOD', note: 'LLM/log caps added 2026.08.' },
+    'Waypoint Route Builder': { growth: 'UNBOUNDED', retention: 'manual delete/clear', rec: false, health: 'REVIEW', note: 'History grows unbounded (small records); full clear UI exists.' },
+    'Space Weather Situation Room': { growth: 'AGE-PRUNED', retention: '7 days + 24-key cap', rec: true, health: 'GOOD', note: 'Stale-key eviction added 2026.08; previously stale keys were never deleted.' },
+    'What Should I Eat': { growth: 'USER-MANAGED', retention: 'per-analysis delete / clear', rec: false, health: 'GOOD' },
+    'Gibson Wildlife Wetland Explorer': { growth: 'USER-MANAGED', retention: 'per-item delete/clear', rec: false, health: 'GOOD' },
+    'SongForge AI': { growth: 'USER-MANAGED', retention: 'jobs capped 200; prompts 50; per-image delete cascades blobs', rec: false, health: 'GOOD', note: 'Images now blob-backed in IndexedDB; data URLs no longer persisted; exports redacted (2026.08).' },
+    'Bashful Stegosaurus Stego': { growth: 'BOUNDED', retention: '100 entries / ~1.5 MB byte budget; carriers in IndexedDB', rec: false, health: 'GOOD', note: 'Byte-budget eviction added 2026.08.' },
+    'Pontifex Daily Desk': { growth: 'BOUNDED', retention: '200 records (oldest evicted)', rec: false, health: 'GOOD', note: 'Cap added 2026.08; previously unbounded.' },
+    'Signal Drawer': { growth: 'BOUNDED', retention: '30-min cache TTL; manual hidden/read clears', rec: true, health: 'REVIEW', note: 'article-state maps grow with usage; full reset exists.' },
+    'Hornet HRU-7': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'China AI Decel Psyop Explainer': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Manual Party Line': { growth: 'STATIC', retention: 'n/a', rec: false, health: 'GOOD' },
+    'Princeton Churches': { growth: 'BOUNDED', retention: 'versioned geocode cache keys', rec: true, health: 'GOOD' },
+    'Member Review Board': { growth: 'USER-MANAGED', retention: 'clear-local-data', rec: false, health: 'GOOD' },
+    'Content Radar': { growth: 'UNBOUNDED', retention: 'manual clear-all', rec: true, health: 'REVIEW', note: 'Items/scans accumulate with no retention cap.' },
+    'Ground Grid Growth': { growth: 'USER-MANAGED', retention: 'reset/clear-all', rec: false, health: 'GOOD' },
+    'Lexical Exhaust Cloud': { growth: 'BOUNDED', retention: 'self-replacing caches; watchlists uncapped', rec: true, health: 'REVIEW', note: 'openrouter_models cache embeds raw provider objects (~0.5–1 MB); slimming candidate.' },
+    'Conversation Reverser': { growth: 'STATIC', retention: 'overwrite-only; forget button', rec: false, health: 'GOOD' },
+    'DuckDB (Quack Drawer v2)': { growth: 'USER-MANAGED', retention: 'app-managed (OPFS)', rec: false, health: 'UNKNOWN', note: 'OPFS file usage is not enumerable from this page.' }
+  };
 
   // Audit findings used by the Diagnostics tab (risk badge + advice).
   var AUDIT_NOTES = [
@@ -394,9 +479,9 @@
     { match: 'bashful-stego-history', risk: 'red', note: 'Stego history had no byte budget (base64 previews + carrier text). Migrated: previews downscaled, carrier payloads offloaded to IndexedDB, ~1.5 MB cap.' },
     { match: 'chatTranscriber', risk: 'red', note: 'Chat Transcriber stored full-resolution screenshot data URLs as "thumbs". Migrated: real 160px thumbnails; writes guarded.' },
     { match: 'collection-of-absurdities:v1', risk: 'red', note: 'Legacy localStorage array with full-size base64 images. Migrated to IndexedDB; if this key reappears it is pre-migration legacy data and safe to import/delete by opening the app.' },
-    { match: 'dpz_source_content_', risk: 'orange', note: 'Dating Pyramid: up to 50 K chars of fetched page text per source, unbounded key count. Candidate to move to IndexedDB.' },
-    { match: 'pontifexDailyDesk.history.v1', risk: 'orange', note: 'Pontifex run history — now capped at 200 entries (oldest evicted). Consider IndexedDB if you need more.' },
-    { match: 'nasaDonki.cache.v1.', risk: 'orange', note: 'Space Weather API cache: one key per endpoint+range. Now evicted when older than 7 days on page load.' },
+    { match: 'dpz_source_content_', risk: 'orange', note: 'Dating Pyramid corpus (up to 50 K chars per source). Migrated to IndexedDB (dpz-zeitgeist-corpus) — if this key reappears it is pre-migration legacy data; opening the app imports and removes it.' },
+    { match: 'pontifexDailyDesk.history.v1', risk: 'green', note: 'Pontifex run history — capped at 200 entries (oldest evicted) as of 2026.08.' },
+    { match: 'nasaDonki.cache.v1.', risk: 'green', note: 'Space Weather API cache — stale keys evicted after 7 days, capped at 24 keys (2026.08).' },
     { match: 'lexical_exhaust_cloud.openrouter_models', risk: 'yellow', note: 'Full provider catalog with raw objects (~0.5–1 MB). Candidate for slimming or IndexedDB.' },
     { match: 'signal-drawer:cache', risk: 'yellow', note: 'Feed cache rewritten each refresh; bounded by sources but can reach a few hundred KB.' },
     { match: 'las_history', risk: 'yellow', note: 'Local AI Scratchpad fallback history — only written if IndexedDB fails. Safe to delete; app re-creates storage in IDB.' },
@@ -829,15 +914,113 @@
     });
     html.push('</ul></div>');
 
+    // Risk diagnostics: what is likely to cause the NEXT quota problem?
+    var unbounded = APP_MAP.map(function (e) { return { app: e.app, h: APP_HEALTH[e.app] }; })
+      .filter(function (x) { return x.h && x.h.growth === 'UNBOUNDED'; });
+    html.push('<div class="rec-section"><h3>Apps still growing without bounds</h3><ul class="rec-list">');
+    if (!unbounded.length) html.push('<li class="muted">None — every mapped app has a known bound or retention policy.</li>');
+    unbounded.forEach(function (x) {
+      html.push('<li><span class="badge red">UNBOUNDED</span> ' + escapeHTML(x.app) + ' — ' + escapeHTML(x.h.note || 'no retention policy') + '</li>');
+    });
+    html.push('</ul></div>');
+
+    var review = APP_MAP.map(function (e) { return { app: e.app, h: APP_HEALTH[e.app] }; })
+      .filter(function (x) { return x.h && x.h.health === 'REVIEW'; });
+    html.push('<div class="rec-section"><h3>Flagged for review (health REVIEW)</h3><ul class="rec-list">');
+    if (!review.length) html.push('<li class="muted">Nothing currently flagged.</li>');
+    review.forEach(function (x) {
+      html.push('<li><span class="badge yellow">REVIEW</span> ' + escapeHTML(x.app) + ' — ' + escapeHTML(x.h.note || 'see audit') + '</li>');
+    });
+    html.push('</ul></div>');
+
+    var OVERSIZE_LS = 64 * 1024;
+    var oversized = lsRows.filter(function (r) { return r.size > OVERSIZE_LS; })
+      .sort(function (a, b) { return b.size - a.size; });
+    html.push('<div class="rec-section"><h3>Oversized localStorage keys (over 64 KB each)</h3><ul class="rec-list">');
+    if (!oversized.length) html.push('<li class="muted">No single localStorage key exceeds 64 KB. 🎉</li>');
+    oversized.forEach(function (r) {
+      html.push('<li><span class="mono">' + escapeHTML(r.key) + '</span> — ' + formatBytes(r.size) + ' — ' + escapeHTML(r.owner) + '</li>');
+    });
+    html.push('</ul></div>');
+
+    var recreatable = APP_MAP.map(function (e) { return { app: e.app, h: APP_HEALTH[e.app] }; })
+      .filter(function (x) { return x.h && (x.h.rec === true || x.h.rec === 'partial'); });
+    html.push('<div class="rec-section"><h3>Re-creatable data kept persistently (safe to clear if needed)</h3><ul class="rec-list">');
+    if (!recreatable.length) html.push('<li class="muted">None mapped.</li>');
+    recreatable.forEach(function (x) {
+      html.push('<li>' + escapeHTML(x.app) + ' <span class="muted">(' + escapeHTML(x.h.growth.toLowerCase()) + ' — ' + escapeHTML(x.h.retention) + ')</span></li>');
+    });
+    html.push('</ul></div>');
+
+    var healthyBig = ['Image Context Inspector', 'Wildlife Field Recorder', 'OpenAI Image Batch Generator', 'What Should I Eat', 'Wildlife-pattern-lab'];
+    html.push('<div class="rec-section"><h3>Large-but-healthy IndexedDB apps (do not panic about their size)</h3><ul class="rec-list">' +
+      '<li>Image Context Inspector, Wildlife Field Recorder, OpenAI Image Batch Generator, What Should I Eat and Gibson Wetlands keep user photos/audio/blobs in IndexedDB with explicit cleanup UI. They can legitimately reach hundreds of MB and remain healthy.</li>' +
+      '<li>Per-database byte figures are not exposed by browsers; judge these apps by their retention UI, not their size.</li>' +
+      '</ul></div>');
+
     // Standing guidance from the audit
     html.push('<div class="rec-section"><h3>Repository guidance (from docs/storage-audit-2026-08.md)</h3><ul class="rec-list">' +
       '<li>localStorage is for kilobytes of preferences — never images, base64 payloads, growing histories, or raw API responses.</li>' +
       '<li>Growing data belongs in IndexedDB record stores with an intentional retention policy (count cap, age cap, or explicit clear UI).</li>' +
-      '<li>Known in-app retention gaps (no auto-prune): Polymarket time-series/logs, Crypto Mood Ring llmAnalyses/fetchLogs, Watchtower events, Content Radar items, Wildlife Pattern Lab logs, Berry 3R archives (orphaned on row delete), SongForge image blobs (orphans before the fix).</li>' +
+      '<li>Remaining retention gaps (no auto-prune): Berry 3R archives (out of scope — active development), GBIF dead cache store, Wildlife Pattern Lab logs, and Resume Job Matcher evaluations. Details in docs/storage-audit-2026-08.md.</li>' +
       '<li>API keys in localStorage are an accepted repo convention but stay opt-in; several apps expose clear-key controls — prefer those over deleting keys here.</li>' +
       '</ul></div>');
 
     el.innerHTML = html.join('');
+  }
+
+  // ---------------------------------------------------------------------
+  // Application health view (growth/retention metadata + live LS sizes).
+  // ---------------------------------------------------------------------
+  function appLiveLsSize(appName) {
+    var total = 0;
+    lsRows.forEach(function (r) {
+      if (r.owner === appName) total += r.size;
+    });
+    return total;
+  }
+  function healthBadgeClass(health) {
+    return health === 'GOOD' ? 'green' : health === 'REVIEW' ? 'yellow'
+      : health === 'MIGRATE' ? 'orange' : health === 'LEGACY' ? 'red' : 'dim';
+  }
+  function renderAppsTable() {
+    var wrap = $('appsTableWrap');
+    var filter = ($('appFilter').value || '').trim().toLowerCase();
+    var rows = APP_MAP.filter(function (e) { return e.app !== 'DuckDB (Quack Drawer v2)' || e.note; });
+    var data = rows.map(function (e) {
+      var h = APP_HEALTH[e.app] || { growth: 'UNKNOWN', retention: 'unknown', rec: null, health: 'UNKNOWN' };
+      return { app: e.app, file: e.file, dbs: e.dbs || [], h: h, ls: appLiveLsSize(e.app) };
+    });
+    var filtered = data.filter(function (d) {
+      if (!filter) return true;
+      return d.app.toLowerCase().indexOf(filter) >= 0 ||
+        d.h.health.toLowerCase().indexOf(filter) >= 0 ||
+        d.h.growth.toLowerCase().indexOf(filter) >= 0;
+    });
+    filtered.sort(function (a, b) { return b.ls - a.ls; });
+    $('appCount').textContent = filtered.length + ' of ' + data.length + ' apps';
+    if (!filtered.length) {
+      wrap.innerHTML = '<p class="muted">No apps match this filter.</p>';
+      return;
+    }
+    var html = ['<table><thead><tr><th scope="col">Application</th><th scope="col" class="num">localStorage</th><th scope="col">IndexedDB</th><th scope="col">Growth</th><th scope="col">Retention</th><th scope="col">Re-creatable</th><th scope="col">Health</th></tr></thead><tbody>'];
+    filtered.forEach(function (d) {
+      var recLabel = d.h.rec === true ? 'Yes' : d.h.rec === 'partial' ? 'Partial' : d.h.rec === false ? 'No' : '—';
+      html.push(
+        '<tr>' +
+        '<td>' + escapeHTML(d.app) + '<br /><span class="muted" style="font-size:0.75rem;">' + escapeHTML(d.file || '') + '</span></td>' +
+        '<td class="num">' + (d.ls > 0 ? formatBytes(d.ls) : '<span class="muted">0 B</span>') + '</td>' +
+        '<td class="muted" style="font-size:0.78rem;">' + (d.dbs.length ? d.dbs.map(escapeHTML).join('<br />') : '—') + '</td>' +
+        '<td><span class="badge ' + (d.h.growth === 'UNBOUNDED' ? 'red' : d.h.growth === 'UNKNOWN' ? 'dim' : '') + '">' + escapeHTML(d.h.growth) + '</span></td>' +
+        '<td class="muted" style="font-size:0.78rem;">' + escapeHTML(d.h.retention || '—') + '</td>' +
+        '<td class="muted">' + recLabel + '</td>' +
+        '<td><span class="badge ' + healthBadgeClass(d.h.health) + '">' + escapeHTML(d.h.health) + '</span>' +
+        (d.h.note ? '<br /><span class="muted" style="font-size:0.72rem;">' + escapeHTML(d.h.note) + '</span>' : '') +
+        '</td></tr>'
+      );
+    });
+    html.push('</tbody></table>');
+    wrap.innerHTML = html.join('');
   }
 
   // ---------------------------------------------------------------------
@@ -852,6 +1035,7 @@
     setStatus(status, 'Scanning storage…');
     lsRows = scanLocalStorage();
     renderLsTable();
+    renderAppsTable();
     refreshOverview();
     renderRecommendations();
     return listDatabases().then(function (dbs) {
@@ -875,6 +1059,7 @@
   // ---------------------------------------------------------------------
   var tabs = [
     { btn: 'tab-ls', panel: 'panel-ls' },
+    { btn: 'tab-apps', panel: 'panel-apps' },
     { btn: 'tab-idb', panel: 'panel-idb' },
     { btn: 'tab-cache', panel: 'panel-cache' },
     { btn: 'tab-rec', panel: 'panel-rec' }
@@ -1084,6 +1269,7 @@
   $('refreshBtn').addEventListener('click', refreshAll);
   $('lsSort').addEventListener('change', renderLsTable);
   $('lsFilter').addEventListener('input', renderLsTable);
+  $('appFilter').addEventListener('input', renderAppsTable);
 
   window.__SM_TEST__ = {
     scanLocalStorage: scanLocalStorage,
@@ -1094,7 +1280,10 @@
     auditInfo: auditInfo,
     summarizeShape: summarizeShape,
     refreshAll: refreshAll,
-    lsRowCount: function () { return lsRows.length; }
+    lsRowCount: function () { return lsRows.length; },
+    appHealth: APP_HEALTH,
+    appLiveLsSize: appLiveLsSize,
+    renderAppsTable: renderAppsTable
   };
 
   refreshAll();

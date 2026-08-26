@@ -478,9 +478,9 @@
   </section>
 </div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  <span>Copyright &copy; 2026 Hank Marquardt.</span> <span>Version 2026.06.01.1.</span>
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  <span>Copyright &copy; 2026 Hank Marquardt.</span> <span>Version 2026.08.26.2.</span>
 </footer>
 
 <div class="toast" id="toast"></div>
@@ -503,6 +503,7 @@
 
   const DB_NAME = 'watchtowerDB';
   const DB_VERSION = 1;
+  const RETENTION = { eventAgeDays: 30, eventMax: 5000, scanMax: 500 };
   let db = null;
   let aiSession = null;
 
@@ -1004,6 +1005,80 @@
   }
 
   // ============================================================
+  // Retention
+  // ============================================================
+  let pendingPruneCount = 0;
+
+  function idbRequest(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function idbDone(tx) {
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function pruneRetention() {
+    if (!db || !db.objectStoreNames.contains('events')) return;
+    try {
+      const store = () => db.transaction('events', 'readonly').objectStore('events');
+      const walkFetchedAt = (range, visit) => new Promise((resolve, reject) => {
+        const req = store().index('fetchedAt').openCursor(range || null);
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) return resolve();
+          if (visit(cursor) === false) return resolve();
+          cursor.continue();
+        };
+        req.onerror = () => reject(req.error);
+      });
+
+      const doomed = new Set();
+      const total = await idbRequest(store().count());
+      const cutoff = new Date(Date.now() - RETENTION.eventAgeDays * 86400000).toISOString();
+      await walkFetchedAt(IDBKeyRange.upperBound(cutoff), (cursor) => {
+        if (cursor.value.starred !== true) doomed.add(cursor.primaryKey);
+      });
+      if (total - doomed.size > RETENTION.eventMax) {
+        await walkFetchedAt(null, (cursor) => {
+          if (cursor.value.starred === true || doomed.has(cursor.primaryKey)) return true;
+          if (total - doomed.size <= RETENTION.eventMax) return false;
+          doomed.add(cursor.primaryKey);
+          return true;
+        });
+      }
+
+      if (doomed.size) {
+        const rwTx = db.transaction('events', 'readwrite');
+        const evRw = rwTx.objectStore('events');
+        doomed.forEach(id => evRw.delete(id));
+        await idbDone(rwTx);
+      }
+
+      const scanIds = await idbRequest(db.transaction('scans', 'readonly').objectStore('scans').getAllKeys());
+      const scanOverflow = scanIds.length - RETENTION.scanMax;
+      if (scanOverflow > 0) {
+        const delTx = db.transaction('scans', 'readwrite');
+        const scRw = delTx.objectStore('scans');
+        scanIds.slice(0, scanOverflow).forEach(key => scRw.delete(key));
+        await idbDone(delTx);
+      }
+      pendingPruneCount = 0;
+    } catch (e) {}
+  }
+
+  function notePruneAfterInsert(count) {
+    pendingPruneCount += count || 0;
+    if (pendingPruneCount >= 100) pruneRetention();
+  }
+
+  // ============================================================
   // Fetchers
   // ============================================================
   async function fetchNasaDonki(watcher) {
@@ -1201,6 +1276,7 @@
     events.forEach(scoreEvent);
     const added = await deduplicate(events);
     state.newEventsThisSession += added.length;
+    notePruneAfterInsert(added.length);
     const partialErrors = watcher._lastPartialErrors || [];
     watcher.status = partialErrors.length ? 'partial' : 'ok';
     watcher.lastError = partialErrors.length ? partialErrors.slice(0, 2).join(' | ') : null;
@@ -1904,6 +1980,7 @@
   // ============================================================
   async function init() {
     await initDb();
+    pruneRetention();
     await loadSettings();
     await loadWatchers();
     await loadEvents();
@@ -1916,6 +1993,15 @@
       if (el('panel-field').classList.contains('active')) renderSignalField();
     }, 1200);
   }
+
+  window.__WT_TEST__ = {
+    RETENTION,
+    pruneRetention,
+    counts: async () => ({
+      events: await idbRequest(db.transaction('events', 'readonly').objectStore('events').count()),
+      scans: await idbRequest(db.transaction('scans', 'readonly').objectStore('scans').count())
+    })
+  };
 
   init();
 })();

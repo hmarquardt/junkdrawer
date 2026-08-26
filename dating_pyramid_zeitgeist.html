@@ -676,8 +676,8 @@
 </div>
 
 <!-- Footer -->
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.01.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.01.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(107, 101, 96, 0.8); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
   <div style="margin-bottom:0.5rem; display:flex; align-items:center; justify-content:center; gap:0.75rem;">
     <span>Part of Hank's Junk Drawer</span>
     <button id="btn-bug" class="btn btn-sm" style="padding:0.3rem 0.5rem;" aria-label="Activity log" title="Activity log">
@@ -688,7 +688,7 @@
       </svg>
     </button>
   </div>
-  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.06.01.1</div>
+  <div>&copy; 2026 Hank Marquardt &middot; Maslow's Pyramid of Romance &middot; version 2026.08.26.2</div>
 </footer>
 
 <script>
@@ -979,6 +979,317 @@ function renderLogs() {
   }).join('');
 }
 
+/* ================================================================
+   CORPUS STORAGE — IndexedDB
+   Source corpus text lives in the IndexedDB database
+   'dpz-zeitgeist-corpus' (version 1), object store 'corpus',
+   keyed by source id. Record shape:
+     { id: <sourceId string>,
+       text: <corpus text, capped at 50000 chars>,
+       origin: 'fetched' | 'manual',
+       storedAt: <epoch ms>,
+       length: <text.length> }
+   At boot the full corpus is mirrored into an in-memory Map
+   (id -> text); read-path callers hit only that Map so rendering
+   stays synchronous. Legacy localStorage keys 'dpz_source_content_<id>'
+   are migrated into IDB once by migrateCorpusIfNeeded(); if IDB is
+   unavailable or migration fails we keep reading those keys with
+   the original behavior. All other dpz_* keys stay in localStorage.
+   ================================================================ */
+const CORPUS_DB_NAME = 'dpz-zeitgeist-corpus';
+const CORPUS_DB_VERSION = 1;
+const CORPUS_STORE = 'corpus';
+const LEGACY_CONTENT_PREFIX = LS_PREFIX + 'source_content_';
+const CORPUS_MIGRATION_MARKER_KEY = 'dpz_corpus_migrated.v2';
+let CORPUS_DB = null;
+let CORPUS_MODE = 'legacy'; // 'idb' once IDB-backed reads are active
+const CORPUS_MAP = new Map();
+
+function openCorpusDB() {
+  return new Promise((resolve) => {
+    let req;
+    try {
+      req = indexedDB.open(CORPUS_DB_NAME, CORPUS_DB_VERSION);
+    } catch (e) {
+      console.warn('Corpus IDB unavailable:', e && e.message);
+      resolve(null);
+      return;
+    }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(CORPUS_STORE)) {
+        db.createObjectStore(CORPUS_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => {
+      CORPUS_DB = req.result;
+      CORPUS_DB.onversionchange = () => {
+        try { CORPUS_DB.close(); } catch (e) {}
+        CORPUS_DB = null;
+      };
+      resolve(CORPUS_DB);
+    };
+    req.onerror = () => {
+      console.warn('Corpus IDB open failed:', req.error && req.error.message);
+      resolve(null);
+    };
+    req.onblocked = () => {
+      console.warn('Corpus IDB open blocked; using localStorage fallback.');
+      resolve(null);
+    };
+  });
+}
+
+function legacySourceKeys() {
+  const keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(LEGACY_CONTENT_PREFIX)) keys.push(k);
+    }
+  } catch (e) {}
+  return keys;
+}
+
+function idbRun(storeMode, op) {
+  // Shared transaction wrapper; resolves false on any failure (never throws).
+  return new Promise((resolve) => {
+    if (!CORPUS_DB) { resolve(false); return; }
+    let tx;
+    try {
+      tx = CORPUS_DB.transaction(CORPUS_STORE, storeMode);
+      op(tx.objectStore(CORPUS_STORE));
+    } catch (e) {
+      console.warn('Corpus IDB error:', e && e.message);
+      resolve(false);
+      return;
+    }
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => { console.warn('Corpus IDB error:', tx.error && tx.error.message); resolve(false); };
+    tx.onabort = () => { console.warn('Corpus IDB aborted:', tx.error && tx.error.message); resolve(false); };
+  });
+}
+
+function idbPut(record) {
+  return idbRun('readwrite', store => store.put(record));
+}
+function idbDelete(id) {
+  return idbRun('readwrite', store => store.delete(id));
+}
+function idbClear() {
+  return idbRun('readwrite', store => store.clear());
+}
+
+async function idbCount() {
+  return new Promise((resolve) => {
+    if (!CORPUS_DB) { resolve(0); return; }
+    let tx;
+    try { tx = CORPUS_DB.transaction(CORPUS_STORE, 'readonly'); }
+    catch (e) { resolve(0); return; }
+    let count = 0;
+    try {
+      const req = tx.objectStore(CORPUS_STORE).count();
+      req.onsuccess = () => { count = req.result || 0; };
+    } catch (e) { resolve(0); return; }
+    tx.oncomplete = () => resolve(count);
+    tx.onerror = () => resolve(0);
+    tx.onabort = () => resolve(0);
+  });
+}
+
+// Migrate legacy localStorage corpus keys into IDB. Idempotent:
+// legacy keys are the source of truth while any remain; the marker
+// records completed migrations. On failure legacy data is preserved.
+async function migrateCorpusIfNeeded() {
+  if (!CORPUS_DB || !CORPUS_DB.objectStoreNames.contains(CORPUS_STORE)) {
+    CORPUS_MODE = 'legacy';
+    console.warn('Corpus migration skipped: IndexedDB unavailable; reading corpus from localStorage.');
+    return false;
+  }
+
+  const legacyKeys = legacySourceKeys();
+  if (!legacyKeys.length) {
+    try {
+      const existing = localStorage.getItem(CORPUS_MIGRATION_MARKER_KEY);
+      if (!existing) {
+        localStorage.setItem(CORPUS_MIGRATION_MARKER_KEY, JSON.stringify({ migratedAt: Date.now(), count: 0 }));
+      }
+    } catch (e) {}
+    CORPUS_MODE = 'idb';
+    return true;
+  }
+
+  try {
+    // Infer origin from the persisted source list (best effort).
+    const sourcesById = {};
+    try {
+      const list = JSON.parse(localStorage.getItem(LS_PREFIX + 'sources') || '[]');
+      if (Array.isArray(list)) for (const s of list) if (s && s.id != null) sourcesById[s.id] = s;
+    } catch (e) {}
+
+    const records = [];
+    const touchedKeys = [];
+    for (const key of legacyKeys) {
+      const id = key.slice(LEGACY_CONTENT_PREFIX.length);
+      if (!id) continue;
+      let text = null;
+      try { text = localStorage.getItem(key); } catch (e) {}
+      if (text == null) continue;
+      const meta = sourcesById[id];
+      const origin = (meta && (meta.type === 'manual' || meta.type === 'user')) ? 'manual' : 'fetched';
+      records.push({ id, text, origin, storedAt: Date.now(), length: text.length });
+      touchedKeys.push(key);
+    }
+
+    if (!records.length) {
+      // Keys exist but were unreadable — leave everything untouched.
+      CORPUS_MODE = 'legacy';
+      console.warn('Corpus migration skipped: legacy values unreadable.');
+      return false;
+    }
+
+    const ok = await new Promise((resolve) => {
+      let tx;
+      try { tx = CORPUS_DB.transaction(CORPUS_STORE, 'readwrite'); }
+      catch (e) { resolve(false); return; }
+      try {
+        const store = tx.objectStore(CORPUS_STORE);
+        for (const rec of records) store.put(rec);
+      } catch (e) {
+        try { tx.abort(); } catch (e2) {}
+        resolve(false);
+        return;
+      }
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    });
+    if (!ok) throw new Error('corpus write transaction failed');
+
+    // Verify before destroying anything.
+    const count = await idbCount();
+    if (count < records.length) throw new Error('post-migration count mismatch (' + count + ' < ' + records.length + ')');
+
+    // Commit: drop migrated legacy keys, then record the marker.
+    for (const key of touchedKeys) {
+      try { localStorage.removeItem(key); } catch (e) {}
+    }
+    try {
+      localStorage.setItem(CORPUS_MIGRATION_MARKER_KEY, JSON.stringify({ migratedAt: Date.now(), count: records.length }));
+    } catch (e) {}
+    logEvent('info', 'Corpus migrated to IndexedDB', { records: records.length });
+    CORPUS_MODE = 'idb';
+    return true;
+  } catch (e) {
+    CORPUS_MODE = 'legacy';
+    console.warn('Corpus migration failed; legacy localStorage keys preserved.', e && e.message);
+    return false;
+  }
+}
+
+async function loadCorpusIntoMemory() {
+  CORPUS_MAP.clear();
+  if (CORPUS_MODE === 'idb' && CORPUS_DB) {
+    await new Promise((resolve) => {
+      let tx;
+      try { tx = CORPUS_DB.transaction(CORPUS_STORE, 'readonly'); }
+      catch (e) {
+        console.warn('Corpus load failed; falling back to localStorage.', e && e.message);
+        CORPUS_MODE = 'legacy';
+        resolve();
+        return;
+      }
+      try {
+        const req = tx.objectStore(CORPUS_STORE).getAll();
+        req.onsuccess = () => {
+          for (const rec of (req.result || [])) {
+            if (rec && rec.id != null) CORPUS_MAP.set(rec.id, rec.text || '');
+          }
+        };
+      } catch (e) {
+        console.warn('Corpus load failed; falling back to localStorage.', e && e.message);
+        CORPUS_MODE = 'legacy';
+        resolve();
+        return;
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => {
+        console.warn('Corpus load failed; falling back to localStorage.');
+        CORPUS_MODE = 'legacy';
+        resolve();
+      };
+      tx.onabort = () => {
+        console.warn('Corpus load aborted; falling back to localStorage.');
+        CORPUS_MODE = 'legacy';
+        resolve();
+      };
+    });
+  }
+  if (CORPUS_MODE === 'legacy') {
+    // Mirror whatever corpus still lives in localStorage.
+    for (const key of legacySourceKeys()) {
+      const id = key.slice(LEGACY_CONTENT_PREFIX.length);
+      let text = null;
+      try { text = localStorage.getItem(key); } catch (e) {}
+      if (text != null) CORPUS_MAP.set(id, text);
+    }
+  }
+}
+
+// Synchronous read used by render paths (replaces direct getItem calls).
+function getStoredSourceText(id) {
+  if (CORPUS_MODE === 'idb') return CORPUS_MAP.get(id) || '';
+  try {
+    return localStorage.getItem(LEGACY_CONTENT_PREFIX + id) || '';
+  } catch (e) {
+    return CORPUS_MAP.get(id) || '';
+  }
+}
+
+// Memory Map update + async guarded IDB write (never throws).
+function storeSourceCorpus(id, cappedText, origin) {
+  const clean = String(cappedText == null ? '' : cappedText);
+  CORPUS_MAP.set(id, clean);
+  const record = { id, text: clean, origin: origin === 'manual' ? 'manual' : 'fetched', storedAt: Date.now(), length: clean.length };
+  idbPut(record).then(ok => {
+    if (!ok) {
+      logEvent('error', 'Corpus save to IndexedDB failed', { source: id });
+      snack('Corpus kept in memory only — browser storage refused it');
+    }
+  });
+}
+
+function deleteSourceCorpus(id) {
+  CORPUS_MAP.delete(id);
+  idbDelete(id).then(ok => {
+    if (!ok) logEvent('warn', 'Corpus delete from IndexedDB failed', { source: id });
+  });
+}
+
+function clearLegacyCorpusKeys() {
+  for (const key of legacySourceKeys()) {
+    try { localStorage.removeItem(key); } catch (e) {}
+  }
+}
+
+// Full purge used by resetSources()/clearCache(): IDB store + memory
+// Map + any surviving legacy localStorage keys (pre-migration defense).
+function purgeCorpusStorage(label) {
+  CORPUS_MAP.clear();
+  clearLegacyCorpusKeys();
+  return idbClear().then(ok => {
+    if (!ok) {
+      logEvent('error', label + ': failed to clear corpus store');
+      snack('Some cached corpus could not be cleared from storage');
+      return false;
+    }
+    try {
+      localStorage.setItem(CORPUS_MIGRATION_MARKER_KEY, JSON.stringify({ migratedAt: Date.now(), count: 0 }));
+    } catch (e) {}
+    return true;
+  });
+}
+
 async function fetchModels(key, currentModel) {
   const sel = document.getElementById('or-model');
   const status = document.getElementById('or-model-status');
@@ -1188,14 +1499,14 @@ function buildCorpus(mode) {
     if (!src.enabled) continue;
     if (src.seedMode && src.seedMode !== mode) continue;
     if (src.type === 'manual' || src.type === 'user') {
-      const content = localStorage.getItem(LS_PREFIX + 'source_content_' + src.id) || '';
+      const content = getStoredSourceText(src.id);
       if (content) corpus += ' ' + content;
     }
   }
   for (const src of STATE.sources) {
     if (!src.enabled) continue;
     if (src.type === 'manual' || src.type === 'user' || src.seedMode) continue;
-    const content = localStorage.getItem(LS_PREFIX + 'source_content_' + src.id) || '';
+    const content = getStoredSourceText(src.id);
     if (content) corpus += ' ' + content;
   }
   return corpus;
@@ -1771,7 +2082,7 @@ async function refreshSources() {
     }
     if (result.ok) {
       const text = normalize(result.text);
-      localStorage.setItem(LS_PREFIX + 'source_content_' + src.id, text.substring(0, 50000));
+      storeSourceCorpus(src.id, text.substring(0, 50000), 'fetched');
       src.lastStatus = 'ok';
       src.lastFetched = Date.now();
       okCount++;
@@ -1944,7 +2255,7 @@ function editSource(id) {
 function deleteSource(id) {
   if (!confirm('Delete this source?')) return;
   STATE.sources = STATE.sources.filter(x => x.id !== id);
-  localStorage.removeItem(LS_PREFIX + 'source_content_' + id);
+  deleteSourceCorpus(id);
   saveSources();
   renderSources();
   renderPyramid();
@@ -1985,9 +2296,7 @@ function saveSourceForm() {
 function resetSources() {
   if (!confirm('Reset all sources to defaults? This will remove user-added sources.')) return;
   STATE.sources = JSON.parse(JSON.stringify(DEFAULT_SOURCES));
-  for (const key of Object.keys(localStorage)) {
-    if (key.startsWith(LS_PREFIX + 'source_content_')) localStorage.removeItem(key);
-  }
+  purgeCorpusStorage('Sources reset');
   saveSources();
   renderSources();
   renderPyramid();
@@ -1995,9 +2304,7 @@ function resetSources() {
 }
 function clearCache() {
   if (!confirm('Clear all fetched source cache?')) return;
-  for (const key of Object.keys(localStorage)) {
-    if (key.startsWith(LS_PREFIX + 'source_content_')) localStorage.removeItem(key);
-  }
+  purgeCorpusStorage('Cache cleared');
   for (const s of STATE.sources) {
     if (!s.seedMode) { s.lastStatus = 'none'; s.lastFetched = null; }
   }
@@ -2060,7 +2367,7 @@ function processManual() {
   const id = 'manual-' + Date.now();
   const src = { id, name, url:'', type:'manual', defaultWeight:1.0, weight:1.0, enabled:true, notes:'', lastStatus:'ok', lastFetched:Date.now() };
   STATE.sources.push(src);
-  localStorage.setItem(LS_PREFIX + 'source_content_' + id, text.substring(0, 50000));
+  storeSourceCorpus(id, text.substring(0, 50000), 'manual');
   saveSources();
   renderSources();
   renderPyramid();
@@ -2221,14 +2528,35 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => renderPyramid(), 250);
 });
 
-// Init
-loadState();
-setSelect('time-window', STATE.timeWindow);
-setSelect('lens-select', STATE.lens);
-setSelect('source-mix', STATE.sourceMix);
-applyMode();
-renderPyramid();
-logEvent('info', 'Page initialized', { mode: STATE.mode, lens: STATE.lens, mix: STATE.sourceMix });
+// Non-visual test hook
+window.__DPZ_TEST__ = {
+  corpusMode: () => CORPUS_MODE,
+  corpusMapSize: () => CORPUS_MAP.size,
+  idbCorpusCount: () => idbCount(),
+  getCorpus: (id) => getStoredSourceText(String(id)),
+  migrateCorpusIfNeeded,
+  legacyKeyCount: () => legacySourceKeys().length
+};
+
+// Init — open IDB, migrate any legacy corpus keys, mirror the corpus
+// into memory, then run the original synchronous boot.
+(async function init() {
+  await openCorpusDB();
+  try {
+    await migrateCorpusIfNeeded();
+  } catch (e) {
+    CORPUS_MODE = 'legacy';
+    console.warn('Corpus migration failed; falling back to localStorage.', e && e.message);
+  }
+  await loadCorpusIntoMemory();
+  loadState();
+  setSelect('time-window', STATE.timeWindow);
+  setSelect('lens-select', STATE.lens);
+  setSelect('source-mix', STATE.sourceMix);
+  applyMode();
+  renderPyramid();
+  logEvent('info', 'Page initialized', { mode: STATE.mode, lens: STATE.lens, mix: STATE.sourceMix, corpusMode: CORPUS_MODE });
+})();
 </script>
 </body>
 </html>

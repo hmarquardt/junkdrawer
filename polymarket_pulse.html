@@ -511,6 +511,7 @@
       const DB_NAME = "PolymarketPulseDB";
       const LS_SETTINGS = "polymarketPulse.settings.v1";
       const LS_KEY = "polymarketPulse.openAiKey";
+      const RETENTION_CAPS = { marketTicks: 20000, orderBooks: 5000, marketSnapshots: 5000, fetchLogs: 500, llmAnalyses: 200 };
       const FALLBACK_OPENAI_MODELS = ["gpt-5-mini", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-nano", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"];
       const DEFAULT_SETTINGS = {
         theme: "dark",
@@ -582,6 +583,8 @@
         await initDb();
         await seedDefaultsIfNeeded();
         await refreshCaches();
+        pruneStaleData(true).catch(() => {});
+        applyRetentionCaps();
         fillSettingsForm();
         setDefaultExplorerBrowseMode();
         queueRender();
@@ -619,7 +622,7 @@
         on("presetBtc5Btn", "click", applyBtcPreset);
         on("refreshFollowRestBtn", "click", refreshFollowedRest);
         on("subscribeFollowBtn", "click", resubscribeWebSocket);
-        on("pruneBtn", "click", pruneStaleData);
+        on("pruneBtn", "click", () => pruneStaleData());
         on("saveSettingsBtn", "click", () => { readSettingsForm(); saveSettings(); applyTheme(); startIntervals(); showToast("Settings saved"); });
         on("saveLlmSettingsBtn", "click", () => { readLlmSettingsForm(); saveSettings(); fillSettingsForm(); showToast("LLM settings saved"); queueRender(); });
         on("clearKeyBtn", "click", clearOpenAiKey);
@@ -1375,6 +1378,7 @@
             parsed
           };
           await state.db.llmAnalyses.add(row);
+          capStoreRows(state.db.llmAnalyses, RETENTION_CAPS.llmAnalyses);
           state.providerStatus.llm.state = "ok";
           state.providerStatus.llm.lastOk = Date.now();
           await refreshCaches();
@@ -1754,7 +1758,27 @@
       function marketHaystack(m) { return [m.question, m.eventTitle, m.slug, m.category, m.resolutionSource, ...(m.tags || []), ...(m.outcomes || [])].join(" ").toLowerCase(); }
       function haystack(a) { return [a.title, a.summary, a.sourceName, a.url, ...(a.matchedTerms || [])].join(" ").toLowerCase(); }
 
-      async function pruneStaleData() {
+      async function capStoreRows(table, max, orderField) {
+        try {
+          const count = await table.count();
+          if (count <= max) return;
+          const overflowKeys = await table.orderBy(orderField || ":id").limit(count - max).primaryKeys();
+          if (overflowKeys.length) await table.bulkDelete(overflowKeys);
+        } catch {}
+      }
+
+      function applyRetentionCaps() {
+        if (!state.db) return Promise.resolve();
+        return Promise.all([
+          capStoreRows(state.db.marketTicks, RETENTION_CAPS.marketTicks),
+          capStoreRows(state.db.orderBooks, RETENTION_CAPS.orderBooks),
+          capStoreRows(state.db.marketSnapshots, RETENTION_CAPS.marketSnapshots),
+          capStoreRows(state.db.fetchLogs, RETENTION_CAPS.fetchLogs),
+          capStoreRows(state.db.llmAnalyses, RETENTION_CAPS.llmAnalyses)
+        ]).catch(() => {});
+      }
+
+      async function pruneStaleData(silent = false) {
         await pruneNews();
         const cutoff = Date.now() - state.settings.priceRetentionDays * 86400000;
         await state.db.marketTicks.where("timestamp").below(cutoff).delete().catch(() => {});
@@ -1765,7 +1789,7 @@
         const oldResolved = [...state.markets.values()].filter(m => !followed.has(m.id) && (m.resolved || m.closed) && num(m.updatedAt) < resolvedCutoff);
         await state.db.markets.bulkDelete(oldResolved.map(m => m.id));
         await refreshCaches();
-        showToast("Old market/news data pruned");
+        if (!silent) showToast("Old market/news data pruned");
         queueRender();
       }
 
@@ -2088,13 +2112,13 @@
       function cryptoRandom() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
       function summarizeLlmInput(input) { return `${input.followedMarkets.length} followed markets, ${input.topExplorerQuickMarkets.length} quick explorer markets, ${input.tailoredNewsStories.length} news stories`; }
       function showToast(message, tone = "") { const el = document.createElement("div"); el.className = "toast " + tone; el.textContent = message; state.els.toastStack?.appendChild(el); setTimeout(() => el.remove(), 4200); }
-      async function logEvent(level, type, message, extra) { try { await state.db?.fetchLogs.add({ timestamp: Date.now(), level, type, message: extra ? `${message}\n${JSON.stringify(extra, null, 2)}` : message }); } catch {} }
+      async function logEvent(level, type, message, extra) { try { await state.db?.fetchLogs.add({ timestamp: Date.now(), level, type, message: extra ? `${message}\n${JSON.stringify(extra, null, 2)}` : message }); capStoreRows(state.db.fetchLogs, RETENTION_CAPS.fetchLogs); } catch {} }
       function logError(type, err, extra) { logEvent("error", type, String(err?.stack || err?.message || err), extra); }
     })();
   </script>
-    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.05.3" bump="Update this version whenever this file changes in a commit." -->
-    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.05.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-      &copy; Hank Marquardt 2026 &middot; Version 2026.06.05.3
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.2" bump="Update this version whenever this file changes in a commit." -->
+    <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+      &copy; Hank Marquardt 2026 &middot; Version 2026.08.26.2
   </footer>
 </body>
 </html>
