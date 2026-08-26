@@ -464,7 +464,7 @@ test('automatic repair fixes only a short reason', async ({ page }) => {
   await expect(page.locator('#aiStatus')).toContainText('Ready.');
   const out = await page.evaluate(() => ({ final: __BERRY3R_TEST__.state.final, repairs: __BERRY3R_TEST__.state.repairs, calls: __BERRY3R_TEST__.state.aiCalls }));
   expect(out.final.aestheticsReason).toBe(autoReasons.aesthetics);
-  expect(out.final.functionalityReason).toBe(autoReasons.functionality);
+  expect(out.final.functionalityReason).toBe(autoReasons.functionality.replace(/^Website B is better because Website B includes/, 'Website B is better because it includes'));
   expect(out.final.overallReason).toBe(autoReasons.overall);
   expect(out.repairs.map(r => r.field)).toEqual(['functionality']);
   expect(out.calls).toBe(7);
@@ -479,7 +479,7 @@ test('human override survives a complete automatic rerun', async ({ page }) => {
   await expect(page.locator('#aiStatus')).toContainText('Ready.');
   const out = await page.evaluate(() => __BERRY3R_TEST__.state.final);
   expect(out.aestheticsReason).toBe(human);
-  expect(out.functionalityReason).toBe(autoReasons.functionality);
+  expect(out.functionalityReason).toBe(autoReasons.functionality.replace(/^Website B is better because Website B includes/, 'Website B is better because it includes'));
 });
 
 test('issue-report copy requires and includes Feather and annotation links', async ({ page }) => {
@@ -1427,4 +1427,147 @@ test('final answers cannot reach READY while a decision-semantic contradiction s
   expect(out.valid).toBe(false);
   expect(out.title).not.toContain('READY TO SUBMIT');
   expect(out.title).toMatch(/field issue/);
+});
+
+// ---------- Phase 5.1: Tautological openings ----------
+
+const compileIn = (page, dim, option, text) => page.evaluate(({ dim, option, text }) => window.__BERRY3R_TEST__.compileFinalReason(dim, option, text), { dim, option, text });
+
+test('real failure "Website A is better because Website A is better" compiles to substantive opening', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because Website A is better. Website A presents a polished dashboard with clear hierarchy.');
+  expect(out).toBe('Website A is better because it presents a polished dashboard with clear hierarchy.');
+});
+
+test('Website B equivalent collapses to the required opening joined to substance', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'functionality', 'B is better', 'Website B is better because Website B is the better website. Website B provides the requested settings panel and both sites keep their core content present.');
+  expect(out.startsWith('Website B is better because it provides the requested settings panel')).toBe(true);
+  expect(out).not.toContain('is the better website');
+});
+
+test('"it is superior" verdict clause is removed and the next sentence pronoun-joins', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because it is superior. Website A has clearer hierarchy throughout the page layout and spacing choices.');
+  expect(out).toBe('Website A is better because it has clearer hierarchy throughout the page layout and spacing choices.');
+});
+
+test('"the better option overall" restatement is collapsed', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'overall', 'B is better', 'Website B is better because it is the better option overall. Website B answers more of the requested structure while keeping its sections complete.');
+  expect(out.startsWith('Website B is better because it answers more of the requested structure')).toBe(true);
+});
+
+test('tie-good tautology drops straight into substantive comparison', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'Both are good', 'Both websites are good because both websites are good. Website A uses calmer spacing while Website B offers denser but tidy panels across every section.');
+  expect(out.startsWith('Website A and Website B are tied as good options because Website A uses calmer spacing')).toBe(true);
+  expect(out).not.toContain('both websites are good');
+});
+
+test('tie-bad "both are poor" tautology collapses identically', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'Both are bad', 'Both websites are bad because both are poor. Website A drops the requested settings flow entirely, while Website B never finishes loading its lists.');
+  expect(out.startsWith('Website A and Website B are tied as bad options because Website A drops')).toBe(true);
+  expect(out).not.toMatch(/both (websites )?are poor/i);
+});
+
+test('legitimate evidence-first first sentence passes through untouched', async ({ page }) => {
+  await open(page);
+  const good = 'Website A is better because it presents a clearer dashboard hierarchy with populated KPI cards and more cohesive panel organization.';
+  const out = await compileIn(page, 'aesthetics', 'A is better', good);
+  expect(out).toBe(good);
+  const comparative = await compileIn(page, 'overall', 'A is better', 'A is better because its layout wins while Website B still renders better print styles for tables than most peers reviewed here today.');
+  expect(comparative).toContain('Website B still renders better print styles for tables');
+});
+
+test('compiler remains idempotent across repeated runs', async ({ page }) => {
+  await open(page);
+  const raw = 'Website B is better because Website B is superior overall. Website B provides working preference screens while Website A stops at the baseline timer.';
+  const once = await compileIn(page, 'functionality', 'B is better', raw);
+  const twice = await compileIn(page, 'functionality', 'B is better', once);
+  const thrice = await compileIn(page, 'functionality', 'B is better', twice);
+  expect(twice).toBe(once);
+  expect(thrice).toBe(once);
+});
+
+test('substantive continuation is preserved after the tautology removal', async ({ page }) => {
+  await open(page);
+  const tail = 'with populated KPI cards, cohesive panel organization, and steadier heading rhythm across all screens of both implementations.';
+  const out = await compileIn(page, 'aesthetics', 'A is better', `Website A is better because Website A is better. Website A presents a polished overview ${tail}`);
+  expect(out.endsWith(tail)).toBe(true);
+  expect(out.startsWith('Website A is better because it presents a polished overview')).toBe(true);
+});
+
+test('mechanical tautology repair consumes zero AI calls in the full pipeline', async ({ page }) => {
+  const errors = await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const longTautology = 'Website A is better because Website A is better. Website A presents a polished overview where populated KPI cards, cohesive panel organization, calmer section spacing, steadier heading rhythm, restrained accent color usage, and clearer call-to-action grouping give every requested module a distinct readable place without dense overlapping edges anywhere, while Website B keeps the same modules grouped but visibly denser.';
+  await page.evaluate(payload => {
+    const T = __BERRY3R_TEST__, s = T.state;
+    Object.assign(s.final, {
+      aestheticsOption: 'A is better',
+      aestheticsReason: payload.seedText,
+      functionalityOption: 'B is better',
+      functionalityReason: payload.auto.functionality,
+      overallOption: 'B is better',
+      overallReason: payload.auto.overall
+    });
+    s.decisions = { aesthetics: { advantages: [] }, functionality: { advantages: [] }, overall: { option: 'B is better', advantages: [], visualSide: { winner: 'A', summary: 'Website A leads presentation.' }, functionalSide: { winner: 'B', summary: 'Website B answers the brief.' }, tradeoff: { moreImportantSide: 'functionality', why: 'Configuration is central.' } } };
+    s.qa = { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: [] };
+    T.setAiTransport(async () => { throw new Error('AI must not be called for mechanical repair'); });
+  }, { seedText: longTautology, auto: AUTO });
+  const callsBefore = await page.evaluate(() => __BERRY3R_TEST__.state.aiCalls);
+  const v = await page.evaluate(async () => await __BERRY3R_TEST__.automaticRepair([]));
+  const out = await page.evaluate(() => ({ calls: __BERRY3R_TEST__.state.aiCalls, reason: __BERRY3R_TEST__.state.final.aestheticsReason }));
+  expect(out.calls).toBe(callsBefore);
+  expect(out.reason.startsWith('Website A is better because it presents a polished overview where')).toBe(true);
+  expect(v.valid).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('no-substantive-continuation case is classified PROSE_SEMANTIC and reaches blocking QA', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__;
+    const issues = T.openingTautologyIssues('functionality', 'B is better', 'Website B is better because it is superior.');
+    const final = { aestheticsOption: '', aestheticsReason: '', functionalityOption: 'B is better', functionalityReason: 'Website B is better because it is superior.', overallOption: '', overallReason: '' };
+    const v = T.validateAll(final, { A: 'normal', B: 'normal' });
+    return { cls: T.classifyIssue(issues[0]), inBlocking: v.blocking.some(x => x.includes('restates the selected verdict')) };
+  });
+  expect(out.cls).toBe('PROSE_SEMANTIC');
+  expect(out.inBlocking).toBe(true);
+});
+
+test('detector stays silent on substantive sentences with later comparison language', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const quiet = await page.evaluate(auto => {
+    const T = __BERRY3R_TEST__;
+    return [
+      ...T.openingTautologyIssues('overall', 'A is better', auto.overall),
+      ...T.openingTautologyIssues('functionality', 'B is better', auto.functionality),
+      ...T.openingTautologyIssues('aesthetics', 'A is better', 'Website A is better because its spacing feels intentional from the first scroll, though Website B is better than typical dense dashboards at surfacing small controls near list edges.')
+    ];
+  }, AUTO);
+  expect(quiet).toEqual([]);
+});
+
+test('word count and validation recompute correctly after deterministic removal', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const out = await page.evaluate(env => {
+    const auto = env.seedText, AUTO = env.autoFixture;
+    const T = __BERRY3R_TEST__, s = T.state;
+    s.decisions = { aesthetics: { advantages: [] }, functionality: { advantages: [] }, overall: { option: 'B is better', advantages: [], visualSide: { winner: 'A', summary: 'x' }, functionalSide: { winner: 'B', summary: 'y' }, tradeoff: { moreImportantSide: 'functionality', why: 'z' } } };
+    s.qa = { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: [] };
+    s.final.aestheticsOption = 'A is better';
+    s.final.aestheticsReason = auto;
+    s.final.functionalityOption = 'B is better';
+    s.final.functionalityReason = AUTO.functionality;
+    s.final.overallOption = 'B is better';
+    s.final.overallReason = AUTO.overall;
+    return new Promise(res => { T.setAiTransport(async () => { throw new Error('no-ai'); }); T.automaticRepair([]).then(v => res({ wc: v.fields.aesthetics.wc, hard: v.hard, compiled: s.final.aestheticsReason })); });
+  }, { seedText: 'Website A is better because Website A is better. Website A presents a polished overview where populated KPI cards, cohesive panel organization, calmer section spacing, steadier heading rhythm, restrained accent color usage, clearer call-to-action grouping, balanced whitespace distribution, consistent iconography sizing, and deliberate visual ordering give every requested module distinct readable placement without crowding edges.', autoFixture: AUTO });
+  const expectedWc = await page.evaluate(r => window.__BERRY3R_TEST__.words(r), out.compiled);
+  expect(out.wc).toBe(expectedWc);
+  expect(out.wc).toBeGreaterThanOrEqual(40);
+  expect(out.hard.join(' ')).not.toContain('40–160');
 });
