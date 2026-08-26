@@ -162,6 +162,22 @@ async function mockGbif(page) {
   return state;
 }
 
+async function mockBreadcrumbs(page, points, { fail = false, defer = false } = {}) {
+  const state = { calls: [], release: () => {} };
+  let gate = null;
+  if (defer) gate = new Promise(resolve => { state.release = resolve; });
+  await page.route('**/wildlife-field-recorder/breadcrumbs**', async route => {
+    state.calls.push(route.request().url());
+    if (gate) await gate;
+    if (fail) return route.abort();
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ records: points.map((data, index) => ({ id: `crumb-${index}`, data })) })
+    });
+  });
+  return state;
+}
+
 const FULL_EXIF = {
   Make: 'TestCam', Model: 'Mk100', FocalLength: 400, ISO: 200,
   DateTimeOriginal: '2026:05:14 17:42:00',
@@ -388,6 +404,237 @@ test('PICKER-J: metadata-free original still imports without invented GPS or cap
   expect(obs.timeProvenance.source).toBe('unknown');
   expect(obs.createdAt).not.toBeNull();
   await expect(page.locator('#original-photo-status')).toContainText('No embedded capture metadata');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- capture-time and Safari breadcrumb recovery ---------- */
+
+test('BREAD-A/B/C/D: filename registry parses real timestamps and rejects generic/malformed names', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const parsed = await page.evaluate(() => {
+    const parse = window.__WFR_TEST__.parsePhotoFilenameTime;
+    return [
+      parse('PXL_20260825_143211123.jpg'),
+      parse('IMG_20260825_143211.jpg'),
+      parse('20260825_143211.jpg'),
+      parse('20260825_143211_001.jpg'),
+      parse('IMG_4837.jpg'),
+      parse('DSC_1021.jpg'),
+      parse('IMG_20261340_296199.jpg')
+    ];
+  });
+  expect(parsed.slice(0, 4).map(value => value.wallIso)).toEqual(Array(4).fill('2026-08-25T14:32:11'));
+  expect(parsed[0]).toMatchObject({ pattern: 'pixel_pxl', millisecond: 123, confidence: 'medium_high' });
+  expect(parsed[1]).toMatchObject({ pattern: 'samsung_img', confidence: 'medium_high' });
+  expect(parsed[2]).toMatchObject({ pattern: 'generic_yyyymmdd_hhmmss' });
+  expect(parsed[3]).toMatchObject({ suffix: '001', millisecond: null });
+  expect(parsed.slice(4)).toEqual([null, null, null]);
+});
+
+test('BREAD-E/F: EXIF beats filename, filename beats weak lastModified, copy-time remains unresolved', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const result = await page.evaluate(() => {
+    const T = window.__WFR_TEST__;
+    const importedAt = Date.UTC(2026, 7, 25, 23, 0, 0);
+    const normalized = T.normalizeExif({ DateTimeOriginal: '2026:08:25 14:30:00', OffsetTimeOriginal: '-04:00' });
+    const parsed = { captureTime: T.normalizeCaptureTime(normalized.exif) };
+    const exifEvidence = T.collectPhotoTimeEvidence(new File(['x'], 'IMG_20260825_143500.jpg', { type: 'image/jpeg', lastModified: importedAt - 86400000 }), parsed, importedAt);
+    const filenameEvidence = T.collectPhotoTimeEvidence(new File(['x'], 'IMG_20260825_143000.jpg', { type: 'image/jpeg', lastModified: Date.UTC(2026, 7, 25, 19, 45) }), {}, importedAt);
+    const unresolvedEvidence = T.collectPhotoTimeEvidence(new File(['x'], 'IMG_4837.jpg', { type: 'image/jpeg', lastModified: importedAt - 1000 }), {}, importedAt);
+    return {
+      exif: T.resolveCaptureTimeEvidence(exifEvidence),
+      filename: T.resolveCaptureTimeEvidence(filenameEvidence),
+      unresolved: T.resolveCaptureTimeEvidence(unresolvedEvidence),
+      unresolvedCandidates: unresolvedEvidence
+    };
+  });
+  expect(result.exif).toMatchObject({ source: 'exif_DateTimeOriginal', wallIso: '2026-08-25T14:30:00' });
+  expect(result.filename).toMatchObject({ source: 'filename', wallIso: '2026-08-25T14:30:00' });
+  expect(result.unresolved).toBeNull();
+  expect(result.unresolvedCandidates[0]).toMatchObject({ source: 'file_last_modified', plausible: false });
+});
+
+test('BREAD-G: a near-exact breadcrumb is used with explicit accuracy', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const result = await page.evaluate(() => {
+    const T = window.__WFR_TEST__;
+    const target = Date.parse('2026-08-25T18:12:37Z');
+    return T.resolveBreadcrumbLocation(
+      { source: 'filename', wallIso: '2026-08-25T14:12:37', confidence: 'medium_high' },
+      [{ timestamp: target + 8000, latitude: 38.3513, longitude: -87.5717, accuracyMeters: 12, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis', sourceId: 'near' }]
+    );
+  });
+  expect(result).toMatchObject({ status: 'resolved', method: 'breadcrumb_nearest', latitude: 38.3513, longitude: -87.5717, estimatedAccuracyMeters: 12, confidence: 'high' });
+});
+
+test('BREAD-H/K/L: moving track interpolates mathematically and resolves filename wall time timezone', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const result = await page.evaluate(() => {
+    const T = window.__WFR_TEST__;
+    const points = [
+      { timestamp: Date.parse('2026-08-25T18:12:10Z'), latitude: 38.35120, longitude: -87.57182, accuracyMeters: 10, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis', sourceId: 'a' },
+      { timestamp: Date.parse('2026-08-25T18:12:50Z'), latitude: 38.35135, longitude: -87.57160, accuracyMeters: 12, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis', sourceId: 'b' }
+    ];
+    const evidence = { source: 'filename', pattern: 'samsung_img', wallIso: '2026-08-25T14:12:30', confidence: 'medium_high' };
+    const resolved = T.resolveBreadcrumbLocation(evidence, points);
+    return { resolved, provenance: T.breadcrumbProvenance(evidence, resolved) };
+  });
+  expect(result.resolved.status).toBe('resolved');
+  expect(result.resolved.method).toBe('breadcrumb_interpolated');
+  expect(result.resolved.latitude).toBeCloseTo(38.351275, 6);
+  expect(result.resolved.longitude).toBeCloseTo(-87.57171, 6);
+  expect(result.resolved.timestamp).toBe(Date.parse('2026-08-25T18:12:30Z'));
+  expect(result.resolved.estimatedAccuracyMeters).toBeGreaterThanOrEqual(12);
+  expect(result.resolved.confidence).toBe('high');
+  expect(result.provenance.breadcrumb).toMatchObject({ beforeTimestamp: Date.parse('2026-08-25T18:12:10Z'), afterTimestamp: Date.parse('2026-08-25T18:12:50Z') });
+});
+
+test('BREAD-I: stationary breadcrumbs use a robust cluster center', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const result = await page.evaluate(() => {
+    const T = window.__WFR_TEST__;
+    const target = Date.parse('2026-08-25T18:12:30Z');
+    const points = [
+      [target - 90000, 38.35120, -87.57180, 9],
+      [target, 38.35122, -87.57178, 8],
+      [target + 90000, 38.35119, -87.57181, 11]
+    ].map((p, i) => ({ timestamp: p[0], latitude: p[1], longitude: p[2], accuracyMeters: p[3], utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis', sourceId: String(i) }));
+    return T.resolveBreadcrumbLocation({ source: 'filename', wallIso: '2026-08-25T14:12:30', confidence: 'medium_high' }, points);
+  });
+  expect(result.method).toBe('breadcrumb_stationary_cluster');
+  expect(result.latitude).toBeCloseTo(38.35120, 5);
+  expect(result.longitude).toBeCloseTo(-87.57180, 5);
+  expect(result.estimatedAccuracyMeters).toBeGreaterThanOrEqual(9);
+  expect(['high', 'medium']).toContain(result.confidence);
+});
+
+test('BREAD-J: sparse or implausible tracks refuse false precision', async ({ page }) => {
+  blockExternal(page);
+  await openCaptureTab(page);
+  const result = await page.evaluate(() => {
+    const T = window.__WFR_TEST__;
+    const target = Date.parse('2026-08-25T18:15:00Z');
+    const points = [
+      { timestamp: target - 6 * 60000, latitude: 38.0, longitude: -88.0, accuracyMeters: 10, utcOffsetSeconds: -14400 },
+      { timestamp: target + 6 * 60000, latitude: 39.0, longitude: -87.0, accuracyMeters: 10, utcOffsetSeconds: -14400 }
+    ];
+    return T.resolveBreadcrumbLocation({ source: 'filename', wallIso: '2026-08-25T14:15:00', confidence: 'medium_high' }, points);
+  });
+  expect(result.status).toBe('unresolved');
+  expect(result.reason).toMatch(/gap|bounding/i);
+});
+
+test('BREAD-M/N: sanitized Android photo recovers provenance, weather, vision, and taxonomy', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: 'sk-or-test' });
+  const crumbs = await mockBreadcrumbs(page, [
+    { timestamp: '2026-05-14T21:41:30Z', latitude: 38.35120, longitude: -87.57182, accuracyMeters: 10, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis' },
+    { timestamp: '2026-05-14T21:42:30Z', latitude: 38.35135, longitude: -87.57160, accuracyMeters: 12, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis' }
+  ]);
+  const meteo = await mockMeteo(page);
+  await mockVision(page);
+  await mockGbif(page);
+  await openCaptureTab(page);
+  await page.evaluate(async pngB64 => {
+    window.exifr.parse = async () => ({});
+    const bytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await window.__WFR_TEST__.importPhotoFile(new File([bytes], 'IMG_20260514_174200.jpg', { type: 'image/jpeg' }));
+  }, PNG.toString('base64'));
+  await dbWait(page, 'obs => obs.weatherStatus === "ok" && obs.classificationStatus === "done" && obs.photoEnrichment.taxonomy === "done"');
+  const obs = await getObs(page);
+  expect(obs.timeProvenance).toMatchObject({ source: 'filename', pattern: 'samsung_img', wallIso: '2026-05-14T17:42:00', utcIso: '2026-05-14T21:42:00.000Z', timezone: 'America/Indiana/Indianapolis', timezoneSource: 'breadcrumb_location' });
+  expect(obs.gpsSource).toBe('breadcrumb_interpolated');
+  expect(obs.locationProvenance).toMatchObject({ source: 'breadcrumb_interpolated', confidence: 'high' });
+  expect(obs.locationProvenance.breadcrumb.source).toBe('wilderness_safari');
+  expect(obs.latitude).toBeCloseTo(38.351275, 6);
+  expect(obs.longitude).toBeCloseTo(-87.57171, 6);
+  expect(obs.createdAt).toBe(Date.parse('2026-05-14T21:42:00Z'));
+  expect(obs.weatherRaw.strategy).toBe('historical archive');
+  expect(obs.subjectCommonName).toBe('Red-tailed Hawk');
+  expect(obs.taxonomy.status).toBe('ok');
+  expect(crumbs.calls).toHaveLength(1);
+  expect(meteo.calls).toContain('2026-05-14');
+  await expect(page.locator('#import-evidence-summary')).toContainText('Estimated from Safari track');
+  expect(errors).toEqual([]);
+});
+
+test('BREAD-O: user location edit wins over a late Safari response', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: '' });
+  const crumbs = await mockBreadcrumbs(page, [
+    { timestamp: '2026-05-14T21:41:30Z', latitude: 38.3512, longitude: -87.5718, accuracyMeters: 10, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis' },
+    { timestamp: '2026-05-14T21:42:30Z', latitude: 38.3514, longitude: -87.5716, accuracyMeters: 10, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis' }
+  ], { defer: true });
+  await openCaptureTab(page);
+  await page.evaluate(async pngB64 => {
+    window.exifr.parse = async () => ({});
+    const bytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await window.__WFR_TEST__.importPhotoFile(new File([bytes], 'IMG_20260514_174200.jpg', { type: 'image/jpeg' }));
+  }, PNG.toString('base64'));
+  await dbWait(page, 'obs => obs.photoEnrichment.location === "running"');
+  await page.fill('#imp-lat', '38.5');
+  await page.fill('#imp-lng', '-87.5');
+  await page.click('#imp-save');
+  crumbs.release();
+  await page.waitForTimeout(500);
+  const obs = await getObs(page);
+  expect(obs.latitude).toBe(38.5);
+  expect(obs.longitude).toBe(-87.5);
+  expect(obs.gpsSource).toBe('user_provided');
+  expect(errors).toEqual([]);
+});
+
+test('BREAD-P/Q: Safari failure is non-destructive and nearby photos reuse cached windows', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: '' });
+  const crumbs = await mockBreadcrumbs(page, [], { fail: true });
+  await openCaptureTab(page);
+  await page.evaluate(async pngB64 => {
+    window.exifr.parse = async () => ({});
+    const bytes = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await window.__WFR_TEST__.importPhotoFile(new File([bytes], 'PXL_20260514_174200123.jpg', { type: 'image/jpeg' }));
+  }, PNG.toString('base64'));
+  await dbWait(page, 'obs => obs.photoEnrichment.location === "error"');
+  let obs = await getObs(page);
+  expect(obs.timeProvenance).toMatchObject({ source: 'filename', wallIso: '2026-05-14T17:42:00' });
+  expect(obs.latitude).toBeNull();
+  expect(obs.locationResolutionError).toMatch(/fetch|network/i);
+
+  await page.unroute('**/wildlife-field-recorder/breadcrumbs**');
+  const cached = await mockBreadcrumbs(page, [{ timestamp: '2026-05-14T21:43:00Z', latitude: 38.35, longitude: -87.57, accuracyMeters: 10, utcOffsetSeconds: -14400, timezone: 'America/Indiana/Indianapolis' }]);
+  const calls = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.clearBreadcrumbWindowCache();
+    await T.fetchBreadcrumbWindow({ wallIso: '2026-05-14T17:41:00', utcIso: null }, T.BREADCRUMB_QUERY_WINDOW_MS);
+    await T.fetchBreadcrumbWindow({ wallIso: '2026-05-14T17:44:00', utcIso: null }, T.BREADCRUMB_QUERY_WINDOW_MS);
+    return true;
+  });
+  expect(calls).toBe(true);
+  expect(cached.calls).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test('BREAD-R: genuine desktop EXIF GPS/time bypasses Safari recovery', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: '' });
+  const crumbs = await mockBreadcrumbs(page, []);
+  await openCaptureTab(page);
+  await importPhoto(page, FULL_EXIF);
+  await dbWait(page, 'obs => obs.observationSource === "photo_import"');
+  const obs = await getObs(page);
+  expect(obs.gpsSource).toBe('exif');
+  expect(obs.timeProvenance.source).toBe('exif_DateTimeOriginal');
+  expect(obs.latitude).toBe(FULL_EXIF.latitude);
+  expect(crumbs.calls).toHaveLength(0);
   expect(errors).toEqual([]);
 });
 
@@ -952,7 +1199,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.25.5');
+    expect(post.body.data.appVersion).toBe('2026.08.25.7');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -1585,7 +1832,7 @@ test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing s
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe('~openai/gpt-latest');
   const prompt = calls[0].messages.map(m => m.content).join('\n');
-  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.25.5');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.25.7');
   expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
   expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
   expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);
@@ -1781,4 +2028,136 @@ test('THEME-M/N: core tabs smoke in both themes and 320/375/430px have no body o
     }
   }
   expect(errors).toEqual([]);
+});
+
+/* ---------- .7 local outing tracker / JSON exchange ---------- */
+
+async function installMockGeolocation(page) {
+  await page.addInitScript(() => {
+    const state = { watches: 0, clears: [], success: null, failure: null };
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+      watchPosition(success, failure) { state.watches++; state.success = success; state.failure = failure; return 700 + state.watches; },
+      clearWatch(id) { state.clears.push(id); },
+      getCurrentPosition(success) { success({ timestamp: Date.now(), coords: { latitude: 38.35, longitude: -87.57, accuracy: 8, altitude: null, altitudeAccuracy: null, heading: null, speed: null } }); }
+    }});
+    window.__geoState = state;
+    window.__emitGeo = (timestamp, latitude, longitude, accuracy = 8, extras = {}) => state.success && state.success({ timestamp, coords: { latitude, longitude, accuracy, altitude:null, altitudeAccuracy:null, heading:null, speed:null, ...extras } });
+    window.__failGeo = message => state.failure && state.failure({ code: 2, message });
+  });
+}
+
+test('OUTING-A–H: lifecycle starts one watcher, throttles noise, stores movement, and finalizes once', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page); await installMockGeolocation(page);
+  await openCaptureTab(page);
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__, t = Date.now();
+    const first = await T.startOuting();
+    const second = await T.startOuting();
+    window.__emitGeo(t, 38.35120, -87.57182, 12);
+    window.__emitGeo(t + 1000, 38.35120, -87.57182, 12);
+    window.__emitGeo(t + 6000, 38.35135, -87.57160, 12);
+    await new Promise(r => setTimeout(r, 80));
+    const during = await T.db.outingPoints.where('outingLocalId').equals(first.localOutingId).count();
+    await T.stopOuting(); await T.stopOuting();
+    return { same:first.localOutingId===second.localOutingId, during, watches:window.__geoState.watches, clears:window.__geoState.clears.length, outing:await T.db.outings.get(first.localOutingId), pointer:localStorage.getItem('wfr_active_outing_id') };
+  });
+  expect(result.same).toBe(true); expect(result.watches).toBe(1); expect(result.during).toBe(2); expect(result.clears).toBe(1);
+  expect(result.outing.status).toBe('completed'); expect(result.outing.endedAt).toBeGreaterThan(result.outing.startedAt); expect(result.pointer).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+test('OUTING-I/J: reload resumes an unfinished outing and GPS failure stays non-destructive', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page); await installMockGeolocation(page); await openCaptureTab(page);
+  const id = await page.evaluate(async () => (await window.__WFR_TEST__.startOuting()).localOutingId);
+  await page.reload({ waitUntil:'domcontentloaded' }); await page.waitForFunction(() => window.__WFR_TEST__.getActiveOuting());
+  const state = await page.evaluate(async id => {
+    window.__failGeo('Position unavailable'); await new Promise(r => setTimeout(r, 20));
+    return { id:window.__WFR_TEST__.getActiveOuting().localOutingId, watches:window.__geoState.watches, status:(await window.__WFR_TEST__.db.outings.get(id)).status, text:document.querySelector('#outing-state').textContent };
+  }, id);
+  expect(state.id).toBe(id); expect(state.watches).toBe(1); expect(state.status).toBe('active'); expect(state.text).toContain('temporarily unavailable');
+  await page.evaluate(() => window.__WFR_TEST__.stopOuting()); expect(errors).toEqual([]);
+});
+
+test('OUTING-K–N: v2 stores preserve observations and deleting an outing removes only its points', async ({ page }) => {
+  blockExternal(page); await page.goto(PAGE_URL, { waitUntil:'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    const T=window.__WFR_TEST__, now=Date.now(), id='outing-delete-test';
+    T.db.close(); await Dexie.delete('WildlifeFieldRecorder');
+    const oldDb=new Dexie('WildlifeFieldRecorder'); oldDb.version(1).stores({observations:'localId, createdAt, submitStatus, category, tripLocalId',audioBlobs:'blobId',trips:'localTripId, startedAt, submitStatus',photos:'localPhotoId, observationLocalId, uploadStatus',logs:'++id, timestamp'});
+    await oldDb.open(); await oldDb.observations.put({ localId:'keep-observation', createdAt:now, submitStatus:'local', outingLocalId:id }); await oldDb.close();
+    await T.db.open();
+    await T.db.outings.put({ localOutingId:id, startedAt:now, endedAt:now+1000, status:'completed', source:'wfr_local' });
+    await T.db.outingPoints.put({ localPointId:'delete-point', outingLocalId:id, timestamp:now, latitude:1, longitude:2 });
+    const stores=T.db.tables.map(t=>t.name);
+    await T.deleteOuting(id,false);
+    return { stores, observation:await T.db.observations.get('keep-observation'), outing:await T.db.outings.get(id), points:await T.db.outingPoints.where('outingLocalId').equals(id).count() };
+  });
+  expect(result.stores).toEqual(expect.arrayContaining(['outings','outingPoints','observations']));
+  expect(result.observation.localId).toBe('keep-observation'); expect(result.outing).toBeUndefined(); expect(result.points).toBe(0);
+});
+
+test('OUTING-O–S: export is sorted, minimal, and excludes observation content and credentials', async ({ page }) => {
+  blockExternal(page); await page.goto(PAGE_URL, { waitUntil:'domcontentloaded' });
+  const exported = await page.evaluate(async () => {
+    const T=window.__WFR_TEST__, id='outing-export', base=Date.parse('2026-08-25T18:03:17Z');
+    T.settings.llmKey='secret-key'; T.settings.token='secret-token';
+    await T.db.outings.put({ localOutingId:id, name:'Patoka Outing', startedAt:base, endedAt:base+60000, status:'completed', source:'wfr_local', timezoneAtStart:'America/Indiana/Indianapolis', utcOffsetSecondsAtStart:-14400 });
+    await T.db.outingPoints.bulkPut([
+      {localPointId:'p2',outingLocalId:id,timestamp:base+2000,latitude:38.2,longitude:-87.2,kind:'breadcrumb'},
+      {localPointId:'p1',outingLocalId:id,timestamp:base+1000,latitude:38.1,longitude:-87.1,kind:'breadcrumb'}
+    ]);
+    await T.db.observations.put({localId:'anchor',outingLocalId:id,createdAt:base+1500,startedAt:base+1500,latitude:38.15,longitude:-87.15,accuracyMeters:9,transcript:'private transcript',userNoteText:'private note',submitStatus:'local'});
+    return T.buildOutingTrackExport(id);
+  });
+  expect(exported.format).toBe('wfr-outing-track'); expect(exported.version).toBe(1);
+  expect(exported.points.map(p=>Date.parse(p.timestamp))).toEqual([...exported.points.map(p=>Date.parse(p.timestamp))].sort((a,b)=>a-b));
+  expect(exported.points.some(p=>p.kind==='observation_anchor')).toBe(true);
+  const text=JSON.stringify(exported); expect(text).not.toContain('private transcript'); expect(text).not.toContain('private note'); expect(text).not.toContain('secret-key'); expect(text).not.toContain('secret-token');
+});
+
+test('OUTING-T–X: import validates format/coordinates, avoids ID collision, persists, and renders history', async ({ page }) => {
+  const errors=collectErrors(page); blockExternal(page); await page.goto(PAGE_URL,{waitUntil:'domcontentloaded'});
+  const result=await page.evaluate(async () => {
+    const T=window.__WFR_TEST__, payload={format:'wfr-outing-track',version:1,outing:{id:'same-source',name:'Hank track',startedAt:'2026-08-25T18:03:17Z',endedAt:'2026-08-25T18:04:17Z',timezone:'America/Indiana/Indianapolis',utcOffsetSeconds:-14400},points:[{timestamp:'2026-08-25T18:03:21Z',latitude:38.351284,longitude:-87.571623,accuracyMeters:8.4}]};
+    const a=await T.importOutingTrackData(payload), b=await T.importOutingTrackData(payload);
+    let badFormat='',badCoords=''; try{T.validateOutingTrackJson({...payload,format:'other'})}catch(e){badFormat=e.message} try{T.validateOutingTrackJson({...payload,points:[{timestamp:'2026-08-25T18:03:21Z',latitude:999,longitude:0}]})}catch(e){badCoords=e.message}
+    await T.loadOutingHistory(); return {a:a.localOutingId,b:b.localOutingId,badFormat,badCoords,count:await T.db.outings.where('source').equals('wfr_imported').count(),html:document.querySelector('#outing-history-list').textContent};
+  });
+  expect(result.a).not.toBe(result.b); expect(result.count).toBe(2); expect(result.badFormat).toContain('not a WFR'); expect(result.badCoords).toContain('invalid'); expect(result.html).toContain('Hank track'); expect(result.html).toContain('Imported'); expect(errors).toEqual([]);
+});
+
+test('OUTING-Y/AD: sanitized wall time resolves against local provider with explicit provenance', async ({ page }) => {
+  blockExternal(page); await page.goto(PAGE_URL,{waitUntil:'domcontentloaded'});
+  const result=await page.evaluate(async () => {
+    const T=window.__WFR_TEST__, id='local-provider', base=Date.parse('2026-08-25T18:32:10Z');
+    await T.db.outings.put({localOutingId:id,startedAt:base,endedAt:base+40000,status:'completed',source:'wfr_local',timezoneAtStart:'America/Indiana/Indianapolis',utcOffsetSecondsAtStart:-14400});
+    await T.db.outingPoints.bulkPut([{localPointId:'a',outingLocalId:id,timestamp:base,latitude:38.35120,longitude:-87.57182,accuracyMeters:8,utcOffsetSeconds:-14400},{localPointId:'b',outingLocalId:id,timestamp:base+40000,latitude:38.35135,longitude:-87.57160,accuracyMeters:8,utcOffsetSeconds:-14400}]);
+    const r=await T.getBreadcrumbCandidates({source:'filename',pattern:'samsung_img',confidence:'medium_high',wallIso:'2026-08-25T14:32:30'}); return {r,p:T.breadcrumbProvenance({source:'filename',pattern:'samsung_img',confidence:'medium_high',wallIso:'2026-08-25T14:32:30'},r)};
+  });
+  expect(result.r.status).toBe('resolved'); expect(result.r.provider).toBe('wfr_outing_track'); expect(result.r.method).toBe('breadcrumb_interpolated'); expect(result.p.providerOutingId).toBe('local-provider');
+});
+
+test('OUTING-Z/AA/AE/AF: imported track powers sanitized photo, weather, vision, and taxonomy without Safari', async ({ page }) => {
+  const errors=collectErrors(page); blockExternal(page); const weather=await mockMeteo(page); const vision=await mockVision(page); await mockGbif(page);
+  let safariCalls=0; await page.route('**/breadcrumbs**', route=>{safariCalls++; return route.abort();});
+  await openCaptureTab(page);
+  await page.evaluate(async ({pngB64}) => {
+    const T=window.__WFR_TEST__, base=Date.parse('2026-08-25T18:32:10Z'); T.settings.llmKey='test-key';
+    await T.importOutingTrackData({format:'wfr-outing-track',version:1,outing:{id:'hank',name:'Hank track',startedAt:new Date(base).toISOString(),endedAt:new Date(base+30000).toISOString(),timezone:'America/Indiana/Indianapolis',utcOffsetSeconds:-14400},points:[0,5,10,15].map((s,i)=>({timestamp:new Date(base+s*1000).toISOString(),latitude:38.35120+i*.00004,longitude:-87.57182+i*.00007,accuracyMeters:8,utcOffsetSeconds:-14400}))});
+    window.exifr.parse=async()=>({}); const bin=Uint8Array.from(atob(pngB64),c=>c.charCodeAt(0));
+    await T.importPhotoFile(new File([bin],'IMG_20260825_143218.jpg',{type:'image/png',lastModified:Date.now()}));
+  },{pngB64:PNG.toString('base64')});
+  await dbWait(page, `obs => obs.weatherStatus === 'ok' && obs.classificationStatus === 'done' && obs.photoEnrichment.taxonomy === 'done'`);
+  const obs=await getObs(page); expect(obs.locationProvenance.provider).toBe('wfr_imported_track'); expect(obs.gpsSource).toMatch(/^breadcrumb_/); expect(obs.weatherStatus).toBe('ok'); expect(obs.subjectCommonName).toBe('Red-tailed Hawk'); expect(obs.taxonomy.status).toBe('ok'); expect(safariCalls).toBe(0); expect(weather.calls.length).toBeGreaterThan(0); expect(vision.calls).toHaveLength(1); expect(errors).toEqual([]);
+});
+
+test('OUTING-AB/AC: Safari remains fallback while EXIF still bypasses every provider', async ({ page }) => {
+  blockExternal(page); await page.goto(PAGE_URL,{waitUntil:'domcontentloaded'});
+  const result=await page.evaluate(async () => {
+    const T=window.__WFR_TEST__; T.settings.token='';
+    const noTrack=await T.getBreadcrumbCandidates({source:'filename',confidence:'medium',wallIso:'2026-08-25T14:00:00'});
+    await T.db.observations.put({localId:'exif-bypass',createdAt:Date.now(),latitude:1,longitude:2,gpsSource:'exif',timeProvenance:{source:'exif_DateTimeOriginal'},photoEnrichment:{location:'pending'}});
+    await T.runBreadcrumbRecoveryStage('exif-bypass'); return {noTrack,obs:await T.db.observations.get('exif-bypass')};
+  });
+  expect(result.noTrack.reason).toContain('Safari breadcrumb source is not configured'); expect(result.obs.latitude).toBe(1); expect(result.obs.photoEnrichment.location).toBe('pending');
 });

@@ -228,6 +228,12 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 .metadata-result { margin: 8px 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-3); color: var(--text-muted); font-size: 0.8rem; line-height: 1.4; }
 .metadata-result.ok { color: var(--accent-bright); border-color: var(--accent-dim); }
 .metadata-result.warn { color: var(--warn); }
+.evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 10px; }
+.evidence-card { min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-3); }
+.evidence-label { color: var(--text-dim); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.evidence-value { margin-top: 3px; color: var(--text); font-size: 0.82rem; font-weight: 700; }
+.evidence-note { margin-top: 2px; color: var(--text-muted); font-size: 0.74rem; line-height: 1.35; }
+@media (max-width: 380px) { .evidence-grid { grid-template-columns: 1fr; } }
 .history-trip { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .history-trip-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--bg-3); cursor: pointer; flex-wrap: wrap; }
 .history-trip-head .trip-title { font-weight: 700; color: var(--accent-bright); flex: 1 1 auto; }
@@ -243,6 +249,14 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 .history-photo-tooltip { position: absolute; z-index: 50; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px; display: none; box-shadow: var(--shadow); }
 .history-photo-tooltip.open { display: block; }
 .history-photo-tooltip img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); margin: 2px; }
+.outing-panel { width: min(560px, 100%); margin: 0 auto 16px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+.outing-panel.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+.outing-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.outing-title { font-weight:800; color:var(--text); }
+.outing-metrics { display:flex; gap:8px; flex-wrap:wrap; margin:9px 0; color:var(--text-muted); font-size:.82rem; }
+.outing-note { color:var(--text-dim); font-size:.76rem; margin:7px 0 0; }
+.outing-history-card { margin:10px 0; padding:12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-2); }
+.outing-history-actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:9px; }
 @media (max-width: 639px) {
   .history-obs { grid-template-columns: 1fr; gap: 4px; padding: 10px 0; }
   .history-obs .history-time, .history-obs .history-cat, .history-obs .history-species, .history-obs .history-weather, .history-obs .history-transcript { white-space: normal; }
@@ -316,6 +330,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
   <div class="status">
     <span id="net-chip" class="status-chip off">Offline</span>
     <span id="gps-chip" class="status-chip off">GPS off</span>
+    <span id="outing-chip" class="status-chip ok" style="display:none;">Track ●</span>
     <span id="queue-chip" class="status-chip">Queue 0</span>
   </div>
   <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">☀️</button>
@@ -371,6 +386,11 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 <!-- Capture -->
 <section id="tab-capture" class="tab">
   <h2>New Observation</h2>
+  <div id="outing-panel" class="outing-panel">
+    <div class="outing-head"><div><div class="outing-title" id="outing-title">Outing tracker</div><div id="outing-state" class="outing-note">Record a private local GPS track for later photo matching.</div></div><button id="outing-toggle" class="btn btn-primary" type="button">Start Outing</button></div>
+    <div id="outing-metrics" class="outing-metrics" style="display:none;"></div>
+    <div class="outing-note">For best tracking, keep WFR open during the outing.</div>
+  </div>
   <div class="capture-wrap">
     <div id="capture-timer" class="timer" style="display:none;">00:00</div>
     <button id="capture-btn" class="capture-btn" aria-label="Start recording voice observation">
@@ -383,6 +403,8 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
       <span style="font-size:0.8rem;font-weight:600;">Import Original Photo</span>
     </button>
     <input type="file" id="photo-import-input" style="display:none;" />
+    <input type="file" id="outing-import-input" accept="application/json,.json" style="display:none;" />
+    <button id="import-outing-btn" class="btn" type="button">Import Outing Track</button>
     <div class="original-photo-hint">Uses the original file so GPS and capture metadata are preserved.</div>
     <div id="original-photo-status" class="original-photo-status" role="status" aria-live="polite"></div>
     <div class="capture-hint" id="capture-status">Ready</div>
@@ -509,6 +531,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
     <button id="history-refresh" class="btn btn-small">↻ Refresh</button>
     <span id="history-source-chip" class="status-chip" style="display:none;"></span>
   </div>
+  <div class="card"><div class="card-title">Outing Tracks</div><div id="outing-history-list"><div class="empty">Loading…</div></div></div>
   <div id="history-list"></div>
 </section>
 
@@ -535,6 +558,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
     <input id="cfg-obs-resource" value="observations" />
     <label>Trips resource</label>
     <input id="cfg-trip-resource" value="trips" />
+    <label>Safari breadcrumb resource</label>
+    <input id="cfg-breadcrumb-resource" value="breadcrumbs" />
+    <p style="font-size:0.76rem;color:var(--text-dim);margin:4px 0 0;">Optional bounded location history used to recover context for photos with stripped EXIF.</p>
     <label>LabBox bearer token</label>
     <input id="cfg-token" type="password" placeholder="Bearer token" />
     <div class="btn-group">
@@ -682,9 +708,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.5" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.5
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.7" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.7
 </footer>
 </div>
 
@@ -692,7 +718,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.25.5';
+const APP_VERSION = '2026.08.25.7';
 
 /* ========================
    DB (Dexie)
@@ -704,6 +730,15 @@ db.version(1).stores({
   trips: 'localTripId, startedAt, submitStatus',
   photos: 'localPhotoId, observationLocalId, uploadStatus',
   logs: '++id, timestamp'
+});
+db.version(2).stores({
+  observations: 'localId, createdAt, submitStatus, category, tripLocalId, outingLocalId',
+  audioBlobs: 'blobId',
+  trips: 'localTripId, startedAt, submitStatus',
+  photos: 'localPhotoId, observationLocalId, uploadStatus',
+  logs: '++id, timestamp',
+  outings: 'localOutingId, startedAt, endedAt, status, source, localDateKey',
+  outingPoints: 'localPointId, outingLocalId, timestamp, [outingLocalId+timestamp]'
 });
 
 /* ========================
@@ -1247,6 +1282,7 @@ const defaultSettings = {
   appId: 'wildlife-field-recorder',
   observationsResource: 'observations',
   tripsResource: 'trips',
+  breadcrumbResource: 'breadcrumbs',
   token: '',
   // OpenRouter is the single AI provider; base URL is an implementation constant.
   llmKey: '',
@@ -1411,6 +1447,179 @@ document.addEventListener('click', e => {
   if (btn) { e.preventDefault(); showTab(btn.dataset.tab); }
 });
 
+/* ========================
+   Local outing tracker
+   ======================== */
+const ACTIVE_OUTING_STORAGE_KEY = 'wfr_active_outing_id';
+const TRACK_MIN_INTERVAL_MS = 5000;
+const TRACK_MAX_INTERVAL_MS = 25000;
+const TRACK_MIN_DISTANCE_METERS = 10;
+const TRACK_ACCURACY_IMPROVEMENT_METERS = 5;
+const TRACK_HEADING_CHANGE_DEGREES = 30;
+const TRACK_SPEED_CHANGE_MPS = 1.5;
+const TRACK_MAX_ACCEPTED_ACCURACY_METERS = 10000;
+const TRACK_FRESH_FIX_MAX_AGE_MS = 20000;
+const TRACK_FRESH_FIX_MAX_ACCURACY_METERS = 100;
+let activeOuting = null;
+let outingWatchId = null;
+let lastTrackerFix = null;
+let outingUiTimer = null;
+let pointWriteChain = Promise.resolve();
+
+function localDateKey(timestamp) {
+  const d = new Date(timestamp);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function validTrackCoords(coords) {
+  return coords && isFinite(coords.latitude) && isFinite(coords.longitude) &&
+    coords.latitude >= -90 && coords.latitude <= 90 && coords.longitude >= -180 && coords.longitude <= 180 &&
+    (!isFinite(coords.accuracy) || coords.accuracy <= TRACK_MAX_ACCEPTED_ACCURACY_METERS);
+}
+function angularDifference(a, b) {
+  if (!isFinite(a) || !isFinite(b)) return 0;
+  return Math.abs(((a - b + 540) % 360) - 180);
+}
+function shouldStoreTrackPoint(previous, next) {
+  if (!previous) return true;
+  const elapsed = next.timestamp - previous.timestamp;
+  if (elapsed >= TRACK_MAX_INTERVAL_MS) return true;
+  if (elapsed < TRACK_MIN_INTERVAL_MS) {
+    const improvement = (previous.accuracyMeters ?? Infinity) - (next.accuracyMeters ?? Infinity);
+    return improvement >= TRACK_ACCURACY_IMPROVEMENT_METERS;
+  }
+  const distance = haversine(previous.latitude, previous.longitude, next.latitude, next.longitude) * 1609.344;
+  return distance >= TRACK_MIN_DISTANCE_METERS ||
+    ((previous.accuracyMeters ?? Infinity) - (next.accuracyMeters ?? Infinity)) >= TRACK_ACCURACY_IMPROVEMENT_METERS ||
+    angularDifference(previous.heading, next.heading) >= TRACK_HEADING_CHANGE_DEGREES ||
+    (isFinite(previous.speed) && isFinite(next.speed) && Math.abs(previous.speed - next.speed) >= TRACK_SPEED_CHANGE_MPS);
+}
+function positionToOutingPoint(position, outing) {
+  const coords = position && position.coords;
+  if (!validTrackCoords(coords)) return null;
+  const timestamp = Number(position.timestamp) || Date.now();
+  return {
+    localPointId: 'crumb-' + uuid(), outingLocalId: outing.localOutingId, timestamp,
+    latitude: Number(coords.latitude), longitude: Number(coords.longitude),
+    accuracyMeters: isFinite(Number(coords.accuracy)) ? Number(coords.accuracy) : null,
+    altitude: coords.altitude != null && isFinite(Number(coords.altitude)) ? Number(coords.altitude) : null,
+    altitudeAccuracyMeters: coords.altitudeAccuracy != null && isFinite(Number(coords.altitudeAccuracy)) ? Number(coords.altitudeAccuracy) : null,
+    heading: coords.heading != null && isFinite(Number(coords.heading)) ? Number(coords.heading) : null,
+    speed: coords.speed != null && isFinite(Number(coords.speed)) ? Number(coords.speed) : null,
+    timezone: outing.timezoneAtStart || null,
+    utcOffsetSeconds: -new Date(timestamp).getTimezoneOffset() * 60,
+    source: 'wfr_local_tracker', kind: 'breadcrumb', createdAt: Date.now()
+  };
+}
+async function persistTrackerPoint(point) {
+  if (!activeOuting || point.outingLocalId !== activeOuting.localOutingId || !shouldStoreTrackPoint(lastTrackerFix, point)) return false;
+  const prior = lastTrackerFix;
+  const distance = prior ? haversine(prior.latitude, prior.longitude, point.latitude, point.longitude) * 1609.344 : 0;
+  await db.transaction('rw', db.outingPoints, db.outings, async () => {
+    await db.outingPoints.put(point);
+    const outing = await db.outings.get(point.outingLocalId);
+    if (!outing || outing.status !== 'active') return;
+    outing.pointCount = (outing.pointCount || 0) + 1;
+    outing.distanceMeters = (outing.distanceMeters || 0) + distance;
+    outing.firstLatitude ??= point.latitude; outing.firstLongitude ??= point.longitude;
+    outing.lastLatitude = point.latitude; outing.lastLongitude = point.longitude;
+    outing.lastFixAt = point.timestamp; outing.lastAccuracyMeters = point.accuracyMeters;
+    outing.trackerError = null;
+    outing.updatedAt = Date.now();
+    await db.outings.put(outing);
+    activeOuting = outing;
+  });
+  lastTrackerFix = point;
+  $('gps-chip').textContent = 'GPS ok'; $('gps-chip').className = 'status-chip ok';
+  renderOutingStatus();
+  return true;
+}
+function trackerPosition(position) {
+  if (!activeOuting) return;
+  const point = positionToOutingPoint(position, activeOuting);
+  if (!point) return;
+  pointWriteChain = pointWriteChain.then(() => persistTrackerPoint(point)).catch(e => logWarn('Outing point save failed: ' + e.message));
+}
+function trackerError(error) {
+  if (!activeOuting) return;
+  activeOuting.trackerError = error && error.message ? error.message : 'GPS temporarily unavailable';
+  $('outing-state').textContent = 'Outing active · GPS temporarily unavailable';
+  $('gps-chip').textContent = 'GPS paused'; $('gps-chip').className = 'status-chip warn';
+}
+function beginOutingWatch() {
+  if (outingWatchId != null || !activeOuting || !('geolocation' in navigator)) return;
+  outingWatchId = navigator.geolocation.watchPosition(trackerPosition, trackerError, {
+    enableHighAccuracy: true, maximumAge: TRACK_MIN_INTERVAL_MS, timeout: (settings.gpsTimeout || 12) * 1000
+  });
+}
+function getFreshTrackerFix(maxAgeMs = TRACK_FRESH_FIX_MAX_AGE_MS, maxAccuracyMeters = TRACK_FRESH_FIX_MAX_ACCURACY_METERS) {
+  if (!activeOuting || !lastTrackerFix || Date.now() - lastTrackerFix.timestamp > maxAgeMs ||
+      (lastTrackerFix.accuracyMeters != null && lastTrackerFix.accuracyMeters > maxAccuracyMeters)) return null;
+  return { ...lastTrackerFix, status: 'ok' };
+}
+function renderOutingStatus() {
+  const panel = $('outing-panel'), chip = $('outing-chip'), metrics = $('outing-metrics');
+  if (!panel) return;
+  if (!activeOuting) {
+    panel.classList.remove('active'); chip.style.display = 'none'; metrics.style.display = 'none';
+    $('outing-title').textContent = 'Outing tracker'; $('outing-state').textContent = 'Record a private local GPS track for later photo matching.';
+    $('outing-toggle').textContent = 'Start Outing'; $('outing-toggle').className = 'btn btn-primary'; return;
+  }
+  panel.classList.add('active'); chip.style.display = 'inline-block';
+  $('outing-title').textContent = '🟢 Outing active';
+  $('outing-state').textContent = activeOuting.trackerError ? 'Outing active · GPS temporarily unavailable' : 'Recording location breadcrumbs locally';
+  $('outing-toggle').textContent = 'Stop Outing'; $('outing-toggle').className = 'btn btn-danger';
+  metrics.style.display = 'flex';
+  metrics.innerHTML = `<span>${fmtDuration((Date.now() - activeOuting.startedAt)/1000)}</span><span>${activeOuting.pointCount || 0} GPS points</span><span>${activeOuting.lastAccuracyMeters != null ? 'Last fix: ' + Math.round(activeOuting.lastAccuracyMeters) + ' m' : 'Waiting for GPS…'}</span>`;
+}
+async function startOuting() {
+  if (activeOuting) { showTab('capture'); renderOutingStatus(); return activeOuting; }
+  const pointer = localStorage.getItem(ACTIVE_OUTING_STORAGE_KEY);
+  if (pointer) {
+    const existing = await db.outings.get(pointer);
+    if (existing && existing.status === 'active') { activeOuting = existing; beginOutingWatch(); renderOutingStatus(); return existing; }
+  }
+  const now = Date.now();
+  activeOuting = {
+    localOutingId: 'outing-' + uuid(), name: null, startedAt: now, endedAt: null,
+    status: 'active', source: 'wfr_local', timezoneAtStart: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+    utcOffsetSecondsAtStart: -new Date(now).getTimezoneOffset() * 60, localDateKey: localDateKey(now),
+    pointCount: 0, observationCount: 0, distanceMeters: 0,
+    firstLatitude: null, firstLongitude: null, lastLatitude: null, lastLongitude: null,
+    createdAt: now, updatedAt: now
+  };
+  await db.outings.put(activeOuting);
+  localStorage.setItem(ACTIVE_OUTING_STORAGE_KEY, activeOuting.localOutingId);
+  lastTrackerFix = null; beginOutingWatch(); renderOutingStatus();
+  if (!outingUiTimer) outingUiTimer = setInterval(renderOutingStatus, 1000);
+  return activeOuting;
+}
+async function stopOuting() {
+  if (!activeOuting) return null;
+  const outingId = activeOuting.localOutingId;
+  if (outingWatchId != null && navigator.geolocation) navigator.geolocation.clearWatch(outingWatchId);
+  outingWatchId = null; await pointWriteChain;
+  const outing = await db.outings.get(outingId);
+  if (outing && outing.status === 'active') {
+    outing.status = 'completed'; outing.endedAt = Date.now(); outing.updatedAt = Date.now();
+    outing.observationCount = await db.observations.where('outingLocalId').equals(outingId).count();
+    await db.outings.put(outing);
+  }
+  localStorage.removeItem(ACTIVE_OUTING_STORAGE_KEY); activeOuting = null; lastTrackerFix = null;
+  if (outingUiTimer) { clearInterval(outingUiTimer); outingUiTimer = null; }
+  renderOutingStatus(); loadOutingHistory().catch(() => {}); return outing;
+}
+async function resumeActiveOuting() {
+  const id = localStorage.getItem(ACTIVE_OUTING_STORAGE_KEY);
+  if (!id) { renderOutingStatus(); return null; }
+  const outing = await db.outings.get(id);
+  if (!outing || outing.status !== 'active') { localStorage.removeItem(ACTIVE_OUTING_STORAGE_KEY); renderOutingStatus(); return null; }
+  activeOuting = outing;
+  const points = await db.outingPoints.where('[outingLocalId+timestamp]').between([id, Dexie.minKey], [id, Dexie.maxKey]).reverse().limit(1).toArray();
+  lastTrackerFix = points[0] || null; beginOutingWatch(); renderOutingStatus();
+  outingUiTimer = setInterval(renderOutingStatus, 1000); return outing;
+}
+$('outing-toggle').addEventListener('click', () => activeOuting ? stopOuting() : startOuting());
+
 $('menu-toggle').addEventListener('click', () => {
   const tabs = $('tabs');
   const toggle = $('menu-toggle');
@@ -1482,6 +1691,11 @@ function getCurrentPosition() {
   });
 }
 
+function getObservationPosition() {
+  const fresh = getFreshTrackerFix();
+  return fresh ? Promise.resolve(fresh) : getCurrentPosition();
+}
+
 function clearCaptureTimers() {
   if (captureDisplayTimerId) { clearInterval(captureDisplayTimerId); captureDisplayTimerId = null; }
   if (captureAutoStopTimerId) { clearTimeout(captureAutoStopTimerId); captureAutoStopTimerId = null; }
@@ -1521,7 +1735,8 @@ async function startCapture(opts = {}) {
     contextPromise: null,
     discarding: false,
     stopping: false,
-    finalizationStarted: false
+    finalizationStarted: false,
+    outingLocalId: activeOuting ? activeOuting.localOutingId : null
   };
   activeCapture = session;
   $('capture-result').style.display = 'none';
@@ -1538,7 +1753,7 @@ async function startCapture(opts = {}) {
   }
   $('capture-discard-wrap').style.display = 'block';
 
-  session.contextPromise = getCurrentPosition().then(async gps => {
+  session.contextPromise = getObservationPosition().then(async gps => {
     if (!activeCapture || activeCapture.id !== session.id) return;
     session.gps = gps;
     if (session.gps.status === 'ok') {
@@ -1632,6 +1847,7 @@ async function onCaptureStop(sessionId) {
 
   const obs = {
     localId,
+    outingLocalId: session.outingLocalId,
     createdAt: Date.now(),
     startedAt: session.startedAt,
     stoppedAt,
@@ -1680,6 +1896,10 @@ async function onCaptureStop(sessionId) {
 
   try {
     await db.observations.put(obs);
+    if (obs.outingLocalId) {
+      await db.outings.where('localOutingId').equals(obs.outingLocalId).modify(o => { o.observationCount = (o.observationCount || 0) + 1; o.updatedAt = Date.now(); });
+      if (activeOuting && activeOuting.localOutingId === obs.outingLocalId) activeOuting.observationCount = (activeOuting.observationCount || 0) + 1;
+    }
     lastCapturedLocalId = localId;
     logInfo('Observation saved ' + localId);
     $('capture-status').textContent = 'Saved locally';
@@ -2261,6 +2481,371 @@ function normalizeCaptureTime(exif) {
   };
 }
 
+/* ---- Deterministic photo-time + breadcrumb recovery ---- */
+const BREADCRUMB_QUERY_WINDOW_MS = 10 * 60 * 1000;
+const BREADCRUMB_EXPANDED_WINDOW_MS = 30 * 60 * 1000;
+const BREADCRUMB_MAX_INTERPOLATION_GAP_MS = 5 * 60 * 1000;
+const BREADCRUMB_NEAR_POINT_MS = 15 * 1000;
+const BREADCRUMB_STATIONARY_RADIUS_METERS = 25;
+const BREADCRUMB_STATIONARY_MIN_POINTS = 3;
+const BREADCRUMB_HIGH_CONFIDENCE_MAX_GAP_MS = 60 * 1000;
+const BREADCRUMB_MAX_PLAUSIBLE_SPEED_MPS = 20;
+const FILE_LAST_MODIFIED_COPY_WINDOW_MS = 10 * 60 * 1000;
+
+const PHOTO_FILENAME_TIME_PATTERNS = [
+  {
+    id: 'pixel_pxl', confidence: 'medium_high',
+    regex: /^PXL_(\d{8})_(\d{6})(\d{3})?(?=[_.-]|$)/i
+  },
+  {
+    id: 'samsung_img', confidence: 'medium_high',
+    regex: /^IMG_(\d{8})_(\d{6})(?:_(\d{3,}))?(?=\.|$)/i
+  },
+  {
+    id: 'generic_yyyymmdd_hhmmss', confidence: 'medium',
+    regex: /^(\d{8})_(\d{6})(?:_(\d{3,}))?(?=\.|$)/i
+  }
+];
+
+function filenameWallTime(dateText, timeText) {
+  if (!/^\d{8}$/.test(dateText) || !/^\d{6}$/.test(timeText)) return null;
+  const parts = {
+    year: +dateText.slice(0, 4), month: +dateText.slice(4, 6), day: +dateText.slice(6, 8),
+    hour: +timeText.slice(0, 2), minute: +timeText.slice(2, 4), second: +timeText.slice(4, 6)
+  };
+  const check = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second));
+  if (check.getUTCFullYear() !== parts.year || check.getUTCMonth() + 1 !== parts.month ||
+      check.getUTCDate() !== parts.day || check.getUTCHours() !== parts.hour ||
+      check.getUTCMinutes() !== parts.minute || check.getUTCSeconds() !== parts.second) return null;
+  return wallIso(parts);
+}
+
+function parsePhotoFilenameTime(filename) {
+  const base = String(filename || '').split(/[\\/]/).pop();
+  for (const pattern of PHOTO_FILENAME_TIME_PATTERNS) {
+    const match = base.match(pattern.regex);
+    if (!match) continue;
+    const wall = filenameWallTime(match[1], match[2]);
+    if (!wall) return null;
+    return {
+      wallIso: wall,
+      utcIso: null,
+      utcOffsetSeconds: null,
+      timezone: null,
+      source: 'filename',
+      pattern: pattern.id,
+      confidence: pattern.confidence,
+      millisecond: pattern.id === 'pixel_pxl' && match[3] ? +match[3] : null,
+      suffix: pattern.id !== 'pixel_pxl' && match[3] ? match[3] : null,
+      raw: base
+    };
+  }
+  return null;
+}
+
+function exifTimeEvidence(captureTime) {
+  if (!captureTime) return null;
+  const original = captureTime.source === 'DateTimeOriginal';
+  const created = captureTime.source === 'CreateDate';
+  return {
+    ...captureTime,
+    source: 'exif_' + captureTime.source,
+    evidenceType: 'exif',
+    confidence: captureTime.utcOffsetSeconds != null ? (original ? 'high' : 'medium_high') :
+      (original ? 'medium_high' : created ? 'medium' : 'low')
+  };
+}
+
+function plausibleLastModifiedEvidence(file, importedAt) {
+  const value = Number(file && file.lastModified);
+  if (!isFinite(value) || value < Date.UTC(2000, 0, 1) || value > importedAt + 86400000) return null;
+  const likelyProviderCopy = Math.abs(importedAt - value) <= FILE_LAST_MODIFIED_COPY_WINDOW_MS;
+  return {
+    source: 'file_last_modified', evidenceType: 'file_metadata', confidence: 'low',
+    timestamp: value, utcIso: new Date(value).toISOString(), wallIso: null,
+    timezone: null, utcOffsetSeconds: null, raw: value, plausible: !likelyProviderCopy,
+    reason: likelyProviderCopy ? 'matches import/materialization time' : 'older file metadata timestamp'
+  };
+}
+
+function collectPhotoTimeEvidence(file, parsed, importedAt = Date.now()) {
+  return [
+    exifTimeEvidence(parsed && parsed.captureTime),
+    parsePhotoFilenameTime(file && file.name),
+    plausibleLastModifiedEvidence(file, importedAt)
+  ].filter(Boolean);
+}
+
+function resolveCaptureTimeEvidence(evidence) {
+  const exif = evidence.find(item => item.evidenceType === 'exif');
+  if (exif) return exif;
+  const filename = evidence.find(item => item.source === 'filename');
+  if (filename) return filename;
+  const modified = evidence.find(item => item.source === 'file_last_modified' && item.plausible);
+  return modified || null;
+}
+
+function timeProvenanceFromEvidence(selected, evidence) {
+  if (!selected) return { source: 'unknown', evidence };
+  return {
+    source: selected.source,
+    pattern: selected.pattern || null,
+    confidence: selected.confidence,
+    raw: selected.raw,
+    wallIso: selected.wallIso || null,
+    localIso: selected.localIso || selected.wallIso || null,
+    utcIso: selected.utcIso || null,
+    utcOffsetSeconds: selected.utcOffsetSeconds ?? null,
+    offsetSource: selected.offsetSource || null,
+    offsetsSeen: selected.offsetsSeen || null,
+    timezone: selected.timezone || null,
+    timezoneAbbreviation: selected.timezoneAbbreviation || null,
+    timezoneSource: selected.utcOffsetSeconds != null ? 'exif_offset' : null,
+    evidence
+  };
+}
+
+function epochFromSourceTimestamp(value) {
+  if (typeof value === 'number' && isFinite(value)) return value < 1e12 ? value * 1000 : value;
+  const parsed = Date.parse(value);
+  return isFinite(parsed) ? parsed : null;
+}
+
+function normalizeBreadcrumbs(payload) {
+  const envelope = payload && !Array.isArray(payload) ? payload : {};
+  const rows = Array.isArray(payload) ? payload : (envelope.records || envelope.data || envelope.points || []);
+  const envelopeOffset = Number(envelope.utc_offset_seconds ?? envelope.utcOffsetSeconds);
+  return (Array.isArray(rows) ? rows : []).map((record, index) => {
+    const raw = record && record.data ? record.data : (record || {});
+    const timestamp = epochFromSourceTimestamp(raw.timestamp ?? raw.recordedAt ?? raw.recorded_at ?? raw.time ?? raw.createdAt ?? record.created_at);
+    const latitude = Number(raw.latitude ?? raw.lat);
+    const longitude = Number(raw.longitude ?? raw.lng ?? raw.lon);
+    const rawOffset = raw.utcOffsetSeconds ?? raw.utc_offset_seconds ?? raw.offset;
+    const parsedOffset = rawOffset == null || rawOffset === '' ? NaN : (typeof rawOffset === 'string' ? parseOffsetSeconds(rawOffset) : Number(rawOffset));
+    if (!isFinite(timestamp) || !isFinite(latitude) || !isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+    return {
+      timestamp, latitude, longitude,
+      accuracyMeters: isFinite(Number(raw.accuracyMeters ?? raw.accuracy)) ? Math.max(0, Number(raw.accuracyMeters ?? raw.accuracy)) : null,
+      altitude: isFinite(Number(raw.altitude)) ? Number(raw.altitude) : null,
+      speed: isFinite(Number(raw.speed)) ? Number(raw.speed) : null,
+      heading: isFinite(Number(raw.heading)) ? Number(raw.heading) : null,
+      timezone: raw.timezone || envelope.timezone || null,
+      timezoneAbbreviation: raw.timezoneAbbreviation || raw.timezone_abbreviation || envelope.timezone_abbreviation || null,
+      utcOffsetSeconds: isFinite(parsedOffset) ? parsedOffset : (isFinite(envelopeOffset) ? envelopeOffset : null),
+      source: raw.source || 'safari', sourceId: String(record.id ?? raw.id ?? raw.localPointId ?? index),
+      provider: raw.provider || envelope.provider || 'wilderness_safari',
+      providerOutingId: raw.providerOutingId || raw.outingLocalId || envelope.providerOutingId || null,
+      kind: raw.kind || 'breadcrumb'
+    };
+  }).filter(Boolean).sort((a, b) => a.timestamp - b.timestamp);
+}
+
+const breadcrumbWindowCache = new Map();
+function clearBreadcrumbWindowCache() { breadcrumbWindowCache.clear(); }
+
+function breadcrumbCacheKey(timeEvidence, windowMs) {
+  const seed = timeEvidence.utcIso ? Date.parse(timeEvidence.utcIso) : wallEpochMinutes(timeEvidence.wallIso) * 60000;
+  const bucket = Math.floor(seed / BREADCRUMB_EXPANDED_WINDOW_MS);
+  return [apiBase(), settings.appId, settings.breadcrumbResource, timeEvidence.utcIso ? 'utc' : 'wall', bucket, windowMs].join('|');
+}
+
+/**
+ * Adapter contract: GET {apiBase}/{appId}/{breadcrumbResource} with either
+ * start/end ISO timestamps or wall_time/window_minutes. Response records may
+ * wrap point fields in `data`; wall-time queries must include timezone or UTC
+ * offset metadata so WFR never guesses using the processing device timezone.
+ */
+async function fetchBreadcrumbWindow(timeEvidence, windowMs = BREADCRUMB_QUERY_WINDOW_MS) {
+  if (!settings.token || !settings.apiBase || !settings.appId || !settings.breadcrumbResource) {
+    throw new Error('Safari breadcrumb source is not configured');
+  }
+  const key = breadcrumbCacheKey(timeEvidence, windowMs);
+  if (breadcrumbWindowCache.has(key)) return breadcrumbWindowCache.get(key);
+  const pending = (async () => {
+    const url = new URL(`${apiBase()}/${encodeURIComponent(settings.appId)}/${encodeURIComponent(settings.breadcrumbResource)}`);
+    if (timeEvidence.utcIso) {
+      const target = Date.parse(timeEvidence.utcIso);
+      url.searchParams.set('start', new Date(target - windowMs).toISOString());
+      url.searchParams.set('end', new Date(target + windowMs).toISOString());
+    } else {
+      url.searchParams.set('wall_time', timeEvidence.wallIso);
+      url.searchParams.set('window_minutes', String(Math.round(windowMs / 60000)));
+    }
+    url.searchParams.set('limit', '2000');
+    const response = await fetch(url, { headers: authHeaders({ Accept: 'application/json' }) });
+    if (!response.ok) throw await httpError(response);
+    return normalizeBreadcrumbs(await response.json());
+  })();
+  breadcrumbWindowCache.set(key, pending);
+  try { return await pending; }
+  catch(e) { breadcrumbWindowCache.delete(key); throw e; }
+}
+
+function outingTargetTimestamp(timeEvidence, outing) {
+  if (timeEvidence.utcIso) return Date.parse(timeEvidence.utcIso);
+  const offset = Number(outing.utcOffsetSecondsAtStart);
+  const iso = isFinite(offset) && timeEvidence.wallIso ? utcIsoFromWall(timeEvidence.wallIso, offset) : null;
+  return iso ? Date.parse(iso) : null;
+}
+async function fetchOutingProviderMatches(timeEvidence, source, windowMs = BREADCRUMB_QUERY_WINDOW_MS) {
+  const outings = await db.outings.where('source').equals(source).toArray();
+  const matches = [];
+  for (const outing of outings) {
+    const target = outingTargetTimestamp(timeEvidence, outing);
+    if (!isFinite(target)) continue;
+    const edge = windowMs + 60000;
+    if (target < outing.startedAt - edge || target > (outing.endedAt || Date.now()) + edge) continue;
+    const rows = await db.outingPoints.where('[outingLocalId+timestamp]')
+      .between([outing.localOutingId, target - windowMs], [outing.localOutingId, target + windowMs], true, true).toArray();
+    const provider = source === 'wfr_imported' ? 'wfr_imported_track' : 'wfr_outing_track';
+    const points = normalizeBreadcrumbs({
+      timezone: outing.timezoneAtStart, utcOffsetSeconds: outing.utcOffsetSecondsAtStart,
+      provider, providerOutingId: outing.localOutingId, points: rows
+    });
+    const resolved = resolveBreadcrumbLocation(timeEvidence, points);
+    if (resolved.status === 'resolved') matches.push({ ...resolved, provider, providerOutingId: outing.localOutingId, outing });
+  }
+  matches.sort((a, b) => (({ high:3, medium:2, low:1 }[b.confidence] || 0) - ({ high:3, medium:2, low:1 }[a.confidence] || 0)) ||
+    (a.estimatedAccuracyMeters ?? Infinity) - (b.estimatedAccuracyMeters ?? Infinity));
+  if (matches.length > 1 && matches[0].confidence === matches[1].confidence &&
+      haversine(matches[0].latitude, matches[0].longitude, matches[1].latitude, matches[1].longitude) * 1609.344 > 200) {
+    return { status: 'ambiguous', reason: 'Two location tracks overlap this photo time. Review location source.', matches };
+  }
+  return matches[0] || { status: 'unresolved', reason: `No ${source === 'wfr_local' ? 'local' : 'imported'} outing track match` };
+}
+async function getBreadcrumbCandidates(timeEvidence) {
+  for (const source of ['wfr_local', 'wfr_imported']) {
+    let match = await fetchOutingProviderMatches(timeEvidence, source, BREADCRUMB_QUERY_WINDOW_MS);
+    if (match.status === 'unresolved') match = await fetchOutingProviderMatches(timeEvidence, source, BREADCRUMB_EXPANDED_WINDOW_MS);
+    if (match.status === 'resolved' || match.status === 'ambiguous') return match;
+  }
+  if (!settings.token || !settings.breadcrumbResource) return { status: 'unresolved', reason: 'No matching WFR outing track; Safari breadcrumb source is not configured' };
+  let points = await fetchBreadcrumbWindow(timeEvidence, BREADCRUMB_QUERY_WINDOW_MS);
+  let resolved = resolveBreadcrumbLocation(timeEvidence, points);
+  if (resolved.status !== 'resolved') {
+    points = await fetchBreadcrumbWindow(timeEvidence, BREADCRUMB_EXPANDED_WINDOW_MS);
+    resolved = resolveBreadcrumbLocation(timeEvidence, points);
+  }
+  return resolved.status === 'resolved' ? { ...resolved, provider: 'wilderness_safari' } : resolved;
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function wallIsoFromEpochOffset(timestamp, offsetSeconds) {
+  if (!isFinite(timestamp) || !isFinite(offsetSeconds)) return null;
+  return new Date(timestamp + offsetSeconds * 1000).toISOString().slice(0, 19);
+}
+
+function targetFromBreadcrumbTimezone(timeEvidence, points) {
+  if (timeEvidence.utcIso) return { timestamp: Date.parse(timeEvidence.utcIso), offset: timeEvidence.utcOffsetSeconds ?? null };
+  if (!timeEvidence.wallIso) return null;
+  const offsets = [...new Set(points.map(point => point.utcOffsetSeconds).filter(Number.isFinite))];
+  let best = null;
+  for (const offset of offsets) {
+    const iso = utcIsoFromWall(timeEvidence.wallIso, offset);
+    const timestamp = iso ? Date.parse(iso) : NaN;
+    const nearest = Math.min(...points.filter(point => point.utcOffsetSeconds === offset).map(point => Math.abs(point.timestamp - timestamp)));
+    if (isFinite(nearest) && (!best || nearest < best.nearest)) best = { timestamp, offset, nearest };
+  }
+  return best;
+}
+
+function interpolateLongitude(a, b, fraction) {
+  let delta = b - a;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  const value = a + delta * fraction;
+  return ((value + 540) % 360) - 180;
+}
+
+function resolveBreadcrumbLocation(timeEvidence, points) {
+  const targetInfo = targetFromBreadcrumbTimezone(timeEvidence, points);
+  if (!targetInfo || !isFinite(targetInfo.timestamp) || !points.length) return { status: 'unresolved', reason: 'No timezone-compatible breadcrumb coverage' };
+  const target = targetInfo.timestamp;
+  const compatible = targetInfo.offset == null ? points : points.filter(point => point.utcOffsetSeconds === targetInfo.offset);
+  if (!compatible.length) return { status: 'unresolved', reason: 'No compatible breadcrumb points' };
+  const nearby = compatible.filter(point => Math.abs(point.timestamp - target) <= BREADCRUMB_MAX_INTERPOLATION_GAP_MS);
+
+  if (nearby.length >= BREADCRUMB_STATIONARY_MIN_POINTS) {
+    const centerLat = median(nearby.map(point => point.latitude));
+    const centerLng = median(nearby.map(point => point.longitude));
+    const spread = Math.max(...nearby.map(point => haversine(centerLat, centerLng, point.latitude, point.longitude) * 1609.344));
+    if (spread <= BREADCRUMB_STATIONARY_RADIUS_METERS) {
+      const reported = median(nearby.map(point => point.accuracyMeters).filter(Number.isFinite)) || 0;
+      const estimatedAccuracyMeters = Math.max(5, Math.ceil(reported + spread));
+      return {
+        status: 'resolved', timestamp: target, latitude: centerLat, longitude: centerLng,
+        estimatedAccuracyMeters, confidence: estimatedAccuracyMeters <= 45 ? 'high' : 'medium',
+        method: 'breadcrumb_stationary_cluster', points: nearby,
+        timezonePoint: nearby.reduce((best, point) => Math.abs(point.timestamp - target) < Math.abs(best.timestamp - target) ? point : best)
+      };
+    }
+  }
+
+  const nearest = compatible.reduce((best, point) => !best || Math.abs(point.timestamp - target) < Math.abs(best.timestamp - target) ? point : best, null);
+  if (nearest && Math.abs(nearest.timestamp - target) <= BREADCRUMB_NEAR_POINT_MS) {
+    const estimatedAccuracyMeters = nearest.accuracyMeters == null ? null : Math.max(5, Math.ceil(nearest.accuracyMeters));
+    return {
+      status: 'resolved', timestamp: target, latitude: nearest.latitude, longitude: nearest.longitude,
+      estimatedAccuracyMeters, confidence: estimatedAccuracyMeters == null || estimatedAccuracyMeters <= 50 ? 'high' : 'medium',
+      method: 'breadcrumb_nearest', points: [nearest], timezonePoint: nearest
+    };
+  }
+
+  const before = compatible.filter(point => point.timestamp <= target).pop();
+  const after = compatible.find(point => point.timestamp >= target);
+  if (!before || !after || before === after) return { status: 'unresolved', reason: 'No reliable bounding breadcrumbs' };
+  const gap = after.timestamp - before.timestamp;
+  if (gap <= 0 || gap > BREADCRUMB_MAX_INTERPOLATION_GAP_MS) return { status: 'unresolved', reason: 'Breadcrumb gap is too large' };
+  const distanceMeters = haversine(before.latitude, before.longitude, after.latitude, after.longitude) * 1609.344;
+  const speedMps = distanceMeters / (gap / 1000);
+  if (!isFinite(speedMps) || speedMps > BREADCRUMB_MAX_PLAUSIBLE_SPEED_MPS) return { status: 'unresolved', reason: 'Track movement is implausible' };
+  const fraction = (target - before.timestamp) / gap;
+  const reported = Math.max(before.accuracyMeters || 0, after.accuracyMeters || 0);
+  const estimatedAccuracyMeters = Math.max(8, Math.ceil(reported + Math.min(150, distanceMeters * 0.15)));
+  return {
+    status: 'resolved', timestamp: target,
+    latitude: before.latitude + fraction * (after.latitude - before.latitude),
+    longitude: interpolateLongitude(before.longitude, after.longitude, fraction),
+    estimatedAccuracyMeters,
+    confidence: gap <= BREADCRUMB_HIGH_CONFIDENCE_MAX_GAP_MS && estimatedAccuracyMeters <= 75 ? 'high' : 'medium',
+    method: 'breadcrumb_interpolated', points: [before, after], timezonePoint: Math.abs(before.timestamp - target) <= Math.abs(after.timestamp - target) ? before : after,
+    fraction, gapSeconds: gap / 1000, distanceMeters, impliedSpeedMps: speedMps
+  };
+}
+
+function breadcrumbProvenance(timeEvidence, result) {
+  const points = result.points || [];
+  const before = points.filter(point => point.timestamp <= result.timestamp).pop() || points[0] || null;
+  const after = points.find(point => point.timestamp >= result.timestamp) || points[points.length - 1] || null;
+  return {
+    source: result.method,
+    provider: result.provider || (points[0] && points[0].provider) || 'wilderness_safari',
+    providerOutingId: result.providerOutingId || (points[0] && points[0].providerOutingId) || null,
+    confidence: result.confidence,
+    estimatedAccuracyMeters: result.estimatedAccuracyMeters,
+    photoTime: {
+      source: timeEvidence.source, pattern: timeEvidence.pattern || null,
+      confidence: timeEvidence.confidence, wallIso: timeEvidence.wallIso || null,
+      utcIso: new Date(result.timestamp).toISOString()
+    },
+    breadcrumb: {
+      source: result.provider || (points[0] && points[0].provider) || 'wilderness_safari', method: result.method.replace(/^breadcrumb_/, ''),
+      beforeTimestamp: before && before.timestamp, afterTimestamp: after && after.timestamp,
+      beforeLatitude: before && before.latitude, beforeLongitude: before && before.longitude,
+      afterLatitude: after && after.latitude, afterLongitude: after && after.longitude,
+      gapSeconds: result.gapSeconds ?? (before && after ? (after.timestamp - before.timestamp) / 1000 : 0),
+      sourceIds: points.map(point => point.sourceId)
+    },
+    resolvedAt: Date.now()
+  };
+}
+
 async function fetchJson(url, timeoutMs = 12000) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -2309,8 +2894,8 @@ function weatherValue(hourly, key, index) {
 }
 function applyWeatherTimezone(captureTime, data) {
   if (!captureTime || !data) return captureTime;
-  captureTime.timezone = data.timezone || captureTime.timezone;
-  captureTime.timezoneAbbreviation = data.timezone_abbreviation || captureTime.timezoneAbbreviation;
+  captureTime.timezone = captureTime.timezone || data.timezone;
+  captureTime.timezoneAbbreviation = captureTime.timezoneAbbreviation || data.timezone_abbreviation;
   if (captureTime.utcOffsetSeconds === null || captureTime.utcOffsetSeconds === undefined) {
     captureTime.utcOffsetSeconds = Number(data.utc_offset_seconds || 0);
     captureTime.localIso = captureTime.wallIso + offsetText(captureTime.utcOffsetSeconds);
@@ -2644,7 +3229,7 @@ function resizeImageFile(file, maxEdge = PHOTO_MAX_EDGE) {
 function photoEnrichmentState(hasGps, hasTime) {
   return {
     exif: 'done',
-    location: hasGps ? 'ready' : 'missing_location',
+    location: hasGps ? 'ready' : (hasTime ? 'pending' : 'missing_location'),
     timestamp: hasTime ? 'ready' : 'missing_timestamp',
     geocode: hasGps ? 'pending' : 'unavailable',
     weather: (hasGps && hasTime) ? 'pending' : 'unavailable',
@@ -2677,18 +3262,20 @@ async function importPhotoFile(file) {
   let sha256 = null;
   try { sha256 = await sha256Hex(await file.arrayBuffer()); } catch(e) { /* non-fatal */ }
 
+  const timeEvidence = collectPhotoTimeEvidence(file, parsed, now);
+  const selectedTime = resolveCaptureTimeEvidence(timeEvidence);
+  const timeProvenance = timeProvenanceFromEvidence(selectedTime, timeEvidence);
   const hasGps = !!parsed.gps;
-  const hasTime = !!parsed.captureTime;
+  const hasTime = !!selectedTime;
+  if (!parsed.captureTime && selectedTime && selectedTime.source === 'filename') {
+    const meta = $('original-photo-status');
+    meta.className = 'original-photo-status ok';
+    meta.textContent = '✓ Capture time found in camera filename\nWFR outing tracks and Safari history will be checked for location and timezone.';
+  }
 
-  // Observation time: EXIF outranks import time. Never silently use import time.
-  const observedMs = hasTime ? (() => {
-    const ct = parsed.captureTime;
-    const ms = ct.utcIso ? Date.parse(ct.utcIso) : NaN;
-    if (!isNaN(ms)) return ms;
-    // No offset info: interpret wall clock in device's local zone, flagged low-confidence
-    const p = captureWallParts(ct.wallIso);
-    return p ? new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second).getTime() : null;
-  })() : null;
+  // Only an absolute timestamp may become canonical here. Wall-only evidence is
+  // retained without interpreting it in the processing device's timezone.
+  const observedMs = selectedTime && selectedTime.utcIso ? Date.parse(selectedTime.utcIso) : null;
 
   // 3. Resize derivative (original is never persisted to browser storage)
   let resized = null;
@@ -2747,19 +3334,11 @@ async function importPhotoFile(file) {
     submitError: null,
     observationSource: 'photo_import',
     importedAt: now,
-    timeProvenance: hasTime ? {
-      source: 'exif_' + parsed.captureTime.source,
-      raw: parsed.captureTime.raw,
-      wallIso: parsed.captureTime.wallIso,
-      localIso: parsed.captureTime.localIso,
-      utcIso: parsed.captureTime.utcIso,
-      timezoneConfidence: parsed.captureTime.timezoneConfidence,
-      utcOffsetSeconds: parsed.captureTime.utcOffsetSeconds,
-      offsetSource: parsed.captureTime.offsetSource,
-      offsetsSeen: parsed.captureTime.offsetsSeen,
-      timezone: null,
-      timezoneAbbreviation: parsed.captureTime.timezoneAbbreviation
-    } : { source: 'unknown' },
+    timeProvenance,
+    locationProvenance: hasGps ? {
+      source: 'exif', confidence: 'high', estimatedAccuracyMeters: null,
+      resolvedAt: now
+    } : null,
     exif: parsed.exif || null,
     exifStatus: parsed.status,
     exifGpsSource: parsed.gpsSource || null,
@@ -2782,6 +3361,7 @@ async function importPhotoFile(file) {
     originalFilename: file.name || 'photo.jpg',
     originalMimeType: file.type || null,
     originalSizeBytes: file.size,
+    originalLastModified: isFinite(Number(file.lastModified)) ? Number(file.lastModified) : null,
     originalSha256: sha256,
     caption: '',
     uploadStatus: 'pending',
@@ -2805,7 +3385,7 @@ async function importPhotoFile(file) {
 
   updateQueueChip();
   $('capture-status').textContent = 'Photo imported — reviewing…';
-  openImportReview(localId);
+  await openImportReview(localId);
 
   // 5. Run enrichment independently; failures never destroy the record
   runPhotoEnrichment(localId);
@@ -2836,6 +3416,7 @@ function runPhotoEnrichment(localId) {
 }
 
 async function runPhotoEnrichmentStages(localId) {
+  await runBreadcrumbRecoveryStage(localId);
   await runGeocodeStage(localId);
   await runWeatherStage(localId);
   await runIdentificationStage(localId);
@@ -2843,14 +3424,110 @@ async function runPhotoEnrichmentStages(localId) {
   refreshStorageStats().catch(() => {});
 }
 
+async function runBreadcrumbRecoveryStage(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.photoEnrichment) return;
+  if (obs.gpsSource === 'exif' || (obs.latitude != null && obs.longitude != null)) return;
+  if (!['pending', 'error'].includes(obs.photoEnrichment.location)) return;
+  const timeEvidence = obs.timeProvenance || {};
+  if (timeEvidence.source === 'unknown' || (!timeEvidence.wallIso && !timeEvidence.utcIso)) {
+    await mutateObservation(localId, o => {
+      o.photoEnrichment.location = 'missing_location';
+      o.photoEnrichment.geocode = 'unavailable';
+      o.photoEnrichment.weather = 'missing_location';
+      o.weatherStatus = 'missing-location';
+    });
+    return;
+  }
+  await mutateObservation(localId, o => {
+    o.photoEnrichment.location = 'running';
+    o.locationResolutionError = null;
+  });
+  try {
+    let resolved = await getBreadcrumbCandidates(timeEvidence);
+    // Track corroboration can strengthen weak file metadata, but never turn it
+    // into false certainty. Low-confidence time evidence gets a conservative
+    // uncertainty penalty and is capped at medium location confidence.
+    if (resolved.status === 'resolved' && timeEvidence.confidence === 'low') {
+      if (resolved.confidence !== 'high') resolved = { status: 'unresolved', reason: 'Weak timestamp evidence was not sufficiently corroborated' };
+      else {
+        resolved.confidence = 'medium';
+        resolved.estimatedAccuracyMeters = resolved.estimatedAccuracyMeters == null ? 150 : Math.ceil(resolved.estimatedAccuracyMeters + 120);
+      }
+    } else if (resolved.status === 'resolved' && timeEvidence.confidence === 'medium' && resolved.confidence === 'high') {
+      resolved.confidence = 'medium';
+      resolved.estimatedAccuracyMeters = resolved.estimatedAccuracyMeters == null ? 60 : Math.ceil(resolved.estimatedAccuracyMeters + 30);
+    }
+    if (resolved.status !== 'resolved') {
+      await mutateObservation(localId, o => {
+        o.photoEnrichment.location = 'unavailable';
+        o.photoEnrichment.geocode = 'unavailable';
+        o.photoEnrichment.weather = 'missing_location';
+        o.weatherStatus = 'missing-location';
+        o.locationResolutionError = resolved.reason || 'No reliable breadcrumb track match';
+      });
+      return;
+    }
+    await mutateObservation(localId, o => {
+      // Async recovery never overwrites EXIF or a user-entered value.
+      if (o.gpsSource === 'exif' || o.gpsSource === 'user_provided' || o.latitude != null || o.longitude != null ||
+          (o.timeProvenance && o.timeProvenance.source === 'user_provided')) return;
+      const timezonePoint = resolved.timezonePoint || {};
+      const offset = timezonePoint.utcOffsetSeconds ?? o.timeProvenance.utcOffsetSeconds ?? null;
+      const wall = o.timeProvenance.wallIso || wallIsoFromEpochOffset(resolved.timestamp, offset);
+      o.latitude = resolved.latitude;
+      o.longitude = resolved.longitude;
+      o.accuracyMeters = resolved.estimatedAccuracyMeters;
+      o.gpsStatus = 'estimated';
+      o.gpsSource = resolved.method;
+      o.locationProvenance = breadcrumbProvenance(timeEvidence, resolved);
+      o.locationResolutionError = null;
+      o.timeProvenance.utcIso = new Date(resolved.timestamp).toISOString();
+      o.timeProvenance.utcOffsetSeconds = offset;
+      o.timeProvenance.wallIso = wall;
+      o.timeProvenance.localIso = wall && offset != null ? wall + offsetText(offset) : wall;
+      o.timeProvenance.timezone = timezonePoint.timezone || o.timeProvenance.timezone || null;
+      o.timeProvenance.timezoneAbbreviation = timezonePoint.timezoneAbbreviation || o.timeProvenance.timezoneAbbreviation || null;
+      o.timeProvenance.timezoneSource = 'breadcrumb_location';
+      o.timeProvenance.timezoneConfidence = timezonePoint.timezone || offset != null ? 'medium_high' : 'low';
+      o.createdAt = resolved.timestamp;
+      o.startedAt = resolved.timestamp;
+      o.photoEnrichment.location = 'ready';
+      o.photoEnrichment.timestamp = 'ready';
+      o.photoEnrichment.geocode = 'pending';
+      o.photoEnrichment.weather = 'pending';
+      o.weatherStatus = 'pending';
+    });
+    const updated = await db.observations.get(localId);
+    if (updated) hydrateImportReviewFields(updated);
+  } catch(e) {
+    logWarn('Breadcrumb lookup failed: ' + e.message);
+    await mutateObservation(localId, o => {
+      o.photoEnrichment.location = 'error';
+      o.photoEnrichment.geocode = 'unavailable';
+      o.photoEnrichment.weather = 'missing_location';
+      o.weatherStatus = 'missing-location';
+      o.locationResolutionError = e.message;
+    });
+  }
+}
+
 /** Apply mutations to the CURRENT stored observation and persist.
  *  Enrichment stages must never re-put a snapshot held across an await:
  *  the user may have saved edits while a network call was in flight. */
 async function mutateObservation(localId, mutator) {
-  const cur = await db.observations.get(localId);
+  let cur = null;
+  let result = null;
+  // One IndexedDB transaction prevents a stale enrichment snapshot from
+  // overwriting a Review/user save that completed while the mutation yielded.
+  await db.transaction('rw', db.observations, async () => {
+    cur = await db.observations.get(localId);
+    if (!cur) return;
+    result = mutator(cur) || cur;
+    cur.updatedAt = Date.now();
+    await db.observations.put(cur);
+  });
   if (!cur) return null;
-  const result = mutator(cur) || cur;
-  await saveObs(cur);
   renderImportReviewStatuses(cur);
   return result;
 }
@@ -2915,6 +3592,16 @@ async function runWeatherStage(localId) {
       if (o.timeProvenance.utcOffsetSeconds == null) {
         o.timeProvenance.utcOffsetSeconds = ct.utcOffsetSeconds;
         o.timeProvenance.timezoneConfidence = ct.timezoneConfidence;
+      }
+      if (ct.utcOffsetSeconds != null && o.timeProvenance.wallIso) {
+        o.timeProvenance.localIso = o.timeProvenance.wallIso + offsetText(ct.utcOffsetSeconds);
+        o.timeProvenance.utcIso = utcIsoFromWall(o.timeProvenance.wallIso, ct.utcOffsetSeconds);
+        if (!o.timeProvenance.timezoneSource) o.timeProvenance.timezoneSource = 'weather_location';
+        const resolvedMs = Date.parse(o.timeProvenance.utcIso);
+        if (isFinite(resolvedMs) && o.timeProvenance.source !== 'unknown') {
+          o.createdAt = resolvedMs;
+          o.startedAt = resolvedMs;
+        }
       }
     } else {
       o.weatherStatus = result.status;
@@ -3029,8 +3716,10 @@ async function renderImportReviewStatuses(obs) {
   }).join('');
   const errEl = document.getElementById('import-enrich-error');
   if (errEl) {
-    errEl.textContent = [obs.weatherSubmitError, obs.classificationError].filter(Boolean).join(' · ');
+    errEl.textContent = [obs.locationResolutionError, obs.weatherSubmitError, obs.classificationError].filter(Boolean).join(' · ');
   }
+  const evidenceEl = document.getElementById('import-evidence-summary');
+  if (evidenceEl) evidenceEl.innerHTML = renderEvidenceSummaryHtml(obs);
 }
 
 async function openImportReview(localId) {
@@ -3065,11 +3754,59 @@ function hydrateImportReviewFields(obs) {
   setIfClean('imp-common', obs.subjectCommonName);
   setIfClean('imp-sci', obs.subjectScientificName);
   setIfClean('imp-count', obs.count);
+  setIfClean('imp-lat', obs.latitude);
+  setIfClean('imp-lng', obs.longitude);
+  setIfClean('imp-datetime', observationWallInputValue(obs));
 }
 
 async function renderImportReviewBody(obs) {
   const thumb = await firstPhotoObjectUrl(obs.localId);
   return reviewTop(obs, thumb) + reviewForm(obs) + reviewDetails(obs);
+}
+
+function filenamePatternLabel(pattern) {
+  return pattern === 'pixel_pxl' ? 'Pixel' : pattern === 'samsung_img' ? 'Samsung' : 'timestamped camera';
+}
+
+function formatWallTimeForReview(wall) {
+  const parts = captureWallParts(wall);
+  if (!parts) return 'Time found';
+  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)));
+}
+
+function timeEvidenceDescription(obs) {
+  const tp = obs.timeProvenance || {};
+  if (String(tp.source || '').startsWith('exif_')) return { value: '✓ Capture time from photo EXIF', note: tp.timezone || (tp.utcOffsetSeconds != null ? 'Explicit camera offset' : 'Timezone unresolved') };
+  if (tp.source === 'filename') return { value: '✓ ' + formatWallTimeForReview(tp.wallIso), note: 'Inferred from ' + filenamePatternLabel(tp.pattern) + ' filename' + (tp.timezone ? ' · ' + tp.timezone : '') };
+  if (tp.source === 'file_last_modified') return { value: 'File timestamp candidate', note: 'Weak evidence · requires track corroboration' };
+  if (tp.source === 'user_provided') return { value: '✓ User-supplied time', note: tp.timezone || 'Manual review value' };
+  return { value: 'Capture time unresolved', note: 'No credible timestamp evidence' };
+}
+
+function locationEvidenceDescription(obs) {
+  if (obs.gpsSource === 'exif') return { value: '✓ GPS from photo EXIF', note: 'Authoritative photo metadata' };
+  if (String(obs.gpsSource || '').startsWith('breadcrumb_')) {
+    const lp = obs.locationProvenance || {};
+    const accuracy = lp.estimatedAccuracyMeters != null ? `~${Math.round(lp.estimatedAccuracyMeters)} m estimated accuracy` : 'Estimated accuracy unavailable';
+    const confidence = lp.confidence ? lp.confidence.charAt(0).toUpperCase() + lp.confidence.slice(1) + ' confidence' : '';
+    const source = lp.provider === 'wfr_outing_track' ? 'local WFR outing' : lp.provider === 'wfr_imported_track' ? 'imported WFR outing' : 'Safari track';
+    return { value: '✓ Estimated from ' + source, note: [accuracy, confidence].filter(Boolean).join(' · ') };
+  }
+  if (obs.gpsSource === 'user_provided') return { value: '✓ User-supplied location', note: 'Manual review value' };
+  return { value: 'Location unresolved', note: obs.locationResolutionError || 'No reliable photo GPS or breadcrumb track match' };
+}
+
+function renderEvidenceSummaryHtml(obs) {
+  const e = escapeHtml;
+  const time = timeEvidenceDescription(obs);
+  const location = locationEvidenceDescription(obs);
+  const weather = obs.weatherStatus === 'ok' ? { value: '✓ ' + observationWeather(obs), note: 'Historical weather near capture time' } :
+    { value: obs.photoEnrichment && obs.photoEnrichment.weather === 'running' ? 'Finding historical weather…' : 'Weather unavailable', note: 'Requires credible capture time and location' };
+  return `
+    <div class="evidence-card"><div class="evidence-label">Time</div><div class="evidence-value">${e(time.value)}</div><div class="evidence-note">${e(time.note)}</div></div>
+    <div class="evidence-card"><div class="evidence-label">Location</div><div class="evidence-value">${e(location.value)}</div><div class="evidence-note">${e(location.note)}</div></div>
+    <div class="evidence-card"><div class="evidence-label">Weather</div><div class="evidence-value">${e(weather.value)}</div><div class="evidence-note">${e(weather.note)}</div></div>`;
 }
 
 function reviewTop(obs, thumbUrl) {
@@ -3080,11 +3817,6 @@ function reviewTop(obs, thumbUrl) {
   const confLabel = obs.subjectConfidence == null ? null :
     obs.subjectConfidence >= 0.75 ? 'High' : obs.subjectConfidence >= 0.4 ? 'Medium' : 'Low';
   const tax = obs.taxonomy;
-  const metadata = photoMetadataResult({
-    exif: obs.exif,
-    gps: obs.exifGpsSource && obs.latitude != null && obs.longitude != null ? { lat: obs.latitude, lng: obs.longitude } : null,
-    captureTime: obs.timeProvenance && String(obs.timeProvenance.source || '').startsWith('exif_') ? obs.timeProvenance : null
-  });
   const taxHtml = tax && tax.status === 'ok' ?
     `<div style="font-size:0.78rem;color:var(--text-muted);">Taxonomy (GBIF): ${e([tax.kingdom, tax.phylum, tax.class, tax.order, tax.family, tax.genus, tax.species].filter(Boolean).join(' › '))}</div>` :
     tax && tax.status === 'ambiguous' ? `<div style="font-size:0.78rem;color:var(--warn);">Taxonomy match ambiguous (${e(tax.matchType || '')}) — AI name retained.</div>` :
@@ -3092,7 +3824,7 @@ function reviewTop(obs, thumbUrl) {
     tax && tax.status === 'error' ? `<div style="font-size:0.78rem;color:var(--danger);">Taxonomy lookup failed. AI name retained.</div>` : '';
   return `
     ${thumbUrl ? `<img src="${thumbUrl}" alt="Imported photo" style="width:100%;max-height:260px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);" />` : ''}
-    <div class="metadata-result ${metadata.className}"><strong>${e(metadata.title)}</strong>${metadata.detail ? `<br>${e(metadata.detail)}` : ''}</div>
+    <div id="import-evidence-summary" class="evidence-grid">${renderEvidenceSummaryHtml(obs)}</div>
     <div id="import-status-list" style="margin:10px 0;"></div>
     <div id="import-enrich-error" style="color:var(--danger);font-size:0.78rem;margin-bottom:6px;"></div>
     <label>Common name</label><input id="imp-common" value="${e(obs.subjectCommonName || '')}" placeholder="e.g. Eastern Fox Squirrel" />
@@ -3101,7 +3833,7 @@ function reviewTop(obs, thumbUrl) {
     ${taxHtml}
     <label>Observed date &amp; time ${tzp.source === 'unknown' ? '(not in photo — please supply)' : ''}</label>
     <input id="imp-datetime" type="datetime-local" value="${dtLocal}" />
-    <div style="font-size:0.76rem;color:var(--text-dim);">${tzp.source === 'unknown' ? 'Source: missing from EXIF — import time was <b>not</b> substituted' : 'Source: EXIF ' + e(tzp.source) + (tzAbbrev ? ' · Timezone: ' + e(tzp.timezone || 'unknown') + tzAbbrev : ' · Timezone: unknown (uncertain, not assumed)')}</div>
+    <div style="font-size:0.76rem;color:var(--text-dim);">${e(timeEvidenceDescription(obs).note)}${tzAbbrev ? e(tzAbbrev) : ''}</div>
     <div class="form-row" style="display:flex;gap:8px;">
       <div style="flex:1;"><label>Latitude ${obs.latitude == null ? '(missing — supply)' : ''}</label><input id="imp-lat" type="number" step="any" value="${obs.latitude ?? ''}" /></div>
       <div style="flex:1;"><label>Longitude ${obs.longitude == null ? '(missing — supply)' : ''}</label><input id="imp-lng" type="number" step="any" value="${obs.longitude ?? ''}" /></div>
@@ -3133,7 +3865,8 @@ function reviewDetails(obs) {
   const tzp = obs.timeProvenance || {};
   return `
     ${obs.weatherRaw ? `<details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Weather details</summary><div style="font-size:0.8rem;color:var(--text-muted);">Temp: ${e(String(obs.weatherRaw.current?.temperature_2m ?? '?'))}\u00b0F · Apparent ${e(String(obs.weatherRaw.current?.apparent_temperature ?? '?'))}\u00b0F<br/>RH: ${e(String(obs.weatherRaw.current?.relative_humidity_2m ?? '?'))}% · Dew point ${e(String(obs.weatherRaw.current?.dew_point_2m ?? '?'))}\u00b0F<br/>Precip: ${e(String(obs.weatherRaw.current?.precipitation ?? '?'))} in · Snowfall: ${e(String(obs.weatherRaw.current?.snowfall ?? '?'))} in · Cloud cover: ${e(String(obs.weatherRaw.current?.cloud_cover ?? '?'))}%<br/>Wind: ${e(String(obs.weatherRaw.current?.wind_speed_10m ?? '?'))} mph ${e(compassDirection(obs.weatherRaw.current?.wind_direction_10m) || '')}, gusts ${e(String(obs.weatherRaw.current?.wind_gusts_10m ?? '?'))} mph<br/>Pressure: ${e(String(obs.weatherRaw.current?.surface_pressure ?? '?'))} hPa<br/>Elevation: ${e(String(obs.weatherRaw.meta?.elevation ?? '?'))} m<br/>Source: ${e((obs.weatherRaw.meta?.provider || 'open-meteo') + ' · ' + (obs.weatherRaw.strategy || '') + ' · matched hour ' + (obs.weatherRaw.sourceTimeLocal || '?'))}</div></details>` : ''}
-    <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Technical details (EXIF &amp; provenance)</summary><pre style="font-size:0.68rem;white-space:pre-wrap;color:var(--text-dim);max-height:200px;overflow:auto;">${e(JSON.stringify({ exif: obs.exif, gpsSource: obs.exifGpsSource, timeProvenance: tzp, classificationRaw: alt ? { model: alt.model, subjectType: alt.subjectType, rank: alt.taxonomicRank, lifeStage: alt.lifeStage, sex: alt.sex, notes: alt.notes } : null }, null, 2))}</pre></details>`;
+    ${obs.locationProvenance && String(obs.locationProvenance.source || '').startsWith('breadcrumb_') ? `<details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Location evidence</summary><div style="font-size:0.78rem;color:var(--text-muted);">Method: ${e(obs.locationProvenance.breadcrumb?.method || '')}<br>Before breadcrumb: ${e(obs.locationProvenance.breadcrumb?.beforeTimestamp ? fmtDate(obs.locationProvenance.breadcrumb.beforeTimestamp) : '—')}<br>After breadcrumb: ${e(obs.locationProvenance.breadcrumb?.afterTimestamp ? fmtDate(obs.locationProvenance.breadcrumb.afterTimestamp) : '—')}<br>Estimated accuracy: ${e(obs.locationProvenance.estimatedAccuracyMeters != null ? '~' + Math.round(obs.locationProvenance.estimatedAccuracyMeters) + ' m' : 'unknown')}</div></details>` : ''}
+    <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Technical details (EXIF &amp; provenance)</summary><pre style="font-size:0.68rem;white-space:pre-wrap;color:var(--text-dim);max-height:200px;overflow:auto;">${e(JSON.stringify({ exif: obs.exif, gpsSource: obs.exifGpsSource, timeProvenance: tzp, locationProvenance: obs.locationProvenance, classificationRaw: alt ? { model: alt.model, subjectType: alt.subjectType, rank: alt.taxonomicRank, lifeStage: alt.lifeStage, sex: alt.sex, notes: alt.notes } : null }, null, 2))}</pre></details>`;
 }
 
 /* Retry buttons are rendered dynamically by renderImportReviewStatuses, so
@@ -3148,7 +3881,10 @@ document.getElementById('import-review-body').addEventListener('click', async e 
   const en = cur.photoEnrichment;
   const tp = cur.timeProvenance || {};
   const label = btn.dataset.retry;
-  if (label === 'LOCATION RESOLUTION' && cur.latitude != null) { en.location = 'ready'; en.geocode = 'pending'; }
+  if (label === 'LOCATION RESOLUTION') {
+    if (cur.latitude != null) { en.location = 'ready'; en.geocode = 'pending'; }
+    else if (tp.wallIso || tp.utcIso) { en.location = 'pending'; cur.locationResolutionError = null; }
+  }
   if (label === 'WEATHER') en.weather = (cur.latitude != null && tp.wallIso) ? 'pending' : 'unavailable';
   if (label === 'IMAGE IDENTIFICATION') { en.identification = 'pending'; cur.classificationError = null; }
   if (label === 'TAXONOMY') en.taxonomy = 'pending';
@@ -3159,7 +3895,7 @@ document.getElementById('import-review-body').addEventListener('click', async e 
 
 function wireImportReview(localId) {
   // Track which AI-derived fields the user has manually modified.
-  for (const id of ['imp-common', 'imp-sci', 'imp-count', 'imp-notes']) {
+  for (const id of ['imp-common', 'imp-sci', 'imp-count', 'imp-notes', 'imp-lat', 'imp-lng', 'imp-datetime']) {
     const el = $(id);
     if (el && !el.dataset.dirtyWired) {
       el.dataset.dirtyWired = '1';
@@ -3192,7 +3928,12 @@ function wireImportReview(localId) {
     if (!isNaN(latVal) && !isNaN(lngVal)) {
       const locChanged = cur.latitude !== latVal || cur.longitude !== lngVal;
       cur.latitude = latVal; cur.longitude = lngVal;
-      cur.gpsStatus = 'ok'; cur.gpsSource = hadLoc ? cur.gpsSource : 'user_provided'; cur.accuracyMeters = null;
+      if (locChanged) {
+        cur.locationProvenance = { ...(cur.locationProvenance || {}), overriddenByUser: true, overriddenAt: Date.now() };
+        cur.gpsSource = 'user_provided';
+        cur.accuracyMeters = null;
+      } else if (!hadLoc) cur.gpsSource = 'user_provided';
+      cur.gpsStatus = 'ok';
       if (locChanged || prevGeo !== 'done') { cur.photoEnrichment.location = 'ready'; cur.photoEnrichment.geocode = 'pending'; }
       if (locChanged || cur.photoEnrichment.weather === 'missing_location') {
         cur.photoEnrichment.weather = (cur.timeProvenance || {}).wallIso ? 'pending' : 'missing_timestamp';
@@ -3224,10 +3965,15 @@ function wireImportReview(localId) {
     logInfo('Photo observation ready ' + localId);
     closeImportReview(true);
   };
+  $('imp-save').dataset.localId = localId;
   $('imp-retry-all').onclick = async () => {
     const cur = await readInputs();
     if (!cur) return;
     const tp = cur.timeProvenance || {};
+    if (cur.latitude == null && (tp.wallIso || tp.utcIso) && ['error', 'unavailable', 'missing_location'].includes(cur.photoEnrichment.location)) {
+      cur.photoEnrichment.location = 'pending';
+      cur.locationResolutionError = null;
+    }
     if (cur.latitude != null && tp.wallIso) cur.photoEnrichment.weather = 'pending';
     if (settings.llmKey) { cur.photoEnrichment.identification = cur.aiIdentification ? 'done' : 'pending'; cur.classificationError = null; }
     if (cur.subjectScientificName && ['error', 'unavailable'].includes(cur.photoEnrichment.taxonomy)) cur.photoEnrichment.taxonomy = 'pending';
@@ -4323,6 +5069,7 @@ function loadSetup() {
   $('cfg-app-id').value = settings.appId;
   $('cfg-obs-resource').value = settings.observationsResource;
   $('cfg-trip-resource').value = settings.tripsResource;
+  $('cfg-breadcrumb-resource').value = settings.breadcrumbResource;
   $('cfg-token').value = settings.token;
   $('cfg-or-key').value = settings.llmKey;
   // Model selects hydrate from cache/fallback immediately; a stale catalog
@@ -4381,6 +5128,7 @@ function saveFromSetup() {
   settings.appId = $('cfg-app-id').value.trim();
   settings.observationsResource = $('cfg-obs-resource').value.trim();
   settings.tripsResource = $('cfg-trip-resource').value.trim();
+  settings.breadcrumbResource = $('cfg-breadcrumb-resource').value.trim();
   settings.token = $('cfg-token').value.trim();
   settings.llmKey = $('cfg-or-key').value.trim();
   settings.transModel = $('cfg-trans-model').value.trim();
@@ -4397,7 +5145,7 @@ function saveFromSetup() {
   saveSettings(settings);
 }
 
-[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-token'), $('cfg-or-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-vision-model'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
+[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-breadcrumb-resource'), $('cfg-token'), $('cfg-or-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-vision-model'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
   if (!el) return;
   el.addEventListener('change', saveFromSetup);
   if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('input', saveFromSetup);
@@ -5221,6 +5969,128 @@ async function fetchServerTrips() {
 }
 
 /* ========================
+   Outing JSON exchange + history
+   ======================== */
+function defaultOutingName(outing) {
+  return outing.name || `Outing — ${new Date(outing.startedAt).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' })}`;
+}
+async function buildOutingTrackExport(localOutingId) {
+  const outing = await db.outings.get(localOutingId);
+  if (!outing) throw new Error('Outing not found');
+  const points = await db.outingPoints.where('[outingLocalId+timestamp]')
+    .between([localOutingId, Dexie.minKey], [localOutingId, Dexie.maxKey]).sortBy('timestamp');
+  const observations = await db.observations.where('outingLocalId').equals(localOutingId).toArray();
+  const anchors = observations.filter(o => o.latitude != null && o.longitude != null).map(o => ({
+    timestamp: new Date(o.startedAt || o.createdAt).toISOString(), latitude: o.latitude, longitude: o.longitude,
+    accuracyMeters: o.accuracyMeters ?? null, altitude: o.altitude ?? null, heading: o.heading ?? null,
+    speed: o.speed ?? null, kind: 'observation_anchor', utcOffsetSeconds: -new Date(o.startedAt || o.createdAt).getTimezoneOffset() * 60
+  }));
+  return {
+    format: 'wfr-outing-track', version: 1, exportedAt: new Date().toISOString(),
+    outing: {
+      id: outing.localOutingId, name: defaultOutingName(outing),
+      startedAt: new Date(outing.startedAt).toISOString(), endedAt: outing.endedAt ? new Date(outing.endedAt).toISOString() : null,
+      timezone: outing.timezoneAtStart || null, utcOffsetSeconds: outing.utcOffsetSecondsAtStart ?? null
+    },
+    points: points.map(p => ({
+      timestamp: new Date(p.timestamp).toISOString(), latitude: p.latitude, longitude: p.longitude,
+      accuracyMeters: p.accuracyMeters ?? null, altitude: p.altitude ?? null, heading: p.heading ?? null,
+      speed: p.speed ?? null, kind: p.kind || 'breadcrumb', utcOffsetSeconds: p.utcOffsetSeconds ?? null
+    })).concat(anchors).sort((a,b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+  };
+}
+async function exportOutingTrack(localOutingId) {
+  const data = await buildOutingTrackExport(localOutingId);
+  const d = new Date(data.outing.startedAt);
+  const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type:'application/json' }));
+  const a = document.createElement('a'); a.href = url; a.download = `wfr-outing-${stamp}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0); return data;
+}
+function validateOutingTrackJson(payload) {
+  if (!payload || payload.format !== 'wfr-outing-track') throw new Error('That file is not a WFR outing track.');
+  if (payload.version !== 1) throw new Error('This WFR outing track version is not supported.');
+  if (!payload.outing || !Array.isArray(payload.points)) throw new Error('The outing track is missing required data.');
+  const points = payload.points.map((raw, index) => {
+    const timestamp = Date.parse(raw.timestamp);
+    const latitude = Number(raw.latitude), longitude = Number(raw.longitude);
+    if (!isFinite(timestamp) || !isFinite(latitude) || !isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      throw new Error(`Track point ${index + 1} has an invalid timestamp or coordinates.`);
+    }
+    return { ...raw, timestamp, latitude, longitude };
+  }).sort((a,b) => a.timestamp - b.timestamp);
+  if (!points.length) throw new Error('The outing track contains no location points.');
+  return { outing: payload.outing, points };
+}
+async function importOutingTrackData(payload) {
+  const valid = validateOutingTrackJson(payload);
+  const now = Date.now(), localOutingId = 'outing-imported-' + uuid();
+  const statedStart = Date.parse(valid.outing.startedAt), statedEnd = Date.parse(valid.outing.endedAt);
+  const startedAt = isFinite(statedStart) ? statedStart : valid.points[0].timestamp;
+  const endedAt = isFinite(statedEnd) ? statedEnd : valid.points[valid.points.length - 1].timestamp;
+  const offset = valid.outing.utcOffsetSeconds == null || valid.outing.utcOffsetSeconds === '' ? NaN : Number(valid.outing.utcOffsetSeconds);
+  const outing = {
+    localOutingId, originalSourceOutingId: valid.outing.id || null, name: valid.outing.name || null,
+    startedAt, endedAt, status:'completed', source:'wfr_imported', timezoneAtStart:valid.outing.timezone || null,
+    utcOffsetSecondsAtStart:isFinite(offset) ? offset : (valid.points[0].utcOffsetSeconds != null && isFinite(Number(valid.points[0].utcOffsetSeconds)) ? Number(valid.points[0].utcOffsetSeconds) : null),
+    localDateKey: localDateKey(startedAt), pointCount:valid.points.length, observationCount:0,
+    firstLatitude:valid.points[0].latitude, firstLongitude:valid.points[0].longitude,
+    lastLatitude:valid.points[valid.points.length-1].latitude, lastLongitude:valid.points[valid.points.length-1].longitude,
+    distanceMeters:valid.points.slice(1).reduce((sum,p,i) => sum + haversine(valid.points[i].latitude, valid.points[i].longitude, p.latitude, p.longitude)*1609.344, 0),
+    importedAt:now, createdAt:now, updatedAt:now
+  };
+  const pointRows = valid.points.map((p,index) => ({
+    localPointId:'crumb-imported-' + uuid(), outingLocalId:localOutingId, timestamp:p.timestamp,
+    latitude:p.latitude, longitude:p.longitude,
+    accuracyMeters:p.accuracyMeters != null && isFinite(Number(p.accuracyMeters)) ? Number(p.accuracyMeters) : null,
+    altitude:p.altitude != null && isFinite(Number(p.altitude)) ? Number(p.altitude) : null,
+    altitudeAccuracyMeters:null, heading:p.heading != null && isFinite(Number(p.heading)) ? Number(p.heading) : null,
+    speed:p.speed != null && isFinite(Number(p.speed)) ? Number(p.speed) : null,
+    timezone:outing.timezoneAtStart, utcOffsetSeconds:p.utcOffsetSeconds != null && isFinite(Number(p.utcOffsetSeconds)) ? Number(p.utcOffsetSeconds) : outing.utcOffsetSecondsAtStart,
+    source:'wfr_imported_tracker', kind:p.kind === 'observation_anchor' ? 'observation_anchor' : 'breadcrumb', createdAt:now, sourceIndex:index
+  }));
+  await db.transaction('rw', db.outings, db.outingPoints, async () => { await db.outings.put(outing); await db.outingPoints.bulkPut(pointRows); });
+  clearBreadcrumbWindowCache(); await loadOutingHistory(); return outing;
+}
+async function importOutingTrackFile(file) {
+  try {
+    const outing = await importOutingTrackData(JSON.parse(await file.text()));
+    $('original-photo-status').className = 'original-photo-status ok';
+    $('original-photo-status').textContent = `✓ Outing Track loaded\n${outing.pointCount} points available for subsequent photos.`;
+    return { status:'imported', outing };
+  } catch(e) {
+    $('original-photo-status').className = 'original-photo-status error';
+    $('original-photo-status').textContent = e.message; return { status:'error', error:e.message };
+  }
+}
+async function deleteOuting(localOutingId, ask = true) {
+  const outing = await db.outings.get(localOutingId);
+  if (!outing || outing.status === 'active') return false;
+  if (ask && !confirm(`Delete "${defaultOutingName(outing)}" and its location points? Observations will remain.`)) return false;
+  await db.transaction('rw', db.outings, db.outingPoints, async () => {
+    await db.outingPoints.where('outingLocalId').equals(localOutingId).delete(); await db.outings.delete(localOutingId);
+  });
+  clearBreadcrumbWindowCache(); await loadOutingHistory(); return true;
+}
+async function loadOutingHistory() {
+  const container = $('outing-history-list'); if (!container) return;
+  const outings = await db.outings.orderBy('startedAt').reverse().toArray();
+  if (!outings.length) { container.innerHTML = '<div class="empty">No outing tracks yet</div>'; return; }
+  container.innerHTML = outings.map(o => {
+    const end = o.endedAt || Date.now(), source = o.source === 'wfr_imported' ? 'Imported' : (o.status === 'active' ? 'Active' : 'Local');
+    return `<div class="outing-history-card" data-outing-id="${escapeHtml(o.localOutingId)}"><div class="outing-head"><strong>${escapeHtml(defaultOutingName(o))}</strong><span class="chip ${o.status === 'active' ? 'ok' : ''}">${source}</span></div><div class="outing-metrics"><span>${fmtDate(o.startedAt)} – ${new Date(end).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span><span>${fmtDuration((end-o.startedAt)/1000)}</span><span>${o.pointCount||0} points</span><span>${o.observationCount||0} observations</span><span>${((o.distanceMeters||0)/1609.344).toFixed(1)} mi</span></div><div class="outing-history-actions">${o.status === 'completed' ? `<button class="btn btn-small" data-outing-export="${escapeHtml(o.localOutingId)}">Export Track</button><button class="btn btn-small" data-outing-rename="${escapeHtml(o.localOutingId)}">Rename</button><button class="btn btn-small btn-danger" data-outing-delete="${escapeHtml(o.localOutingId)}">Delete</button>` : '<span class="outing-note">Stop the outing before export.</span>'}</div></div>`;
+  }).join('');
+}
+$('import-outing-btn').addEventListener('click', () => { $('outing-import-input').value=''; $('outing-import-input').click(); });
+$('outing-import-input').addEventListener('change', e => { const file=e.target.files && e.target.files[0]; if (file) importOutingTrackFile(file); });
+document.addEventListener('click', async e => {
+  const exportBtn=e.target.closest('[data-outing-export]'); if (exportBtn) await exportOutingTrack(exportBtn.dataset.outingExport);
+  const deleteBtn=e.target.closest('[data-outing-delete]'); if (deleteBtn) await deleteOuting(deleteBtn.dataset.outingDelete);
+  const renameBtn=e.target.closest('[data-outing-rename]');
+  if (renameBtn) { const o=await db.outings.get(renameBtn.dataset.outingRename); const name=o && prompt('Outing name:', defaultOutingName(o)); if (o && name && name.trim()) { o.name=name.trim(); o.updatedAt=Date.now(); await db.outings.put(o); await loadOutingHistory(); } }
+});
+
+/* ========================
    History
    ======================== */
 function flattenObservation(obs) {
@@ -5268,6 +6138,7 @@ function getObsTripRef(obs) {
 async function loadHistory() {
   const container = $('history-list');
   container.innerHTML = '<div class="empty">Loading…</div>';
+  loadOutingHistory().catch(e => logWarn('Outing history failed: ' + e.message));
 
   const [localTrips, localObs, serverTrips, serverObs] = await Promise.all([
     db.trips.orderBy('startedAt').reverse().toArray(),
@@ -5574,6 +6445,7 @@ async function init() {
   updateQueueChip();
   loadSetup();
   showTab('about');
+  resumeActiveOuting().catch(e => { logWarn('Active outing recovery failed: ' + e.message); renderOutingStatus(); });
 }
 init();
 
@@ -5582,6 +6454,14 @@ window.__WFR_TEST__ = {
   db, settings,
   importPhotoFile, chooseOriginalPhoto, openGenericPhotoInput, isSupportedPhotoFile,
   photoMetadataResult, parseExifFromFile, normalizeExif, normalizeCaptureTime,
+  PHOTO_FILENAME_TIME_PATTERNS, parsePhotoFilenameTime, collectPhotoTimeEvidence,
+  resolveCaptureTimeEvidence, timeProvenanceFromEvidence, normalizeBreadcrumbs,
+  resolveBreadcrumbLocation, breadcrumbProvenance, fetchBreadcrumbWindow,
+  clearBreadcrumbWindowCache, runBreadcrumbRecoveryStage, fetchOutingProviderMatches, getBreadcrumbCandidates,
+  BREADCRUMB_QUERY_WINDOW_MS, BREADCRUMB_EXPANDED_WINDOW_MS,
+  BREADCRUMB_MAX_INTERPOLATION_GAP_MS, BREADCRUMB_NEAR_POINT_MS,
+  BREADCRUMB_STATIONARY_RADIUS_METERS, BREADCRUMB_STATIONARY_MIN_POINTS,
+  BREADCRUMB_HIGH_CONFIDENCE_MAX_GAP_MS,
   enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex,
   compassDirection, wallEpochMinutes, captureWallParts, wallIso,
   applyObservationTime, observationWallInputValue,
@@ -5591,7 +6471,14 @@ window.__WFR_TEST__ = {
   normalizeOpenRouterModels, filterModelsFor, migrateModelId, initModelCatalog,
   refreshModelCatalog, modelCatalogState, transcribeAudio, processObservation,
   effectiveRecommendation, refreshRecommendations, recommendationRequestBody,
-  recommendationsNeedRefresh, currentCatalogFingerprints, applyTheme
+  recommendationsNeedRefresh, currentCatalogFingerprints, applyTheme,
+  startOuting, stopOuting, resumeActiveOuting, shouldStoreTrackPoint, positionToOutingPoint,
+  persistTrackerPoint, getFreshTrackerFix, renderOutingStatus,
+  buildOutingTrackExport, validateOutingTrackJson, importOutingTrackData, importOutingTrackFile,
+  deleteOuting, loadOutingHistory, runPhotoEnrichment,
+  getActiveOuting: () => activeOuting, getLastTrackerFix: () => lastTrackerFix,
+  TRACK_MIN_INTERVAL_MS, TRACK_MAX_INTERVAL_MS, TRACK_MIN_DISTANCE_METERS,
+  TRACK_ACCURACY_IMPROVEMENT_METERS, TRACK_MAX_ACCEPTED_ACCURACY_METERS
 };
 })();
 </script>
