@@ -3,6 +3,7 @@ const path = require('path');
 
 const fileUrl = `file://${path.resolve(process.cwd(), 'ui-berry-3r-evaluator.html')}`;
 const productionFixture = process.env.BERRY_PRODUCTION_FIXTURE;
+const productionFixtures = (process.env.BERRY_PRODUCTION_FIXTURES || '').split(path.delimiter).filter(Boolean);
 
 test.use({ channel: 'chrome' });
 
@@ -32,8 +33,8 @@ const reason = (option, n = 40, extra = '') => {
 
 const autoReasons = {
   aesthetics: 'Website A is better because its balanced spacing, crisp typography, restrained palette, and centered hierarchy create a clearer visual focus, while Website B uses denser spacing, a less consistent heading scale, and more competing accents. Website B remains readable and coherent, but Website A presents the timer with stronger alignment, contrast, and overall visual consistency.',
-  functionality: 'Website B is better because Website B includes the requested mode controls, settings panel, and supporting state-change code, while Website A includes the timer and reset control but has no comparable archive evidence for the requested configuration flow. The stronger evidence coverage for Website B addresses more core requirements, although its behavior remains strongly supported rather than interaction-confirmed.',
-  overall: 'Website B is better because Website A has the more polished hierarchy, steadier spacing, and cleaner palette, but Website B represents the requested settings and mode-control flow more completely. Website B’s denser layout costs less for this timer request than Website A’s weaker evidence for configuration, because customization is a core workflow requirement; the archive evidence supports that trade-off without claiming unconfirmed interaction success.'
+  functionality: 'Website B is better because Website B includes the requested mode controls, settings panel, and state-change structure, while Website A includes the timer and reset control but has no comparable configuration flow. Website B therefore represents more core requirements through clearly labeled controls and corresponding panels, while Website A provides a narrower set of requested inputs and actions.',
+  overall: 'Website B is better because Website A has the more polished hierarchy, steadier spacing, and cleaner palette, but Website B represents the requested settings and mode-control flow more completely. Website B’s denser layout costs less for this timer request than Website A’s narrower configuration structure, because customization is a core workflow requirement and matters more here than the difference in visual refinement.'
 };
 
 function automationResponses({ shortFunctionality = false, qaIssues = [] } = {}) {
@@ -58,10 +59,10 @@ function automationResponses({ shortFunctionality = false, qaIssues = [] } = {})
     decisions: {
       aesthetics: { option: 'A is better', rationalePlan: 'A has stronger lens-level visual consistency.', advantages: [{ claim: 'Stronger hierarchy', website: 'A', requirementIds: [], relevance: 'lens-quality', sourceFactIds: ['A-visual'], usedAsWinning: true }], caveats: [] },
       functionality: { option: 'B is better', rationalePlan: 'B represents more core requested behavior.', advantages: [{ claim: 'Settings flow represented', website: 'B', requirementIds: ['r1'], relevance: 'explicit', sourceFactIds: ['B-r1'], usedAsWinning: true }], caveats: ['Not interaction-confirmed'] },
-      overall: { option: 'B is better', rationalePlan: 'Configuration matters more than the visual gap.', advantages: [{ claim: 'Core configuration coverage', website: 'B', requirementIds: ['r1'], relevance: 'explicit', sourceFactIds: ['B-r1'], usedAsWinning: true }], caveats: [] }
+      overall: { option: 'B is better', rationalePlan: 'Configuration matters more than the visual gap.', visualSide: { winner: 'A', summary: 'Website A has the stronger visual hierarchy.' }, functionalSide: { winner: 'B', summary: 'Website B represents more requested configuration controls.' }, tradeoff: { moreImportantSide: 'functionality', why: 'Configuration is core to this timer request.' }, advantages: [{ claim: 'Core configuration coverage', website: 'B', requirementIds: ['r1'], relevance: 'explicit', sourceFactIds: ['B-r1'], usedAsWinning: true }], caveats: [] }
     },
     reasons: result,
-    qa: { issues: qaIssues },
+    qa: { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: qaIssues },
     'repair-functionality': { option: 'B is better', reason: autoReasons.functionality }
   };
 }
@@ -292,6 +293,29 @@ test('production fixture smoke parses exact Feather shell, candidate mapping, UR
   expect(errors).toEqual([]);
 });
 
+test('available private Berry fixtures retain distinct candidates, six fields, and structured requirements', async ({ page }) => {
+  test.skip(!productionFixtures.length, 'Set BERRY_PRODUCTION_FIXTURES to run private local smoke fixtures.');
+  const errors = await open(page), results=[];
+  for (const fixture of productionFixtures) {
+    await page.locator('#file').setInputFiles(fixture);
+    await expect(page.locator('#workspace')).toBeVisible();
+    results.push(await page.evaluate(() => {
+      const t=__BERRY3R_TEST__,s=t.state,decomposition=t.decomposeLocal(s.task.userRequest.text);
+      return {requestLength:s.task.userRequest.text.length,aPart:s.task.websiteA?.part.index,bPart:s.task.websiteB?.part.index,aUrl:s.task.websiteA?.url,bUrl:s.task.websiteB?.url,fields:Object.keys(s.task.existingAnswers),requirements:decomposition.requirements.length,cardinality:decomposition.requirements.filter(r=>r.requestedCount).length};
+    }));
+  }
+  for (const out of results) {
+    expect(out.requestLength).toBeGreaterThan(50);
+    expect(out.aPart).not.toBe(out.bPart);
+    expect(out.aUrl).toMatch(/^https:\/\//);
+    expect(out.bUrl).toMatch(/^https:\/\//);
+    expect(out.fields.sort()).toEqual(['aestheticsOption','aestheticsReason','functionalityOption','functionalityReason','overallOption','overallReason'].sort());
+    expect(out.requirements).toBeGreaterThan(0);
+  }
+  expect(results.some(x=>x.cardinality>0)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test('mobile layout has no page-level horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
@@ -490,4 +514,121 @@ test('API key is excluded from history-shaped records and exports', async ({ pag
   const serialized = await page.evaluate(() => JSON.stringify(__BERRY3R_TEST__.record()));
   expect(serialized).not.toContain('private-test-sentinel');
   expect(serialized).not.toContain('apiKey');
+});
+
+const realOverall = `Website B is better because it provides the stronger end-to-end interpretation of the requested builder, especially around gallery-based hero selection and clearly distinguished controls for expanding each hierarchy level. Website A appears to have the more festival-specific visual identity and supplies four extensive starter sections, but its upload-style hero choice and less descriptive plus controls weaken prompt alignment. Website B still presents all essential event fields, themes, menu levels, and preview content while making the intended structure easier to identify. That functional advantage outweighs Website A's likely aesthetic edge, although neither implementation has been behaviorally verified.`;
+
+test('real production Overall is recognized as a visual/functionality trade-off', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(reason => __BERRY3R_TEST__.overallLexicalAssessment(reason), realOverall);
+  expect(out).toEqual({ visual: true, functional: true, tradeoff: true });
+});
+
+test('plural controls count as functionality language', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => __BERRY3R_TEST__.overallLexicalAssessment('Website A has the stronger visual hierarchy, but Website B provides clearer controls for every requested level and that advantage matters more.'));
+  expect(out.functional).toBe(true);
+});
+
+test('functional advantage outweighs aesthetic edge is explicit trade-off language', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => __BERRY3R_TEST__.overallLexicalAssessment('Website A has the aesthetic edge, but Website B fulfills the requested workflow more completely, and that functional advantage outweighs Website A visual lead.'));
+  expect(out.tradeoff).toBe(true);
+});
+
+test('structured Overall and semantic QA override lexical uncertainty', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const t = __BERRY3R_TEST__, s = t.state;
+    s.decisions = { overall: { option: 'B is better', visualSide: { winner: 'A', summary: 'Website A leads presentation.' }, functionalSide: { winner: 'B', summary: 'Website B answers the brief.' }, tradeoff: { moreImportantSide: 'functionality', why: 'The brief depends on configuration.' } } };
+    s.qa = { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: [] };
+    return t.overallAssessment('Website B is better because Website A offers the stronger presentation, while Website B answers the brief more directly. The latter matters more for this particular request.');
+  });
+  expect(out.pass).toBe(true);
+  expect(out.advisory).toContain('Lexical heuristic is uncertain');
+});
+
+test('archived structure suggests is blocked from submission voice', async ({ page }) => {
+  await open(page);
+  const issues = await page.evaluate(() => __BERRY3R_TEST__.submissionVoiceIssues('Its archived structure suggests a clear visual progression.'));
+  expect(issues.join(' ')).toContain('internal evidence or automation mechanics');
+});
+
+test('archived interface visibly includes is blocked from submission voice', async ({ page }) => {
+  await open(page);
+  const issues = await page.evaluate(() => __BERRY3R_TEST__.submissionVoiceIssues('The archived interface visibly includes six selectable choices.'));
+  expect(issues.join(' ')).toContain('internal evidence or automation mechanics');
+});
+
+test('behaviorally verified disclaimer is removed without inventing success', async ({ page }) => {
+  await open(page);
+  const cleaned = await page.evaluate(() => __BERRY3R_TEST__.sanitizeSubmissionVoice('Website B provides the requested controls, although neither implementation has been behaviorally verified.'));
+  expect(cleaned).toBe('Website B provides the requested controls');
+  expect(cleaned).not.toMatch(/works|verified/i);
+});
+
+test('unconfirmed behavior may use safe existence language', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const final = {
+    aestheticsOption: 'A is better', aestheticsReason: autoReasons.aesthetics,
+    functionalityOption: 'B is better', functionalityReason: 'Website B is better because Website B includes the requested settings controls, provides configuration inputs, and presents clear mode choices, while Website A contains the timer and reset controls but exposes fewer requested configuration fields. Website B more closely matches the requested workflow structure, and Website A still provides the essential timer content without claiming that either interaction succeeds.',
+    overallOption: 'B is better', overallReason: autoReasons.overall
+  };
+  const out = await page.evaluate(final => __BERRY3R_TEST__.validateAll(final, { A: 'normal', B: 'normal' }), final);
+  expect(out.blocking.join(' ')).not.toContain('stated as confirmed');
+});
+
+test('four-by-five versus one-by-three initial structures become symmetric facts', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const out = await page.evaluate(() => {
+    const t=__BERRY3R_TEST__,s=t.state;
+    s.requirements=[{id:'r-count',requirement:'Provide four starter category sections with five item fields per subcategory.',requestedCount:{categories:4,itemsPerSubcategory:5},lens:'functionality',kind:'content',importance:'core',websiteA:'unknown',websiteB:'unknown',evidence:''}];
+    s.reports.A={visible:'Category 1 Item 1 Item 2 Item 3 Item 4 Item 5 Category 2 Category 3 Category 4',controls:[],css:{colors:[],media:[],animations:[],raw:''},js:{hasJavaScript:false,staticHandlerHints:[],raw:''}};
+    s.reports.B={visible:'Category 1 Item 1 Item 2 Item 3',controls:[{text:'Add Item',id:''},{text:'Add Subcategory',id:''},{text:'Add Category',id:''}],css:{colors:[],media:[],animations:[],raw:''},js:{hasJavaScript:false,staticHandlerHints:[],raw:''}};
+    return {A:t.cardinalityFacts('A'),B:t.cardinalityFacts('B')};
+  });
+  expect(out.A.find(f=>f.comparisonKey.endsWith('initial-cardinality')).observedCount).toEqual({categories:4,itemsPerSubcategory:5});
+  expect(out.B.find(f=>f.comparisonKey.endsWith('initial-cardinality')).observedCount).toEqual({categories:1,itemsPerSubcategory:3});
+});
+
+test('dynamic add controls do not erase initial cardinality shortfall', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const facts = await page.evaluate(() => {
+    const t=__BERRY3R_TEST__,s=t.state;
+    s.requirements=[{id:'r-count',requirement:'Provide four starter category sections with five item fields per subcategory.',requestedCount:{categories:4,itemsPerSubcategory:5},lens:'functionality',kind:'content',importance:'core',websiteA:'unknown',websiteB:'unknown',evidence:''}];
+    s.reports.B={visible:'Category 1 Item 1 Item 2 Item 3',controls:[{text:'Add Item',id:''},{text:'Add Subcategory',id:''},{text:'Add Category',id:''}],css:{colors:[],media:[],animations:[],raw:''},js:{hasJavaScript:false,staticHandlerHints:[],raw:''}};
+    return t.cardinalityFacts('B');
+  });
+  expect(facts.some(f=>f.observedCount?.categories===1&&f.observedCount?.itemsPerSubcategory===3)).toBe(true);
+  expect(facts.some(f=>f.dynamicExpansion?.addCategory&&f.dynamicExpansion?.addItem)).toBe(true);
+  expect(facts.filter(f=>f.requirementIds.includes('r-count'))).toHaveLength(2);
+});
+
+test('appearance-only Overall remains blocking', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => { __BERRY3R_TEST__.state.decisions=null; __BERRY3R_TEST__.state.qa=null; return __BERRY3R_TEST__.overallAssessment('Website A is better because Website A has stronger typography, spacing, palette, hierarchy, and visual polish, while Website B has denser layout and weaker alignment. The cleaner composition makes Website A the better choice for the requested page.'); });
+  expect(out.pass).toBe(false);
+  expect(out.message).toContain('functionality/prompt fulfillment');
+});
+
+test('prompt-fulfillment-only Overall remains blocking', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => { __BERRY3R_TEST__.state.decisions=null; __BERRY3R_TEST__.state.qa=null; return __BERRY3R_TEST__.overallAssessment('Website B is better because Website B includes every requested control, input, feature, and configuration field, while Website A is missing important requirements. Website B fulfills the workflow more completely, supports every menu level, and provides the requested interactions, so its functional advantage matters more for the user.'); });
+  expect(out.pass).toBe(false);
+  expect(out.message).toContain('visual comparison');
+});
+
+test('advisory-only lexical uncertainty does not prevent READY', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const out = await page.evaluate(({aesthetics,functionality}) => {
+    const t=__BERRY3R_TEST__,s=t.state;
+    s.decisions={overall:{option:'B is better',visualSide:{winner:'A',summary:'Website A leads presentation.'},functionalSide:{winner:'B',summary:'Website B answers the brief.'},tradeoff:{moreImportantSide:'functionality',why:'Configuration is central.'},advantages:[]},aesthetics:{advantages:[]},functionality:{advantages:[]}};
+    s.qa={overallSemantics:{visualComparisonExpressed:true,functionalComparisonExpressed:true,tradeoffExpressed:true,consistentWithDecision:true},issues:[]};
+    s.final={aestheticsOption:'A is better',aestheticsReason:aesthetics,functionalityOption:'B is better',functionalityReason:functionality,overallOption:'B is better',overallReason:'Website B is better because Website A offers an expressive treatment with memorable character and stronger emotional appeal, while Website B answers the brief in a more direct manner. The second consideration carries greater weight for this particular request because the central user goal depends on that directness. Website A remains compelling, but Website B provides the more appropriate complete choice for the intended audience.'};
+    const v=t.validateAll(s.final,{A:'normal',B:'normal'});return{valid:v.valid,advisory:v.advisory,blocking:v.blocking,checks:t.qaChecks(v)};
+  }, {aesthetics:autoReasons.aesthetics,functionality:autoReasons.functionality});
+  expect(out.valid).toBe(true);
+  expect(out.blocking).toEqual([]);
+  expect(out.advisory.join(' ')).toContain('Lexical heuristic is uncertain');
+  expect(out.checks.filter(x=>!x.pass&&x.severity==='blocking')).toHaveLength(0);
 });
