@@ -114,6 +114,7 @@ test('parser recovers shell, complete request, candidate identity, URLs, and all
 test('manual candidate reassignment changes only the selected side and prevents an accidental same-part assignment', async ({ page }) => {
   await open(page);
   await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.locator('#manualDetails > summary').click();
   const before = await page.evaluate(() => ({ a: __BERRY3R_TEST__.state.task.websiteA.part.index, b: __BERRY3R_TEST__.state.task.websiteB.part.index }));
   page.once('dialog', dialog => dialog.dismiss());
   await page.locator('[data-assign=A]').selectOption(String(before.b));
@@ -215,6 +216,7 @@ for (const [overall, overallReason] of [
 
 test('one completely broken candidate deterministically assigns the working site all three wins', async ({ page }) => {
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.locator('#manualDetails > summary').click();
   await page.locator('[data-note="A.status"]').selectOption('broken');
   const out = await page.evaluate(() => ({ a: __BERRY3R_TEST__.state.final.aestheticsOption, f: __BERRY3R_TEST__.state.final.functionalityOption, o: __BERRY3R_TEST__.state.final.overallOption }));
   expect(out).toEqual({ a: 'B is better', f: 'B is better', o: 'B is better' });
@@ -222,6 +224,7 @@ test('one completely broken candidate deterministically assigns the working site
 
 test('both broken assigns all Both are bad and waives minimum words', async ({ page }) => {
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.locator('#manualDetails > summary').click();
   await page.locator('[data-note="A.status"]').selectOption('broken');
   await page.locator('[data-note="B.status"]').selectOption('broken');
   const options = await page.evaluate(() => ['aesthetics', 'functionality', 'overall'].map(d => __BERRY3R_TEST__.state.final[d + 'Option']));
@@ -481,6 +484,7 @@ test('human override survives a complete automatic rerun', async ({ page }) => {
 
 test('issue-report copy requires and includes Feather and annotation links', async ({ page }) => {
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.locator('#taskIssueDetails > summary').click();
   await page.getByRole('button', { name: 'COPY ISSUE REPORT' }).click();
   await expect(page.locator('#issueStatus')).toContainText('Both Feather link and Annotation link are required');
   await page.locator('#annotationLink').fill('https://annotations.example.test/a-123');
@@ -632,7 +636,7 @@ test('advisory-only lexical uncertainty does not prevent READY', async ({ page }
   expect(out.advisory.join(' ')).toContain('Lexical heuristic is uncertain');
   expect(out.checks.filter(x=>!x.pass&&x.severity==='blocking')).toHaveLength(0);
 });
-// ---------- Phase 4: UI Regression ----------
+// ---------- Phase 4.1: UX Cleanup Regression ----------
 
 test('first visit defaults to light theme', async ({ page }) => {
   const errors = await open(page);
@@ -650,65 +654,190 @@ test('saved dark preference restores dark theme', async ({ page }) => {
   await page.evaluate(() => localStorage.removeItem('berry3r.theme'));
 });
 
-test('primary light-mode button has high-contrast foreground', async ({ page }) => {
-  await open(page);
-  const color = await page.evaluate(() => {
-    const btn = document.querySelector('.btn.primary');
-    if (!btn) return null;
-    return window.getComputedStyle(btn).color;
-  });
-  expect(color).toBe('rgb(255, 255, 255)');
-});
-
-test('major light-mode text tokens meet reasonable contrast thresholds', async ({ page }) => {
-  await open(page);
-  const out = await page.evaluate(() => {
-    const bodyColor = window.getComputedStyle(document.body).color;
-    const muted = document.querySelector('.muted');
-    const mutedColor = muted ? window.getComputedStyle(muted).color : null;
-    const help = document.querySelector('.help');
-    const helpColor = help ? window.getComputedStyle(help).color : null;
-    return { bodyColor, mutedColor, helpColor };
-  });
-  expect(out.bodyColor).toBeTruthy();
-  if (out.mutedColor) expect(out.mutedColor).not.toBe('rgb(255, 255, 255)');
-  if (out.helpColor) expect(out.helpColor).not.toBe('rgb(255, 255, 255)');
-});
-
-test('advanced sections are collapsed by default', async ({ page }) => {
+test('all secondary and manual sections start collapsed', async ({ page }) => {
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
-  const collapsed = await page.evaluate(() => ({
+  const state = await page.evaluate(() => ({
+    request: !document.querySelector('#workspace > details').hasAttribute('open'),
     analysis: !document.getElementById('analysisDetails')?.hasAttribute('open'),
+    manual: !document.getElementById('manualDetails')?.hasAttribute('open'),
     archive: !document.getElementById('archive')?.hasAttribute('open'),
+    taskIssue: !document.getElementById('taskIssueDetails')?.hasAttribute('open')
   }));
-  expect(collapsed.analysis).toBe(true);
-  expect(collapsed.archive).toBe(true);
+  expect(state.request).toBe(true);
+  expect(state.analysis).toBe(true);
+  expect(state.manual).toBe(true);
+  expect(state.archive).toBe(true);
+  expect(state.taskIssue).toBe(true);
 });
 
-test('answer cards remain visible immediately after task header', async ({ page }) => {
+test('canonical editable answers follow immediately after the task/action bar', async ({ page }) => {
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
-  const visible = await page.evaluate(() => {
-    const draft = document.getElementById('draftPanel');
-    const action = document.querySelector('.action-strip');
-    if (!draft || !action) return false;
-    const actionBottom = action.getBoundingClientRect().bottom;
-    const draftTop = draft.getBoundingClientRect().top;
-    return draftTop < actionBottom + window.innerHeight * 0.5;
+  const out = await page.evaluate(() => {
+    const strip = document.querySelector('.action-strip');
+    const panel = document.getElementById('submissionPanel');
+    const afterStrip = strip?.nextElementSibling === panel;
+    const gap = panel.getBoundingClientRect().top - strip.getBoundingClientRect().bottom;
+    return { afterStrip, gap, nearTop: panel.getBoundingClientRect().top < window.innerHeight };
   });
-  expect(visible).toBe(true);
+  expect(out.afterStrip).toBe(true);
+  expect(out.nearTop).toBe(true);
+  expect(Math.abs(out.gap)).toBeLessThan(200);
 });
 
-test('Final QA is adjacent to conclusions', async ({ page }) => {
+test('only one primary visible presentation of the three final answers exists', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const out = await page.evaluate(() => {
+    const visible = el => !el.closest('details:not([open])') && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const answers = [...document.querySelectorAll('.answer')];
+    const drafts = [...document.querySelectorAll('.draft')];
+    return {
+      answersVisible: answers.filter(visible).length,
+      editableReasonAreas: document.querySelectorAll('#submission textarea[data-final]').length,
+      optionControls: document.querySelectorAll('#submission input[type=radio]').length,
+      draftsVisibleOnLoad: drafts.filter(visible).length
+    };
+  });
+  expect(out.answersVisible).toBe(3);
+  expect(out.editableReasonAreas).toBe(3);
+  expect(out.optionControls).toBe(12);
+  expect(out.draftsVisibleOnLoad).toBe(0);
+});
+
+test('AI intermediate drafts are retained only inside collapsed Analysis Details', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const before = await page.evaluate(() => {
+    const details = document.getElementById('aiDraftsDetails');
+    const box = document.getElementById('drafts');
+    const visible = el => !el.closest('details:not([open])') && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    return { exists: !!details, insideAnalysis: !!details?.closest('#analysisDetails'), containsDrafts: !!box?.closest('#aiDraftsDetails'), detailsCollapsed: !details?.hasAttribute('open'), draftsHidden: visible(box) === false };
+  });
+  expect(before.exists).toBe(true);
+  expect(before.insideAnalysis).toBe(true);
+  expect(before.containsDrafts).toBe(true);
+  expect(before.detailsCollapsed).toBe(true);
+  expect(before.draftsHidden).toBe(true);
+  await page.locator('#analysisDetails > summary').click();
+  await page.locator('#aiDraftsDetails > summary').click();
+  const after = await page.evaluate(() => {
+    const visible = el => !el.closest('details:not([open])') && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    return { draftCards: [...document.querySelectorAll('.draft')].filter(visible).length };
+  });
+  expect(after.draftCards).toBe(3);
+});
+
+test('Final QA directly follows the canonical answer cards', async ({ page }) => {
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
   const adjacent = await page.evaluate(() => {
-    const draft = document.getElementById('draftPanel');
+    const answers = document.getElementById('submissionPanel');
     const qa = document.getElementById('finalQaPanel');
-    if (!draft || !qa) return false;
-    const draftBottom = draft.getBoundingClientRect().bottom;
-    const qaTop = qa.getBoundingClientRect().top;
-    return (qaTop - draftBottom) < 200;
+    const direct = answers?.nextElementSibling === qa;
+    const gap = qa.getBoundingClientRect().top - answers.getBoundingClientRect().bottom;
+    return { direct, gap };
   });
-  expect(adjacent).toBe(true);
+  expect(adjacent.direct).toBe(true);
+  expect(Math.abs(adjacent.gap)).toBeLessThan(200);
+});
+
+test('final answer sections precede all secondary/manual/collapsed sections in DOM order', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const order = await page.evaluate(() => {
+    const els = ['submissionPanel', 'finalQaPanel', 'analysisDetails', 'manualDetails', 'archive', 'taskIssueDetails'];
+    const list = Array.from(document.body.querySelectorAll('section, details'));
+    return Object.fromEntries(els.map(id => [id, list.indexOf(document.getElementById(id))]));
+  });
+  expect(order.submissionPanel).toBeLessThan(order.finalQaPanel);
+  expect(order.finalQaPanel).toBeLessThan(order.analysisDetails);
+  expect(order.finalQaPanel).toBeLessThan(order.manualDetails);
+  expect(order.finalQaPanel).toBeLessThan(order.archive);
+  expect(order.archive).toBeLessThan(order.taskIssueDetails);
+});
+
+test('manual corrections can be opened and used through their summary', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.locator('#manualDetails > summary').click();
+  await page.locator('.chip').first().click();
+  const noteValue = await page.locator('.lens textarea').first().inputValue();
+  expect(noteValue.length).toBeGreaterThan(0);
+  await page.locator('textarea[data-note="A.visual"]').fill('Manual observation entered while collapsed-by-default.');
+  const stored = await page.evaluate(() => __BERRY3R_TEST__.state.notes.A.visual);
+  expect(stored).toContain('collapsed-by-default');
+});
+
+test('task issue reporting can be opened and used through its summary', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.locator('#taskIssueDetails > summary').click();
+  await page.locator('#featherLink').fill('https://tasks.example.test/task-berry');
+  await page.locator('#annotationLink').fill('https://annotations.example.test/a-xyz');
+  await page.getByRole('button', { name: 'COPY ISSUE REPORT' }).click();
+  await expect(page.locator('#issueStatus')).toContainText('copied with both required links');
+});
+
+test('light-mode WCAG contrast: text tokens clear 4.5:1 and key boundaries clear 3:1', async ({ page }) => {
+  const errors = await open(page);
+  await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.locator('[data-dim="aesthetics"] .option input').first().check();
+  const failures = await page.evaluate(() => {
+    const parts = s => (s.match(/\d+(\.\d+)?/g) || []).map(Number);
+    const lum = rgb => { const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return .2126 * f(rgb[0]) + .7152 * f(rgb[1]) + .0722 * f(rgb[2]); };
+    const cr = (fg, bg) => { const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x); return (a + .05) / (b + .05); };
+    const comp = getComputedStyle(document.documentElement);
+    const tok = n => {
+      let v = comp.getPropertyValue(n).trim();
+      if (v.startsWith('#')) v = v.slice(1).replace(/^(\w)(\w)(\w)$/, '$1$1$2$2$3$3');
+      return v.match(/../g).map(h => parseInt(h, 16));
+    };
+    const bc = el => parts(getComputedStyle(el).backgroundColor).slice(0, 3);
+    const cc = el => parts(getComputedStyle(el).color).slice(0, 3);
+    const checks = [
+      ['ink on rail', tok('--ink'), tok('--rail'), 4.5],
+      ['ink on panel', tok('--ink'), [255, 255, 255], 4.5],
+      ['muted on rail', tok('--muted'), tok('--rail'), 4.5],
+      ['muted on panel', tok('--muted'), [255, 255, 255], 4.5],
+      ['warn on rail', tok('--warn'), tok('--rail'), 4.5],
+      ['warn on warning-note', tok('--warn'), [252, 243, 224], 4.5],
+      ['bad on rail', tok('--bad'), tok('--rail'), 4.5],
+      ['ok on panel', tok('--ok'), [255, 255, 255], 4.5],
+      ['accent A on panel', tok('--a'), [255, 255, 255], 4.5],
+      ['accent B on panel', tok('--b'), [255, 255, 255], 4.5],
+      ['berry eyebrow on rail', tok('--berry'), tok('--rail'), 4.5]
+    ];
+    const failures = [];
+    for (const [name, fg, bg, min] of checks) {
+      const r = cr(fg, bg);
+      if (r < min) failures.push(`${name}: ${r.toFixed(2)} < ${min}`);
+    }
+    const primary = document.querySelector('.btn.primary');
+    const pr = cr(cc(primary), bc(primary));
+    if (pr < 4.5) failures.push(`primary button fg/bg: ${pr.toFixed(2)} < 4.5`);
+    const accentBtn = document.querySelector('.btn.a');
+    const ar = cr(cc(accentBtn), bc(accentBtn));
+    if (ar < 4.5) failures.push(`accent-A button fg/bg: ${ar.toFixed(2)} < 4.5`);
+    const reasonArea = document.querySelector('textarea[data-final="aestheticsReason"]');
+    const ph = getComputedStyle(reasonArea, '::placeholder').color;
+    const phr = cr(parts(ph), bc(reasonArea));
+    if (phr < 4.5) failures.push(`placeholder: ${phr.toFixed(2)} < 4.5`);
+    const selectedSpan = document.querySelector('.option input:checked+span');
+    if (selectedSpan) {
+      const sr = cr(cc(selectedSpan), bc(selectedSpan));
+      if (sr < 4.5) failures.push(`selected option text/bg: ${sr.toFixed(2)} < 4.5`);
+      const inactive = document.querySelector('.option input:not(:checked)+span');
+      const cardBg = bc(inactive.closest('.answer'));
+      const ir = cr(cc(inactive), cardBg);
+      if (ir < 4.5) failures.push(`inactive option text/bg: ${ir.toFixed(2)} < 4.5`);
+    }
+    return failures;
+  });
+  expect(failures).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('completion scroll targets the result area when no answer field has focus', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const canScroll = await page.evaluate(() => {
+    const panel = document.getElementById('submissionPanel');
+    return !!panel && typeof panel.scrollIntoView === 'function';
+  });
+  expect(canScroll).toBe(true);
 });
 
 test('completion chime does not fire for targeted lint/rewrite', async ({ page }) => {
@@ -726,17 +855,10 @@ test('disabled chime preference suppresses sound', async ({ page }) => {
   expect(safe).toBe(true);
 });
 
-test('manual sections remain accessible', async ({ page }) => {
-  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
-  const accessible = await page.evaluate(() => {
-    const manual = document.getElementById('manualDetails');
-    const inspect = document.getElementById('inspection');
-    const notebook = document.getElementById('notebook');
-    return { manualExists: !!manual, inspectExists: !!inspect, notebookExists: !!notebook };
-  });
-  expect(accessible.manualExists).toBe(true);
-  expect(accessible.inspectExists).toBe(true);
-  expect(accessible.notebookExists).toBe(true);
+test('chime preference defaults ON', async ({ page }) => {
+  await open(page);
+  const checked = await page.locator('#setChime').isChecked();
+  expect(checked).toBe(true);
 });
 
 test('no "human-led inspection workbench" text remains', async ({ page }) => {
@@ -762,13 +884,11 @@ test('mobile layout has no horizontal overflow', async ({ page }) => {
   expect(overflow).toBe(false);
 });
 
-test('completion scroll targets the result area when no answer field has focus', async ({ page }) => {
+test('desktop layout has no horizontal overflow after the restructure', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
-  const canScroll = await page.evaluate(() => {
-    const draft = document.getElementById('draftPanel');
-    return !!draft && typeof draft.scrollIntoView === 'function';
-  });
-  expect(canScroll).toBe(true);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 });
 
 test('completion chime fires once after successful full analysis', async ({ page }) => {
@@ -778,21 +898,4 @@ test('completion chime fires once after successful full analysis', async ({ page
     return typeof fn === 'function' && fn.toString().includes('AudioContext');
   });
   expect(exists).toBe(true);
-});
-
-test('final answer section precedes analysis/manual/archive sections in DOM order', async ({ page }) => {
-  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
-  const order = await page.evaluate(() => {
-    const ids = ['draftPanel', 'finalQaPanel', 'analysisDetails', 'manualDetails', 'archive'];
-    const positions = {};
-    for (const id of ids) {
-      const el = document.getElementById(id);
-      if (el) positions[id] = Array.from(document.body.querySelectorAll('section, details')).indexOf(el);
-    }
-    return positions;
-  });
-  expect(order.draftPanel).toBeLessThan(order.analysisDetails);
-  expect(order.draftPanel).toBeLessThan(order.manualDetails);
-  expect(order.draftPanel).toBeLessThan(order.archive);
-  expect(order.finalQaPanel).toBeLessThan(order.analysisDetails);
 });
