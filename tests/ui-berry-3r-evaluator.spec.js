@@ -899,3 +899,273 @@ test('completion chime fires once after successful full analysis', async ({ page
   });
   expect(exists).toBe(true);
 });
+
+// ---------- Storage Reliability + Debug Tab ----------
+
+const SENTINEL_KEY = 'sk-or-v1-test-sentinel-abcdef0123456789';
+const SETTINGS_KEY = 'berry3r.settings';
+
+async function openAdmin(page) {
+  await open(page);
+  await page.getByRole('button', { name: 'Admin' }).click();
+}
+
+async function breakQuotaFor(page, key = SETTINGS_KEY) {
+  await page.evaluate(k => {
+    const orig = Storage.prototype.setItem;
+    window.__origSetItem = orig;
+    Storage.prototype.setItem = function(a, b) {
+      if (a === k) {
+        const e = new DOMException(`Failed to execute 'setItem' on 'Storage': Setting the value of '${a}' exceeded the quota.`, 'QuotaExceededError');
+        e.code = 22; e.name = 'QuotaExceededError';
+        throw e;
+      }
+      return orig.call(this, a, b);
+    };
+  }, key);
+}
+
+async function fixQuota(page) {
+  await page.evaluate(() => { if (window.__origSetItem) Storage.prototype.setItem = window.__origSetItem; });
+}
+
+function idbSettingsRow(page) {
+  return page.evaluate(() => new Promise((res, rej) => {
+    const r = indexedDB.open('berry3r-evaluator');
+    r.onsuccess = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains('settings')) { d.close(); return res(null); }
+      const q = d.transaction('settings', 'readonly').objectStore('settings').getAll();
+      q.onsuccess = () => { d.close(); res(q.result.find(x => x.id === 'berry3r.settings') || null); };
+      q.onerror = () => { d.close(); rej(q.error); };
+    };
+    r.onerror = () => rej(r.error);
+  }));
+}
+
+test('API key persists on input without requiring blur and shows saved state', async ({ page }) => {
+  await openAdmin(page);
+  await page.locator('#orKey').fill(SENTINEL_KEY);
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(k => localStorage.getItem(k), SETTINGS_KEY)).toContain(SENTINEL_KEY);
+  expect(await page.locator('#persistState').textContent()).toContain('Settings saved locally');
+});
+
+test('selected model persists immediately on change', async ({ page }) => {
+  await openAdmin(page);
+  await page.route('**/api/v1/models', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [
+    { id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 Mini' }, { id: 'anthropic/claude-test', name: 'Claude Test' }] }) }));
+  await page.locator('#orKey').fill(SENTINEL_KEY);
+  await page.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(page.locator('#modelStatus')).toContainText('2 models loaded');
+  await page.locator('#orModel').selectOption('anthropic/claude-test');
+  expect(await page.evaluate(k => { try { return (JSON.parse(localStorage.getItem(k)) || {}).model; } catch { return null; } }, SETTINGS_KEY)).toBe('anthropic/claude-test');
+});
+
+test('API key and model survive reload', async ({ page }) => {
+  await openAdmin(page);
+  await page.route('**/api/v1/models', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [
+    { id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 Mini' }, { id: 'anthropic/claude-test', name: 'Claude Test' }] }) }));
+  await page.locator('#orKey').fill(SENTINEL_KEY);
+  await page.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(page.locator('#modelStatus')).toContainText('2 models loaded');
+  await page.locator('#orModel').selectOption('anthropic/claude-test');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__BERRY3R_TEST__));
+  const out = await page.evaluate(k => ({ input: document.getElementById('orKey').value, s: (() => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } })() }), SETTINGS_KEY);
+  expect(out.input).toBe(SENTINEL_KEY);
+  expect(out.s.model).toBe('anthropic/claude-test');
+});
+
+test('localStorage QuotaExceededError is caught without an uncaught browser error', async ({ page }) => {
+  const errors = await open(page);
+  await breakQuotaFor(page);
+  const ok = await page.evaluate(() => window.__BERRY3R_TEST__.persistSettings());
+  expect(ok).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('quota failure surfaces a prominent app warning', async ({ page }) => {
+  await open(page);
+  await breakQuotaFor(page);
+  await page.evaluate(() => window.__BERRY3R_TEST__.persistSettings());
+  await expect(page.locator('#loadStatus')).toContainText('Settings could not be saved — browser storage quota is full');
+  await page.getByRole('button', { name: 'Admin' }).click();
+  await expect(page.locator('#persistState')).toContainText(/storage quota full|IndexedDB fallback/);
+});
+
+test('quota failure is recorded in the Debug tab and error buffer', async ({ page }) => {
+  const errors = await open(page);
+  await breakQuotaFor(page);
+  await page.evaluate(() => window.__BERRY3R_TEST__.persistSettings());
+  await page.getByRole('button', { name: 'Debug' }).click();
+  await expect(page.locator('#dbgErrors')).toContainText('QuotaExceededError');
+  const buffer = await page.evaluate(() => window.__BERRY3R_TEST__.errors());
+  expect(buffer.some(e => /quota/i.test(e.message))).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('IndexedDB fallback stores settings after localStorage quota failure', async ({ page }) => {
+  await open(page);
+  await breakQuotaFor(page);
+  await page.getByRole('button', { name: 'Admin' }).click();
+  await page.locator('#orKey').fill(SENTINEL_KEY + '-fb');
+  await page.waitForTimeout(700);
+  const row = await idbSettingsRow(page);
+  expect(row && typeof row.value === 'string').toBe(true);
+  expect(JSON.parse(row.value).apiKey).toBe(SENTINEL_KEY + '-fb');
+});
+
+test('reload restores settings from the IndexedDB fallback when localStorage copy is gone', async ({ page }) => {
+  await open(page);
+  await breakQuotaFor(page);
+  await page.getByRole('button', { name: 'Admin' }).click();
+  await page.locator('#orKey').fill(SENTINEL_KEY + '-reload');
+  await page.waitForTimeout(700);
+  await fixQuota(page);
+  await page.evaluate(k => localStorage.removeItem(k), SETTINGS_KEY);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__BERRY3R_TEST__));
+  await page.waitForTimeout(300);
+  expect(await page.locator('#orKey').inputValue()).toBe(SENTINEL_KEY + '-reload');
+  expect(await page.evaluate(k => (localStorage.getItem(k) || '').includes('-reload'), SETTINGS_KEY)).toBe(true);
+});
+
+test('newer IndexedDB fallback repairs the preferred localStorage copy when it becomes writable', async ({ page }) => {
+  await open(page);
+  await page.evaluate(k => window.__BERRY3R_TEST__.persistSettings(), SETTINGS_KEY); // ensure schema exists
+  const newer = JSON.stringify({ apiKey: 'k-newer-copy', model: 'openai/gpt-4.1-mini', __v: Date.now() + 99999 });
+  await page.evaluate(v => new Promise((res, rej) => {
+    const r = indexedDB.open('berry3r-evaluator');
+    r.onsuccess = () => { const d = r.result, tx = d.transaction('settings', 'readwrite');
+      tx.objectStore('settings').put({ id: 'berry3r.settings', value: v, __v: Date.now() + 99999 });
+      tx.oncomplete = () => { d.close(); res(); }; tx.onerror = () => rej(tx.error); };
+  }), newer);
+  const repaired = await page.evaluate(() => window.__BERRY3R_TEST__.hydrateFallback().then(() => localStorage.getItem('berry3r.settings')));
+  expect(repaired).toContain('k-newer-copy');
+  expect(await page.evaluate(() => window.__BERRY3R_TEST__.readStoredSettings().apiKey)).toBe('k-newer-copy');
+});
+
+test('task Clear does not alter persisted settings', async ({ page }) => {
+  await open(page);
+  await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await page.getByRole('button', { name: 'Admin' }).click();
+  await page.locator('#orKey').fill(SENTINEL_KEY);
+  await page.waitForTimeout(700);
+  const before = await page.evaluate(k => localStorage.getItem(k), SETTINGS_KEY);
+  await page.getByRole('button', { name: 'Evaluate' }).click();
+  await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  const after = await page.evaluate(k => localStorage.getItem(k), SETTINGS_KEY);
+  const stripV = t => { const { __v, ...rest } = JSON.parse(t || '{}'); return JSON.stringify(rest); };
+  expect(stripV(after)).toBe(stripV(before));
+  expect(after).toContain(SENTINEL_KEY);
+});
+
+test('model refresh keeps the saved selection instead of reverting to default', async ({ page }) => {
+  await page.addInitScript(v => localStorage.setItem(v.k, JSON.stringify({ apiKey: v.key, model: 'nostalgic/mega-model-v1' })), { k: SETTINGS_KEY, key: SENTINEL_KEY });
+  await openAdmin(page);
+  await page.route('**/api/v1/models', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 Mini' }] }) }));
+  await page.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(page.locator('#modelStatus')).toContainText('1 models loaded');
+  const val = await page.locator('#orModel').inputValue();
+  expect(val).toBe('nostalgic/mega-model-v1');
+  const opts = await page.locator('#orModel option').allTextContents();
+  expect(opts.join(' ')).toContain('saved — not in current list');
+});
+
+test('debug storage table identifies the largest keys with sizes and percentages', async ({ page }) => {
+  await page.addInitScript(() => {
+    try { localStorage.setItem('junkdrawer.zoo.history', 'x'.repeat(60000)); localStorage.setItem('widget.cache', 'y'.repeat(4000)); } catch {}
+  });
+  await open(page);
+  await page.getByRole('button', { name: 'Debug' }).click();
+  const rows = await page.locator('#dbgStorage tbody tr').evaluateAll(trs => trs.map(tr => [...tr.cells].map(c => c.textContent.trim())));
+  expect(rows[0][0]).toBe('junkdrawer.zoo.history');
+  expect(rows[0][2]).toMatch(/KB/);
+  expect(Number(rows[0][3].replace('%', ''))).toBeGreaterThanOrEqual(Number(rows[rows.length - 1][3].replace('%', '')));
+  expect(rows.map(r => r[0])).toEqual(expect.arrayContaining(['widget.cache']));
+  for (const r of rows) expect(r[4]).toMatch(/value hidden|Delete|%/);
+});
+
+test('the API key never appears in the rendered debug DOM', async ({ page }) => {
+  await page.addInitScript(v => localStorage.setItem(v.k, JSON.stringify({ apiKey: v.key })), { k: SETTINGS_KEY, key: SENTINEL_KEY });
+  await open(page);
+  await page.getByRole('button', { name: 'Debug' }).click();
+  const html = await page.evaluate(() => document.getElementById('view-debug').innerHTML + document.getElementById('dbgStorage').textContent);
+  expect(html).not.toContain(SENTINEL_KEY);
+  expect(html).not.toContain('sk-or-v1-test-sentinel');
+});
+
+test('exported debug JSON excludes the API key but includes the redaction notice', async ({ page }) => {
+  await page.addInitScript(v => localStorage.setItem(v.k, JSON.stringify({ apiKey: v.key })), { k: SETTINGS_KEY, key: SENTINEL_KEY });
+  await open(page);
+  const json = JSON.stringify(await page.evaluate(() => window.__BERRY3R_TEST__.buildDebugReport()));
+  expect(json).not.toContain(SENTINEL_KEY);
+  expect(json).toContain('Secrets redacted automatically.');
+  expect(json).toContain('"apiKeyConfigured":true');
+});
+
+test('the application error buffer sanitizes secret-like material', async ({ page }) => {
+  await page.addInitScript(v => localStorage.setItem(v.k, JSON.stringify({ apiKey: v.key })), { k: SETTINGS_KEY, key: SENTINEL_KEY });
+  await open(page);
+  await page.evaluate(() => { setTimeout(() => { throw new Error('upload failed for sk-or-v1-deadbeef123456 item'); }, 0); });
+  await page.waitForTimeout(200);
+  const dump = JSON.stringify(await page.evaluate(() => window.__BERRY3R_TEST__.errors()));
+  expect(dump).not.toContain('sk-or-v1-deadbeef123456');
+  expect(dump).toContain('[REDACTED]');
+  expect(dump).not.toContain(SENTINEL_KEY);
+});
+
+test('the debug report includes a sanitized QuotaExceededError record', async ({ page }) => {
+  await open(page);
+  await breakQuotaFor(page);
+  await page.evaluate(() => window.__BERRY3R_TEST__.persistSettings());
+  const report = await page.evaluate(() => window.__BERRY3R_TEST__.buildDebugReport());
+  expect(report.secretsRedacted).toBe(true);
+  expect(JSON.stringify(report.errors)).toMatch(/QuotaExceededError|quota/i);
+  expect(JSON.stringify(report.storage.berry.lastFailedWrite || {})).toMatch(/QuotaExceededError/i);
+});
+
+test('serialized Berry settings stay far below the size threshold', async ({ page }) => {
+  await open(page);
+  const size = await page.evaluate(() => {
+    const raw = localStorage.getItem('berry3r.settings') || '';
+    return { chars: raw.length, bytes: raw.length * 2, max: window.__BERRY3R_TEST__.SETTINGS_MAX_CHARS };
+  });
+  expect(size.bytes).toBeLessThan(size.max);
+  expect(size.chars).toBeLessThan(50000);
+});
+
+test('deleting Berry history never deletes settings or the fallback copy', async ({ page }) => {
+  await page.addInitScript(v => localStorage.setItem(v.k, JSON.stringify({ apiKey: v.key })), { k: SETTINGS_KEY, key: SENTINEL_KEY });
+  await open(page);
+  await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.getByRole('button', { name: 'Save to history' }).click();
+  await page.getByRole('button', { name: 'Debug' }).click();
+  page.once('dialog', d => d.accept());
+  await page.getByRole('button', { name: 'Delete Berry history + archives' }).click();
+  await expect(page.locator('#storeStatus')).toContainText('evaluations (0 records)');
+  const histCount = await page.evaluate(() => new Promise(res => { const r = indexedDB.open('berry3r-evaluator'); r.onsuccess = () => { const d = r.result, q = d.transaction('evaluations', 'readonly').objectStore('evaluations').count(); q.onsuccess = () => { d.close(); res(q.result); }; }; }));
+  expect(histCount).toBe(0);
+  expect(await page.evaluate(k => localStorage.getItem(k), SETTINGS_KEY)).toContain(SENTINEL_KEY);
+});
+
+test('origin-wide cleanup requires explicit per-key confirmation and leaves neighbors untouched', async ({ page }) => {
+  await page.addInitScript(() => {
+    try { localStorage.setItem('junkdrawer.other.tool', 'precious'); localStorage.setItem('junkdrawer.sacrificial.key', 'temp'); } catch {}
+  });
+  await open(page);
+  await page.getByRole('button', { name: 'Debug' }).click();
+  await expect(page.locator('#dbgStorage')).toContainText('junkdrawer.sacrificial.key');
+  expect(await page.getByRole('button', { name: /clear all local/i }).count()).toBe(0);
+  page.once('dialog', d => d.dismiss());
+  await page.locator('[data-delkey="junkdrawer.sacrificial.key"]').click();
+  expect(await page.evaluate(() => !!localStorage.getItem('junkdrawer.sacrificial.key'))).toBe(true);
+  page.once('dialog', async d => { expect(d.message()).toContain('junkdrawer.sacrificial.key'); await d.accept(); });
+  await page.locator('[data-delkey="junkdrawer.sacrificial.key"]').click();
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => localStorage.getItem('junkdrawer.sacrificial.key'))).toBe(null);
+  expect(await page.evaluate(() => localStorage.getItem('junkdrawer.other.tool'))).toBe('precious');
+});
