@@ -399,9 +399,9 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 
 <div class="sr-only" id="liveRegion" aria-live="polite"></div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.2" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Time to Click · version 2026.08.26.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.3" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Time to Click · version 2026.08.26.3
 </footer>
 
 <script>
@@ -654,6 +654,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   var alarmBusy = false;
   var activeAlarmPrompt = null;   // prompt currently announced (for title)
   var titleFlashUntil = 0;
+  var processedAlarmCount = 0;    // diagnostics/test hook: alarms that began playing
 
   function enqueueAlarm(timer) {
     alarmQueue.push({ id: timer.id, prompt: timer.prompt });
@@ -678,6 +679,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
       return;
     }
     alarmBusy = true;
+    processedAlarmCount += 1;
     activeAlarmPrompt = item.prompt;
     playAlarm(item, function () {
       alarmBusy = false;
@@ -701,7 +703,16 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     var finish = function () { if (!finished) { finished = true; done(); } };
     setTimeout(function () { speakAlarmText(prompt, finish); }, 250);
     // Safety valve so the queue can never wedge if onend never fires.
-    setTimeout(finish, Math.max(3000, prompt.length * 80 + 1000));
+    setTimeout(finish, speechSafetyTimeoutMs(prompt));
+  }
+
+  function speechSafetyTimeoutMs(text) {
+    var s = String(text || '');
+    var words = s.trim().split(/\s+/).filter(Boolean).length;
+    // Approximate normal speech at ~150 WPM, adjusted for the selected rate.
+    var rate = Math.max(0.5, settings.speechRate || 1);
+    var estimatedMs = words ? (words / (150 * rate)) * 60 * 1000 : 0;
+    return Math.max(5000, estimatedMs + 5000, s.length * 100 + 3000);
   }
 
   function speakAlarmText(text, onDone) {
@@ -1592,7 +1603,10 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   }
 
   function restoreRuntime() {
-    // Normalize loaded runtime state after a refresh.
+    // Normalize loaded runtime state after a refresh. Overdue timers are
+    // collected, not enqueued: alarm processing must not begin before the
+    // timer cards exist in the DOM, so init() enqueues after rebuildGrid().
+    var overdueTimers = [];
     var now = Date.now();
     timers.forEach(function (t) {
       if (t.state === 'running') {
@@ -1602,7 +1616,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
             // Deadline passed while the page was away: fire at most one
             // reminder and establish a new interval from now.
             t.remindersCompleted += 1;
-            enqueueAlarm(t);
+            overdueTimers.push(t);
             armNextInterval(t, now);
           } else {
             t.remainingMilliseconds = rem;
@@ -1623,15 +1637,19 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
       }
     });
     saveTimers();
+    return overdueTimers;
   }
 
   function init() {
     migrateFromV1IfNeeded();
     timers = loadTimers();
-    restoreRuntime();
+    var overdueTimers = restoreRuntime();
     bindSettingsToUI();
     rebuildGrid();
     refreshVoices();
+
+    // Cards now exist, so restore-time alarms can safely flash them.
+    overdueTimers.forEach(function (t) { enqueueAlarm(t); });
 
     if (countRunning() > 0) {
       startHeartbeat();
@@ -1690,6 +1708,9 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     makeId: uid,
     alarmQueueLength: function () { return alarmQueue.length; },
     alarmBusy: function () { return alarmBusy; },
+    processedAlarmCount: function () { return processedAlarmCount; },
+    speechSafetyTimeoutMs: speechSafetyTimeoutMs,
+    setSpeechRate: function (r) { settings.speechRate = clampNumber(r, 0.5, 2, 1); saveSettings(); },
     tick: function () { tick(); },
     find: findTimer,
     setRemaining: function (id, ms) {

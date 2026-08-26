@@ -437,3 +437,119 @@ test("card countdown display ticks down and shows mm:ss", async ({ page }) => {
   expect(text).toMatch(/^04:5[0-9]$/);
   expect(errors.length).toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// Restore-time alarm ordering (cards must exist before alarms flash) and
+// speech safety-timeout hardening.
+// ---------------------------------------------------------------------------
+
+function seedRunningTimer(overrides) {
+  return Object.assign({
+    id: "seed-" + Math.random().toString(36).slice(2, 8),
+    prompt: "Seeded Task",
+    minMinutes: 5,
+    maxMinutes: 5,
+    state: "running",
+    currentIntervalSeconds: 300,
+    targetTimestamp: 0,
+    remainingMilliseconds: 0,
+    remindersCompleted: 0,
+    createdAt: Date.now()
+  }, overrides);
+}
+
+test("overdue timer restored on reload fires exactly once and flashes its own card", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const overdue = seedRunningTimer({
+    prompt: "Overdue Restore Task",
+    targetTimestamp: Date.now() - 45000,
+    currentIntervalSeconds: 300
+  });
+  await page.evaluate(t => localStorage.setItem("timeToClick.timers.v2", JSON.stringify([t])), overdue);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+
+  // 1) incremented exactly once, 2) running again, 3) future target
+  const t = await page.evaluate(() => window.__TTC_TEST__.timers()[0]);
+  expect(t.prompt).toBe("Overdue Restore Task");
+  expect(t.remindersCompleted).toBe(1);
+  expect(t.state).toBe("running");
+  expect(t.targetTimestamp).toBeGreaterThan(Date.now());
+
+  // 4) card exists; 5) that same card carries the alarm visual state
+  const card = page.locator(".timer-card", { hasText: "Overdue Restore Task" });
+  await expect(card).toHaveCount(1);
+  await expect(page.locator(".timer-card.alarm-flash")).toHaveCount(1);
+  await expect(page.locator(".timer-card.alarm-flash")).toContainText("Overdue Restore Task");
+
+  // 6) no reminder storm; 7) alarm queued/processed exactly once
+  await page.waitForFunction(
+    () => window.__TTC_TEST__.alarmQueueLength() === 0 && !window.__TTC_TEST__.alarmBusy(),
+    { timeout: 15000 }
+  );
+  await page.evaluate(() => window.__TTC_TEST__.tick());
+  const after = await page.evaluate(() => window.__TTC_TEST__.timers()[0]);
+  expect(after.remindersCompleted).toBe(1);
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(1);
+  expect(errors.length).toBe(0);
+});
+
+test("two overdue timers restored together each fire once with serialized alarms", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = seedRunningTimer({ id: "seed-a", prompt: "Overdue Alpha", targetTimestamp: Date.now() - 60000 });
+  const b = seedRunningTimer({ id: "seed-b", prompt: "Overdue Bravo", targetTimestamp: Date.now() - 30000 });
+  await page.evaluate(ts => localStorage.setItem("timeToClick.timers.v2", JSON.stringify(ts)), [a, b]);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+
+  // Both increment once and rearm with future targets.
+  const states = await page.evaluate(() => window.__TTC_TEST__.timers().map(t => ({
+    prompt: t.prompt, reminders: t.remindersCompleted, state: t.state, future: t.targetTimestamp > Date.now()
+  })));
+  expect(states).toHaveLength(2);
+  for (const s of states) {
+    expect(s.reminders).toBe(1);
+    expect(s.state).toBe("running");
+    expect(s.future).toBe(true);
+  }
+
+  // Each card flashes (serialized, so possibly at different moments).
+  await expect(page.locator(".timer-card.alarm-flash", { hasText: "Overdue Alpha" })).toBeVisible({ timeout: 10000 });
+  await expect(page.locator(".timer-card.alarm-flash", { hasText: "Overdue Bravo" })).toBeVisible({ timeout: 20000 });
+
+  // Both alarms retained and processed exactly once, in order, queue drains.
+  await page.waitForFunction(
+    () => window.__TTC_TEST__.alarmQueueLength() === 0 && !window.__TTC_TEST__.alarmBusy(),
+    { timeout: 30000 }
+  );
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(2);
+  const finalCounts = await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.remindersCompleted));
+  expect(finalCounts).toEqual([1, 1]);
+  expect(errors.length).toBe(0);
+});
+
+test("speech safety timeout respects prompt length, speech rate, and a floor", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const results = await page.evaluate(() => {
+    const h = window.__TTC_TEST__;
+    const text = "Check the queue now.";
+    const atRate1 = h.speechSafetyTimeoutMs(text);
+    h.setSpeechRate(0.5);
+    const atHalfRate = h.speechSafetyTimeoutMs(text);
+    h.setSpeechRate(1);
+    const afterRestore = h.speechSafetyTimeoutMs(text);
+    const short = h.speechSafetyTimeoutMs("Hi.");
+    const long = h.speechSafetyTimeoutMs("Please check the annotation queue and confirm every pending item before moving on with the rest of your work today.");
+    const floor = h.speechSafetyTimeoutMs("");
+    return { short, long, atHalfRate, atRate1, afterRestore, floor };
+  });
+  expect(results.short).toBeGreaterThanOrEqual(5000);
+  expect(results.long).toBeGreaterThan(results.short);
+  expect(results.atHalfRate).toBeGreaterThan(results.atRate1);
+  expect(results.afterRestore).toBe(results.atRate1);
+  expect(results.floor).toBe(5000);
+  expect(errors.length).toBe(0);
+});
