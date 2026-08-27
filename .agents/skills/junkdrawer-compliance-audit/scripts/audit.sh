@@ -28,6 +28,53 @@ WARNINGS=0
 err()  { echo "  ERROR   $1"; ERRORS=$((ERRORS + 1)); }
 warn() { echo "  warning $1"; WARNINGS=$((WARNINGS + 1)); }
 
+# storage-manager.html legitimately displays/inspects raw storage patterns;
+# analytics-dashboard.html is exempt everywhere.
+check_storage() {
+  F="$1"
+  [ "$F" = "storage-manager.html" ] && return 0
+  local seen_base64=0 seen_history=0 seen_state=0 seen_url=0
+
+  # localStorage.setItem whose value mentions a data-URL/base64-producing call
+  # (same line only — cross-line flow is beyond static analysis).
+  if grep -nE 'localStorage\.setItem\([^)]*(toDataURL|readAsDataURL|base64|dataURL|dataUrl)' "$F" >/dev/null 2>&1; then
+    warn "review storage: localStorage.setItem near a Base64/data-URL expression (line $(grep -nE 'localStorage\.setItem\([^)]*(toDataURL|readAsDataURL|base64|dataURL|dataUrl)' "$F" | head -1 | cut -d: -f1)) — Base64 payloads do not belong in localStorage"
+    seen_base64=1
+  fi
+
+  # readAsDataURL whose result reaches localStorage.setItem on the same line
+  if grep -nE 'localStorage\.setItem\([^)]*result' "$F" >/dev/null 2>&1 && grep -nE 'readAsDataURL' "$F" >/dev/null 2>&1; then
+    warn "review storage: FileReader.readAsDataURL present alongside raw localStorage.setItem — verify image data is not persisted to localStorage"
+  fi
+
+  # history/log/cache-like key persisted wholesale via JSON.stringify
+  local hl
+  hl="$(grep -nE 'localStorage\.setItem\([^)]*(history|History|log|Log|cache|Cache|corpus|Corpus)[^)]*,\s*JSON\.stringify' "$F" | head -1)"
+  if [ -n "$hl" ]; then
+    warn "review storage: history-like data persisted to localStorage ($(echo "$hl" | cut -d: -f1)) — histories belong in IndexedDB with a retention policy"
+    seen_history=1
+  fi
+
+  # whole app-state blob writes (the entire state object, not a settings sub-object)
+  local sl
+  sl="$(grep -nE 'localStorage\.setItem\([^)]*,\s*JSON\.stringify\((state|appState|fullState)\)\s*\)' "$F" | head -1)"
+  if [ -n "$sl" ]; then
+    warn "review storage: whole app-state object serialized to localStorage ($(echo "$sl" | cut -d: -f1)) — keep localStorage to small prefs; large state belongs in IndexedDB"
+    seen_state=1
+  fi
+
+  # large-ish persisted blobs: a localStorage.setItem carrying a very long
+  # string literal (heuristic for inlining a big payload). Long *lines* are
+  # normal in minified code, so match the literal length, not the line length.
+  # perl handles {300,}; BSD grep caps repetitions at 255.
+  local longlit
+  longlit="$(perl -ne 'if (/localStorage\.setItem\(/ && /["'"'"'][^"'"'"']{300,}["'"'"']/) { print "$.\n"; exit }' "$F" 2>/dev/null | head -1)"
+  if [ -n "$longlit" ]; then
+    warn "review storage: very long string literal passed to localStorage.setItem (line $longlit) — verify the value stays small and bounded"
+  fi
+  return 0
+}
+
 echo "== junk-drawer.json =="
 if ! jq empty "$JSON" 2>/dev/null; then
   err "junk-drawer.json is not valid JSON"
@@ -84,6 +131,10 @@ for F in $FILES; do
       warn "public page has no analytics-lite.js (and no own JunkStatsConfig)"
     fi
   fi
+
+  # --- storage anti-patterns (advisory warnings; static analysis cannot prove
+  #     growth behavior — treat these as review prompts, not verdicts) ---
+  check_storage "$F"
 
   [ -n "$COMMENT_VER" ] && echo "  version $COMMENT_VER${JSON_VER:+ (json: $JSON_VER)}${HIDDEN:+ hidden=$HIDDEN}"
 done

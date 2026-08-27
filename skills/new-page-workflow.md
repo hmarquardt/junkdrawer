@@ -52,7 +52,25 @@ For public user-facing pages, add the Analytics Lite / JunkStats tracker near th
 
 Skip this for hidden/private/test pages, `analytics-dashboard.html`, generated/vendor/example files, or pages that already include `analytics-lite.js` or an equivalent custom `window.JunkStatsConfig`.
 
-### 5. Add Entry to junk-drawer.json
+### 5. Storage Design
+
+All pages share one browser storage budget — choose the mechanism by data shape (canonical policy:
+`AGENTS.md → Browser Storage Architecture`).
+
+```text
+Storage check:
+- preferences only → localStorage (kilobytes, not megabytes)
+- histories/datasets/blobs/corpora/cached responses → IndexedDB record stores
+- growing data → explicit retention policy (count cap, byte budget, age, or user-managed clear)
+- caches → bounded and evicted
+- no Base64/data URLs in localStorage, ever
+- nontrivial localStorage writes → jd-storage.js (or the same guarded pattern)
+```
+
+If the page persists anything beyond trivial preferences, also add an `APP_HEALTH` entry (plus
+`APP_MAP` if it introduces new key/database names) to `storage-manager.html`.
+
+### 6. Add Entry to junk-drawer.json
 
 Open `junk-drawer.json` and add a new entry under `pages`:
 
@@ -67,14 +85,16 @@ Open `junk-drawer.json` and add a new entry under `pages`:
 
 Match the version from step 3. Use a single emoji for `emoji`.
 
-### 6. Verify
+### 7. Verify
 
 - Confirm the HTML file has no syntax errors
 - Confirm `junk-drawer.json` is valid JSON
 - Confirm favicon, footer comment, footer element, and JSON entry all match and use the same version
 - Confirm public user-facing pages include exactly one `analytics-lite.js` script tag, and hidden/private/dashboard pages do not
+- Run the compliance audit (`.agents/skills/junkdrawer-compliance-audit/scripts/audit.sh new-tool.html`) — it must report no errors; review any storage warnings
+- Confirm persistence follows the storage check from step 5
 
-### 7. Commit and Push
+### 8. Commit and Push
 
 Commit with a brief message (e.g., "Add [tool name]") and push to remote.
 

@@ -1,6 +1,12 @@
 /*
  * jd-storage.js — tiny guarded localStorage helper for Junkdrawer pages.
  *
+ * Canonical storage policy: AGENTS.md → "Browser Storage Architecture".
+ * In short: all pages share one per-origin storage budget; localStorage is
+ * for kilobytes of small, stable preferences; anything that grows (histories,
+ * blobs, corpora, cached responses) belongs in IndexedDB with a retention
+ * policy. Inspect live storage with storage-manager.html.
+ *
  * Repo convention (see docs/storage-audit-2026-08.md): localStorage is for
  * kilobytes of preferences, never images, histories, or raw API responses.
  * Any write can still fail when the ~5 MB per-origin budget is exhausted —
@@ -11,6 +17,7 @@
  *   - does not corrupt previous state (localStorage.setItem either fully
  *     applies or leaves the old value intact; we surface the failure)
  *   - optional `evict` callback lets the app shed old data and retry
+ *     (re-serialized per attempt, so evicting actually shrinks the write)
  *   - does not blindly retry the same impossible write
  *
  * Usage:

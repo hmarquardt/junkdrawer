@@ -86,7 +86,7 @@ Do not add analytics to `analytics-dashboard.html`, hidden/private/test pages, g
 
 Pages that use OpenRouter should provide a user-configurable model selector instead of hard-coding a single model in the UI.
 
-- Store the user's OpenRouter API key and selected model locally only, using IndexedDB or localStorage according to the page's existing storage pattern.
+- Store the user's OpenRouter API key and selected model locally only. Keys and the selected model are small, stable preferences: `localStorage` (guarded per the Browser Storage Architecture section) is fine; a fetched model catalog is a re-creatable cache — keep it small and bounded, or put it in IndexedDB.
 - Use a default model when no setting exists: `openai/gpt-4.1-mini`.
 - Once an OpenRouter key is entered or saved, fetch available models from `https://openrouter.ai/api/v1/models` using the user's key.
 - Populate the model control as a `<select>` grouped by provider with `<optgroup>` labels. For standard OpenRouter IDs, use the prefix before `/` as the provider, e.g. `openai/gpt-4.1-mini` groups under `openai`.
@@ -94,6 +94,70 @@ Pages that use OpenRouter should provide a user-configurable model selector inst
 - Include a manual "Refresh models" action and a visible status/error element for model loading.
 - Do not fetch models until the user has provided a key. Do not make hidden OpenRouter calls beyond model-list loading and explicit AI actions.
 - If model loading fails, keep the saved/default model usable and show a clear error rather than blocking the page.
+
+## Browser Storage Architecture
+
+All Junkdrawer pages are served from one GitHub Pages origin, so they **share one browser storage
+budget**. Quota pressure is cumulative: one page can fill storage and cause quota failures in
+completely unrelated pages. Storage design is a repository-wide concern. Full audit and per-app
+classifications: `docs/storage-audit-2026-08.md`; live inspection tool: `storage-manager.html`.
+
+### Choose the mechanism by data shape, not habit
+
+- **Small, stable, bounded** (prefs, UI state, selected model, feature flags, last-used options,
+  tiny migration markers) → `localStorage`. An app's total localStorage footprint should be
+  **kilobytes, not megabytes**.
+- **Growing, structured, or large** (histories, logs, evaluation records, observations, imported
+  documents, corpora, cached API/model-catalog responses, AI outputs, images, audio, blobs,
+  data URLs) → **IndexedDB**, using record-oriented object stores — not one giant JSON blob.
+
+Never store in localStorage: unbounded histories, Base64/data-URL payloads (especially images and
+audio), imported documents, raw API responses, model catalogs, or whole app-state snapshots.
+
+### Growth policy
+
+Every structure that can grow must have an intentional model: **STATIC**, **BOUNDED** (max record
+count or byte budget), **AGE-PRUNED** (max age), or **USER-MANAGED** (explicit delete/clear UI).
+Avoid UNBOUNDED/UNKNOWN. For high-volume or bursty data prefer two-dimensional retention — a
+maximum age **and** a hard record-count cap (e.g. "no older than 30 days AND ≤ 5,000 records").
+Never auto-delete user-owned data to satisfy a generic limit; re-creatable caches may be bounded
+more aggressively than user-generated data.
+
+### Guarded writes
+
+Any nontrivial localStorage write can fail when the shared budget is full — handle it. Use
+`jd-storage.js` (`JDStorage.setString/setJSON` with optional evict-and-retry; never throws) or
+follow the same pattern: catch `QuotaExceededError`, never corrupt the last good value, surface a
+clear UI message, don't loop on an impossible write, and evict only when the app has an
+intentional eviction policy. Trivial one-line preference writes may use bare localStorage with a
+simple try/catch — use judgment, not ceremony.
+
+### Migration safety
+
+When moving existing data (e.g. localStorage → IndexedDB): detect legacy data → write destination
+records → commit the transaction → verify (count/read-back) → **only then** remove legacy data →
+write a small migration marker → keep it idempotent, tolerant of interruption, and
+non-duplicating on reload. **Never delete legacy persistent data before the new copy has been
+successfully committed and verified.**
+
+### Orphan cleanup
+
+If a logical record has associated blobs or child records (images, audio, archives, imported
+files), deleting the record must delete its children. Replace-all operations must not leave
+abandoned records behind. Orphan cleanup is part of storage design, not an afterthought.
+
+### Privacy
+
+Browser storage is convenient, not secure. Minimize retention of sensitive/personal data, avoid
+duplication, provide clear deletion, and redact API keys/tokens from any export unless exposing
+them is explicitly intended.
+
+### Registering new persistent apps
+
+If a new page persists anything beyond trivial preferences, add an entry to the `APP_HEALTH` map
+in `storage-manager.html` (growth/retention/re-creatable/health) — and an `APP_MAP` ownership
+entry if it uses new key or database names — so the Storage Manager can classify it. One small
+metadata object per app; no registry system.
 
 ## General Principles
 
@@ -111,7 +175,9 @@ Pages that use OpenRouter should provide a user-configurable model selector inst
 - [ ] Add emoji favicon to `<head>`
 - [ ] Add `JUNKDRAWER_DEPLOY_FOOTER` comment and footer with inline styles
 - [ ] Add Analytics Lite script for public user-facing pages
+- [ ] Storage check (see Browser Storage Architecture): prefs → localStorage; histories/blobs/growing data → IndexedDB with a retention policy; no Base64/data URLs in localStorage
 - [ ] For OpenRouter tools, add a provider-grouped model selector populated from OpenRouter after a key is provided
+- [ ] If the page persists anything beyond trivial preferences, add `APP_HEALTH` (and `APP_MAP` if new key/DB names) entries in `storage-manager.html`
 - [ ] Add entry to `junk-drawer.json` with title, description, emoji, and version
 - [ ] Commit with a brief, descriptive message
 - [ ] Push to remote

@@ -50,11 +50,34 @@ Near the end of `<head>` (or before `</body>` for unusual structures):
 
 Do NOT add it to: `analytics-dashboard.html`, hidden/private/test pages, generated/vendor/example files, or pages defining their own `window.JunkStatsConfig`.
 
-### 5. OpenRouter pages
+### 5. Storage design (before writing persistence code)
+
+All pages share one browser storage budget — a full page anywhere can break unrelated pages.
+Choose the mechanism by data shape (full policy: `AGENTS.md → Browser Storage Architecture`):
+
+```text
+Storage check:
+- preferences only → localStorage (kilobytes, not megabytes)
+- histories/datasets/blobs/corpora/cached responses → IndexedDB record stores
+- growing data → explicit retention policy (count cap, byte budget, age, or user-managed clear)
+- caches → bounded and evicted
+- no Base64/data URLs in localStorage, ever
+- nontrivial localStorage writes → jd-storage.js (or the same guarded pattern)
+```
+
+Ask before implementing persistence: Is this data small and stable? Can it grow? Is it
+user-owned or re-creatable? Does it need retention? Does it contain blobs/Base64? What happens
+when quota is exceeded?
+
+If the page persists anything beyond trivial preferences, add an `APP_HEALTH` entry (and an
+`APP_MAP` entry for new key/database names) to `storage-manager.html` so it shows up correctly
+in the Storage Manager.
+
+### 6. OpenRouter pages
 
 If the tool calls OpenRouter, the settings UI must include a provider-grouped model selector — follow the `openrouter-model-selector` skill exactly. Default model: `openai/gpt-4.1-mini`.
 
-### 6. Register in `junk-drawer.json`
+### 7. Register in `junk-drawer.json`
 
 Add under `pages`, version matching the footer:
 
@@ -69,7 +92,7 @@ Add under `pages`, version matching the footer:
 
 Add `"hide": true` for private/hidden pages (title/description/emoji optional then).
 
-### 7. Verify
+### 8. Verify
 
 Run the compliance audit (from repo root):
 
@@ -77,9 +100,11 @@ Run the compliance audit (from repo root):
 .agents/skills/junkdrawer-compliance-audit/scripts/audit.sh filename.html
 ```
 
-It must report no errors for the new file. Also open the page in a browser (see `junkdrawer-page-testing`) and confirm it loads with no console errors.
+It must report no errors for the new file (storage findings appear as advisory warnings — review
+any that mention localStorage patterns). Also open the page in a browser (see
+`junkdrawer-page-testing`) and confirm it loads with no console errors.
 
-### 8. Commit and push
+### 9. Commit and push
 
 Brief message, e.g. `Add <tool name>`, then push to `origin main`.
 

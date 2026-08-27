@@ -113,12 +113,19 @@ Example metadata:
 
 ## Local-First Storage
 
-Several apps store data only in the browser:
+Several apps store data only in the browser. All pages share one browser storage budget
+(they live on the same origin), so storage is a shared resource across the whole collection:
 
-- `localStorage` is used for lightweight settings and preferences.
-- IndexedDB is used where larger or structured data is needed.
+- `localStorage` holds small, bounded settings and preferences (kilobytes, not megabytes).
+- IndexedDB holds larger or growing data — histories, imported documents, corpora, cached
+  responses, images and audio blobs — ideally as individual records with a retention policy
+  (a record cap, age limit, or an explicit clear option in the app).
 - Clearing browser site data will remove locally stored app data.
 - `localStorage` is not secure storage. Do not store sensitive secrets on shared machines.
+
+To inspect what's stored — usage vs. quota, per-key sizes, owning app, IndexedDB databases,
+and safe cleanup candidates — open **`storage-manager.html`**. Details and per-app risk
+classifications: `docs/storage-audit-2026-08.md`.
 
 ## Network And CORS Limitations
 
