@@ -553,3 +553,161 @@ test("speech safety timeout respects prompt length, speech rate, and a floor", a
   expect(results.floor).toBe(5000);
   expect(errors.length).toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// Storage bounds: MAX_TIMERS cap, sanitize/truncate on load, and
+// reload-persistence semantics for each timer state.
+// ---------------------------------------------------------------------------
+
+function seedTimer(i, state) {
+  return {
+    id: "seed-" + i,
+    prompt: "Seeded timer " + i,
+    minMinutes: 5,
+    maxMinutes: 8,
+    state: state || "not-started",
+    currentIntervalSeconds: 0,
+    targetTimestamp: 0,
+    remainingMilliseconds: 0,
+    remindersCompleted: 0,
+    createdAt: Date.now() + i
+  };
+}
+
+test("paused timer survives reload still paused with remaining time preserved", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const id = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Pause Persist", minMinutes: 6, maxMinutes: 6 }));
+  await page.waitForTimeout(500);
+  await page.evaluate(i => window.__TTC_TEST__.pause(i), id);
+  const before = await page.evaluate(i => window.__TTC_TEST__.find(i), id);
+  expect(before.state).toBe("paused");
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+  const after = await page.evaluate(() => window.__TTC_TEST__.timers()[0]);
+  expect(after.state).toBe("paused");
+  expect(after.prompt).toBe("Pause Persist");
+  expect(Math.abs(after.remainingMilliseconds - before.remainingMilliseconds)).toBeLessThan(1500);
+  // resumed-from-storage behavior still works
+  await page.evaluate(() => { const t = window.__TTC_TEST__.timers()[0]; window.__TTC_TEST__.resume(t.id); });
+  const resumed = await page.evaluate(() => window.__TTC_TEST__.timers()[0]);
+  expect(resumed.state).toBe("running");
+  expect(resumed.targetTimestamp).toBeGreaterThan(Date.now());
+  expect(errors.length).toBe(0);
+});
+
+test("deleted timer never returns after reload; intentionally empty stays empty", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  // beforeEach leaves a clean slate (migration only runs once per storage,
+  // and clearAll removed its default), so no additional reset is needed.
+
+  const keepId = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Keep Me", minMinutes: 5, maxMinutes: 5 }));
+  const deleteId = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Delete Me", minMinutes: 6, maxMinutes: 6 }));
+  await page.evaluate(i => window.__TTC_TEST__.deleteDirect(i), deleteId);
+  let timersNow = await page.evaluate(() => window.__TTC_TEST__.timers());
+  expect(timersNow).toHaveLength(1);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+  timersNow = await page.evaluate(() => window.__TTC_TEST__.timers());
+  expect(timersNow).toHaveLength(1);
+  expect(timersNow[0].prompt).toBe("Keep Me");
+  expect(timersNow[0].id).toBe(keepId);
+
+  // Deleting the last one leaves an empty collection that persists as empty.
+  await page.evaluate(() => window.__TTC_TEST__.clearAll());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers())).toHaveLength(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("timeToClick.timers.v2")))).toEqual([]);
+  expect(await page.locator("#emptyState").isVisible()).toBe(true);
+  expect(errors.length).toBe(0);
+});
+
+test("MAX_TIMERS can be stored; further UI creation is rejected with a visible message", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+
+  // Fill to MAX_TIMERS - 99 seed records via storage + one real UI creation below.
+  await page.evaluate(() => {
+    const seeds = [];
+    for (let i = 0; i < 99; i++) {
+      seeds.push({
+        id: "cap-seed-" + i, prompt: "Cap seed " + i, minMinutes: 5, maxMinutes: 5,
+        state: "not-started", currentIntervalSeconds: 0, targetTimestamp: 0,
+        remainingMilliseconds: 0, remindersCompleted: 0, createdAt: Date.now() + i
+      });
+    }
+    localStorage.setItem("timeToClick.timers.v2", JSON.stringify(seeds));
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__) && window.__TTC_TEST__.timers().length === 99);
+
+  // Timer #100 through the actual Add dialog succeeds and buttons re-enable state updates.
+  await page.click("#addTimerBtn");
+  await page.fill("#intervalInput", "8");
+  await page.fill("#promptInput", "The hundredth timer");
+  await page.click("#timerDialogOk");
+  await expect(page.locator(".timer-card")).toHaveCount(100);
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().length)).toBe(100);
+
+  // At the cap: Add buttons disabled, visible inline message shown.
+  await expect(page.locator("#limitNote")).toBeVisible();
+  await expect(page.locator("#limitNote")).toContainText("Maximum of 100 timers reached. Delete an existing timer before adding another.");
+  await expect(page.locator("#addTimerBtn")).toBeDisabled();
+  await expect(page.locator("#emptyAddBtn")).toBeDisabled();
+
+  // Hook-level guard also refuses the 101st creation; existing timers unaffected.
+  const overflow = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "One too many", minMinutes: 5, maxMinutes: 5 }));
+  expect(overflow).toBeNull();
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().length)).toBe(100);
+
+  // Deleting one frees the slot and hides the note.
+  await page.evaluate(() => { const t = window.__TTC_TEST__.timers().find(x => x.prompt === "The hundredth timer"); window.__TTC_TEST__.deleteDirect(t.id); });
+  await expect(page.locator("#limitNote")).toBeHidden();
+  await expect(page.locator("#addTimerBtn")).toBeEnabled();
+  expect(errors.length).toBe(0);
+});
+
+test("externally seeded data exceeding MAX_TIMERS is truncated, sanitized, and persisted bounded", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => {
+    const seeds = [];
+    for (let i = 0; i < 130; i++) {
+      seeds.push({
+        id: "over-" + i, prompt: "Overflow " + i, minMinutes: 4, maxMinutes: 7,
+        state: "not-started", currentIntervalSeconds: 0, targetTimestamp: 0,
+        remainingMilliseconds: 0, remindersCompleted: i, createdAt: Date.now() + i,
+        junkField: { nested: "ignored" }
+      });
+    }
+    localStorage.setItem("timeToClick.timers.v2", JSON.stringify(seeds));
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__) && window.__TTC_TEST__.timers().length > 0);
+
+  const count = await page.evaluate(() => window.__TTC_TEST__.timers().length);
+  expect(count).toBe(100);
+  // First MAX_TIMERS retained in original order
+  const firstPrompt = await page.evaluate(() => window.__TTC_TEST__.timers()[0].prompt);
+  const lastPrompt = await page.evaluate(() => window.__TTC_TEST__.timers()[99].prompt);
+  expect(firstPrompt).toBe("Overflow 0");
+  expect(lastPrompt).toBe("Overflow 99");
+  // Normalized result persisted immediately
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("timeToClick.timers.v2")));
+  expect(stored).toHaveLength(100);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__) && window.__TTC_TEST__.timers().length === 100);
+  expect(errors.length).toBe(0);
+});

@@ -312,6 +312,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 
   <div class="dashboard-bar">
     <p class="total" id="totalReminders">Total reminders: 0</p>
+    <p class="total" id="limitNote" role="status" hidden></p>
     <div class="toolbar" role="group" aria-label="Dashboard controls">
       <button type="button" id="pauseAllBtn">Pause All</button>
       <button type="button" id="resumeAllBtn">Resume All</button>
@@ -399,9 +400,9 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 
 <div class="sr-only" id="liveRegion" aria-live="polite"></div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.3" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Time to Click · version 2026.08.26.3
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.4" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Time to Click · version 2026.08.26.4
 </footer>
 
 <script>
@@ -415,6 +416,12 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   var OLD_SETTINGS_KEY = 'timeToClick.settings.v1';
   var TIMERS_KEY = 'timeToClick.timers.v2';
   var OLD_COUNT_KEY = 'timeToClick.reminderCount.v1';
+
+  // Timer records are tiny user-created configuration/runtime state, so
+  // localStorage is the appropriate persistence tier here — but the collection
+  // stays explicitly bounded so it can never grow unbounded against the
+  // shared-origin storage budget (see AGENTS.md Browser Storage Architecture).
+  var MAX_TIMERS = 100;
 
   var DEFAULTS = {
     voiceURI: '',
@@ -530,7 +537,10 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     if (v2) {
       try { items = sanitizeTimers(JSON.parse(v2)); } catch (e) { items = []; }
     }
-    return items;
+    // Defensive bound: externally modified storage may hold more than
+    // MAX_TIMERS records. Retain the first MAX_TIMERS; init persists the
+    // normalized bounded result.
+    return items.slice(0, MAX_TIMERS);
   }
 
   function saveTimers() {
@@ -562,6 +572,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 
   var liveRegion = $('liveRegion');
   var totalRemindersEl = $('totalReminders');
+  var limitNote = $('limitNote');
   var emptyState = $('emptyState');
   var timerGrid = $('timerGrid');
   var addTimerBtn = $('addTimerBtn');
@@ -909,6 +920,15 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     emptyState.hidden = !empty;
     pauseAllBtn.disabled = timers.every(function (t) { return t.state !== 'running'; });
     resumeAllBtn.disabled = timers.every(function (t) { return t.state !== 'paused'; });
+    // Explicit collection bound: at MAX_TIMERS, creation is disabled with a
+    // visible message. Existing timers keep working normally.
+    var atLimit = timers.length >= MAX_TIMERS;
+    addTimerBtn.disabled = atLimit;
+    emptyAddBtn.disabled = atLimit;
+    limitNote.hidden = !atLimit;
+    if (atLimit) {
+      limitNote.textContent = 'Maximum of ' + MAX_TIMERS + ' timers reached. Delete an existing timer before adding another.';
+    }
   }
 
   // -------------------------------------------------------------------
@@ -1441,6 +1461,12 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 
   function submitTimerDialog() {
     resetDialogErrors();
+    if (!editingTimerId && timers.length >= MAX_TIMERS) {
+      // Belt-and-braces for a dialog that was open when the cap was reached.
+      dialogNote.textContent = 'Maximum of ' + MAX_TIMERS + ' timers reached. Delete an existing timer before adding another.';
+      announce(dialogNote.textContent);
+      return false;
+    }
     var parsed = parseInterval(intervalInput.value);
     if (parsed.error) {
       intervalError.textContent = parsed.error;
@@ -1674,6 +1700,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   window.__TTC_TEST__ = {
     timers: function () { return timers.map(function (t) { return Object.assign({}, t); }); },
     addAndStart: function (opts) {
+      if (timers.length >= MAX_TIMERS) return null;
       var t = makeTimer({ prompt: opts.prompt, minMinutes: opts.minMinutes, maxMinutes: opts.maxMinutes, state: 'not-started' });
       timers.push(t);
       rebuildGrid(); saveTimers(); startTimer(t);
