@@ -465,7 +465,7 @@ test('automatic repair fixes only a short reason', async ({ page }) => {
   const out = await page.evaluate(() => ({ final: __BERRY3R_TEST__.state.final, repairs: __BERRY3R_TEST__.state.repairs, calls: __BERRY3R_TEST__.state.aiCalls }));
   expect(out.final.aestheticsReason).toBe(autoReasons.aesthetics);
   expect(out.final.functionalityReason).toBe(autoReasons.functionality.replace(/^Website B is better because Website B includes/, 'Website B is better because it includes'));
-  expect(out.final.overallReason).toBe(autoReasons.overall);
+  expect(out.final.overallReason).toBe(autoReasons.overall.replace(/’/g, "'"));
   expect(out.repairs.map(r => r.field)).toEqual(['functionality']);
   expect(out.calls).toBe(7);
 });
@@ -1570,4 +1570,189 @@ test('word count and validation recompute correctly after deterministic removal'
   expect(out.wc).toBe(expectedWc);
   expect(out.wc).toBeGreaterThanOrEqual(40);
   expect(out.hard.join(' ')).not.toContain('40–160');
+});
+
+// ---------- Phase 5.2: Submission house style ----------
+
+test('curly double quotes normalize to straight ASCII in compiled prose', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because the \u201CDashboard\u201D heading anchors the view while Website B scatters its labels.');
+  expect(out).toContain('"Dashboard"');
+  expect(out).not.toMatch(/[\u201C\u201D]/);
+});
+
+test('curly apostrophes normalize to straight ASCII', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because Website A\u2019s spacing stays disciplined across every panel.');
+  expect(out).toContain("Website A's spacing");
+  expect(out).not.toMatch(/[\u2018\u2019]/);
+});
+
+test('em dashes are removed from final prose in favor of commas', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because panels align cleanly \u2014 nothing overlaps or collides.');
+  expect(out).not.toContain('\u2014');
+  expect(out).toContain('panels align cleanly, nothing overlaps');
+});
+
+test('en dash used as sentence punctuation is removed', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because hierarchy reads first \u2013 contrast second \u2013 density last.');
+  expect(out).not.toMatch(/(^|\s)\u2013(\s|$)/);
+  expect(out).toContain('hierarchy reads first, contrast second, density last');
+});
+
+test('compound-word hyphens survive: dark-blue', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because its dark-blue accents stay consistent across both light and dense screens.');
+  expect(out).toContain('dark-blue');
+});
+
+test('compound-word hyphens survive: end-to-end and user-facing', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'aesthetics', 'A is better', 'Website A is better because its end-to-end flow stays coherent for user-facing screens.');
+  expect(out).toContain('end-to-end');
+  expect(out).toContain('user-facing');
+});
+
+test('parenthetical em-dash construction becomes natural comma prose', async ({ page }) => {
+  await open(page);
+  const out = await compileIn(page, 'overall', 'A is better', 'Website A has stronger hierarchy\u2014especially in the KPI area\u2014while Website B is sparser.');
+  expect(out).toBe('Website A is better because it has stronger hierarchy, especially in the KPI area, while Website B is sparser.');
+});
+
+test('was not behaviorally verified cannot reach final submission', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__, final = { aestheticsOption: 'A is better', aestheticsReason: 'Website A is better because its layout is calmer than the alternative, and the difference was not behaviorally verified. ' + 'Detail filler sentence for length requirements follows here with concrete spacing notes. ', functionalityOption: '', functionalityReason: '', overallOption: '', overallReason: '' };
+    const v = T.validateAll(final, { A: 'normal', B: 'normal' });
+    const cleaned = T.sanitizeSubmissionHouseStyle(final.aestheticsReason);
+    return { blocked: v.blocking.some(x => x.includes('testing-omission narration')), cleanedHas: /verified/.test(cleaned) };
+  });
+  expect(out.blocked).toBe(true);
+  expect(out.cleanedHas).toBe(false);
+});
+
+test('did not examine cannot reach final submission', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__;
+    const final = { aestheticsOption: 'A is better', aestheticsReason: 'Website A is better because its panels are organized. The modal flows did not examine deeper settings states. ' + 'Extra substance sentence describing spacing rhythm and palette restraint for both websites appears here. ', functionalityOption: '', functionalityReason: '', overallOption: '', overallReason: '' };
+    const v = T.validateAll(final, { A: 'normal', B: 'normal' });
+    return { blocked: v.blocking.some(x => x.includes('testing-omission narration')), cls: T.classifyIssue(v.blocking.find(x => x.includes('testing-omission narration')) || '') };
+  });
+  expect(out.blocked).toBe(true);
+  expect(out.cls).toBe('PROSE_SEMANTIC');
+});
+
+test('could not verify cannot reach final submission', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__;
+    const v = T.validateAll({ aestheticsOption: 'A is better', aestheticsReason: 'Website A is better because its hierarchy reads clearly. Interaction states could not verify deeper behavior for either candidate site. ' + 'Additional concrete observations continue here about spacing rhythm, type scale, and palette restraint across sections. ', functionalityOption: '', functionalityReason: '', overallOption: '', overallReason: '' }, { A: 'normal', B: 'normal' });
+    return v.blocking.some(x => x.includes('testing-omission narration'));
+  });
+  expect(out).toBe(true);
+});
+
+test('safe rewrite preserves evidence certainty instead of claiming function', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__;
+    const compiled = T.compileFinalReason('functionality', 'B is better', 'Website B is better because Website B was not tested, but it appears to include working control structure for items and categories.');
+    const v = T.validateAll({ aestheticsOption: '', aestheticsReason: '', functionalityOption: 'B is better', functionalityReason: compiled, overallOption: '', overallReason: '' }, { A: 'normal', B: 'normal' });
+    return { compiled, certain: v.blocking.some(x => x.includes('stated as confirmed')), omissionLeft: v.blocking.some(x => x.includes('testing-omission')) };
+  });
+  expect(out.compiled).toContain('because it includes visible control structure');
+  expect(out.compiled).not.toMatch(/\bworking\b/);
+  expect(out.compiled).not.toMatch(/was not tested/i);
+  expect(out.certain).toBe(false);
+  expect(out.omissionLeft).toBe(false);
+});
+
+test('omission wording with no safe deterministic rewrite becomes PROSE_SEMANTIC', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__;
+    const issues = T.submissionHouseStyleIssues('overall', 'Website B is better because it presents richer sections overall, and this conclusion is based solely on static evidence alone.');
+    return { n: issues.length, cls: T.classifyIssue(issues[0]) };
+  });
+  expect(out.n).toBeGreaterThan(0);
+  expect(out.cls).toBe('PROSE_SEMANTIC');
+});
+
+test('house-style compiler is idempotent on mixed-style input', async ({ page }) => {
+  await open(page);
+  const raw = 'Website A is better because it presents \u201CAdd Item\u201D labels \u2014 six per section \u2014 while Website B shows 40\u201360 entries per list.';
+  const once = await compileIn(page, 'aesthetics', 'A is better', raw);
+  const twice = await compileIn(page, 'aesthetics', 'A is better', once);
+  expect(twice).toBe(once);
+  expect(once).toContain('40\u201360'); // numeric range preserved
+  expect(once).toContain('"Add Item"');
+  expect(once).not.toContain('\u2014');
+});
+
+test('no smart quote or em dash survives automatic repair; omission phrase cannot reach READY', async ({ page }) => {
+  const errors = await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.evaluate(({ auto }) => {
+    const T = __BERRY3R_TEST__, s = T.state;
+    Object.assign(s.final, {
+      aestheticsOption: 'A is better',
+      aestheticsReason: 'Website A is better because its \u201CKPI\u201D cards align \u2014 tight \u2014 while Website B was not behaviorally verified. Populated panels, calmer spacing, steadier headings, and restrained accents keep every requested module readable across repeated viewing sessions, and labels remain visible.',
+      functionalityOption: 'B is better',
+      functionalityReason: auto.functionality,
+      overallOption: 'B is better',
+      overallReason: auto.overall
+    });
+    s.decisions = { aesthetics: { advantages: [] }, functionality: { advantages: [] }, overall: { option: 'B is better', advantages: [], visualSide: { winner: 'A', summary: 'a' }, functionalSide: { winner: 'B', summary: 'b' }, tradeoff: { moreImportantSide: 'functionality', why: 'c' } } };
+    s.qa = { overallSemantics: { visualComparisonExpressed: true, functionalComparisonExpressed: true, tradeoffExpressed: true, consistentWithDecision: true }, issues: [] };
+    T.setAiTransport(async () => { throw new Error('no-ai expected'); });
+  }, { auto: AUTO });
+  await page.evaluate(async () => await __BERRY3R_TEST__.automaticRepair([]));
+  const out = await page.evaluate(() => {
+    const T = __BERRY3R_TEST__, v = T.validateAll(), title = document.getElementById('readyTitle').textContent;
+    return { reason: s => s.final.aestheticsReason, final: T.state.final.aestheticsReason, valid: v.valid, title, omBlock: v.blocking.some(x => x.includes('testing-omission')) };
+  });
+  expect(out.final).not.toMatch(/[\u201C\u201D\u2018\u2019]/);
+  expect(out.final).not.toContain('\u2014');
+  expect(out.valid).toBe(false); // omission wording has no deterministic rewrite -> blocks READY
+  expect(out.omBlock).toBe(true);
+  expect(out.title).not.toContain('READY TO SUBMIT');
+  expect(errors).toEqual([]);
+});
+
+test('Debug telemetry retains verification terminology after prose cleanup', async ({ page }) => {
+  await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.evaluate(({ auto }) => {
+    const T = __BERRY3R_TEST__, s = T.state;
+    Object.assign(s.final, {
+      aestheticsOption: 'A is better',
+      aestheticsReason: 'Website A is better because its panels align cleanly. Some deeper states were not verified. Populated cards, calmer spacing, steadier headings, and restrained accents keep the layout readable across sessions and screens.',
+      functionalityOption: 'B is better',
+      functionalityReason: auto.functionality,
+      overallOption: 'B is better',
+      overallReason: auto.overall
+    });
+  }, { auto: AUTO });
+  const report = await page.evaluate(async () => JSON.stringify(await window.__BERRY3R_TEST__.buildDebugReport()));
+  expect(report).toMatch(/not verified|verification/i);
+});
+
+test('reason-writing prompts carry the house-style instructions', async ({ page }) => {
+  const errors = await open(page); await page.getByRole('button', { name: 'Load synthetic demo' }).click();
+  await page.evaluate(() => { window.__captured = []; });
+  await page.evaluate(() => {
+    window.__BERRY3R_TEST__.setAiTransport(async (stage, messages) => {
+      window.__captured.push({ stage, text: JSON.stringify(messages) });
+      throw new Error('stop-after-capture');
+    });
+  });
+  await page.getByRole('button', { name: 'ANALYZE & GENERATE' }).click();
+  await page.waitForTimeout(300);
+  const captured = await page.evaluate(() => window.__captured);
+  const reasons = captured.find(c => c.stage === 'request');
+  expect(reasons).toBeTruthy();
+  expect(reasons.text).toContain('straight ASCII');
+  expect(reasons.text).toContain('em dashes');
+  expect(reasons.text).toContain('inspection limits');
 });
