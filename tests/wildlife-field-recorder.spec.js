@@ -204,72 +204,51 @@ test('page loads with photo-import UI and no camera', async ({ page }) => {
 
 /* ---------- original-file picker / Android EXIF preservation ---------- */
 
-test('PICKER-A: primary original-file input has no image accept restriction', async ({ page }) => {
+test('PICKER-A: primary photo input is the normal image picker with truthful copy', async ({ page }) => {
   blockExternal(page);
   await openCaptureTab(page);
   const input = page.locator('#photo-import-input');
-  expect(await input.getAttribute('accept')).toBeNull();
-  await expect(page.locator('#import-photo-btn')).toContainText('Import Original Photo');
-  await expect(page.locator('.original-photo-hint')).toContainText('original file');
+  expect(await input.getAttribute('accept')).toBe('image/*');
+  expect(await input.getAttribute('capture')).toBeNull();
+  await expect(page.locator('#import-photo-btn')).toContainText('Import Photo');
+  await expect(page.locator('.original-photo-hint')).toContainText('outing history');
+  await expect(page.locator('.original-photo-hint')).not.toContainText('original file');
+  // Outing-track import keeps its own JSON/document picker.
+  expect(await page.locator('#outing-import-input').getAttribute('accept')).toBe('application/json,.json');
 });
 
-test('PICKER-B: File System Access API is preferred and imports its returned File', async ({ page }) => {
-  const errors = collectErrors(page);
-  blockExternal(page);
-  await openCaptureTab(page);
-  await page.evaluate(({ pngB64, exif }) => {
-    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
-    window.__pickerCalls = 0;
-    window.__genericInputClicks = 0;
-    document.getElementById('photo-import-input').addEventListener('click', () => { window.__genericInputClicks++; });
-    window.exifr.parse = async () => exif;
-    window.showOpenFilePicker = async options => {
-      window.__pickerCalls++;
-      window.__pickerOptions = options;
-      return [{ getFile: async () => new File([bin], 'original.jpg', { type: 'image/jpeg' }) }];
-    };
-  }, { pngB64: PNG.toString('base64'), exif: FULL_EXIF });
-
-  await page.click('#import-photo-btn');
-  await dbWait(page, 'obs => obs.observationSource === "photo_import"');
-  const result = await page.evaluate(async () => ({
-    pickerCalls: window.__pickerCalls,
-    genericClicks: window.__genericInputClicks,
-    options: window.__pickerOptions,
-    count: await window.__WFR_TEST__.db.observations.count()
-  }));
-  expect(result.pickerCalls).toBe(1);
-  expect(result.genericClicks).toBe(0);
-  expect(result.options).toEqual({ multiple: false });
-  expect(result.count).toBe(1);
-  expect(errors).toEqual([]);
-});
-
-test('PICKER-C: absent File System Access API falls back to generic file input', async ({ page }) => {
+test('PICKER-B/C: Import Photo opens the image input — never showOpenFilePicker — and preserves the camera filename', async ({ page }) => {
   const errors = collectErrors(page);
   blockExternal(page);
   await openCaptureTab(page);
   await page.evaluate(() => {
-    delete window.showOpenFilePicker;
     window.exifr.parse = async () => ({});
+    window.__pickerCalls = 0;
+    window.showOpenFilePicker = async () => { window.__pickerCalls++; return []; };
   });
   const chooserPromise = page.waitForEvent('filechooser');
   await page.click('#import-photo-btn');
   const chooser = await chooserPromise;
-  await chooser.setFiles({ name: 'fallback.jpg', mimeType: 'image/jpeg', buffer: PNG });
+  await chooser.setFiles({ name: 'PXL_20260828_231840123.jpg', mimeType: 'image/jpeg', buffer: PNG });
   await dbWait(page, 'obs => obs.observationSource === "photo_import"');
-  expect(await page.evaluate(() => window.__WFR_TEST__.db.observations.count())).toBe(1);
+  const obs = await getObs(page);
+  // The Android-style selected File reaches importPhotoFile with its camera
+  // filename intact, so Pixel UTC filename semantics apply.
+  expect(await page.evaluate(() => window.__pickerCalls)).toBe(0);
+  expect(obs.timeProvenance).toMatchObject({ source: 'filename', pattern: 'pixel_pxl', timeBasis: 'utc', utcIso: '2026-08-28T23:18:40.123Z' });
   expect(errors).toEqual([]);
 });
 
-test('PICKER-D: AbortError is a normal cancellation and returns to Ready', async ({ page }) => {
+test('PICKER-D: photo-picker cancellation is quiet — no observation, no error, Ready', async ({ page }) => {
   const errors = collectErrors(page);
   blockExternal(page);
   await openCaptureTab(page);
   await page.evaluate(() => {
-    window.showOpenFilePicker = async () => { throw new DOMException('Cancelled', 'AbortError'); };
+    // Simulate the picker closing without a selection (empty FileList change).
+    const input = document.getElementById('photo-import-input');
+    input.files = new DataTransfer().files;
+    input.dispatchEvent(new Event('change'));
   });
-  await page.click('#import-photo-btn');
   await expect(page.locator('#capture-status')).toHaveText('Ready');
   expect(await page.evaluate(() => window.__WFR_TEST__.db.observations.count())).toBe(0);
   expect(errors).toEqual([]);
@@ -321,14 +300,13 @@ test('PICKER-F: unsupported documents are rejected before EXIF or observation cr
   expect(errors).toEqual([]);
 });
 
-test('PICKER-G/H/I: original bytes reach EXIF first, hash exactly, and retain rich metadata', async ({ page }) => {
+test('PICKER-G/H/I: selected bytes reach EXIF first, hash exactly, and retain rich metadata', async ({ page }) => {
   const errors = collectErrors(page);
   blockExternal(page);
   const meteo = await mockMeteo(page);
   await openCaptureTab(page);
   const expectedHash = createHash('sha256').update(PNG).digest('hex');
   await page.evaluate(({ pngB64, exif }) => {
-    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
     const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
     window.__importEvidence = { events: [], exifBytes: null };
     window.exifr.parse = async file => {
@@ -341,12 +319,11 @@ test('PICKER-G/H/I: original bytes reach EXIF first, hash exactly, and retain ri
       window.__importEvidence.events.push('resize');
       return nativeCreateObjectURL(blob);
     };
-    window.showOpenFilePicker = async () => [{
-      getFile: async () => new File([bin], 'camera-original.jpg', { type: 'image/jpeg' })
-    }];
   }, { pngB64: PNG.toString('base64'), exif: FULL_EXIF });
-
+  const chooserPromise = page.waitForEvent('filechooser');
   await page.click('#import-photo-btn');
+  const chooser = await chooserPromise;
+  await chooser.setFiles({ name: 'camera-original.jpg', mimeType: 'image/jpeg', buffer: PNG });
   await dbWait(page, 'obs => obs.weatherStatus === "ok"');
   const result = await page.evaluate(async () => {
     const T = window.__WFR_TEST__;
@@ -380,22 +357,23 @@ test('PICKER-G/H/I: original bytes reach EXIF first, hash exactly, and retain ri
   expect(result.createdAt).toBe(Date.parse('2026-05-14T21:42:00.000Z'));
   expect(result.timeSource).toBe('exif_DateTimeOriginal');
   expect(result.offset).toBe(-14400);
-  expect(result.metadataStatus).toContain('Original metadata found');
+  expect(result.metadataStatus).toContain('Embedded metadata found');
   expect(result.metadataStatus).toContain('GPS · capture time · TestCam Mk100');
   expect(meteo.calls).toContain('2026-05-14');
   expect(errors).toEqual([]);
 });
 
-test('PICKER-J: metadata-free original still imports without invented GPS or capture time', async ({ page }) => {
+test('PICKER-J: metadata-free selection still imports without invented GPS or capture time', async ({ page }) => {
   const errors = collectErrors(page);
   blockExternal(page);
   await openCaptureTab(page);
   await page.evaluate(pngB64 => {
-    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
     window.exifr.parse = async () => ({});
-    window.showOpenFilePicker = async () => [{ getFile: async () => new File([bin], 'edited.jpg', { type: 'image/jpeg' }) }];
   }, PNG.toString('base64'));
+  const chooserPromise = page.waitForEvent('filechooser');
   await page.click('#import-photo-btn');
+  const chooser = await chooserPromise;
+  await chooser.setFiles({ name: 'edited.jpg', mimeType: 'image/jpeg', buffer: PNG });
   await dbWait(page, 'obs => obs.observationSource === "photo_import"');
   const obs = await getObs(page);
   expect(obs.latitude).toBeNull();
@@ -403,7 +381,8 @@ test('PICKER-J: metadata-free original still imports without invented GPS or cap
   expect(obs.gpsStatus).toBe('missing');
   expect(obs.timeProvenance.source).toBe('unknown');
   expect(obs.createdAt).not.toBeNull();
-  await expect(page.locator('#original-photo-status')).toContainText('No embedded capture metadata');
+  // Absent metadata is an expected, non-failing state on sanitized photos.
+  await expect(page.locator('#original-photo-status')).toContainText('No embedded GPS/capture metadata found; checking outing history');
   expect(errors).toEqual([]);
 });
 
@@ -1199,7 +1178,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.29.8');
+    expect(post.body.data.appVersion).toBe('2026.08.29.9');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -1832,7 +1811,7 @@ test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing s
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe('~openai/gpt-latest');
   const prompt = calls[0].messages.map(m => m.content).join('\n');
-  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.29.8');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.29.9');
   expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
   expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
   expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);
@@ -2162,7 +2141,7 @@ test('OUTING-AB/AC: Safari remains fallback while EXIF still bypasses every prov
   expect(result.noTrack.reason).toContain('Safari breadcrumb source is not configured'); expect(result.obs.latitude).toBe(1); expect(result.obs.photoEnrichment.location).toBe('pending');
 });
 
-/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.29.8) ---------- */
+/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.29.9) ---------- */
 
 const INDIANA_OUTING = {
   format: 'wfr-outing-track', version: 1,
@@ -2234,6 +2213,37 @@ test('PIXEL-SAMSUNG: IMG filename resolves as outing-local wall time via track c
   expect(safariCalls).toBe(0);
   const summary = await page.locator('#import-evidence-summary').innerText();
   expect(summary).toContain('track-corroborated local time');
+  expect(errors).toEqual([]);
+});
+
+test('PICKER-E2E: sanitized image-picker selection with Pixel filename fully recovers via imported outing', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  const weather = await mockMeteo(page); const vision = await mockVision(page); await mockGbif(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: 'sk-or-test' });
+  let safariCalls = 0;
+  await page.route('**/breadcrumbs**', route => { safariCalls++; return route.abort(); });
+  await openCaptureTab(page);
+  await page.evaluate(async outingJson => {
+    const T = window.__WFR_TEST__;
+    T.settings.llmKey = 'sk-or-test';
+    await T.importOutingTrackData(outingJson);
+    window.exifr.parse = async () => ({});
+  }, INDIANA_OUTING);
+  // Simulate the new normal Android photo-picker flow end to end.
+  const chooserPromise = page.waitForEvent('filechooser');
+  await page.click('#import-photo-btn');
+  const chooser = await chooserPromise;
+  await chooser.setFiles({ name: 'PXL_20260828_231840123.jpg', mimeType: 'image/jpeg', buffer: PNG });
+  await dbWait(page, `obs => obs.weatherStatus === 'ok' && obs.classificationStatus === 'done' && obs.photoEnrichment.taxonomy === 'done'`);
+  const obs = await getObs(page);
+  expect(obs.timeProvenance).toMatchObject({ pattern: 'pixel_pxl', timeBasis: 'utc', utcIso: '2026-08-28T23:18:40.123Z' });
+  expect(obs.locationProvenance.provider).toBe('wfr_imported_track');
+  expect(obs.gpsSource).toMatch(/^breadcrumb_/);
+  expect(obs.latitude).toBeCloseTo(38.351275, 4);
+  expect(obs.subjectCommonName).toBe('Red-tailed Hawk');
+  expect(obs.taxonomy.status).toBe('ok');
+  expect(await page.locator('#import-evidence-summary').innerText()).toContain('7:18:40');
+  expect(safariCalls).toBe(0);
   expect(errors).toEqual([]);
 });
 
