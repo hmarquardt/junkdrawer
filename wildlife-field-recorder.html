@@ -708,9 +708,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.25.7" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.25.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.25.7
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.29.8" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.29.8" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.29.8
 </footer>
 </div>
 
@@ -718,7 +718,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.25.7';
+const APP_VERSION = '2026.08.29.8';
 
 /* ========================
    DB (Dexie)
@@ -2492,17 +2492,24 @@ const BREADCRUMB_HIGH_CONFIDENCE_MAX_GAP_MS = 60 * 1000;
 const BREADCRUMB_MAX_PLAUSIBLE_SPEED_MPS = 20;
 const FILE_LAST_MODIFIED_COPY_WINDOW_MS = 10 * 60 * 1000;
 
+/* Android does not standardize filename timestamp semantics. Only strongly
+ * established conventions get authoritative `timeBasis` values; everything
+ * else carries a hint (or none) and the outing track decides. */
 const PHOTO_FILENAME_TIME_PATTERNS = [
   {
-    id: 'pixel_pxl', confidence: 'medium_high',
+    id: 'pixel_pxl', confidence: 'high',
+    // Google Camera 7.5+ / Android 11+ encodes PXL timestamps in UTC.
+    timeBasis: 'utc', timeBasisResolution: 'known_filename_semantics',
     regex: /^PXL_(\d{8})_(\d{6})(\d{3})?(?=[_.-]|$)/i
   },
   {
     id: 'samsung_img', confidence: 'medium_high',
+    timeBasisHint: 'local_wall',
     regex: /^IMG_(\d{8})_(\d{6})(?:_(\d{3,}))?(?=\.|$)/i
   },
   {
     id: 'generic_yyyymmdd_hhmmss', confidence: 'medium',
+    timeBasisHint: 'unknown',
     regex: /^(\d{8})_(\d{6})(?:_(\d{3,}))?(?=\.|$)/i
   }
 ];
@@ -2527,20 +2534,118 @@ function parsePhotoFilenameTime(filename) {
     if (!match) continue;
     const wall = filenameWallTime(match[1], match[2]);
     if (!wall) return null;
+    // Known UTC semantics (Pixel PXL): the digits ARE a UTC instant. No wall
+    // interpretation is produced, so no outing offset can ever be applied twice.
+    if (pattern.timeBasis === 'utc') {
+      const ms = match[3] ? +match[3] : 0;
+      const epoch = Date.parse(wall + 'Z');
+      if (!isFinite(epoch)) return null;
+      return {
+        source: 'filename', pattern: pattern.id,
+        timeBasis: 'utc', timeBasisResolution: 'known_filename_semantics',
+        timestamp: epoch + ms,
+        utcIso: new Date(epoch + ms).toISOString(),
+        wallIso: null,
+        utcOffsetSeconds: null,
+        timezone: null,
+        confidence: pattern.confidence,
+        millisecond: ms || null,
+        suffix: null,
+        raw: base
+      };
+    }
+    // Unknown/hinted semantics: digits are parsed but their meaning stays open
+    // until the outing track corroborates one interpretation (never the
+    // processing device's timezone).
     return {
+      source: 'filename',
+      pattern: pattern.id,
+      timeBasisHint: pattern.timeBasisHint || 'unknown',
       wallIso: wall,
       utcIso: null,
       utcOffsetSeconds: null,
       timezone: null,
-      source: 'filename',
-      pattern: pattern.id,
       confidence: pattern.confidence,
-      millisecond: pattern.id === 'pixel_pxl' && match[3] ? +match[3] : null,
-      suffix: pattern.id !== 'pixel_pxl' && match[3] ? match[3] : null,
+      millisecond: null,
+      suffix: match[3] || null,
       raw: base
     };
   }
   return null;
+}
+
+/* ---- Filename time hypotheses + track corroboration ----
+ * Parsing digits and deciding what timezone they represent are separate steps.
+ * For filenames without authoritative semantics, candidate interpretations
+ * (absolute UTC vs outing-local wall time) are scored against real breadcrumb
+ * coverage — never against the processing device's timezone. */
+const FILENAME_HYPOTHESIS_MIN_SCORE = 25;
+const FILENAME_HYPOTHESIS_CLEAR_MARGIN = 15;
+
+function filenameTimeHypotheses(timeEvidence, points) {
+  if (!timeEvidence || timeEvidence.source !== 'filename' || !timeEvidence.wallIso || timeEvidence.utcIso) return [];
+  const base = Date.parse(timeEvidence.wallIso + 'Z');
+  if (!isFinite(base)) return [];
+  const hypotheses = [{ timeBasis: 'utc', timestamp: base, offsetSeconds: null }];
+  const offsets = [...new Set((points || []).map(point => point.utcOffsetSeconds).filter(Number.isFinite))];
+  for (const offset of offsets) {
+    const iso = utcIsoFromWall(timeEvidence.wallIso, offset);
+    const timestamp = iso ? Date.parse(iso) : NaN;
+    if (isFinite(timestamp)) hypotheses.push({ timeBasis: 'local_wall', timestamp, offsetSeconds: offset });
+  }
+  return hypotheses;
+}
+
+/** Deterministic coverage score for a candidate instant against track points. */
+function scoreHypothesisCoverage(timestamp, points, outing) {
+  if (!isFinite(timestamp) || !points || !points.length) return null;
+  const near = points.filter(point => Math.abs(point.timestamp - timestamp) <= BREADCRUMB_EXPANDED_WINDOW_MS);
+  if (!near.length) return null;
+  const nearest = Math.min(...near.map(point => Math.abs(point.timestamp - timestamp)));
+  let score = 0;
+  if (outing && isFinite(outing.startedAt)) {
+    const end = outing.endedAt != null ? outing.endedAt : timestamp;
+    if (timestamp >= outing.startedAt - 60000 && timestamp <= end + 60000) score += 30;
+  }
+  if (nearest <= BREADCRUMB_NEAR_POINT_MS) score += 25;
+  else if (nearest <= 60000) score += 15;
+  else if (nearest <= BREADCRUMB_MAX_INTERPOLATION_GAP_MS) score += 8;
+  else return null; // no credible temporal coverage at all
+  const before = points.filter(point => point.timestamp <= timestamp).pop();
+  const after = points.find(point => point.timestamp >= timestamp);
+  if (before && after && before !== after) {
+    const gap = after.timestamp - before.timestamp;
+    if (gap <= BREADCRUMB_HIGH_CONFIDENCE_MAX_GAP_MS) score += 20;
+    else if (gap <= BREADCRUMB_MAX_INTERPOLATION_GAP_MS) score += 12;
+  }
+  if (near.some(point => point.accuracyMeters != null)) score += 5;
+  score += Math.min(10, near.length);
+  return score;
+}
+
+/** Decide which hypothesis the outing track corroborates. Returns
+ *  { status: 'resolved'|'ambiguous'|'unresolved', ... } — ambiguity is
+ *  surfaced for review rather than silently guessed. */
+function resolveFilenameTimeBasis(timeEvidence, points, outing) {
+  const scored = filenameTimeHypotheses(timeEvidence, points)
+    .map(hypothesis => {
+      let score = scoreHypothesisCoverage(hypothesis.timestamp, points, outing);
+      // A known vendor hint is a small deterministic tiebreak, never a veto.
+      if (score != null && timeEvidence.timeBasisHint === hypothesis.timeBasis) score += 5;
+      return { ...hypothesis, score };
+    })
+    .filter(item => item.score != null)
+    .sort((a, b) => b.score - a.score);
+  if (!scored.length) return { status: 'unresolved', reason: 'No breadcrumb coverage for any filename time interpretation' };
+  const best = scored[0];
+  const second = scored[1];
+  const clearlyBetter = !second ||
+    best.score - second.score >= FILENAME_HYPOTHESIS_CLEAR_MARGIN ||
+    best.score >= second.score * 1.5 + 10;
+  if (best.score < FILENAME_HYPOTHESIS_MIN_SCORE || !clearlyBetter) {
+    return { status: 'ambiguous', reason: 'Filename time could be interpreted as UTC or outing-local time — both have track coverage. Review the capture time.' };
+  }
+  return { status: 'resolved', timeBasis: best.timeBasis, timestamp: best.timestamp, offsetSeconds: best.offsetSeconds, score: best.score };
 }
 
 function exifTimeEvidence(captureTime) {
@@ -2600,6 +2705,9 @@ function timeProvenanceFromEvidence(selected, evidence) {
     offsetsSeen: selected.offsetsSeen || null,
     timezone: selected.timezone || null,
     timezoneAbbreviation: selected.timezoneAbbreviation || null,
+    timeBasis: selected.timeBasis || null,
+    timeBasisHint: selected.timeBasisHint || null,
+    timeBasisResolution: selected.timeBasisResolution || null,
     timezoneSource: selected.utcOffsetSeconds != null ? 'exif_offset' : null,
     evidence
   };
@@ -2687,25 +2795,73 @@ function outingTargetTimestamp(timeEvidence, outing) {
   const iso = isFinite(offset) && timeEvidence.wallIso ? utcIsoFromWall(timeEvidence.wallIso, offset) : null;
   return iso ? Date.parse(iso) : null;
 }
+const CONFIDENCE_RANK = { high: 3, medium: 2, low: 1 };
+function providerForOutingSource(source) {
+  return source === 'wfr_imported' ? 'wfr_imported_track' : 'wfr_outing_track';
+}
 async function fetchOutingProviderMatches(timeEvidence, source, windowMs = BREADCRUMB_QUERY_WINDOW_MS) {
   const outings = await db.outings.where('source').equals(source).toArray();
   const matches = [];
+  const ambiguities = [];
   for (const outing of outings) {
-    const target = outingTargetTimestamp(timeEvidence, outing);
+    let target = timeEvidence && timeEvidence.utcIso ? Date.parse(timeEvidence.utcIso) : NaN;
+    let basis = null;
+    let evidenceForMatch = timeEvidence;
+    // Filename digits without authoritative semantics: let this outing's track
+    // decide between the UTC and outing-local-wall interpretations. Point-level
+    // UTC offsets are preferred over the outing-level start offset.
+    if (!isFinite(target) && timeEvidence && timeEvidence.source === 'filename' && timeEvidence.wallIso) {
+      const rows = await db.outingPoints.where('outingLocalId').equals(outing.localOutingId).toArray();
+      const provider = providerForOutingSource(source);
+      const allPoints = normalizeBreadcrumbs({
+        timezone: outing.timezoneAtStart, utcOffsetSeconds: outing.utcOffsetSecondsAtStart,
+        provider, providerOutingId: outing.localOutingId, points: rows
+      });
+      const resolution = resolveFilenameTimeBasis(timeEvidence, allPoints, outing);
+      if (resolution.status === 'ambiguous') { ambiguities.push(resolution.reason); continue; }
+      if (resolution.status !== 'resolved') continue;
+      target = resolution.timestamp;
+      basis = resolution;
+      evidenceForMatch = {
+        ...timeEvidence,
+        utcIso: new Date(target).toISOString(),
+        timestamp: target,
+        utcOffsetSeconds: resolution.timeBasis === 'local_wall' ? resolution.offsetSeconds : null,
+        timeBasis: resolution.timeBasis,
+        timeBasisResolution: 'breadcrumb_corroborated'
+      };
+    }
+    if (!isFinite(target) && !(timeEvidence && timeEvidence.source === 'filename' && timeEvidence.wallIso)) {
+      target = outingTargetTimestamp(timeEvidence, outing);
+    }
     if (!isFinite(target)) continue;
     const edge = windowMs + 60000;
     if (target < outing.startedAt - edge || target > (outing.endedAt || Date.now()) + edge) continue;
     const rows = await db.outingPoints.where('[outingLocalId+timestamp]')
       .between([outing.localOutingId, target - windowMs], [outing.localOutingId, target + windowMs], true, true).toArray();
-    const provider = source === 'wfr_imported' ? 'wfr_imported_track' : 'wfr_outing_track';
+    const provider = providerForOutingSource(source);
     const points = normalizeBreadcrumbs({
       timezone: outing.timezoneAtStart, utcOffsetSeconds: outing.utcOffsetSecondsAtStart,
       provider, providerOutingId: outing.localOutingId, points: rows
     });
-    const resolved = resolveBreadcrumbLocation(timeEvidence, points);
-    if (resolved.status === 'resolved') matches.push({ ...resolved, provider, providerOutingId: outing.localOutingId, outing });
+    const resolved = resolveBreadcrumbLocation(evidenceForMatch, points);
+    if (resolved.status === 'resolved') {
+      matches.push({
+        ...resolved, provider, providerOutingId: outing.localOutingId, outing,
+        filenameBasis: basis ? {
+          pattern: timeEvidence.pattern, timeBasis: basis.timeBasis,
+          offsetSeconds: basis.offsetSeconds ?? null, resolution: 'breadcrumb_corroborated'
+        } : null
+      });
+    }
   }
-  matches.sort((a, b) => (({ high:3, medium:2, low:1 }[b.confidence] || 0) - ({ high:3, medium:2, low:1 }[a.confidence] || 0)) ||
+  // If corroborated matches disagree about the filename time basis, refuse to guess.
+  const bases = new Set(matches.map(match => match.filenameBasis ? match.filenameBasis.timeBasis : 'absolute'));
+  if (matches.length > 1 && bases.size > 1) {
+    return { status: 'ambiguous', reason: 'Filename time could be interpreted as UTC or outing-local time — both have track coverage. Review the capture time.', matches };
+  }
+  if (!matches.length && ambiguities.length) return { status: 'ambiguous', reason: ambiguities[0] };
+  matches.sort((a, b) => (CONFIDENCE_RANK[b.confidence] || 0) - (CONFIDENCE_RANK[a.confidence] || 0) ||
     (a.estimatedAccuracyMeters ?? Infinity) - (b.estimatedAccuracyMeters ?? Infinity));
   if (matches.length > 1 && matches[0].confidence === matches[1].confidence &&
       haversine(matches[0].latitude, matches[0].longitude, matches[1].latitude, matches[1].longitude) * 1609.344 > 200) {
@@ -2720,13 +2876,22 @@ async function getBreadcrumbCandidates(timeEvidence) {
     if (match.status === 'resolved' || match.status === 'ambiguous') return match;
   }
   if (!settings.token || !settings.breadcrumbResource) return { status: 'unresolved', reason: 'No matching WFR outing track; Safari breadcrumb source is not configured' };
-  let points = await fetchBreadcrumbWindow(timeEvidence, BREADCRUMB_QUERY_WINDOW_MS);
-  let resolved = resolveBreadcrumbLocation(timeEvidence, points);
-  if (resolved.status !== 'resolved') {
-    points = await fetchBreadcrumbWindow(timeEvidence, BREADCRUMB_EXPANDED_WINDOW_MS);
-    resolved = resolveBreadcrumbLocation(timeEvidence, points);
+  // Safari breadcrumbs are optional fallback infrastructure. A missing or
+  // unimplemented breadcrumb resource must never surface as a raw HTTP error.
+  try {
+    let points = await fetchBreadcrumbWindow(timeEvidence, BREADCRUMB_QUERY_WINDOW_MS);
+    let resolved = resolveBreadcrumbLocation(timeEvidence, points);
+    if (resolved.status !== 'resolved') {
+      points = await fetchBreadcrumbWindow(timeEvidence, BREADCRUMB_EXPANDED_WINDOW_MS);
+      resolved = resolveBreadcrumbLocation(timeEvidence, points);
+    }
+    return resolved.status === 'resolved' ? { ...resolved, provider: 'wilderness_safari' } : resolved;
+  } catch(e) {
+    if (/^HTTP 40[04]\b/.test(String(e && e.message))) {
+      return { status: 'provider_unavailable', reason: 'Safari breadcrumb source unavailable' };
+    }
+    throw e;
   }
-  return resolved.status === 'resolved' ? { ...resolved, provider: 'wilderness_safari' } : resolved;
 }
 
 function median(values) {
@@ -2832,7 +2997,9 @@ function breadcrumbProvenance(timeEvidence, result) {
     photoTime: {
       source: timeEvidence.source, pattern: timeEvidence.pattern || null,
       confidence: timeEvidence.confidence, wallIso: timeEvidence.wallIso || null,
-      utcIso: new Date(result.timestamp).toISOString()
+      utcIso: new Date(result.timestamp).toISOString(),
+      timeBasis: timeEvidence.timeBasis || (result.filenameBasis && result.filenameBasis.timeBasis) || null,
+      timeBasisResolution: timeEvidence.timeBasisResolution || (result.filenameBasis && result.filenameBasis.resolution) || null
     },
     breadcrumb: {
       source: result.provider || (points[0] && points[0].provider) || 'wilderness_safari', method: result.method.replace(/^breadcrumb_/, ''),
@@ -3490,6 +3657,11 @@ async function runBreadcrumbRecoveryStage(localId) {
       o.timeProvenance.timezoneAbbreviation = timezonePoint.timezoneAbbreviation || o.timeProvenance.timezoneAbbreviation || null;
       o.timeProvenance.timezoneSource = 'breadcrumb_location';
       o.timeProvenance.timezoneConfidence = timezonePoint.timezone || offset != null ? 'medium_high' : 'low';
+      if (resolved.filenameBasis) {
+        o.timeProvenance.timeBasis = resolved.filenameBasis.timeBasis;
+        o.timeProvenance.timeBasisResolution = resolved.filenameBasis.resolution;
+        o.timeProvenance.timeBasisHint = null;
+      }
       o.createdAt = resolved.timestamp;
       o.startedAt = resolved.timestamp;
       o.photoEnrichment.location = 'ready';
@@ -3595,7 +3767,14 @@ async function runWeatherStage(localId) {
       }
       if (ct.utcOffsetSeconds != null && o.timeProvenance.wallIso) {
         o.timeProvenance.localIso = o.timeProvenance.wallIso + offsetText(ct.utcOffsetSeconds);
-        o.timeProvenance.utcIso = utcIsoFromWall(o.timeProvenance.wallIso, ct.utcOffsetSeconds);
+        const rebuiltIso = utcIsoFromWall(o.timeProvenance.wallIso, ct.utcOffsetSeconds);
+        // Preserve sub-second precision from an already-resolved UTC instant;
+        // wall-clock arithmetic only carries whole seconds.
+        const prevMs = Date.parse(o.timeProvenance.utcIso || '');
+        const rebuiltMs = rebuiltIso ? Date.parse(rebuiltIso) : NaN;
+        o.timeProvenance.utcIso = isFinite(prevMs) && isFinite(rebuiltMs) && Math.floor(prevMs / 1000) === Math.floor(rebuiltMs / 1000)
+          ? new Date(prevMs).toISOString()
+          : (rebuiltIso || o.timeProvenance.utcIso);
         if (!o.timeProvenance.timezoneSource) o.timeProvenance.timezoneSource = 'weather_location';
         const resolvedMs = Date.parse(o.timeProvenance.utcIso);
         if (isFinite(resolvedMs) && o.timeProvenance.source !== 'unknown') {
@@ -3778,7 +3957,13 @@ function formatWallTimeForReview(wall) {
 function timeEvidenceDescription(obs) {
   const tp = obs.timeProvenance || {};
   if (String(tp.source || '').startsWith('exif_')) return { value: '✓ Capture time from photo EXIF', note: tp.timezone || (tp.utcOffsetSeconds != null ? 'Explicit camera offset' : 'Timezone unresolved') };
-  if (tp.source === 'filename') return { value: '✓ ' + formatWallTimeForReview(tp.wallIso), note: 'Inferred from ' + filenamePatternLabel(tp.pattern) + ' filename' + (tp.timezone ? ' · ' + tp.timezone : '') };
+  if (tp.source === 'filename') {
+    let note = 'Inferred from ' + filenamePatternLabel(tp.pattern) + ' filename';
+    if (tp.timeBasis === 'utc' && tp.timeBasisResolution === 'known_filename_semantics') note += ' · UTC filename';
+    else if (tp.timeBasisResolution === 'breadcrumb_corroborated') note += ' · track-corroborated ' + (tp.timeBasis === 'local_wall' ? 'local time' : 'UTC');
+    if (tp.timezone) note += ' · ' + tp.timezone;
+    return { value: '✓ ' + formatWallTimeForReview(tp.wallIso), note };
+  }
   if (tp.source === 'file_last_modified') return { value: 'File timestamp candidate', note: 'Weak evidence · requires track corroboration' };
   if (tp.source === 'user_provided') return { value: '✓ User-supplied time', note: tp.timezone || 'Manual review value' };
   return { value: 'Capture time unresolved', note: 'No credible timestamp evidence' };
@@ -3816,6 +4001,9 @@ function reviewTop(obs, thumbUrl) {
   const e = escapeHtml;
   const confLabel = obs.subjectConfidence == null ? null :
     obs.subjectConfidence >= 0.75 ? 'High' : obs.subjectConfidence >= 0.4 ? 'Medium' : 'Low';
+  // A missing confidence number does NOT mean identification failed. Only
+  // claim "pending/unavailable" when identification actually did not succeed.
+  const identificationDone = (obs.photoEnrichment && obs.photoEnrichment.identification === 'done') || obs.classificationStatus === 'done';
   const tax = obs.taxonomy;
   const taxHtml = tax && tax.status === 'ok' ?
     `<div style="font-size:0.78rem;color:var(--text-muted);">Taxonomy (GBIF): ${e([tax.kingdom, tax.phylum, tax.class, tax.order, tax.family, tax.genus, tax.species].filter(Boolean).join(' › '))}</div>` :
@@ -3829,7 +4017,9 @@ function reviewTop(obs, thumbUrl) {
     <div id="import-enrich-error" style="color:var(--danger);font-size:0.78rem;margin-bottom:6px;"></div>
     <label>Common name</label><input id="imp-common" value="${e(obs.subjectCommonName || '')}" placeholder="e.g. Eastern Fox Squirrel" />
     <label>Scientific name</label><input id="imp-sci" value="${e(obs.subjectScientificName || '')}" />
-    ${confLabel ? `<div style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">AI confidence: ${confLabel}${obs.subjectConfidence != null ? ' (' + Math.round(obs.subjectConfidence * 100) + '%)' : ''} — draft identification, please verify</div>` : '<div style="font-size:0.82rem;color:var(--warn);">AI identification pending or unavailable — you can enter it manually</div>'}
+    ${confLabel ? `<div style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">AI confidence: ${confLabel}${obs.subjectConfidence != null ? ' (' + Math.round(obs.subjectConfidence * 100) + '%)' : ''} — draft identification, please verify</div>` :
+      identificationDone ? '<div style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">Draft identification — confidence unavailable, please verify</div>' :
+      '<div style="font-size:0.82rem;color:var(--warn);">AI identification pending or unavailable — you can enter it manually</div>'}
     ${taxHtml}
     <label>Observed date &amp; time ${tzp.source === 'unknown' ? '(not in photo — please supply)' : ''}</label>
     <input id="imp-datetime" type="datetime-local" value="${dtLocal}" />
@@ -6456,6 +6646,7 @@ window.__WFR_TEST__ = {
   photoMetadataResult, parseExifFromFile, normalizeExif, normalizeCaptureTime,
   PHOTO_FILENAME_TIME_PATTERNS, parsePhotoFilenameTime, collectPhotoTimeEvidence,
   resolveCaptureTimeEvidence, timeProvenanceFromEvidence, normalizeBreadcrumbs,
+  filenameTimeHypotheses, scoreHypothesisCoverage, resolveFilenameTimeBasis,
   resolveBreadcrumbLocation, breadcrumbProvenance, fetchBreadcrumbWindow,
   clearBreadcrumbWindowCache, runBreadcrumbRecoveryStage, fetchOutingProviderMatches, getBreadcrumbCandidates,
   BREADCRUMB_QUERY_WINDOW_MS, BREADCRUMB_EXPANDED_WINDOW_MS,
@@ -6465,7 +6656,7 @@ window.__WFR_TEST__ = {
   enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex,
   compassDirection, wallEpochMinutes, captureWallParts, wallIso,
   applyObservationTime, observationWallInputValue,
-  categoryFromSubjectType, submitObservation,
+  categoryFromSubjectType, submitObservation, reviewTop,
   OPENROUTER_BASE, DEFAULT_TRANS_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL,
   WFR_BOOTSTRAP_RECOMMENDATIONS, WFR_RECOMMENDATION_MODEL,
   normalizeOpenRouterModels, filterModelsFor, migrateModelId, initModelCatalog,

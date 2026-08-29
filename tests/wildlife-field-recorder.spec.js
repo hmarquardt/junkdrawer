@@ -424,10 +424,9 @@ test('BREAD-A/B/C/D: filename registry parses real timestamps and rejects generi
       parse('IMG_20261340_296199.jpg')
     ];
   });
-  expect(parsed.slice(0, 4).map(value => value.wallIso)).toEqual(Array(4).fill('2026-08-25T14:32:11'));
-  expect(parsed[0]).toMatchObject({ pattern: 'pixel_pxl', millisecond: 123, confidence: 'medium_high' });
-  expect(parsed[1]).toMatchObject({ pattern: 'samsung_img', confidence: 'medium_high' });
-  expect(parsed[2]).toMatchObject({ pattern: 'generic_yyyymmdd_hhmmss' });
+  expect(parsed[0]).toMatchObject({ pattern: 'pixel_pxl', timeBasis: 'utc', timeBasisResolution: 'known_filename_semantics', utcIso: '2026-08-25T14:32:11.123Z', timestamp: Date.parse('2026-08-25T14:32:11.123Z'), wallIso: null, millisecond: 123, confidence: 'high' });
+  expect(parsed[1]).toMatchObject({ pattern: 'samsung_img', timeBasisHint: 'local_wall', wallIso: '2026-08-25T14:32:11', utcIso: null, confidence: 'medium_high' });
+  expect(parsed[2]).toMatchObject({ pattern: 'generic_yyyymmdd_hhmmss', timeBasisHint: 'unknown' });
   expect(parsed[3]).toMatchObject({ suffix: '001', millisecond: null });
   expect(parsed.slice(4)).toEqual([null, null, null]);
 });
@@ -604,7 +603,8 @@ test('BREAD-P/Q: Safari failure is non-destructive and nearby photos reuse cache
   }, PNG.toString('base64'));
   await dbWait(page, 'obs => obs.photoEnrichment.location === "error"');
   let obs = await getObs(page);
-  expect(obs.timeProvenance).toMatchObject({ source: 'filename', wallIso: '2026-05-14T17:42:00' });
+  // Pixel PXL filenames encode UTC — the digits must NOT be treated as local wall time.
+  expect(obs.timeProvenance).toMatchObject({ source: 'filename', pattern: 'pixel_pxl', timeBasis: 'utc', timeBasisResolution: 'known_filename_semantics', utcIso: '2026-05-14T17:42:00.123Z', wallIso: null });
   expect(obs.latitude).toBeNull();
   expect(obs.locationResolutionError).toMatch(/fetch|network/i);
 
@@ -1199,7 +1199,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.25.7');
+    expect(post.body.data.appVersion).toBe('2026.08.29.8');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -1832,7 +1832,7 @@ test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing s
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe('~openai/gpt-latest');
   const prompt = calls[0].messages.map(m => m.content).join('\n');
-  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.25.7');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.29.8');
   expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
   expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
   expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);
@@ -2160,4 +2160,243 @@ test('OUTING-AB/AC: Safari remains fallback while EXIF still bypasses every prov
     await T.runBreadcrumbRecoveryStage('exif-bypass'); return {noTrack,obs:await T.db.observations.get('exif-bypass')};
   });
   expect(result.noTrack.reason).toContain('Safari breadcrumb source is not configured'); expect(result.obs.latitude).toBe(1); expect(result.obs.photoEnrichment.location).toBe('pending');
+});
+
+/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.29.8) ---------- */
+
+const INDIANA_OUTING = {
+  format: 'wfr-outing-track', version: 1,
+  outing: { id: 'indiana', name: 'Indiana outing', startedAt: '2026-08-28T22:00:00Z', endedAt: '2026-08-29T00:30:00Z', timezone: 'America/Indiana/Indianapolis', utcOffsetSeconds: -14400 },
+  points: [
+    { timestamp: '2026-08-28T23:17:40Z', latitude: 38.35120, longitude: -87.57182, accuracyMeters: 8, utcOffsetSeconds: -14400 },
+    { timestamp: '2026-08-28T23:19:40Z', latitude: 38.35135, longitude: -87.57160, accuracyMeters: 8, utcOffsetSeconds: -14400 }
+  ]
+};
+
+async function importIndianaOutingAndPhoto(page, filename) {
+  await page.evaluate(async ({ pngB64, outingJson, photoName }) => {
+    const T = window.__WFR_TEST__;
+    T.settings.llmKey = 'sk-or-test';
+    await T.importOutingTrackData(outingJson);
+    window.exifr.parse = async () => ({});
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await T.importPhotoFile(new File([bin], photoName, { type: 'image/jpeg', lastModified: Date.now() }));
+  }, { pngB64: PNG.toString('base64'), outingJson: INDIANA_OUTING, photoName: filename });
+}
+
+test('PIXEL-UTC: PXL filename is absolute UTC, matches outing track, Safari never called', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  const weather = await mockMeteo(page); const vision = await mockVision(page); await mockGbif(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: 'sk-or-test' });
+  let safariCalls = 0;
+  await page.route('**/breadcrumbs**', route => { safariCalls++; return route.abort(); });
+  await openCaptureTab(page);
+  await importIndianaOutingAndPhoto(page, 'PXL_20260828_231840123.jpg');
+  await dbWait(page, `obs => obs.weatherStatus === 'ok' && obs.classificationStatus === 'done' && obs.photoEnrichment.taxonomy === 'done'`);
+  const obs = await getObs(page);
+  expect(obs.createdAt).toBe(Date.parse('2026-08-28T23:18:40.123Z'));
+  expect(obs.createdAt).not.toBe(Date.parse('2026-08-29T03:18:40.123Z'));
+  expect(obs.timeProvenance).toMatchObject({
+    source: 'filename', pattern: 'pixel_pxl', timeBasis: 'utc',
+    timeBasisResolution: 'known_filename_semantics',
+    utcIso: '2026-08-28T23:18:40.123Z', wallIso: '2026-08-28T19:18:40',
+    timezone: 'America/Indiana/Indianapolis'
+  });
+  expect(obs.locationProvenance.provider).toBe('wfr_imported_track');
+  expect(obs.gpsSource).toMatch(/^breadcrumb_/);
+  expect(obs.latitude).toBeCloseTo(38.351275, 4);
+  expect(obs.longitude).toBeCloseTo(-87.57171, 4);
+  expect(safariCalls).toBe(0);
+  expect(weather.calls.length).toBeGreaterThan(0);
+  const summary = await page.locator('#import-evidence-summary').innerText();
+  expect(summary).toContain('7:18:40');
+  expect(summary).toContain('UTC filename');
+  expect(errors).toEqual([]);
+});
+
+test('PIXEL-SAMSUNG: IMG filename resolves as outing-local wall time via track corroboration', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  const weather = await mockMeteo(page); const vision = await mockVision(page); await mockGbif(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: 'sk-or-test' });
+  let safariCalls = 0;
+  await page.route('**/breadcrumbs**', route => { safariCalls++; return route.abort(); });
+  await openCaptureTab(page);
+  await importIndianaOutingAndPhoto(page, 'IMG_20260828_191840.jpg');
+  await dbWait(page, `obs => obs.weatherStatus === 'ok' && obs.classificationStatus === 'done'`);
+  const obs = await getObs(page);
+  expect(obs.createdAt).toBe(Date.parse('2026-08-28T23:18:40.000Z'));
+  expect(obs.timeProvenance).toMatchObject({
+    source: 'filename', pattern: 'samsung_img', timeBasis: 'local_wall',
+    timeBasisResolution: 'breadcrumb_corroborated',
+    utcIso: '2026-08-28T23:18:40.000Z', wallIso: '2026-08-28T19:18:40'
+  });
+  expect(obs.locationProvenance.provider).toBe('wfr_imported_track');
+  expect(safariCalls).toBe(0);
+  const summary = await page.locator('#import-evidence-summary').innerText();
+  expect(summary).toContain('track-corroborated local time');
+  expect(errors).toEqual([]);
+});
+
+test('HYPOTHESES-A/B: generic digits resolve by track coverage', async ({ page }) => {
+  blockExternal(page); await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  const cases = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    // Case A track: covers 23:18:40Z only.
+    await T.db.outings.put({ localOutingId: 'hyp-a', startedAt: Date.parse('2026-08-28T23:00:00Z'), endedAt: Date.parse('2026-08-28T23:40:00Z'), status: 'completed', source: 'wfr_local', timezoneAtStart: 'America/Indiana/Indianapolis', utcOffsetSecondsAtStart: -14400 });
+    await T.db.outingPoints.bulkPut([
+      { localPointId: 'hyp-a-0', outingLocalId: 'hyp-a', timestamp: Date.parse('2026-08-28T23:17:40Z'), latitude: 38.35120, longitude: -87.57182, accuracyMeters: 8, utcOffsetSeconds: -14400 },
+      { localPointId: 'hyp-a-1', outingLocalId: 'hyp-a', timestamp: Date.parse('2026-08-28T23:19:40Z'), latitude: 38.35135, longitude: -87.57160, accuracyMeters: 8, utcOffsetSeconds: -14400 }
+    ]);
+    // Case B track: covers 23:18:40Z (19:18:40 local) only.
+    await T.db.outings.put({ localOutingId: 'hyp-b', startedAt: Date.parse('2026-08-28T23:00:00Z'), endedAt: Date.parse('2026-08-28T23:40:00Z'), status: 'completed', source: 'wfr_local', timezoneAtStart: 'America/Indiana/Indianapolis', utcOffsetSecondsAtStart: -14400 });
+    await T.db.outingPoints.bulkPut([
+      { localPointId: 'hyp-b-0', outingLocalId: 'hyp-b', timestamp: Date.parse('2026-08-28T23:17:40Z'), latitude: 38.35120, longitude: -87.57182, accuracyMeters: 8, utcOffsetSeconds: -14400 },
+      { localPointId: 'hyp-b-1', outingLocalId: 'hyp-b', timestamp: Date.parse('2026-08-28T23:19:40Z'), latitude: 38.35135, longitude: -87.57160, accuracyMeters: 8, utcOffsetSeconds: -14400 }
+    ]);
+    const evidence = wall => ({ source: 'filename', pattern: 'generic_yyyymmdd_hhmmss', timeBasisHint: 'unknown', confidence: 'medium', wallIso: wall, utcIso: null });
+    return {
+      utcChosen: await T.getBreadcrumbCandidates(evidence('2026-08-28T23:18:40')),
+      localChosen: await T.getBreadcrumbCandidates(evidence('2026-08-28T19:18:40'))
+    };
+  });
+  // Case A: UTC interpretation wins (local-wall would be ~4h outside the track).
+  expect(cases.utcChosen.status).toBe('resolved');
+  expect(cases.utcChosen.timestamp).toBe(Date.parse('2026-08-28T23:18:40Z'));
+  expect(cases.utcChosen.filenameBasis).toMatchObject({ timeBasis: 'utc', resolution: 'breadcrumb_corroborated' });
+  // Case B: outing-local interpretation wins.
+  expect(cases.localChosen.status).toBe('resolved');
+  expect(cases.localChosen.timestamp).toBe(Date.parse('2026-08-28T23:18:40Z'));
+  expect(cases.localChosen.filenameBasis).toMatchObject({ timeBasis: 'local_wall', offsetSeconds: -14400, resolution: 'breadcrumb_corroborated' });
+});
+
+test('HYPOTHESES-C: both interpretations covered equally becomes ambiguous for review', async ({ page }) => {
+  blockExternal(page); await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  const ambiguous = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    await T.db.outings.put({ localOutingId: 'hyp-c2', startedAt: Date.parse('2026-08-28T18:00:00Z'), endedAt: Date.parse('2026-08-29T00:30:00Z'), status: 'completed', source: 'wfr_local', timezoneAtStart: 'America/Indiana/Indianapolis', utcOffsetSecondsAtStart: -14400 });
+    await T.db.outingPoints.bulkPut([
+      { localPointId: 'hyp-c2-0', outingLocalId: 'hyp-c2', timestamp: Date.parse('2026-08-28T19:17:40Z'), latitude: 38.35120, longitude: -87.57182, accuracyMeters: 8, utcOffsetSeconds: -14400 },
+      { localPointId: 'hyp-c2-1', outingLocalId: 'hyp-c2', timestamp: Date.parse('2026-08-28T19:19:40Z'), latitude: 38.35121, longitude: -87.57180, accuracyMeters: 8, utcOffsetSeconds: -14400 },
+      { localPointId: 'hyp-c2-2', outingLocalId: 'hyp-c2', timestamp: Date.parse('2026-08-28T23:17:40Z'), latitude: 38.35134, longitude: -87.57162, accuracyMeters: 8, utcOffsetSeconds: -14400 },
+      { localPointId: 'hyp-c2-3', outingLocalId: 'hyp-c2', timestamp: Date.parse('2026-08-28T23:19:40Z'), latitude: 38.35135, longitude: -87.57160, accuracyMeters: 8, utcOffsetSeconds: -14400 }
+    ]);
+    return T.getBreadcrumbCandidates({ source: 'filename', pattern: 'generic_yyyymmdd_hhmmss', timeBasisHint: 'unknown', confidence: 'medium', wallIso: '2026-08-28T19:18:40', utcIso: null });
+  });
+  expect(ambiguous.status).toBe('ambiguous');
+  expect(ambiguous.reason).toMatch(/ambigu|Review the capture time/i);
+});
+
+test('HYPOTHESIS-OFFSET: local-wall resolution uses the relevant point offset, not the outing start offset', async ({ page }) => {
+  blockExternal(page); await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    // Outing starts at UTC-4 but its points record UTC-5 (travel/DST change).
+    await T.db.outings.put({ localOutingId: 'dst-outing', startedAt: Date.parse('2026-08-28T23:00:00Z'), endedAt: Date.parse('2026-08-29T01:00:00Z'), status: 'completed', source: 'wfr_local', timezoneAtStart: 'America/Indiana/Indianapolis', utcOffsetSecondsAtStart: -14400 });
+    await T.db.outingPoints.bulkPut([
+      { localPointId: 'dst-0', outingLocalId: 'dst-outing', timestamp: Date.parse('2026-08-29T00:17:40Z'), latitude: 38.35120, longitude: -87.57182, accuracyMeters: 8, utcOffsetSeconds: -18000 },
+      { localPointId: 'dst-1', outingLocalId: 'dst-outing', timestamp: Date.parse('2026-08-29T00:19:40Z'), latitude: 38.35135, longitude: -87.57160, accuracyMeters: 8, utcOffsetSeconds: -18000 }
+    ]);
+    return T.getBreadcrumbCandidates({ source: 'filename', pattern: 'generic_yyyymmdd_hhmmss', timeBasisHint: 'unknown', confidence: 'medium', wallIso: '2026-08-28T19:18:40', utcIso: null });
+  });
+  expect(result.status).toBe('resolved');
+  expect(result.timestamp).toBe(Date.parse('2026-08-29T00:18:40Z'));
+  expect(result.filenameBasis).toMatchObject({ timeBasis: 'local_wall', offsetSeconds: -18000, resolution: 'breadcrumb_corroborated' });
+});
+
+const TZ_RESULTS = [];
+for (const tz of ['UTC', 'America/Indiana/Indianapolis', 'America/Denver']) {
+  test.describe(`cross-timezone independence (${tz})`, () => {
+    test.use({ timezoneId: tz });
+    test('identical Pixel + outing fixture resolves identically', async ({ page }) => {
+      const errors = collectErrors(page); blockExternal(page);
+      seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: '' });
+      await page.route('**/breadcrumbs**', route => route.abort());
+      await openCaptureTab(page);
+      await importIndianaOutingAndPhoto(page, 'PXL_20260828_231840123.jpg');
+      await dbWait(page, `obs => obs.gpsSource && obs.gpsSource.indexOf('breadcrumb_') === 0`);
+      const obs = await getObs(page);
+      TZ_RESULTS.push({
+        tz,
+        createdAt: obs.createdAt,
+        latitude: obs.latitude,
+        longitude: obs.longitude,
+        utcIso: obs.timeProvenance.utcIso,
+        timeBasis: obs.timeProvenance.timeBasis,
+        timeBasisResolution: obs.timeProvenance.timeBasisResolution
+      });
+      expect(obs.createdAt).toBe(Date.parse('2026-08-28T23:18:40.123Z'));
+      if (TZ_RESULTS.length === 3) {
+        const comparable = r => ({ createdAt: r.createdAt, latitude: r.latitude, longitude: r.longitude, utcIso: r.utcIso, timeBasis: r.timeBasis, timeBasisResolution: r.timeBasisResolution });
+        expect(comparable(TZ_RESULTS[1])).toEqual(comparable(TZ_RESULTS[0]));
+        expect(comparable(TZ_RESULTS[2])).toEqual(comparable(TZ_RESULTS[0]));
+        expect(TZ_RESULTS[0].latitude).toBeCloseTo(38.351275, 4);
+      }
+      expect(errors).toEqual([]);
+    });
+  });
+}
+
+test('SAFARI-A: HTTP 400 resource-not-found is graceful provider unavailable and never blocks vision', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  const vision = await mockVision(page);
+  seedSettings(page.context(), { token: 'lab-test', breadcrumbResource: 'breadcrumbs', llmKey: 'sk-or-test' });
+  await page.route('**/wildlife-field-recorder/breadcrumbs**', route => route.fulfill({
+    status: 400, contentType: 'application/json',
+    body: JSON.stringify({ detail: 'Resource not found: wildlife-field-recorder/breadcrumbs' })
+  }));
+  await openCaptureTab(page);
+  await page.evaluate(async pngB64 => {
+    const T = window.__WFR_TEST__;
+    window.exifr.parse = async () => ({});
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await T.importPhotoFile(new File([bin], 'PXL_20260828_231840123.jpg', { type: 'image/jpeg', lastModified: Date.now() }));
+  }, PNG.toString('base64'));
+  await dbWait(page, `obs => obs.photoEnrichment.location === 'unavailable' && obs.classificationStatus === 'done'`);
+  const obs = await getObs(page);
+  expect(obs.locationResolutionError).toBe('Safari breadcrumb source unavailable');
+  expect(obs.locationResolutionError).not.toMatch(/HTTP/);
+  expect(obs.latitude).toBeNull();
+  // One photo-identification request (the other chat/completions call is the
+  // unrelated model-recommendation job that runs on load with a stored key).
+  const photoVisionCalls = vision.calls.filter(c => (c.messages || []).some(m => Array.isArray(m.content)));
+  expect(photoVisionCalls).toHaveLength(1);
+  // The browser's own network log may mention the 400, but the page must not
+  // surface it as an error or destroy the import.
+  expect(errors.filter(e => !/Failed to load resource.*400/.test(e))).toEqual([]);
+});
+
+test('SAFARI-B: HTTP 404 resource-not-found is provider unavailable via the candidate API', async ({ page }) => {
+  blockExternal(page);
+  await page.route('**/wildlife-field-recorder/breadcrumbs**', route => route.fulfill({
+    status: 404, contentType: 'application/json',
+    body: JSON.stringify({ detail: 'Resource not found: wildlife-field-recorder/breadcrumbs' })
+  }));
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.token = 'lab-test';
+    T.settings.breadcrumbResource = 'breadcrumbs';
+    return T.getBreadcrumbCandidates({ source: 'filename', pattern: 'pixel_pxl', timeBasis: 'utc', confidence: 'high', utcIso: '2026-08-28T23:18:40.123Z', wallIso: null });
+  });
+  expect(result.status).toBe('provider_unavailable');
+  expect(result.reason).toBe('Safari breadcrumb source unavailable');
+});
+
+test('COPY-ID: completed identification with null confidence is not reported as pending', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const doneHtml = await page.evaluate(() => window.__WFR_TEST__.reviewTop({
+    localId: 'copy-done', timeProvenance: { source: 'exif_DateTimeOriginal', wallIso: '2026-08-28T19:18:40', utcIso: '2026-08-28T23:18:40.000Z', utcOffsetSeconds: -14400 },
+    subjectCommonName: 'Fall Webworm', subjectScientificName: 'Hyphantria cunea',
+    subjectConfidence: null, classificationStatus: 'done',
+    photoEnrichment: { identification: 'done', location: 'ready' }
+  }, ''));
+  expect(doneHtml).not.toContain('pending or unavailable');
+  expect(doneHtml).toContain('Fall Webworm');
+  expect(doneHtml).toContain('confidence unavailable');
+  const pendingHtml = await page.evaluate(() => window.__WFR_TEST__.reviewTop({
+    localId: 'copy-pending', timeProvenance: { source: 'unknown' },
+    subjectConfidence: null, classificationStatus: 'pending',
+    photoEnrichment: { identification: 'pending' }
+  }, ''));
+  expect(pendingHtml).toContain('pending or unavailable');
 });
