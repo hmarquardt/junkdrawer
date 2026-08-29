@@ -708,9 +708,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.29.9" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.29.9" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.29.9
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.29.10" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.29.10" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.29.10
 </footer>
 </div>
 
@@ -718,7 +718,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.29.9';
+const APP_VERSION = '2026.08.29.10';
 
 /* ========================
    DB (Dexie)
@@ -2402,6 +2402,10 @@ function normalizeExif(raw) {
   if (raw.LensMake) exif.LensMake = String(raw.LensMake);
   if (raw.LensModel) exif.LensModel = String(raw.LensModel);
   if (raw.FocalLength !== undefined) exif.FocalLength = Number(raw.FocalLength);
+  if (raw.FocalLengthIn35mmFormat !== undefined) exif.FocalLengthIn35mmFormat = Number(raw.FocalLengthIn35mmFormat);
+  if (raw.DigitalZoomRatio !== undefined) exif.DigitalZoomRatio = Number(raw.DigitalZoomRatio);
+  if (raw.GPSImgDirection !== undefined) exif.GPSImgDirection = Number(raw.GPSImgDirection);
+  if (raw.GPSImgDirectionRef !== undefined) exif.GPSImgDirectionRef = String(raw.GPSImgDirectionRef);
   if (raw.FNumber !== undefined) exif.FNumber = Number(raw.FNumber);
   if (raw.ExposureTime !== undefined) exif.ExposureTime = Number(raw.ExposureTime);
   if (raw.ISO !== undefined) exif.ISO = Number(raw.ISO);
@@ -3380,7 +3384,8 @@ function photoEnrichmentState(hasGps, hasTime) {
     geocode: hasGps ? 'pending' : 'unavailable',
     weather: (hasGps && hasTime) ? 'pending' : 'unavailable',
     identification: 'pending',
-    taxonomy: 'pending'
+    taxonomy: 'pending',
+    geometry: 'pending'
   };
 }
 
@@ -3567,6 +3572,7 @@ async function runPhotoEnrichmentStages(localId) {
   await runWeatherStage(localId);
   await runIdentificationStage(localId);
   await runTaxonomyStage(localId);
+  await runSubjectGeometryStage(localId);
   refreshStorageStats().catch(() => {});
 }
 
@@ -3844,6 +3850,412 @@ async function runTaxonomyStage(localId) {
   });
 }
 
+/* ---- Subject geometry (optional post-taxonomy photogrammetric estimate) ----
+ * Estimates distance/bearing/position of the animal using confirmed species
+ * size, image measurement, optics, and camera direction. All math is local and
+ * deterministic; the vision model only supplies measurement + biological prior.
+ * This NEVER replaces observation latitude/longitude (the camera location). */
+const SUBJECT_GEOMETRY_FULL_FRAME_DIAGONAL_MM = 43.266;
+const SUBJECT_MIN_MEASUREMENT_CONFIDENCE = 0.5;
+const SUBJECT_MIN_ANGULAR_SIZE_DEG = 0.05;
+const SUBJECT_MAX_ANGULAR_SIZE_DEG = 60;
+const SUBJECT_MIN_RANGE_METERS = 0.5;
+const SUBJECT_MAX_RANGE_METERS = 2000;
+const SUBJECT_SPECIES_SIZE_MAX_SPREAD_RATIO = 4;
+const SUBJECT_MIN_BEARING_UNCERTAINTY_DEG = 2;
+const SUBJECT_EARTH_RADIUS_METERS = 6371008.8;
+const SUBJECT_GEO_RADIANS = d => d * Math.PI / 180;
+const SUBJECT_GEO_DEGREES = r => r * 180 / Math.PI;
+
+function normalizeCaptureGeometry(exif, imageWidth, imageHeight) {
+  const e = exif || {};
+  const num = v => (v == null || !isFinite(Number(v)) ? null : Number(v));
+  const refRaw = e.GPSImgDirectionRef != null ? String(e.GPSImgDirectionRef).trim().toUpperCase() : null;
+  const ref = refRaw ? (refRaw.startsWith('T') ? 'true' : refRaw.startsWith('M') ? 'magnetic' : null) : null;
+  const geo = {
+    focalLengthMm: num(e.FocalLength),
+    focalLength35mm: num(e.FocalLengthIn35mmFormat),
+    digitalZoomRatio: num(e.DigitalZoomRatio),
+    imageWidth: num(imageWidth),
+    imageHeight: num(imageHeight),
+    cameraDirectionDegrees: num(e.GPSImgDirection),
+    cameraDirectionReference: ref,
+    orientation: num(e.Orientation),
+    source: 'exif'
+  };
+  // EXIF Orientation 5-8 means the sensor image is rotated 90°; use
+  // post-rotation display dimensions so normalized coordinates line up.
+  if (isFinite(geo.orientation) && geo.orientation >= 5 && geo.orientation <= 8 &&
+      isFinite(geo.imageWidth) && isFinite(geo.imageHeight)) {
+    const w = geo.imageWidth; geo.imageWidth = geo.imageHeight; geo.imageHeight = w;
+    geo.orientationAdjusted = true;
+  }
+  return geo;
+}
+
+/** Field of view from a 35mm-equivalent focal length and the actual image
+ *  aspect ratio, preserving the standard full-frame diagonal. */
+function fieldOfViewRadians(focalLength35mm, imageWidth, imageHeight) {
+  if (focalLength35mm == null || !isFinite(focalLength35mm) || focalLength35mm <= 0 ||
+      imageWidth == null || imageHeight == null || !isFinite(imageWidth) || !isFinite(imageHeight) ||
+      imageWidth <= 0 || imageHeight <= 0) return null;
+  const r = imageWidth / imageHeight;
+  const s = Math.sqrt(r * r + 1);
+  const equivalentWidth = SUBJECT_GEOMETRY_FULL_FRAME_DIAGONAL_MM * r / s;
+  const equivalentHeight = SUBJECT_GEOMETRY_FULL_FRAME_DIAGONAL_MM / s;
+  return {
+    horizontal: 2 * Math.atan(equivalentWidth / (2 * focalLength35mm)),
+    vertical: 2 * Math.atan(equivalentHeight / (2 * focalLength35mm))
+  };
+}
+
+/* Vendor semantics for DigitalZoomRatio vs the reported 35mm-equivalent focal
+ * length are inconsistent. When zoom > 1 and the metadata does not make the
+ * relationship unambiguous, keep an optical envelope instead of guessing. */
+function opticalFocalLengthRange(captureGeometry) {
+  const f = captureGeometry.focalLength35mm;
+  if (f == null || !isFinite(f) || f <= 0) return null;
+  const dz = captureGeometry.digitalZoomRatio;
+  if (isFinite(dz) && dz > 1) {
+    return { min: f, max: f * dz, digitalZoomAmbiguous: true };
+  }
+  return { min: f, max: f, digitalZoomAmbiguous: false };
+}
+
+function subjectRayFromNormalizedPoint(x, y, fov) {
+  const nx = (x - 0.5) * 2;
+  const ny = (y - 0.5) * 2;
+  const v = [nx * Math.tan(fov.horizontal / 2), ny * Math.tan(fov.vertical / 2), 1];
+  const len = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / len, v[1] / len, v[2] / len];
+}
+
+function subjectAngularSeparationRadians(pointA, pointB, fov) {
+  const a = subjectRayFromNormalizedPoint(pointA.x, pointA.y, fov);
+  const b = subjectRayFromNormalizedPoint(pointB.x, pointB.y, fov);
+  const dot = Math.min(1, Math.max(-1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
+  return Math.acos(dot);
+}
+
+function subjectDistanceFromAngularSize(physicalSizeMeters, angularRadians) {
+  if (!(angularRadians > 0) || !(physicalSizeMeters > 0)) return NaN;
+  return physicalSizeMeters / (2 * Math.tan(angularRadians / 2));
+}
+
+function subjectNormalizeDegrees(d) { return ((d % 360) + 360) % 360; }
+
+function subjectBearingFromFrame(cameraDirectionDegreesTrue, subjectCenterX, fov) {
+  const nx = (subjectCenterX - 0.5) * 2;
+  const offsetRadians = Math.atan(nx * Math.tan(fov.horizontal / 2));
+  return {
+    offsetDegrees: SUBJECT_GEO_DEGREES(offsetRadians),
+    bearingDegreesTrue: subjectNormalizeDegrees(cameraDirectionDegreesTrue + SUBJECT_GEO_DEGREES(offsetRadians))
+  };
+}
+
+/** Spherical destination point (deterministic geodesic projection). */
+function destinationPointDegrees(latDeg, lonDeg, bearingDegreesTrue, distanceMeters) {
+  const φ1 = SUBJECT_GEO_RADIANS(latDeg), λ1 = SUBJECT_GEO_RADIANS(lonDeg);
+  const θ = SUBJECT_GEO_RADIANS(bearingDegreesTrue);
+  const δ = distanceMeters / SUBJECT_EARTH_RADIUS_METERS;
+  const sinφ2 = Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ);
+  const φ2 = Math.asin(sinφ2);
+  const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * sinφ2);
+  const lon = ((SUBJECT_GEO_DEGREES(λ2) + 540) % 360) - 180;
+  return { latitude: SUBJECT_GEO_DEGREES(φ2), longitude: lon };
+}
+
+function subjectNormalizedPointOk(p) {
+  return !!p && isFinite(Number(p.x)) && isFinite(Number(p.y)) &&
+    Number(p.x) >= 0 && Number(p.x) <= 1 && Number(p.y) >= 0 && Number(p.y) <= 1;
+}
+
+/** Validate the model's measurement response. The model never controls the
+ *  geometry math — it only supplies a measurement and a biological prior. */
+function validateSubjectMeasurementResponse(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'Malformed subject measurement response' };
+  if (!raw.usable) return { ok: false, reason: raw.reason || 'Subject not measurable in this photograph' };
+  const dimension = typeof raw.dimension === 'string' && raw.dimension.trim() ? raw.dimension.trim().toLowerCase() : null;
+  if (!dimension) return { ok: false, reason: 'No anatomical dimension selected' };
+  const size = raw.physical_size_m || {};
+  const min = Number(size.min), typical = Number(size.typical), max = Number(size.max);
+  if (![min, typical, max].every(isFinite) || min <= 0 || min > typical || typical > max) {
+    return { ok: false, reason: 'Implausible or malformed species size range' };
+  }
+  if (max / min > SUBJECT_SPECIES_SIZE_MAX_SPREAD_RATIO) {
+    return { ok: false, reason: 'Species size range too broad to range reliably' };
+  }
+  if (!raw.measurement || !subjectNormalizedPointOk(raw.measurement.point_a) || !subjectNormalizedPointOk(raw.measurement.point_b)) {
+    return { ok: false, reason: 'Measurement endpoints missing or outside the frame' };
+  }
+  const confidence = Number(raw.measurement_confidence);
+  if (!isFinite(confidence) || confidence < SUBJECT_MIN_MEASUREMENT_CONFIDENCE) {
+    return { ok: false, reason: 'Visual measurement confidence too low' };
+  }
+  return {
+    ok: true,
+    measurement: {
+      dimension,
+      pointA: { x: Number(raw.measurement.point_a.x), y: Number(raw.measurement.point_a.y) },
+      pointB: { x: Number(raw.measurement.point_b.x), y: Number(raw.measurement.point_b.y) },
+      subjectCenter: subjectNormalizedPointOk(raw.subject_center) ? { x: Number(raw.subject_center.x), y: Number(raw.subject_center.y) } : null,
+      pose: typeof raw.pose === 'string' ? raw.pose : null,
+      occlusion: typeof raw.occlusion === 'string' ? raw.occlusion : null,
+      foreshortening: typeof raw.foreshortening === 'string' ? raw.foreshortening : null,
+      confidence,
+      notes: typeof raw.notes === 'string' ? raw.notes : null
+    },
+    prior: { min, typical, max }
+  };
+}
+
+function estimateSubjectRange(captureGeometry, measurement, prior) {
+  const optical = opticalFocalLengthRange(captureGeometry);
+  if (!optical) return { status: 'unavailable', reason: 'Optical metadata missing' };
+  const angularAt = f => subjectAngularSeparationRadians(measurement.pointA, measurement.pointB,
+    fieldOfViewRadians(f, captureGeometry.imageWidth, captureGeometry.imageHeight));
+  const angularMin = angularAt(optical.max); // longest focal → narrowest FOV → smallest angle
+  const angularMax = angularAt(optical.min);
+  const angularMid = (angularMin + angularMax) / 2;
+  const angularSizeDegrees = SUBJECT_GEO_DEGREES(angularMid);
+  if (!isFinite(angularSizeDegrees) || angularSizeDegrees < SUBJECT_MIN_ANGULAR_SIZE_DEG || angularSizeDegrees > SUBJECT_MAX_ANGULAR_SIZE_DEG) {
+    return { status: 'unavailable', reason: 'Angular size implausible for photogrammetric ranging' };
+  }
+  // Distance grows with focal length; smaller angle ⇒ larger distance.
+  const dMin = subjectDistanceFromAngularSize(prior.min, angularMax);
+  const dTypical = subjectDistanceFromAngularSize(prior.typical, angularMid);
+  const dMax = subjectDistanceFromAngularSize(prior.max, angularMin);
+  if (![dMin, dTypical, dMax].every(isFinite) || dMin < SUBJECT_MIN_RANGE_METERS || dMax > SUBJECT_MAX_RANGE_METERS) {
+    return { status: 'unavailable', reason: 'Estimated range outside plausible bounds' };
+  }
+  const uncertaintyReasons = [];
+  if (optical.digitalZoomAmbiguous) uncertaintyReasons.push('digital zoom crop semantics ambiguous');
+  uncertaintyReasons.push('species natural size variation');
+  if (measurement.foreshortening && /moderate|high|severe/i.test(measurement.foreshortening)) uncertaintyReasons.push('pose/foreshortening uncertainty');
+  if (measurement.occlusion && /moderate|major|severe/i.test(measurement.occlusion)) uncertaintyReasons.push('partial occlusion');
+  const confidence = measurement.confidence >= 0.75 && /low|none|minor/i.test(measurement.occlusion || 'none') &&
+    /low|none/i.test(measurement.foreshortening || 'none') ? 'medium' : 'low';
+  const round1 = v => Math.round(v * 10) / 10;
+  return {
+    status: 'estimated',
+    dimension: measurement.dimension,
+    physicalSizeMeters: { min: prior.min, typical: prior.typical, max: prior.max },
+    angularSizeDegrees: Math.round(angularSizeDegrees * 100) / 100,
+    distanceMeters: { min: round1(dMin), typical: round1(dTypical), max: round1(dMax) },
+    distanceMetersPrecise: { min: dMin, typical: dTypical, max: dMax },
+    confidence,
+    uncertaintyReasons
+  };
+}
+
+function estimateSubjectBearing(captureGeometry, measurement, fov) {
+  const dir = captureGeometry.cameraDirectionDegrees;
+  if (!isFinite(dir) || dir == null) {
+    return { status: 'unavailable', reason: 'Camera direction not recorded' };
+  }
+  if (captureGeometry.cameraDirectionReference === 'magnetic') {
+    // Never silently treat a magnetic bearing as true; no declination model
+    // exists in this pass, so no precise subject coordinates may be derived.
+    return {
+      status: 'magnetic_only',
+      cameraDirectionDegreesMagnetic: dir,
+      reference: 'magnetic',
+      reason: 'Camera direction is magnetic; geomagnetic declination not applied, so subject coordinates are withheld'
+    };
+  }
+  if (captureGeometry.cameraDirectionReference !== 'true') {
+    return { status: 'unavailable', reason: 'Camera direction reference is neither true nor magnetic' };
+  }
+  const centerX = measurement.subjectCenter ? measurement.subjectCenter.x : 0.5;
+  const bearing = subjectBearingFromFrame(dir, centerX, fov);
+  return {
+    status: 'estimated',
+    reference: 'true',
+    cameraDirectionDegreesTrue: dir,
+    horizontalOffsetDegrees: Math.round(bearing.offsetDegrees * 100) / 100,
+    bearingDegreesTrue: Math.round(bearing.bearingDegreesTrue * 10) / 10,
+    bearingUncertaintyDegrees: Math.max(SUBJECT_MIN_BEARING_UNCERTAINTY_DEG, SUBJECT_GEO_DEGREES(fov.horizontal) * 0.05)
+  };
+}
+
+function estimateSubjectLocation(obs, rangeEstimate, bearingEstimate) {
+  if (!rangeEstimate || rangeEstimate.status !== 'estimated' || !bearingEstimate || bearingEstimate.status !== 'estimated') return null;
+  if (obs.latitude == null || obs.longitude == null) return null;
+  const precise = rangeEstimate.distanceMetersPrecise;
+  const typical = rangeEstimate.distanceMeters.typical;
+  const point = destinationPointDegrees(obs.latitude, obs.longitude, bearingEstimate.bearingDegreesTrue, typical);
+  const rangeSpread = (precise.max - precise.min) / 2;
+  const bearingArc = SUBJECT_GEO_RADIANS(bearingEstimate.bearingUncertaintyDegrees) * typical;
+  return {
+    status: 'estimated',
+    latitude: point.latitude,
+    longitude: point.longitude,
+    bearingDegreesTrue: bearingEstimate.bearingDegreesTrue,
+    distanceMeters: rangeEstimate.distanceMeters,
+    confidence: 'medium_low',
+    source: 'photogrammetric_estimate',
+    cameraLocationSource: obs.gpsSource || 'unknown',
+    estimatedAccuracyMeters: Math.ceil(Math.max(rangeSpread, bearingArc)),
+    uncertainty: {
+      bearingDegrees: Math.round(bearingEstimate.bearingUncertaintyDegrees * 10) / 10,
+      rangeMinMeters: rangeEstimate.distanceMeters.min,
+      rangeMaxMeters: rangeEstimate.distanceMeters.max
+    },
+    estimatedAt: Date.now()
+  };
+}
+
+function subjectGeometryFromResponse(obs, captureGeometry, raw, model) {
+  const validated = validateSubjectMeasurementResponse(raw);
+  const base = { captureGeometry, model, analyzedAt: Date.now(), species: obs.subjectScientificName, dimension: null };
+  if (!validated.ok) {
+    return { ...base, status: 'unavailable', reason: validated.reason, measurement: null };
+  }
+  const fov = fieldOfViewRadians(captureGeometry.focalLength35mm, captureGeometry.imageWidth, captureGeometry.imageHeight);
+  const rangeEstimate = estimateSubjectRange(captureGeometry, validated.measurement, validated.prior);
+  const bearingEstimate = estimateSubjectBearing(captureGeometry, validated.measurement, fov);
+  const locationEstimate = estimateSubjectLocation(obs, rangeEstimate, bearingEstimate);
+  return {
+    ...base,
+    status: 'done',
+    measurement: validated.measurement,
+    speciesPhysicalPrior: {
+      scientificName: obs.subjectScientificName,
+      dimension: validated.measurement.dimension,
+      minimumMeters: validated.prior.min,
+      typicalMeters: validated.prior.typical,
+      maximumMeters: validated.prior.max,
+      lifeStage: raw.life_stage || null,
+      confidence: 'medium',
+      source: 'model_species_prior'
+    },
+    rangeEstimate: { ...rangeEstimate, distanceMetersPrecise: undefined },
+    bearingEstimate,
+    locationEstimate
+  };
+}
+
+/** Post-taxonomy measurement call. Sends the image, confirmed species, and
+ *  optical metadata ONLY — never camera coordinates, route, or exact GPS. */
+async function measureSubjectGeometry(obs, imageDataUrl, captureGeometry) {
+  if (!settings.llmKey) throw new Error('No OpenRouter key configured (see Setup)');
+  const model = settings.visionModel || DEFAULT_VISION_MODEL;
+  const imageUrl = /^data:[^,;]+;base64,/.test(imageDataUrl) ? imageDataUrl : `data:image/jpeg;base64,${imageDataUrl}`;
+  const zoom = captureGeometry.digitalZoomRatio;
+  const prompt = `Taxonomy has ALREADY been resolved for this wildlife photograph — do NOT identify the species.
+
+Confirmed species:
+${obs.subjectScientificName || 'unknown'}
+${obs.subjectCommonName || ''}
+
+Image: ${captureGeometry.imageWidth}x${captureGeometry.imageHeight} pixels
+Optics: 35mm-equivalent focal length ${captureGeometry.focalLength35mm}mm${isFinite(zoom) && zoom > 1 ? `, digital zoom ratio ${zoom} (may or may not already be reflected in the 35mm equivalent)` : ''}
+
+Your task is MEASUREMENT, not identification. A biological size prior for the confirmed species is also required for ranging.
+
+Rules:
+- If the animal is too obscured, blurry, small, cropped, or foreshortened to measure a well-chosen anatomical dimension, set "usable": false and explain in "reason".
+- Choose the single anatomical dimension most appropriate for this species and pose (e.g. standing_height, body_length, wingspan, carapace_length, total_length, snout_vent_length).
+- point_a / point_b are the normalized endpoints of THAT dimension in the image: x 0..1 left to right, y 0..1 top to bottom.
+- physical_size_m is a BROAD, biologically realistic adult range for that dimension of the confirmed species (never false precision; widen if age/sex is uncertain).
+- Do not use a bounding box as body size; use actual visible anatomy.
+Return ONLY valid JSON matching exactly this schema:
+{
+  "usable": boolean,
+  "reason": string | null,
+  "species": string,
+  "dimension": string,
+  "physical_size_m": { "min": number, "typical": number, "max": number },
+  "measurement": { "point_a": { "x": number, "y": number }, "point_b": { "x": number, "y": number } },
+  "subject_center": { "x": number, "y": number },
+  "pose": string,
+  "occlusion": string,
+  "foreshortening": string,
+  "measurement_confidence": number,
+  "life_stage": string | null,
+  "notes": string | null
+}`;
+  const r = await fetch(OPENROUTER_BASE + '/chat/completions', {
+    method: 'POST',
+    headers: openRouterHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: imageUrl } }
+        ]
+      }]
+    })
+  });
+  if (!r.ok) throw new Error('Geometry vision HTTP ' + r.status);
+  const data = await r.json();
+  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content ? data.choices[0].message.content : '{}';
+  const clean = content.replace(/```json\s?/i, '').replace(/```/g, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(clean); } catch(e) { throw new Error('Geometry model returned invalid JSON'); }
+  return subjectGeometryFromResponse(obs, captureGeometry, parsed, model);
+}
+
+async function runSubjectGeometryStage(localId) {
+  const obs = await db.observations.get(localId);
+  if (!obs || !obs.photoEnrichment) return;
+  const state = obs.photoEnrichment.geometry;
+  if (state !== 'pending' && state !== 'error') return;
+  const tax = obs.taxonomy;
+  const scientificName = String(obs.subjectScientificName || '').trim();
+  // Hard gate: species-level taxonomy plus usable 35mm-equivalent optics.
+  const speciesOk = !!tax && tax.status === 'ok' &&
+    (!!tax.species || scientificName.split(/\s+/).filter(Boolean).length >= 2);
+  if (!speciesOk) {
+    await mutateObservation(localId, o => {
+      o.photoEnrichment.geometry = 'unavailable';
+      o.subjectGeometry = { status: 'unavailable', reason: 'Taxonomy did not resolve a credible species' };
+    });
+    return;
+  }
+  const photo = await db.photos.where('observationLocalId').equals(localId).first();
+  const captureGeometry = normalizeCaptureGeometry(obs.exif, photo && photo.width, photo && photo.height);
+  if (captureGeometry.focalLength35mm == null || !isFinite(captureGeometry.focalLength35mm) ||
+      captureGeometry.imageWidth == null || !isFinite(captureGeometry.imageWidth) ||
+      captureGeometry.imageHeight == null || !isFinite(captureGeometry.imageHeight)) {
+    await mutateObservation(localId, o => {
+      o.photoEnrichment.geometry = 'unavailable';
+      o.subjectGeometry = { status: 'unavailable', captureGeometry, reason: 'Subject geometry unavailable — optical metadata missing' };
+    });
+    return;
+  }
+  await mutateObservation(localId, o => { o.photoEnrichment.geometry = 'running'; o.subjectGeometryError = null; });
+  try {
+    const rec = await db.audioBlobs.get((obs.photoLocalIds || [])[0]);
+    if (!rec) throw new Error('Photo blob missing');
+    const b64 = await blobToBase64(rec.blob);
+    const dataUrl = `data:${rec.mimeType || 'image/jpeg'};base64,${b64}`;
+    const result = await measureSubjectGeometry(obs, dataUrl, captureGeometry);
+    await mutateObservation(localId, o => {
+      // A species edit that landed while the request was in flight invalidates
+      // the estimate — a distance based on the prior species must not survive.
+      if (o.subjectScientificName !== obs.subjectScientificName) {
+        o.subjectGeometry = { ...result, status: 'unavailable', stale: true, reason: 'Species changed — subject estimate requires recomputation' };
+        o.photoEnrichment.geometry = 'unavailable';
+        return;
+      }
+      o.subjectGeometry = result;
+      o.photoEnrichment.geometry = result.status === 'done' ? 'done' : 'unavailable';
+    });
+    const updated = await db.observations.get(localId);
+    if (updated) hydrateImportReviewFields(updated);
+  } catch(e) {
+    logWarn('Subject geometry failed: ' + e.message);
+    await mutateObservation(localId, o => {
+      o.photoEnrichment.geometry = 'error';
+      o.subjectGeometryError = e.message;
+    });
+  }
+}
+
 /* ---- Import review overlay UI ---- */
 const ENRICH_LABELS = [
   ['PHOTO SAVED', () => 'done'],
@@ -3851,7 +4263,8 @@ const ENRICH_LABELS = [
   ['LOCATION RESOLUTION', en => en.geocode === 'done' ? 'done' : (en.location || 'pending')],
   ['WEATHER', en => en.weather],
   ['IMAGE IDENTIFICATION', en => en.identification],
-  ['TAXONOMY', en => en.taxonomy]
+  ['TAXONOMY', en => en.taxonomy],
+  ['SUBJECT GEOMETRY', en => en.geometry]
 ];
 
 async function renderImportReviewStatuses(obs) {
@@ -3874,7 +4287,7 @@ async function renderImportReviewStatuses(obs) {
   }).join('');
   const errEl = document.getElementById('import-enrich-error');
   if (errEl) {
-    errEl.textContent = [obs.locationResolutionError, obs.weatherSubmitError, obs.classificationError].filter(Boolean).join(' · ');
+    errEl.textContent = [obs.locationResolutionError, obs.weatherSubmitError, obs.classificationError, obs.subjectGeometryError].filter(Boolean).join(' · ');
   }
   const evidenceEl = document.getElementById('import-evidence-summary');
   if (evidenceEl) evidenceEl.innerHTML = renderEvidenceSummaryHtml(obs);
@@ -4028,6 +4441,41 @@ function reviewForm(obs) {
     </div>`;
 }
 
+function subjectEstimateDetailsHtml(obs) {
+  const e = escapeHtml;
+  const sg = obs.subjectGeometry;
+  if (!sg) return '';
+  const lines = [];
+  const cg = sg.captureGeometry || {};
+  if (isFinite(cg.focalLength35mm)) lines.push('Camera optics: ' + cg.focalLength35mm + ' mm equivalent' +
+    (isFinite(cg.cameraDirectionDegrees) ? ' · Direction: ' + cg.cameraDirectionDegrees + '°' +
+      (cg.cameraDirectionReference === 'true' ? ' true' : cg.cameraDirectionReference === 'magnetic' ? ' magnetic' : '') : ''));
+  if (sg.status === 'done' && sg.measurement) {
+    const m = sg.measurement;
+    const dimLabel = String(m.dimension || '').replace(/_/g, ' ');
+    lines.push('Measured anatomy: ' + dimLabel + ' — ' + e(m.pose || 'pose unknown'));
+    if (sg.rangeEstimate && sg.rangeEstimate.status === 'estimated') {
+      const d = sg.rangeEstimate.distanceMeters;
+      lines.push('Estimated range: ~' + d.min + '–' + d.max + ' m (typical ~' + d.typical + ' m, ' + sg.rangeEstimate.confidence + ' confidence)');
+    } else if (sg.rangeEstimate && sg.rangeEstimate.reason) {
+      lines.push('Range unavailable — ' + e(sg.rangeEstimate.reason));
+    }
+    const b = sg.bearingEstimate;
+    if (b && b.status === 'estimated') lines.push('Estimated subject bearing: ' + b.bearingDegreesTrue + '° true (±' + Math.round(b.bearingUncertaintyDegrees) + '°)');
+    else if (b && b.status === 'magnetic_only') lines.push('Approximate subject bearing: ' + b.cameraDirectionDegreesMagnetic + '° magnetic — ' + e(b.reason));
+    else if (b && b.reason) lines.push('Subject coordinates unavailable — ' + e(b.reason));
+    const loc = sg.locationEstimate;
+    if (loc && loc.status === 'estimated') {
+      lines.push('Estimated subject position: ' + loc.latitude.toFixed(5) + ', ' + loc.longitude.toFixed(5) +
+        ' (' + loc.confidence + ' confidence, ±~' + loc.estimatedAccuracyMeters + ' m)');
+    }
+  } else if (sg.reason) {
+    lines.push('Subject estimate unavailable — ' + e(sg.reason));
+  }
+  if (!lines.length) return '';
+  return `<details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Subject estimate (experimental)</summary><div style="font-size:0.78rem;color:var(--text-muted);">${lines.map(l => e(l)).join('<br>')}<br><span style="color:var(--text-dim);">Subject position is a photogrammetric estimate based on species size, image scale, optics, and camera direction. Observation GPS remains the camera location.</span></div></details>`;
+}
+
 function reviewDetails(obs) {
   const e = escapeHtml;
   const alt = obs.aiIdentification;
@@ -4035,7 +4483,8 @@ function reviewDetails(obs) {
   return `
     ${obs.weatherRaw ? `<details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Weather details</summary><div style="font-size:0.8rem;color:var(--text-muted);">Temp: ${e(String(obs.weatherRaw.current?.temperature_2m ?? '?'))}\u00b0F · Apparent ${e(String(obs.weatherRaw.current?.apparent_temperature ?? '?'))}\u00b0F<br/>RH: ${e(String(obs.weatherRaw.current?.relative_humidity_2m ?? '?'))}% · Dew point ${e(String(obs.weatherRaw.current?.dew_point_2m ?? '?'))}\u00b0F<br/>Precip: ${e(String(obs.weatherRaw.current?.precipitation ?? '?'))} in · Snowfall: ${e(String(obs.weatherRaw.current?.snowfall ?? '?'))} in · Cloud cover: ${e(String(obs.weatherRaw.current?.cloud_cover ?? '?'))}%<br/>Wind: ${e(String(obs.weatherRaw.current?.wind_speed_10m ?? '?'))} mph ${e(compassDirection(obs.weatherRaw.current?.wind_direction_10m) || '')}, gusts ${e(String(obs.weatherRaw.current?.wind_gusts_10m ?? '?'))} mph<br/>Pressure: ${e(String(obs.weatherRaw.current?.surface_pressure ?? '?'))} hPa<br/>Elevation: ${e(String(obs.weatherRaw.meta?.elevation ?? '?'))} m<br/>Source: ${e((obs.weatherRaw.meta?.provider || 'open-meteo') + ' · ' + (obs.weatherRaw.strategy || '') + ' · matched hour ' + (obs.weatherRaw.sourceTimeLocal || '?'))}</div></details>` : ''}
     ${obs.locationProvenance && String(obs.locationProvenance.source || '').startsWith('breadcrumb_') ? `<details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Location evidence</summary><div style="font-size:0.78rem;color:var(--text-muted);">Method: ${e(obs.locationProvenance.breadcrumb?.method || '')}<br>Before breadcrumb: ${e(obs.locationProvenance.breadcrumb?.beforeTimestamp ? fmtDate(obs.locationProvenance.breadcrumb.beforeTimestamp) : '—')}<br>After breadcrumb: ${e(obs.locationProvenance.breadcrumb?.afterTimestamp ? fmtDate(obs.locationProvenance.breadcrumb.afterTimestamp) : '—')}<br>Estimated accuracy: ${e(obs.locationProvenance.estimatedAccuracyMeters != null ? '~' + Math.round(obs.locationProvenance.estimatedAccuracyMeters) + ' m' : 'unknown')}</div></details>` : ''}
-    <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Technical details (EXIF &amp; provenance)</summary><pre style="font-size:0.68rem;white-space:pre-wrap;color:var(--text-dim);max-height:200px;overflow:auto;">${e(JSON.stringify({ exif: obs.exif, gpsSource: obs.exifGpsSource, timeProvenance: tzp, locationProvenance: obs.locationProvenance, classificationRaw: alt ? { model: alt.model, subjectType: alt.subjectType, rank: alt.taxonomicRank, lifeStage: alt.lifeStage, sex: alt.sex, notes: alt.notes } : null }, null, 2))}</pre></details>`;
+    ${subjectEstimateDetailsHtml(obs)}
+    <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:0.82rem;">Technical details (EXIF &amp; provenance)</summary><pre style="font-size:0.68rem;white-space:pre-wrap;color:var(--text-dim);max-height:200px;overflow:auto;">${e(JSON.stringify({ exif: obs.exif, gpsSource: obs.exifGpsSource, timeProvenance: tzp, locationProvenance: obs.locationProvenance, subjectGeometry: obs.subjectGeometry || null, classificationRaw: alt ? { model: alt.model, subjectType: alt.subjectType, rank: alt.taxonomicRank, lifeStage: alt.lifeStage, sex: alt.sex, notes: alt.notes } : null }, null, 2))}</pre></details>`;
 }
 
 /* Retry buttons are rendered dynamically by renderImportReviewStatuses, so
@@ -4057,6 +4506,7 @@ document.getElementById('import-review-body').addEventListener('click', async e 
   if (label === 'WEATHER') en.weather = (cur.latitude != null && tp.wallIso) ? 'pending' : 'unavailable';
   if (label === 'IMAGE IDENTIFICATION') { en.identification = 'pending'; cur.classificationError = null; }
   if (label === 'TAXONOMY') en.taxonomy = 'pending';
+  if (label === 'SUBJECT GEOMETRY') { en.geometry = 'pending'; cur.subjectGeometryError = null; }
   await saveObs(cur);
   renderImportReviewStatuses(cur);
   runPhotoEnrichment(localId);
@@ -4082,8 +4532,14 @@ function wireImportReview(localId) {
       if (cur.subjectCommonName) cur.subjectCommonNameUserEdited = true;
     }
     if (importReviewDirtyFields.has('imp-sci')) {
+      const prevSci = cur.subjectScientificName;
       cur.subjectScientificName = $('imp-sci').value.trim() || null;
       if (cur.subjectScientificName) cur.subjectScientificNameUserEdited = true;
+      // A changed species invalidates any subject estimate based on the old one.
+      if (cur.subjectGeometry && cur.subjectScientificName !== prevSci) {
+        cur.subjectGeometry = { ...cur.subjectGeometry, status: 'unavailable', stale: true, reason: 'Species changed — subject estimate requires recomputation' };
+        if (cur.photoEnrichment) cur.photoEnrichment.geometry = 'unavailable';
+      }
     }
     if (importReviewDirtyFields.has('imp-notes')) cur.userNoteText = $('imp-notes').value.trim() || null;
     if (importReviewDirtyFields.has('imp-count')) {
@@ -6633,6 +7089,10 @@ window.__WFR_TEST__ = {
   BREADCRUMB_STATIONARY_RADIUS_METERS, BREADCRUMB_STATIONARY_MIN_POINTS,
   BREADCRUMB_HIGH_CONFIDENCE_MAX_GAP_MS,
   enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex,
+  measureSubjectGeometry, runSubjectGeometryStage, normalizeCaptureGeometry, fieldOfViewRadians,
+  opticalFocalLengthRange, subjectAngularSeparationRadians, subjectDistanceFromAngularSize,
+  subjectBearingFromFrame, destinationPointDegrees, estimateSubjectRange, validateSubjectMeasurementResponse,
+  subjectGeometryFromResponse, estimateSubjectBearing, estimateSubjectLocation,
   compassDirection, wallEpochMinutes, captureWallParts, wallIso,
   applyObservationTime, observationWallInputValue,
   categoryFromSubjectType, submitObservation, reviewTop,

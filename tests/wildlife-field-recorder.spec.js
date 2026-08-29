@@ -1178,7 +1178,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.29.9');
+    expect(post.body.data.appVersion).toBe('2026.08.29.10');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -1811,7 +1811,7 @@ test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing s
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe('~openai/gpt-latest');
   const prompt = calls[0].messages.map(m => m.content).join('\n');
-  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.29.9');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.29.10');
   expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
   expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
   expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);
@@ -2141,7 +2141,7 @@ test('OUTING-AB/AC: Safari remains fallback while EXIF still bypasses every prov
   expect(result.noTrack.reason).toContain('Safari breadcrumb source is not configured'); expect(result.obs.latitude).toBe(1); expect(result.obs.photoEnrichment.location).toBe('pending');
 });
 
-/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.29.9) ---------- */
+/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.29.10) ---------- */
 
 const INDIANA_OUTING = {
   format: 'wfr-outing-track', version: 1,
@@ -2409,4 +2409,450 @@ test('COPY-ID: completed identification with null confidence is not reported as 
     photoEnrichment: { identification: 'pending' }
   }, ''));
   expect(pendingHtml).toContain('pending or unavailable');
+});
+
+/* ---------- Subject geometry (post-taxonomy photogrammetric estimate) ---------- */
+
+/* Independent reference implementations of the geometry math (not the app's). */
+function refFov(f, w, h) {
+  const r = w / h, s = Math.sqrt(r * r + 1);
+  const ew = 43.266 * r / s, eh = 43.266 / s;
+  return { horizontal: 2 * Math.atan(ew / (2 * f)), vertical: 2 * Math.atan(eh / (2 * f)) };
+}
+function refRay(x, y, fov) {
+  const nx = (x - 0.5) * 2, ny = (y - 0.5) * 2;
+  const v = [nx * Math.tan(fov.horizontal / 2), ny * Math.tan(fov.vertical / 2), 1];
+  const len = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / len, v[1] / len, v[2] / len];
+}
+function refAngleDeg(a, b, fov) {
+  const ra = refRay(a.x, a.y, fov), rb = refRay(b.x, b.y, fov);
+  const dot = Math.min(1, Math.max(-1, ra[0] * rb[0] + ra[1] * rb[1] + ra[2] * rb[2]));
+  return Math.acos(dot) * 180 / Math.PI;
+}
+function refDistance(size, angDeg) { const a = angDeg * Math.PI / 180; return size / (2 * Math.tan(a / 2)); }
+function refDestPoint(lat, lon, brg, d) {
+  const R = 6371008.8, toRad = x => x * Math.PI / 180;
+  const p1 = toRad(lat), l1 = toRad(lon), th = toRad(brg), dl = d / R;
+  const p2 = Math.asin(Math.sin(p1) * Math.cos(dl) + Math.cos(p1) * Math.sin(dl) * Math.cos(th));
+  const l2 = l1 + Math.atan2(Math.sin(th) * Math.sin(dl) * Math.cos(p1), Math.cos(dl) - Math.sin(p1) * Math.sin(p2));
+  return { latitude: p2 * 180 / Math.PI, longitude: ((l2 * 180 / Math.PI + 540) % 360) - 180 };
+}
+function refHaversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371008.8, toRad = x => x * Math.PI / 180;
+  const dp = toRad(lat2 - lat1), dl = toRad(lon2 - lon1);
+  const a = Math.sin(dp / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+const GEO_POINTS = { a: { x: 0.5, y: 0.2 }, b: { x: 0.5, y: 0.7 } };
+const GEO_PRIOR = { min: 0.9, typical: 1.05, max: 1.3 };
+const GEO_CG = { focalLength35mm: 230, imageWidth: 4000, imageHeight: 3000, digitalZoomRatio: null, source: 'exif' };
+const GEO_MEASUREMENT = {
+  dimension: 'standing_height',
+  pointA: GEO_POINTS.a, pointB: GEO_POINTS.b,
+  subjectCenter: { x: 0.5, y: 0.45 },
+  pose: 'standing, side-on', occlusion: 'minor', foreshortening: 'low',
+  confidence: 0.82, notes: 'head and feet visible'
+};
+const GEOMETRY_JSON = {
+  usable: true, reason: null, species: 'Ardea herodias', dimension: 'standing_height',
+  physical_size_m: { min: 0.9, typical: 1.05, max: 1.3 },
+  measurement: { point_a: GEO_POINTS.a, point_b: GEO_POINTS.b },
+  subject_center: { x: 0.5, y: 0.45 },
+  pose: 'standing, side-on', occlusion: 'minor', foreshortening: 'low',
+  measurement_confidence: 0.82, life_stage: 'adult', notes: 'head and feet visible'
+};
+
+/** Vision mock that answers identification and geometry calls distinctly. */
+async function mockVisionAndGeometry(page, geometryJson) {
+  const state = { calls: [] };
+  await page.route('**/chat/completions', async route => {
+    const body = route.request().postDataJSON();
+    state.calls.push(body);
+    const isGeometry = JSON.stringify(body).includes('MEASUREMENT, not identification');
+    const payload = isGeometry ? geometryJson : VISION_JSON;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }) });
+  });
+  return state;
+}
+
+test('GEO-FOV: deterministic field-of-view math for landscape and portrait', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const result = await page.evaluate(() => {
+    const T = window.__WFR_TEST__;
+    return {
+      landscape: T.fieldOfViewRadians(230, 4000, 3000),
+      portrait: T.fieldOfViewRadians(230, 3000, 4000),
+      square: T.fieldOfViewRadians(230, 2000, 2000),
+      invalid: T.fieldOfViewRadians(0, 4000, 3000)
+    };
+  });
+  const expL = refFov(230, 4000, 3000);
+  expect(result.landscape.horizontal).toBeCloseTo(expL.horizontal, 9);
+  expect(result.landscape.vertical).toBeCloseTo(expL.vertical, 9);
+  const expP = refFov(230, 3000, 4000);
+  expect(result.portrait.horizontal).toBeCloseTo(expP.horizontal, 9);
+  expect(result.portrait.vertical).toBeCloseTo(expP.vertical, 9);
+  // Portrait must swap the landscape FOVs (same diagonal, swapped aspect).
+  expect(result.portrait.horizontal).toBeCloseTo(result.landscape.vertical, 9);
+  expect(result.portrait.vertical).toBeCloseTo(result.landscape.horizontal, 9);
+  expect(result.square.horizontal).toBeCloseTo(result.square.vertical, 9);
+  expect(result.invalid).toBeNull();
+});
+
+test('GEO-RANGE: deterministic angular-size and distance math', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const result = await page.evaluate(({ cg, m, prior }) => window.__WFR_TEST__.estimateSubjectRange(cg, m, prior),
+    { cg: GEO_CG, m: GEO_MEASUREMENT, prior: GEO_PRIOR });
+  const ang = refAngleDeg(GEO_POINTS.a, GEO_POINTS.b, refFov(230, 4000, 3000));
+  expect(result.status).toBe('estimated');
+  expect(result.angularSizeDegrees).toBeCloseTo(ang, 2);
+  expect(result.distanceMetersPrecise.min).toBeCloseTo(refDistance(GEO_PRIOR.min, ang), 3);
+  expect(result.distanceMetersPrecise.typical).toBeCloseTo(refDistance(GEO_PRIOR.typical, ang), 3);
+  expect(result.distanceMetersPrecise.max).toBeCloseTo(refDistance(GEO_PRIOR.max, ang), 3);
+  expect(result.distanceMeters.min).toBeCloseTo(refDistance(GEO_PRIOR.min, ang), 1);
+  expect(result.distanceMeters.typical).toBeCloseTo(refDistance(GEO_PRIOR.typical, ang), 1);
+  expect(result.distanceMeters.max).toBeCloseTo(refDistance(GEO_PRIOR.max, ang), 1);
+  expect(result.confidence).toBe('medium');
+});
+
+test('GEO-SIZE: wider biological size range produces wider distance range', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const ranges = await page.evaluate(({ cg, m }) => {
+    const T = window.__WFR_TEST__;
+    return {
+      narrow: T.estimateSubjectRange(cg, m, { min: 0.9, typical: 1.05, max: 1.3 }),
+      wide: T.estimateSubjectRange(cg, m, { min: 0.8, typical: 1.05, max: 1.6 })
+    };
+  }, { cg: GEO_CG, m: GEO_MEASUREMENT });
+  const narrowWidth = ranges.narrow.distanceMetersPrecise.max - ranges.narrow.distanceMetersPrecise.min;
+  const wideWidth = ranges.wide.distanceMetersPrecise.max - ranges.wide.distanceMetersPrecise.min;
+  expect(wideWidth).toBeGreaterThan(narrowWidth);
+  expect(ranges.narrow.distanceMeters.min).toBeLessThan(ranges.narrow.distanceMeters.typical);
+  expect(ranges.narrow.distanceMeters.typical).toBeLessThan(ranges.narrow.distanceMeters.max);
+});
+
+test('GEO-ZOOM: ambiguous digital zoom preserves an optical envelope instead of double-applying', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const result = await page.evaluate(({ cg, m, prior }) => {
+    const T = window.__WFR_TEST__;
+    return {
+      optical: T.opticalFocalLengthRange(cg),
+      range: T.estimateSubjectRange(cg, m, prior)
+    };
+  }, { cg: { ...GEO_CG, digitalZoomRatio: 1.4 }, m: GEO_MEASUREMENT, prior: GEO_PRIOR });
+  expect(result.optical).toEqual({ min: 230, max: 322, digitalZoomAmbiguous: true });
+  const ang230 = refAngleDeg(GEO_POINTS.a, GEO_POINTS.b, refFov(230, 4000, 3000));
+  const ang322 = refAngleDeg(GEO_POINTS.a, GEO_POINTS.b, refFov(322, 4000, 3000));
+  // Blind double-application would be a single distance at 322mm semantics;
+  // the envelope instead spans from 230mm to 322mm focal semantics.
+  expect(result.range.distanceMetersPrecise.min).toBeCloseTo(refDistance(GEO_PRIOR.min, ang230), 3);
+  expect(result.range.distanceMetersPrecise.max).toBeCloseTo(refDistance(GEO_PRIOR.max, ang322), 3);
+  expect(result.range.distanceMetersPrecise.max).toBeGreaterThan(refDistance(GEO_PRIOR.max, ang230));
+  expect(result.range.uncertaintyReasons).toContain('digital zoom crop semantics ambiguous');
+});
+
+test('GEO-BEARING: frame offset correction against a known true camera direction', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const result = await page.evaluate(fov => {
+    const T = window.__WFR_TEST__;
+    return {
+      centered: T.subjectBearingFromFrame(270, 0.5, fov),
+      right: T.subjectBearingFromFrame(270, 0.6, fov),
+      wrap: T.subjectBearingFromFrame(359, 0.6, fov)
+    };
+  }, refFov(230, 4000, 3000));
+  expect(result.centered.bearingDegreesTrue).toBeCloseTo(270, 9);
+  const expectedOffset = Math.atan(0.2 * Math.tan(refFov(230, 4000, 3000).horizontal / 2)) * 180 / Math.PI;
+  expect(result.right.offsetDegrees).toBeCloseTo(expectedOffset, 9);
+  expect(result.right.bearingDegreesTrue).toBeCloseTo(270 + expectedOffset, 9);
+  expect(result.wrap.bearingDegreesTrue).toBeCloseTo((359 + expectedOffset) % 360, 6);
+});
+
+test('GEO-GEO: spherical geodesic destination-point projection', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const result = await page.evaluate(() => {
+    const T = window.__WFR_TEST__;
+    return {
+      east: T.destinationPointDegrees(38.3512, -87.5718, 90, 100),
+      north: T.destinationPointDegrees(38.3512, -87.5718, 0, 1000),
+      dateline: T.destinationPointDegrees(10, 179.999, 90, 20000)
+    };
+  });
+  const east = refDestPoint(38.3512, -87.5718, 90, 100);
+  expect(result.east.latitude).toBeCloseTo(east.latitude, 12);
+  expect(result.east.longitude).toBeCloseTo(east.longitude, 12);
+  const north = refDestPoint(38.3512, -87.5718, 0, 1000);
+  expect(result.north.latitude).toBeCloseTo(north.latitude, 12);
+  expect(result.north.longitude).toBeCloseTo(north.longitude, 12);
+  const dl = refDestPoint(10, 179.999, 90, 20000);
+  expect(result.dateline.longitude).toBeCloseTo(dl.longitude, 9);
+  expect(result.dateline.longitude).toBeLessThan(0); // wrapped across the antimeridian
+});
+
+test('GEO-VALIDATION: malformed model measurements are rejected, not ranged', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const results = await page.evaluate(gj => {
+    const T = window.__WFR_TEST__;
+    const good = { ...gj };
+    return {
+      notUsable: T.validateSubjectMeasurementResponse({ usable: false, reason: 'severe occlusion — animal behind branches' }),
+      badCoords: T.validateSubjectMeasurementResponse({ ...good, measurement: { point_a: { x: 1.4, y: 0.2 }, point_b: { x: 0.5, y: 0.7 } } }),
+      invertedRange: T.validateSubjectMeasurementResponse({ ...good, physical_size_m: { min: 1.3, typical: 1.05, max: 0.9 } }),
+      hugeRange: T.validateSubjectMeasurementResponse({ ...good, physical_size_m: { min: 0.1, typical: 1, max: 2 } }),
+      lowConfidence: T.validateSubjectMeasurementResponse({ ...good, measurement_confidence: 0.2 }),
+      nan: T.validateSubjectMeasurementResponse({ ...good, physical_size_m: { min: NaN, typical: 1, max: 2 } }),
+      negative: T.validateSubjectMeasurementResponse({ ...good, physical_size_m: { min: -1, typical: 1, max: 2 } })
+    };
+  }, GEOMETRY_JSON);
+  expect(results.notUsable.ok).toBe(false);
+  expect(results.notUsable.reason).toMatch(/occlusion/);
+  for (const key of ['badCoords', 'invertedRange', 'hugeRange', 'lowConfidence', 'nan', 'negative']) {
+    expect(results[key].ok, key).toBe(false);
+  }
+});
+
+test('GEO-BEARING-REF: true vs magnetic direction handling', async ({ page }) => {
+  blockExternal(page); await openCaptureTab(page);
+  const result = await page.evaluate(({ gj }) => {
+    const T = window.__WFR_TEST__;
+    const obs = { subjectScientificName: 'Ardea herodias', latitude: 38.3512, longitude: -87.5718, gpsSource: 'wfr_outing_track' };
+    const geomResponse = T.subjectGeometryFromResponse;
+    // Build capture geometry through the real EXIF normalization path.
+    const mk = mode => {
+      const exif = { FocalLengthIn35mmFormat: 230 };
+      if (mode !== 'NO_DIRECTION') { exif.GPSImgDirection = 247; exif.GPSImgDirectionRef = mode; }
+      return geomResponse(obs, T.normalizeCaptureGeometry(exif, 4000, 3000), gj, 'test-model');
+    };
+    return {
+      trueNorth: mk('T'),
+      magnetic: mk('M'),
+      missing: mk('NO_DIRECTION'),
+      refless: mk(null)
+    };
+  }, { gj: GEOMETRY_JSON });
+  expect(result.trueNorth.bearingEstimate.status).toBe('estimated');
+  expect(result.trueNorth.bearingEstimate.bearingDegreesTrue).toBe(247);
+  expect(result.trueNorth.locationEstimate.status).toBe('estimated');
+  // Magnetic: preserved as magnetic, never silently converted to true.
+  expect(result.magnetic.bearingEstimate.status).toBe('magnetic_only');
+  expect(result.magnetic.bearingEstimate.cameraDirectionDegreesMagnetic).toBe(247);
+  expect(result.magnetic.bearingEstimate.reason).toMatch(/magnetic/i);
+  expect(result.magnetic.locationEstimate).toBeNull();
+  // Missing direction: range may exist, bearing and coordinates do not.
+  expect(result.missing.rangeEstimate.status).toBe('estimated');
+  expect(result.missing.bearingEstimate.status).toBe('unavailable');
+  expect(result.missing.bearingEstimate.reason).toMatch(/direction not recorded/i);
+  expect(result.missing.locationEstimate).toBeNull();
+  // A direction value without a usable reference is also refused (conservative).
+  expect(result.refless.bearingEstimate.status).toBe('unavailable');
+  expect(result.refless.bearingEstimate.reason).toMatch(/neither true nor magnetic/i);
+  expect(result.refless.locationEstimate).toBeNull();
+});
+
+async function seedGeometryObs(page, { geometryCalls = 0 } = {}) {
+  await page.evaluate(async ({ geometryCalls }) => {
+    const T = window.__WFR_TEST__;
+    T.settings.llmKey = 'sk-or-test';
+    await T.db.observations.put({
+      localId: 'geo-obs', createdAt: Date.now(), startedAt: Date.now(),
+      latitude: 38.3512, longitude: -87.5718, gpsSource: 'exif', gpsStatus: 'ok',
+      subjectCommonName: 'Great Blue Heron', subjectScientificName: 'Ardea herodias',
+      taxonomy: { status: 'ok', species: 'Ardea herodias', scientificName: 'Ardea herodias' },
+      exif: { FocalLengthIn35mmFormat: 230, GPSImgDirection: 247, GPSImgDirectionRef: 'T', Orientation: 1 },
+      photoLocalIds: ['geo-photo'], observationSource: 'photo_import',
+      timeProvenance: { source: 'exif_DateTimeOriginal', wallIso: '2026-08-28T19:18:40', utcIso: '2026-08-28T23:18:40.000Z', utcOffsetSeconds: -14400 },
+      photoEnrichment: { exif: 'done', location: 'ready', timestamp: 'ready', geocode: 'done', weather: 'done', identification: 'done', taxonomy: 'done', geometry: 'pending' }
+    });
+    await T.db.photos.put({ localPhotoId: 'geo-photo', observationLocalId: 'geo-obs', createdAt: Date.now(), width: 4000, height: 3000, mimeType: 'image/jpeg', uploadStatus: 'pending' });
+    await T.db.audioBlobs.put({ blobId: 'geo-photo', blob: new Blob(['x'], { type: 'image/jpeg' }), mimeType: 'image/jpeg', sizeBytes: 1, createdAt: Date.now() });
+  }, { geometryCalls });
+}
+
+async function mockGeometryRoute(page, geometryJson) {
+  const state = { geometryCalls: 0 };
+  await page.route('**/chat/completions', async route => {
+    const body = route.request().postDataJSON();
+    if (JSON.stringify(body).includes('MEASUREMENT, not identification')) {
+      state.geometryCalls++;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(geometryJson) } }] }) });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(VISION_JSON) } }] }) });
+  });
+  return state;
+}
+
+test('GEO-ORDER: geometry never starts before species-level taxonomy', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  await openCaptureTab(page);
+  await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    // Ambiguous taxonomy + optics present + geometry pending: must stay unavailable.
+    await T.db.observations.put({
+      localId: 'geo-order', createdAt: Date.now(), startedAt: Date.now(),
+      subjectCommonName: 'Some heron', subjectScientificName: 'Ardea sp.',
+      taxonomy: { status: 'ambiguous', matchType: 'FUZZY', scientificName: 'Ardea sp.' },
+      exif: { FocalLengthIn35mmFormat: 230 },
+      photoLocalIds: ['geo-order-photo'], observationSource: 'photo_import',
+      photoEnrichment: { exif: 'done', location: 'ready', timestamp: 'ready', geocode: 'done', weather: 'done', identification: 'done', taxonomy: 'done', geometry: 'pending' }
+    });
+    await T.db.photos.put({ localPhotoId: 'geo-order-photo', observationLocalId: 'geo-order', createdAt: Date.now(), width: 4000, height: 3000, uploadStatus: 'pending' });
+    await T.db.audioBlobs.put({ blobId: 'geo-order-photo', blob: new Blob(['x'], { type: 'image/jpeg' }), mimeType: 'image/jpeg', sizeBytes: 1, createdAt: Date.now() });
+  });
+  const geoRoute = await mockGeometryRoute(page, GEOMETRY_JSON);
+  await page.evaluate(() => window.__WFR_TEST__.runSubjectGeometryStage('geo-order'));
+  const obs = await page.evaluate(async () => (await window.__WFR_TEST__.db.observations.get('geo-order')));
+  expect(obs.photoEnrichment.geometry).toBe('unavailable');
+  expect(obs.subjectGeometry.status).toBe('unavailable');
+  expect(obs.subjectGeometry.reason).toMatch(/taxonomy/i);
+  expect(geoRoute.geometryCalls).toBe(0); // no geometry model call
+  expect(errors).toEqual([]);
+});
+
+test('GEO-NOOPTICS: missing 35mm-equivalent optics skips geometry without any model call', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  await openCaptureTab(page);
+  await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.llmKey = 'sk-or-test';
+    await T.db.observations.put({
+      localId: 'geo-noopt', createdAt: Date.now(), startedAt: Date.now(),
+      subjectCommonName: 'Great Blue Heron', subjectScientificName: 'Ardea herodias',
+      taxonomy: { status: 'ok', species: 'Ardea herodias', scientificName: 'Ardea herodias' },
+      exif: { FocalLength: 23 },
+      photoLocalIds: ['geo-noopt-photo'], observationSource: 'photo_import',
+      photoEnrichment: { exif: 'done', location: 'ready', timestamp: 'ready', geocode: 'done', weather: 'done', identification: 'done', taxonomy: 'done', geometry: 'pending' }
+    });
+    await T.db.photos.put({ localPhotoId: 'geo-noopt-photo', observationLocalId: 'geo-noopt', createdAt: Date.now(), width: 4000, height: 3000, uploadStatus: 'pending' });
+    await T.db.audioBlobs.put({ blobId: 'geo-noopt-photo', blob: new Blob(['x'], { type: 'image/jpeg' }), mimeType: 'image/jpeg', sizeBytes: 1, createdAt: Date.now() });
+  });
+  const geoRoute = await mockGeometryRoute(page, GEOMETRY_JSON);
+  await page.evaluate(() => window.__WFR_TEST__.runSubjectGeometryStage('geo-noopt'));
+  const obs = await page.evaluate(async () => (await window.__WFR_TEST__.db.observations.get('geo-noopt')));
+  expect(obs.photoEnrichment.geometry).toBe('unavailable');
+  expect(obs.subjectGeometry.status).toBe('unavailable');
+  expect(obs.subjectGeometry.reason).toMatch(/optical metadata missing/i);
+  expect(geoRoute.geometryCalls).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('GEO-OCCLUSION: unusable measurement degrades gracefully with reason retained', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  await mockGeometryRoute(page, { usable: false, reason: 'severe occlusion — animal behind branches' });
+  await openCaptureTab(page);
+  await seedGeometryObs(page);
+  await page.evaluate(() => window.__WFR_TEST__.runSubjectGeometryStage('geo-obs'));
+  const obs = await page.evaluate(async () => (await window.__WFR_TEST__.db.observations.get('geo-obs')));
+  expect(obs.photoEnrichment.geometry).toBe('unavailable');
+  expect(obs.subjectGeometry.status).toBe('unavailable');
+  expect(obs.subjectGeometry.reason).toMatch(/occlusion/i);
+  expect(obs.subjectGeometry.rangeEstimate).toBeUndefined();
+  expect(obs.latitude).toBe(38.3512); // camera GPS untouched
+  expect(errors).toEqual([]);
+});
+
+test('GEO-E2E: taxonomy + optics + true direction + outing camera yields separated subject estimate', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  const weather = await mockMeteo(page);
+  await mockVisionAndGeometry(page, GEOMETRY_JSON);
+  await mockGbif(page);
+  await page.route('**/breadcrumbs**', route => route.abort());
+  await openCaptureTab(page);
+  await page.evaluate(async ({ outingJson, pngB64 }) => {
+    const T = window.__WFR_TEST__;
+    T.settings.llmKey = 'sk-or-test';
+    await T.importOutingTrackData(outingJson);
+    window.exifr.parse = async () => ({
+      FocalLengthIn35mmFormat: 230, GPSImgDirection: 247, GPSImgDirectionRef: 'T', Orientation: 1
+    });
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await T.importPhotoFile(new File([bin], 'IMG_20260828_191840.jpg', { type: 'image/jpeg', lastModified: Date.now() }));
+  }, { outingJson: INDIANA_OUTING, pngB64: PNG.toString('base64') });
+  await dbWait(page, `obs => obs.photoEnrichment.geometry === 'done'`);
+  const obs = await getObs(page);
+  const sg = obs.subjectGeometry;
+  expect(sg.status).toBe('done');
+  expect(sg.captureGeometry.focalLength35mm).toBe(230);
+  expect(sg.speciesPhysicalPrior).toMatchObject({ dimension: 'standing_height', minimumMeters: 0.9, maximumMeters: 1.3, source: 'model_species_prior' });
+  expect(sg.rangeEstimate.status).toBe('estimated');
+  expect(sg.bearingEstimate.status).toBe('estimated');
+  expect(sg.bearingEstimate.bearingDegreesTrue).toBe(247);
+  // Observation GPS remains the CAMERA location from the outing track.
+  expect(obs.latitude).toBeCloseTo(38.351275, 4);
+  expect(obs.longitude).toBeCloseTo(-87.57171, 4);
+  expect(obs.gpsSource).toMatch(/^breadcrumb_/);
+  // Subject location is separate, projected from camera + bearing + range.
+  const expected = refDestPoint(obs.latitude, obs.longitude, 247, sg.rangeEstimate.distanceMeters.typical);
+  expect(sg.locationEstimate.status).toBe('estimated');
+  expect(sg.locationEstimate.latitude).toBeCloseTo(expected.latitude, 4);
+  expect(sg.locationEstimate.longitude).toBeCloseTo(expected.longitude, 4);
+  // Subject estimate is genuinely separated from the camera by ~the typical range.
+  const separationMeters = refHaversineMeters(obs.latitude, obs.longitude, sg.locationEstimate.latitude, sg.locationEstimate.longitude);
+  expect(separationMeters).toBeGreaterThanOrEqual(sg.rangeEstimate.distanceMeters.min);
+  expect(separationMeters).toBeLessThanOrEqual(sg.rangeEstimate.distanceMeters.max);
+  expect(sg.locationEstimate.cameraLocationSource).toBe(obs.gpsSource);
+  expect(sg.locationEstimate.source).toBe('photogrammetric_estimate');
+  expect(sg.locationEstimate.estimatedAccuracyMeters).toBeGreaterThan(0);
+  expect(weather.calls.length).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+test('GEO-SPECIES-CHANGE: editing the scientific name marks the subject estimate stale', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  const weather = await mockMeteo(page);
+  await mockVisionAndGeometry(page, GEOMETRY_JSON);
+  await mockGbif(page);
+  await openCaptureTab(page);
+  await page.evaluate(async ({ outingJson, pngB64 }) => {
+    const T = window.__WFR_TEST__;
+    T.settings.llmKey = 'sk-or-test';
+    await T.importOutingTrackData(outingJson);
+    window.exifr.parse = async () => ({ FocalLengthIn35mmFormat: 230, GPSImgDirection: 247, GPSImgDirectionRef: 'T' });
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await T.importPhotoFile(new File([bin], 'IMG_20260828_191840.jpg', { type: 'image/jpeg', lastModified: Date.now() }));
+  }, { outingJson: INDIANA_OUTING, pngB64: PNG.toString('base64') });
+  await dbWait(page, `obs => obs.photoEnrichment.geometry === 'done'`);
+  await page.fill('#imp-sci', 'Branta canadensis');
+  await page.click('#imp-save');
+  await page.waitForTimeout(300);
+  const obs = await getObs(page);
+  expect(obs.subjectGeometry.stale).toBe(true);
+  expect(obs.subjectGeometry.status).toBe('unavailable');
+  expect(obs.subjectGeometry.reason).toMatch(/Species changed/i);
+  expect(obs.photoEnrichment.geometry).toBe('unavailable');
+  expect(errors).toEqual([]);
+});
+
+test('GEO-ACTIVE-OUTING: photo resolves against a still-active outing without stop/export', async ({ page }) => {
+  const errors = collectErrors(page); blockExternal(page);
+  await installMockGeolocation(page);
+  await openCaptureTab(page);
+  await page.evaluate(async pngB64 => {
+    const T = window.__WFR_TEST__;
+    const t0 = Date.now();
+    await T.startOuting();
+    window.__emitGeo(t0, 38.35120, -87.57182, 10);
+    window.__emitGeo(t0 + 6000, 38.35135, -87.57160, 10);
+    // Pixel filename digits are UTC — build them from the midpoint instant.
+    const mid = new Date(t0 + 3000);
+    const p2 = n => String(n).padStart(2, '0');
+    const name = 'PXL_' + mid.getUTCFullYear() + p2(mid.getUTCMonth() + 1) + p2(mid.getUTCDate()) + '_' +
+      p2(mid.getUTCHours()) + p2(mid.getUTCMinutes()) + p2(mid.getUTCSeconds()) + '123.jpg';
+    window.exifr.parse = async () => ({});
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await T.importPhotoFile(new File([bin], name, { type: 'image/jpeg', lastModified: Date.now() }));
+    window.__photoName = name;
+  }, PNG.toString('base64'));
+  await dbWait(page, `obs => obs.gpsSource && obs.gpsSource.indexOf('breadcrumb_') === 0`);
+  const obs = await getObs(page);
+  expect(obs.locationProvenance.provider).toBe('wfr_outing_track');
+  expect(obs.gpsSource).toMatch(/^breadcrumb_/);
+  // The outing is STILL ACTIVE — it was never stopped or exported.
+  const outing = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    return { active: !!T.getActiveOuting(), status: (await T.db.outings.toArray())[0].status };
+  });
+  expect(outing.active).toBe(true);
+  expect(outing.status).toBe('active');
+  expect(errors).toEqual([]);
 });
