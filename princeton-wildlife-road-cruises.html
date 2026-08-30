@@ -159,6 +159,7 @@
       .score{grid-column:2;justify-self:start}
       .toolbar button{padding:11px 14px}
       .gps-status{width:100%;order:9}
+      .nearest-btn{order:8;max-width:100%;min-height:44px}
     }
 
     /* Vehicle GPS */
@@ -170,6 +171,14 @@
     .gps-error.show{display:block}
     .gps-privacy{display:none;font-size:.74rem;color:var(--muted);margin:7px 14px 0}
     .gps-privacy.show{display:block}
+    .gps-privacy strong{color:#c8d4cd;font-weight:600}
+    .nearest-btn{
+      border:1px solid #3d5a45;background:#18231c;color:var(--accent);
+      border-radius:999px;padding:8px 12px;cursor:pointer;font-size:.8rem;
+      max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+    }
+    .nearest-btn:hover{border-color:#547a60}
+    .nearest-btn.near{border-color:var(--accent);background:#1d2f22}
     #vehicleBtn.tracking{border-color:#2f80ed;color:#9cc4f5}
     .veh-marker{background:transparent;border:none}
     .veh-marker .veh-dot{
@@ -219,13 +228,14 @@
           <button id="fitVisible" type="button">Fit visible</button>
           <button id="vehicleBtn" type="button" aria-label="Show my vehicle location on the map">🚗 Add vehicle</button>
           <button id="vehicleRemoveBtn" type="button" hidden aria-label="Remove vehicle marker from map">Remove vehicle</button>
+          <button id="nearestRouteBtn" type="button" class="nearest-btn" hidden aria-label="Focus the nearest cruise route on the map"></button>
           <span class="gps-status" id="vehicleStatus" role="status"></span>
           <label class="pill" id="followWrap" hidden><input id="followToggle" type="checkbox"> Follow vehicle</label>
           <label class="pill" id="wakeWrap" hidden><input id="wakeToggle" type="checkbox"> Keep screen awake</label>
           <span class="spacer"></span>
           <label class="pill"><input id="radiusToggle" type="checkbox" checked> 25-mile radius</label>
         </div>
-        <div class="gps-privacy" id="gpsPrivacy">Location stays in this browser session and is not sent anywhere by this page.</div>
+        <div class="gps-privacy" id="gpsPrivacy"><strong>Your GPS coordinates are not stored or sent to a backend.</strong> Map tiles are loaded from OpenStreetMap for the area you're viewing.</div>
         <div class="gps-error" id="gpsError" role="alert"></div>
         <div id="map" aria-label="Interactive OpenStreetMap showing wildlife road-cruise routes"></div>
       </div>
@@ -956,6 +966,7 @@
     const gpsPrivacy = document.getElementById("gpsPrivacy");
     const wakeWrap = document.getElementById("wakeWrap");
     const wakeToggle = document.getElementById("wakeToggle");
+    const nearestRouteBtn = document.getElementById("nearestRouteBtn");
 
     const GPS_OPTIONS = { enableHighAccuracy:true, maximumAge:3000, timeout:15000 };
 
@@ -1025,6 +1036,85 @@
       fn();
       map.once("moveend", ()=>{ programmaticMove = false; });
     }
+
+    /* ---------- Nearest cruise route (in-memory field aid) ---------- */
+
+    const ROUTE_SHORT = {
+      dillin:"Dillin Bottoms",
+      bluegrass:"Blue Grass FWA",
+      oatsville:"Oatsville Bottoms",
+      snakey:"Snakey Point",
+      sugar6:"Sugar Ridge Area 6"
+    };
+    const EARTH_R = 6371000;          // meters
+    const DEG = Math.PI / 180;
+    const NEAR_THRESHOLD_M = 91.4;    // ~300 ft
+
+    let nearestRoute = null;          // {id,name,meters} — memory only, never persisted
+
+    // Local-plane projection (equirectangular around the vehicle) — plenty
+    // accurate at these distances and latitudes.
+    function localXY(lat, lng, lat0, lng0){
+      return [
+        (lng - lng0) * DEG * EARTH_R * Math.cos(lat0 * DEG),
+        (lat - lat0) * DEG * EARTH_R
+      ];
+    }
+
+    function distToSegmentM(px, py, ax, ay, bx, by){
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const cx = ax + t * dx, cy = ay + t * dy;
+      return Math.hypot(px - cx, py - cy);
+    }
+
+    function metersToRoute(lat, lng, route){
+      const coords = route.coords;
+      let best = Infinity;
+      for(let i = 0; i < coords.length - 1; i++){
+        const [ax, ay] = localXY(coords[i][0],   coords[i][1],   lat, lng);
+        const [bx, by] = localXY(coords[i+1][0], coords[i+1][1], lat, lng);
+        best = Math.min(best, distToSegmentM(0, 0, ax, ay, bx, by));
+      }
+      if(coords.length === 1) return Math.hypot(...localXY(coords[0][0], coords[0][1], lat, lng));
+      return best;
+    }
+
+    function fmtRouteDistance(meters){
+      const feet = meters * 3.28084;
+      if(feet < 0.2 * 5280) return `${Math.round(feet)} ft`;
+      return `${(meters / 1609.344).toFixed(1)} mi`;
+    }
+
+    function updateNearestRoute(){
+      if(!vehicleLastFix){ nearestRoute = null; return; }
+      let best = null;
+      routes.forEach(r => {
+        const m = metersToRoute(vehicleLastFix.lat, vehicleLastFix.lng, r);
+        if(!best || m < best.meters) best = { id:r.id, name:ROUTE_SHORT[r.id] || r.name, meters:m };
+      });
+      nearestRoute = best;
+      if(nearestRoute){
+        const near = best.meters <= NEAR_THRESHOLD_M;
+        nearestRouteBtn.textContent = near
+          ? `📍 ${best.name} · On/near route`
+          : `📍 Nearest route: ${best.name} · ${fmtRouteDistance(best.meters)}`;
+        nearestRouteBtn.classList.toggle("near", near);
+        nearestRouteBtn.hidden = false;
+      }
+    }
+
+    nearestRouteBtn.addEventListener("click", ()=>{
+      if(!nearestRoute || !vehicleLastFix) return;
+      const r = routes.find(x => x.id === nearestRoute.id);
+      if(!r) return;
+      // Fit the vehicle plus this route only — no radius, no other routes.
+      const bounds = L.latLngBounds([[vehicleLastFix.lat, vehicleLastFix.lng]]);
+      r.coords.forEach(c => bounds.extend(c));
+      recenterProgrammatically(()=>map.fitBounds(bounds.pad(.25),{maxZoom:17}));
+    });
     function handleVehiclePosition(pos){
       const c = pos && pos.coords;
       if(!c) return;
@@ -1060,6 +1150,7 @@
         }
       }
       if(vehicleMarker.isPopupOpen()) vehicleMarker.setPopupContent(vehiclePopupHtml());
+      updateNearestRoute();
 
       if(typeof vehicleLastFix.accuracy === "number" && vehicleLastFix.accuracy > 0){
         if(!vehicleAccuracyCircle){
@@ -1077,11 +1168,9 @@
 
       if(!hasInitialVehicleFix){
         hasInitialVehicleFix = true;
-        // Frame the vehicle once in context of the visible routes; don't yank the map around.
-        const bounds = L.latLngBounds([latlng]);
-        layers.forEach(entry => { if(entry.visible) bounds.extend(entry.line.getBounds()); });
-        if(document.getElementById("radiusToggle").checked) bounds.extend(radiusCircle.getBounds());
-        recenterProgrammatically(()=>map.fitBounds(bounds.pad(.05),{maxZoom:15}));
+        // Center on the vehicle at street level so the user can identify their
+        // current road/intersection. Fit Visible remains the regional overview.
+        recenterProgrammatically(()=>map.setView(latlng,15));
       }else if(followVehicle){
         recenterProgrammatically(()=>map.panTo(latlng,{animate:false}));
       }
@@ -1135,6 +1224,8 @@
       followToggle.checked = false;
       followWrap.hidden = true;
       vehicleRemoveBtn.hidden = true;
+      nearestRouteBtn.hidden = true;
+      nearestRouteBtn.classList.remove("near");
       vehicleStatus.textContent = "";
       clearGpsError();
       updateVehicleButton();
@@ -1203,9 +1294,9 @@
   })();
   </script>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.30.4" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.30.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Princeton Wildlife Road Cruises · version 2026.08.30.4
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.30.5" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.30.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Princeton Wildlife Road Cruises · version 2026.08.30.5
   </footer>
 </body>
 </html>
