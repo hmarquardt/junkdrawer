@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Princeton Wildlife Road Cruises</title>
+  <meta name="description" content="Low-traffic wildlife road-cruise candidates within roughly 25 miles of Princeton, Indiana.">
+  <meta name="description" content="Low-traffic wildlife road-cruise candidates within roughly 25 miles of Princeton, Indiana.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦌</text></svg>" />
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIINfQ3ynZsoz3pBNlMb+NKJfQhao96r0JM=" crossorigin="">
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root{
+      color-scheme: dark;
+      --bg:#0d1110;
+      --panel:#141a17;
+      --panel2:#19211d;
+      --line:#2a3730;
+      --text:#edf3ef;
+      --muted:#9fb0a7;
+      --accent:#9fd28f;
+      --accent2:#d9b76e;
+      --danger:#e39b8f;
+      --shadow:0 14px 35px rgba(0,0,0,.24);
+      --radius:16px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    body{min-height:100vh}
+    a{color:#b7d9ff}
+    button,input{font:inherit}
+    .page{max-width:1500px;margin:0 auto;padding:18px}
+    header{
+      display:flex;gap:18px;align-items:flex-end;justify-content:space-between;
+      margin-bottom:14px;padding:4px 2px
+    }
+    h1{font-size:clamp(1.55rem,3vw,2.4rem);line-height:1.05;margin:0 0 6px;letter-spacing:-.03em}
+    .subtitle{color:var(--muted);max-width:850px}
+    .pill{
+      display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);
+      background:var(--panel);padding:7px 10px;border-radius:999px;color:var(--muted);font-size:.84rem;white-space:nowrap
+    }
+    .layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(330px,.75fr);gap:14px;align-items:start}
+    .map-card,.side{
+      background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)
+    }
+    .map-card{overflow:hidden}
+    .toolbar{
+      display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--line)
+    }
+    .toolbar button{
+      border:1px solid var(--line);background:var(--panel2);color:var(--text);
+      padding:8px 11px;border-radius:10px;cursor:pointer
+    }
+    .toolbar button:hover{border-color:#506159}
+    .toolbar .spacer{flex:1}
+    #map{height:min(70vh,760px);min-height:520px;background:#101512}
+    .side{padding:12px}
+    .side-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+    .side h2{font-size:1rem;margin:0}
+    .count{color:var(--muted);font-size:.86rem}
+    .routes{display:grid;gap:9px}
+    .route{
+      border:1px solid var(--line);border-radius:13px;background:var(--panel2);overflow:hidden
+    }
+    .route-head{
+      display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
+      padding:11px 12px;cursor:pointer
+    }
+    .route-head input{width:19px;height:19px;accent-color:var(--accent);cursor:pointer}
+    .route-title{font-weight:700;line-height:1.2}
+    .route-sub{font-size:.78rem;color:var(--muted);margin-top:3px}
+    .score{
+      min-width:48px;text-align:center;border:1px solid var(--line);border-radius:999px;
+      padding:4px 8px;font-weight:700;font-size:.8rem
+    }
+    .route-body{display:none;padding:0 12px 12px;color:#d7e0da}
+    .route.open .route-body{display:block}
+    .route-body p{margin:.4rem 0 .7rem}
+    .meta{display:flex;gap:6px;flex-wrap:wrap;margin:.55rem 0}
+    .tag{font-size:.73rem;padding:4px 7px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:#111714}
+    .focus{
+      border:1px solid var(--line);background:#111714;color:var(--text);
+      border-radius:9px;padding:7px 10px;cursor:pointer
+    }
+    .focus:hover{border-color:#54665d}
+    .legend-note,.field-note,.sources{
+      margin-top:14px;border:1px solid var(--line);background:var(--panel);border-radius:var(--radius);padding:13px 15px
+    }
+    .legend-note strong,.field-note strong{color:var(--accent)}
+    .field-note{background:#151a16}
+    .sources h2{margin:0 0 8px;font-size:1rem}
+    .sources ul{margin:0;padding-left:19px;color:var(--muted)}
+    .sources li{margin:.35rem 0}
+    .tiny{font-size:.78rem;color:var(--muted)}
+    .route-key{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:7px;vertical-align:-1px}
+    .leaflet-container{font:14px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#17201b;color:#edf3ef}
+    .leaflet-popup-content{margin:10px 12px}
+    .leaflet-control-layers,.leaflet-bar a{background:#17201b;color:#edf3ef;border-color:#314038}
+    .leaflet-control-layers-expanded{color:#edf3ef}
+    .leaflet-control-attribution{background:rgba(13,17,16,.82)!important;color:#c1cdc6}
+    .leaflet-control-attribution a{color:#b7d9ff}
+    @media(max-width:900px){
+      .layout{grid-template-columns:1fr}
+      #map{height:58vh;min-height:430px}
+      header{align-items:flex-start;flex-direction:column}
+    }
+    @media(max-width:520px){
+      .page{padding:10px}
+      #map{min-height:390px}
+      .route-head{grid-template-columns:auto 1fr}
+      .score{grid-column:2;justify-self:start}
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>Princeton Wildlife Road Cruises</h1>
+        <div class="subtitle">
+          Low-traffic, low-walking wildlife scouting routes around Princeton, Indiana — built for slow cruising,
+          scanning road edges, wetlands, reclaimed mine country and river bottoms.
+        </div>
+      </div>
+      <div class="pill">Base: Princeton, IN · ~25-mile scouting radius</div>
+    </header>
+
+    <section class="layout">
+      <div class="map-card">
+        <div class="toolbar">
+          <button id="showAll" type="button">Show all routes</button>
+          <button id="hideAll" type="button">Hide all routes</button>
+          <button id="fitVisible" type="button">Fit visible</button>
+          <span class="spacer"></span>
+          <label class="pill"><input id="radiusToggle" type="checkbox" checked> 25-mile radius</label>
+        </div>
+        <div id="map" aria-label="Interactive OpenStreetMap showing wildlife road-cruise routes"></div>
+      </div>
+
+      <aside class="side">
+        <div class="side-top">
+          <h2>Route layers</h2>
+          <span class="count" id="visibleCount"></span>
+        </div>
+        <div class="routes" id="routeList"></div>
+      </aside>
+    </section>
+
+    <section class="legend-note">
+      <strong>Important:</strong> these are scouting overlays, not turn-by-turn navigation.
+      The Blue Grass and Snakey Point corridors have comparatively strong road-name support;
+      the Oatsville and Sugar Ridge lines are deliberately marked exploratory. Always follow posted signs,
+      county-road status, closures, refuge hours and safe pull-off rules. Traffic ratings here are qualitative,
+      not measured traffic counts.
+    </section>
+
+    <section class="field-note">
+      <strong>Road-cruise bias:</strong> the ranking favors habitat touching the road, dead ends or county-road grids,
+      few through-traffic reasons, and the ability to stay in the vehicle. For herps, warm humid evenings after rain
+      are the obvious experiment; for birds and mammals, dawn and the last hour of daylight are the stronger windows.
+      Patoka refuge lands are generally dawn-to-dusk for approved activities, so night cruising should remain on lawful
+      public county roads and outside closed refuge-use periods.
+    </section>
+
+    <section class="sources">
+      <h2>Primary references used to build the scouting layer</h2>
+      <ul>
+        <li><a href="https://www.fws.gov/refuge/patoka-river-and-management-area/visit-us" target="_blank" rel="noopener">U.S. Fish &amp; Wildlife Service — Patoka River NWR visitor information</a></li>
+        <li><a href="https://www.fws.gov/sites/default/files/documents/2024-11/patokariver_huntfish24_online_2.pdf" target="_blank" rel="noopener">U.S. Fish &amp; Wildlife Service — Patoka refuge map/regulations</a></li>
+        <li><a href="https://www.in.gov/dnr/fish-and-wildlife/files/bluegrass.pdf" target="_blank" rel="noopener">Indiana DNR — Blue Grass FWA map</a></li>
+        <li><a href="https://www.in.gov/dnr/fish-and-wildlife/files/sugar.pdf" target="_blank" rel="noopener">Indiana DNR — Sugar Ridge FWA map</a></li>
+      </ul>
+      <div class="tiny" style="margin-top:9px">Map tiles © OpenStreetMap contributors. Leaflet 1.9.4. No backend, account, build step or API key required.</div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+  (() => {
+    "use strict";
+
+    const princeton = [38.3553, -87.5675];
+
+    const routes = [
+      {
+        id:"dillin",
+        name:"Dillin Bottoms — CR 775 E",
+        short:"Dead-end refuge/wetland out-and-back",
+        score:"9.5",
+        color:"#e69f6b",
+        status:"Best first scout",
+        traffic:"Expected very low",
+        geometry:"Out-and-back",
+        confidence:"High corridor confidence",
+        description:"A county-maintained dead-end road surrounded by Patoka River NWR habitat with direct access to Dillin Bottoms wetland. This is the cleanest match for the road-cruise idea: almost no reason for through traffic, wetland/slough habitat, deer/turkey country and strong waterfowl potential.",
+        timing:"Try dawn, last light, and — on lawful public-road sections — warm humid post-rain evenings.",
+        coords:[
+          [38.3320,-87.1304],
+          [38.3250,-87.1304],
+          [38.3190,-87.1304],
+          [38.31383,-87.13043]
+        ]
+      },
+      {
+        id:"bluegrass",
+        name:"Blue Grass FWA — Klippel / Kansas / St. Johns",
+        short:"Reclaimed-mine county-road loop",
+        score:"9.0",
+        color:"#66c2a5",
+        status:"Strong repeatable loop",
+        traffic:"Expected low on internal county roads",
+        geometry:"Loop",
+        confidence:"High road-name confidence",
+        description:"The practical loop is Klippel Road south, Kansas Road east, St. Johns Road north, then New Harmony Road back west. The slow-cruise value is Klippel, Kansas and St. Johns; use New Harmony mainly as the connector. The road grid repeatedly touches pits, wetlands, grassland and reclaimed mine edges.",
+        timing:"Excellent candidate for dawn bird/mammal runs and experimental post-rain herp cruising.",
+        coords:[
+          [38.0972,-87.4595],
+          [38.0815,-87.4595],
+          [38.0657,-87.4595],
+          [38.0667,-87.4490],
+          [38.0815,-87.4490],
+          [38.0972,-87.44915],
+          [38.0972,-87.4595]
+        ]
+      },
+      {
+        id:"oatsville",
+        name:"Patoka NWR — Oatsville Bottoms grid",
+        short:"Rural refuge back-road wander",
+        score:"9.0",
+        color:"#8da0cb",
+        status:"Exploratory grid",
+        traffic:"Expected very low",
+        geometry:"Wander / partial loop",
+        confidence:"Moderate — scout in daylight first",
+        description:"This is less a single named loop than a rural county-road matrix through Patoka River bottomland habitat near Oatsville. FWS explicitly recommends Oatsville Bottoms and the refuge auto-tour concept. The attraction is habitat diversity: river bottoms, wet woods, marsh, agriculture and flood-prone low country.",
+        timing:"Best first pass: weekday dawn or late afternoon. Expect seasonal flooding and variable gravel-road conditions.",
+        coords:[
+          [38.4070,-87.4075],
+          [38.4050,-87.3945],
+          [38.3960,-87.3885],
+          [38.3865,-87.3995],
+          [38.3895,-87.4170],
+          [38.3995,-87.4240],
+          [38.4070,-87.4075]
+        ]
+      },
+      {
+        id:"snakey",
+        name:"Snakey Point / Columbia Mine perimeter",
+        short:"CR 1275E → 1300E → marsh edge",
+        score:"7.5",
+        color:"#e78ac3",
+        status:"Good habitat, less continuous",
+        traffic:"Expected low",
+        geometry:"Out-and-back / perimeter",
+        confidence:"High approach-road confidence",
+        description:"Approach from the east side of Oakland City, turn north on CR 1275E, bear left onto paved 1300E as it becomes gravel, then continue toward the Boyd/Snakey Point area. The habitat is excellent; the limitation is that the preserve interior is not an automobile network, so think perimeter cruise rather than deep interior loop.",
+        timing:"Dawn and dusk for marsh-edge birds and mammals. Use the road as the blind; walking is optional.",
+        coords:[
+          [38.3392,-87.3340],
+          [38.3455,-87.3275],
+          [38.3525,-87.3235],
+          [38.3590,-87.3205],
+          [38.3645,-87.3185]
+        ]
+      },
+      {
+        id:"sugar6",
+        name:"Sugar Ridge FWA — Area 6",
+        short:"900S / 1000S / Haul Road grid",
+        score:"8.0",
+        color:"#ffd166",
+        status:"Daylight scout before committing",
+        traffic:"Likely low",
+        geometry:"Exploratory loop",
+        confidence:"Moderate — verify public-road segments",
+        description:"Area 6 has exactly the habitat geometry we want: a little road grid threading reclaimed mine pits, marshy edges and upland cover around Prairie, Fox, Bethel, Cattail, Barrett, Tulip, Bass and Mallard pits. The DNR map shows the road network clearly, but not every mapped segment should be assumed open to ordinary vehicles without checking signs on the ground.",
+        timing:"Scout once in daylight, then decide which public-road pieces are suitable for slow evening passes.",
+        coords:[
+          [38.2890,-87.1840],
+          [38.2890,-87.1605],
+          [38.2760,-87.1605],
+          [38.2660,-87.1606],
+          [38.2560,-87.1663],
+          [38.2515,-87.1700],
+          [38.2520,-87.1830],
+          [38.2680,-87.1840],
+          [38.2890,-87.1840]
+        ]
+      }
+    ];
+
+    const map = L.map("map", { zoomControl:true, preferCanvas:true }).setView([38.30,-87.36], 10);
+
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom:19,
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+    }).addTo(map);
+
+    const princetonMarker = L.circleMarker(princeton,{
+      radius:7,color:"#ffffff",weight:2,fillColor:"#202a25",fillOpacity:1
+    }).addTo(map).bindPopup("<strong>Princeton, Indiana</strong><br>Reference point for the ~25-mile scouting radius.");
+
+    const radiusCircle = L.circle(princeton,{
+      radius:40233.6,
+      color:"#9fb0a7",
+      weight:1.3,
+      opacity:.75,
+      fillColor:"#9fb0a7",
+      fillOpacity:.045,
+      dashArray:"7 7"
+    }).addTo(map);
+
+    const layers = new Map();
+    const routeList = document.getElementById("routeList");
+    const visibleCount = document.getElementById("visibleCount");
+
+    function popupHtml(r){
+      return `<strong>${r.name}</strong><br>${r.short}<br><span style="color:#b8c5bd">Road-cruise score: ${r.score}/10</span>`;
+    }
+
+    routes.forEach((r, idx) => {
+      const group = L.layerGroup();
+      const line = L.polyline(r.coords,{
+        color:r.color,weight:5,opacity:.86,lineCap:"round",lineJoin:"round"
+      }).bindPopup(popupHtml(r));
+
+      const start = L.circleMarker(r.coords[0],{
+        radius:6,color:"#101512",weight:2,fillColor:r.color,fillOpacity:1
+      }).bindTooltip(r.name,{direction:"top"});
+
+      line.addTo(group); start.addTo(group);
+      group.addTo(map);
+      layers.set(r.id,{group,line,start,visible:true});
+
+      const card = document.createElement("article");
+      card.className = "route" + (idx === 0 ? " open" : "");
+      card.dataset.route = r.id;
+      card.innerHTML = `
+        <div class="route-head" role="button" tabindex="0" aria-expanded="${idx===0}">
+          <input class="route-toggle" type="checkbox" checked aria-label="Toggle ${r.name}">
+          <div>
+            <div class="route-title"><span class="route-key" style="background:${r.color}"></span>${r.name}</div>
+            <div class="route-sub">${r.short}</div>
+          </div>
+          <div class="score">${r.score}/10</div>
+        </div>
+        <div class="route-body">
+          <div class="meta">
+            <span class="tag">${r.status}</span>
+            <span class="tag">${r.traffic}</span>
+            <span class="tag">${r.geometry}</span>
+            <span class="tag">${r.confidence}</span>
+          </div>
+          <p>${r.description}</p>
+          <p class="tiny"><strong>Best experiment:</strong> ${r.timing}</p>
+          <button class="focus" type="button">Focus this route</button>
+        </div>`;
+      routeList.appendChild(card);
+
+      const head = card.querySelector(".route-head");
+      const toggle = card.querySelector(".route-toggle");
+      const focus = card.querySelector(".focus");
+
+      function toggleOpen(e){
+        if(e && e.target === toggle) return;
+        card.classList.toggle("open");
+        head.setAttribute("aria-expanded", card.classList.contains("open"));
+      }
+
+      head.addEventListener("click", toggleOpen);
+      head.addEventListener("keydown", e => {
+        if(e.key === "Enter" || e.key === " "){
+          e.preventDefault();
+          toggleOpen(e);
+        }
+      });
+
+      toggle.addEventListener("change", () => {
+        setRouteVisible(r.id, toggle.checked, false);
+      });
+
+      focus.addEventListener("click", e => {
+        e.stopPropagation();
+        map.fitBounds(line.getBounds().pad(.28), {maxZoom:14});
+        line.openPopup();
+      });
+    });
+
+    function setRouteVisible(id, visible, syncCheckbox=true){
+      const entry = layers.get(id);
+      if(!entry) return;
+      if(visible && !map.hasLayer(entry.group)) entry.group.addTo(map);
+      if(!visible && map.hasLayer(entry.group)) map.removeLayer(entry.group);
+      entry.visible = visible;
+      if(syncCheckbox){
+        const cb = document.querySelector(`[data-route="${id}"] .route-toggle`);
+        if(cb) cb.checked = visible;
+      }
+      updateCount();
+      persist();
+    }
+
+    function updateCount(){
+      const count = [...layers.values()].filter(x => x.visible).length;
+      visibleCount.textContent = `${count} of ${routes.length} visible`;
+    }
+
+    function fitVisible(){
+      const bounds = [];
+      layers.forEach(entry => {
+        if(entry.visible) bounds.push(entry.line.getBounds());
+      });
+      if(document.getElementById("radiusToggle").checked) bounds.push(radiusCircle.getBounds());
+      if(!bounds.length){
+        map.setView(princeton,10);
+        return;
+      }
+      let merged = bounds[0];
+      for(let i=1;i<bounds.length;i++) merged = merged.extend(bounds[i]);
+      map.fitBounds(merged.pad(.06), {maxZoom:12});
+    }
+
+    function persist(){
+      try{
+        const state = {};
+        layers.forEach((entry,id)=>state[id]=entry.visible);
+        state.radius = document.getElementById("radiusToggle").checked;
+        localStorage.setItem("princeton-wildlife-road-cruises", JSON.stringify(state));
+      }catch(_){}
+    }
+
+    function restore(){
+      try{
+        const raw = localStorage.getItem("princeton-wildlife-road-cruises");
+        if(!raw) return;
+        const state = JSON.parse(raw);
+        routes.forEach(r => {
+          if(typeof state[r.id] === "boolean") setRouteVisible(r.id,state[r.id],true);
+        });
+        if(typeof state.radius === "boolean"){
+          document.getElementById("radiusToggle").checked = state.radius;
+          if(state.radius && !map.hasLayer(radiusCircle)) radiusCircle.addTo(map);
+          if(!state.radius && map.hasLayer(radiusCircle)) map.removeLayer(radiusCircle);
+        }
+      }catch(_){}
+    }
+
+    document.getElementById("showAll").addEventListener("click",()=>{
+      routes.forEach(r=>setRouteVisible(r.id,true,true));
+      fitVisible();
+    });
+
+    document.getElementById("hideAll").addEventListener("click",()=>{
+      routes.forEach(r=>setRouteVisible(r.id,false,true));
+    });
+
+    document.getElementById("fitVisible").addEventListener("click",fitVisible);
+
+    document.getElementById("radiusToggle").addEventListener("change",e=>{
+      if(e.target.checked) radiusCircle.addTo(map);
+      else map.removeLayer(radiusCircle);
+      persist();
+    });
+
+    restore();
+    updateCount();
+    fitVisible();
+
+    setTimeout(()=>map.invalidateSize(),120);
+  })();
+  </script>
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.30.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.30.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Princeton Wildlife Road Cruises · version 2026.08.30.1
+  </footer>
+</body>
+</html>
