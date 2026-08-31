@@ -48,6 +48,7 @@
       background:var(--panel);padding:7px 10px;border-radius:999px;color:var(--muted);font-size:.84rem;white-space:nowrap
     }
     .layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(330px,.75fr);gap:14px;align-items:start}
+    .guide-left{min-width:0;display:grid;gap:14px;align-content:start}
     .map-card,.side{
       background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)
     }
@@ -116,9 +117,40 @@
       margin-top:14px;border:1px solid var(--line);background:var(--panel);border-radius:var(--radius);padding:13px 15px
     }
     .opportunities{
-      margin-top:14px;border:1px solid var(--line);background:var(--panel);
+      border:1px solid var(--line);background:var(--panel);
       border-radius:var(--radius);box-shadow:var(--shadow);padding:12px
     }
+
+    /* Active-route progressive disclosure (native <details>) */
+    .active-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:.7rem 0}
+    .active-controls .focus{flex:1}
+    .active-controls .panel-nav{flex:2;margin:0;min-width:190px}
+    .disc-actions{display:flex;gap:8px;margin:0 0 10px}
+    .disc-btn{
+      border:1px solid var(--line);background:var(--panel2);color:var(--text);
+      border-radius:9px;padding:6px 10px;cursor:pointer;font-size:.78rem
+    }
+    .disc-btn:hover{border-color:#506159}
+    .detail-sec,.w-disc{border:1px solid var(--line);border-radius:10px;background:#111714;margin:.55rem 0}
+    .detail-sec>summary,.w-disc>summary{
+      cursor:pointer;padding:8px 11px;font-weight:700;font-size:.78rem;
+      letter-spacing:.05em;text-transform:uppercase;color:var(--accent);
+      list-style:none;display:flex;align-items:center;gap:8px
+    }
+    .detail-sec>summary::-webkit-details-marker,.w-disc>summary::-webkit-details-marker{display:none}
+    .detail-sec>summary::after,.w-disc>summary::after{
+      content:"▸";margin-left:auto;color:var(--muted);transition:transform .15s;flex-shrink:0
+    }
+    .detail-sec[open]>summary::after,.w-disc[open]>summary::after{transform:rotate(90deg)}
+    .detail-sec[open]>summary,.w-disc[open]>summary{border-bottom:1px solid var(--line)}
+    .detail-body{padding:4px 12px 10px}
+    .detail-body p{margin:.45rem 0}
+    .detail-body .seasons{margin:.4rem 0 0}
+    .w-disc{margin:.45rem 0}
+    .w-disc>ul{list-style:none;margin:0;padding:4px 12px 10px}
+    .w-disc li{font-size:.8rem;line-height:1.45;margin:.24rem 0;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+    .access-row{display:flex;gap:8px;font-size:.82rem;margin:.3rem 0;align-items:baseline}
+    .access-key{color:var(--accent2);font-weight:700;text-transform:uppercase;font-size:.68rem;letter-spacing:.06em;min-width:86px;flex-shrink:0}
     .legend-note strong,.field-note strong{color:var(--accent)}
     .field-note{background:#151a16}
     .sources h2{margin:0 0 8px;font-size:1rem}
@@ -174,6 +206,11 @@
     .pw-row{margin-top:6px}
     @media(max-width:900px){
       .layout{grid-template-columns:1fr}
+      /* single column: map → active route → opportunities */
+      .guide-left{display:contents}
+      .map-card{order:1}
+      .side{order:2}
+      .opportunities{order:3}
       #map{height:58vh;min-height:430px}
       header{align-items:flex-start;flex-direction:column}
     }
@@ -184,6 +221,7 @@
       .toolbar button{padding:11px 14px}
       .gps-status{width:100%;order:9}
       .nearest-btn{order:8;max-width:100%;min-height:44px}
+      .active-controls .focus,.active-controls .panel-nav{flex-basis:100%}
     }
 
     /* Vehicle GPS */
@@ -245,7 +283,8 @@
     </section>
 
     <section class="layout">
-      <div class="map-card">
+      <div class="guide-left">
+        <div class="map-card">
         <div class="toolbar">
           <button id="showAll" type="button">Show all routes</button>
           <button id="hideAll" type="button">Hide all routes</button>
@@ -262,6 +301,19 @@
         <div class="gps-privacy" id="gpsPrivacy"><strong>Your GPS coordinates are not stored or sent to a backend.</strong> Map tiles are loaded from OpenStreetMap for the area you're viewing.</div>
         <div class="gps-error" id="gpsError" role="alert"></div>
         <div id="map" aria-label="Interactive OpenStreetMap showing wildlife road-cruise routes"></div>
+        </div>
+
+        <section class="opportunities" aria-label="Road cruise opportunities">
+          <div class="side-top">
+            <h2>Road Cruise Opportunities</h2>
+            <span class="tiny">tap a card to open its full field guide beside the map</span>
+          </div>
+          <div class="filters" role="group" aria-label="Highlight routes by what you want to see">
+            <div class="filters-head">What are you looking for? <span class="tiny" style="font-weight:400">highlights matching routes — nothing is hidden</span></div>
+            <div class="chip-row" id="filterRow"></div>
+          </div>
+          <div class="routes" id="routeList"></div>
+        </section>
       </div>
 
       <aside class="side" id="activePanel" aria-label="Active route detail">
@@ -269,25 +321,21 @@
           <h2>Active route</h2>
           <span class="count" id="visibleCount"></span>
         </div>
-        <span class="tag" id="activeHiddenNote" hidden>Hidden on map — toggle it on below</span>
-        <div class="route-detail" id="activeDetail"></div>
-        <div class="panel-nav">
-          <button id="prevRoute" type="button">← Previous</button>
-          <button id="nextRoute" type="button">Next →</button>
+        <span class="tag" id="activeHiddenNote">Visible on map</span>
+        <div class="route-detail" id="activeHead"></div>
+        <div class="active-controls">
+          <button class="focus" id="focusRoute" type="button">Focus route</button>
+          <div class="panel-nav">
+            <button id="prevRoute" type="button">← Previous</button>
+            <button id="nextRoute" type="button">Next →</button>
+          </div>
         </div>
+        <div class="disc-actions" role="group" aria-label="Active route disclosure controls">
+          <button id="expandAllDisc" type="button" class="disc-btn">Expand all</button>
+          <button id="collapseAllDisc" type="button" class="disc-btn">Collapse all</button>
+        </div>
+        <div class="route-detail" id="activeDetail"></div>
       </aside>
-    </section>
-
-    <section class="opportunities" aria-label="Road cruise opportunities">
-      <div class="side-top">
-        <h2>Road Cruise Opportunities</h2>
-        <span class="tiny">tap a card to open its full field guide beside the map</span>
-      </div>
-      <div class="filters" role="group" aria-label="Highlight routes by what you want to see">
-        <div class="filters-head">What are you looking for? <span class="tiny" style="font-weight:400">highlights matching routes — nothing is hidden</span></div>
-        <div class="chip-row" id="filterRow"></div>
-      </div>
-      <div class="routes" id="routeList"></div>
     </section>
 
     <section class="legend-note">
@@ -311,7 +359,7 @@
       numbers — arrive about two hours before sunset.
     </section>
 
-    <section class="sources">
+    <section class="sources" id="sources">
       <h2>Primary references used to build the scouting layer</h2>
       <ul>
         <li><a href="https://www.fws.gov/refuge/patoka-river-and-management-area/visit-us" target="_blank" rel="noopener">U.S. Fish &amp; Wildlife Service — Patoka River NWR visitor information</a></li>
@@ -753,11 +801,15 @@
     const TIER_LABEL = {likely:"Likely", watch:"Watch for", seasonal:"Seasonal", uncommon:"Uncommon"};
 
     function wildlifeHtml(w){
-      const group = (title, items) => (!items || !items.length) ? "" : `
-        <div class="w-group"><span class="w-title">${title}</span>
-          <ul>${items.map(it=>`<li><span class="tier t-${it.t}">${TIER_LABEL[it.t]}</span><span class="w-name">${it.n}</span>${it.d?`<span class="w-note"> — ${it.d}</span>`:""}</li>`).join("")}</ul>
-        </div>`;
-      return group("🐦 Birds", w.birds) + group("🦌 Mammals", w.mammals) + group("🐍 Reptiles & amphibians", w.herps);
+      const group = (key, title, items, open=false) => (!items || !items.length) ? "" : `
+        <details class="w-disc" data-wildlife-group="${key}"${open ? " open" : ""}>
+          <summary>${title} · ${items.length}</summary>
+          <ul>${items.map(it=>`<li><span class="tier t-${it.t}">${TIER_LABEL[it.t] || it.t}</span><span class="w-name">${it.n}</span>${it.d?`<span class="w-note"> — ${it.d}</span>`:""}</li>`).join("")}</ul>
+        </details>`;
+      return group("birds", "🐦 Birds", w.birds, true)
+        + group("mammals", "🦌 Mammals", w.mammals)
+        + group("herps", "🐍🐸 Herps", w.herps)
+        + group("other", "✨ Other Wildlife", w.other);
     }
 
     function popupHtml(r){
@@ -769,7 +821,7 @@
         <div style="margin-top:7px;font-size:.8rem;color:#b8c5bd"><strong>Best:</strong> ${r.popupBest}</div>`;
     }
 
-    function routeDetailHtml(r){
+    function routeHeaderHtml(r){
       return `
         <div class="route-detail-head">
           <div class="route-title detail-title"><span class="route-key" style="background:${r.color}"></span>${r.name}</div>
@@ -777,25 +829,55 @@
         </div>
         <div class="route-sub">${r.habitat.join("")} ${r.short}</div>
         <p class="tagline">${r.tagline}</p>
-        <h3 class="micro">Why this road is interesting</h3>
-        <p>${r.why}</p>
-        <h3 class="micro">What you might see</h3>
-        ${wildlifeHtml(r.wildlife)}
-        <h3 class="micro">Best time to try</h3>
-        <p>${r.best}</p>
-        <h3 class="micro">What to watch while driving</h3>
-        <ul class="cues">${r.cues.map(c=>`<li>${c}</li>`).join("")}</ul>
-        <h3 class="micro">Why go today</h3>
-        <div class="seasons">${r.seasons.map(([s,t])=>`<div class="season"><span>${s}</span>${t}</div>`).join("")}</div>
-        <h3 class="micro">Wildcards</h3>
-        <ul class="wildcards">${r.wildcards.map(w=>`<li>${w}</li>`).join("")}</ul>
         <div class="meta">
           <span class="tag">${r.status}</span>
           <span class="tag">${r.traffic}</span>
           <span class="tag">${r.geometry}</span>
           <span class="tag">${r.confidence}</span>
-        </div>
-        <button class="focus" type="button">Focus this route</button>`;
+        </div>`;
+    }
+
+    function routeDetailHtml(r){
+      const wildlifeCount = ["birds","mammals","herps","other"]
+        .reduce((sum,key)=>sum + (Array.isArray(r.wildlife[key]) ? r.wildlife[key].length : 0),0);
+      return `
+        <details class="detail-sec" data-section="why" open>
+          <summary>Why This Road Is Interesting</summary>
+          <div class="detail-body"><p>${r.why}</p></div>
+        </details>
+        <details class="detail-sec" data-section="wildlife" open>
+          <summary>Wildlife · ${wildlifeCount}</summary>
+          <div class="detail-body">${wildlifeHtml(r.wildlife)}</div>
+        </details>
+        <details class="detail-sec" data-section="best" open>
+          <summary>Best Time to Go</summary>
+          <div class="detail-body"><p>${r.best}</p></div>
+        </details>
+        ${r.cues && r.cues.length ? `<details class="detail-sec" data-section="cues">
+          <summary>👀 What to Watch While Driving · ${r.cues.length}</summary>
+          <div class="detail-body"><ul class="cues">${r.cues.map(c=>`<li>${c}</li>`).join("")}</ul></div>
+        </details>` : ""}
+        ${r.seasons && r.seasons.length ? `<details class="detail-sec" data-section="seasons">
+          <summary>Seasonal Guide · ${r.seasons.length}</summary>
+          <div class="detail-body"><div class="seasons">${r.seasons.map(([s,t])=>`<div class="season"><span>${s}</span>${t}</div>`).join("")}</div></div>
+        </details>` : ""}
+        ${r.wildcards && r.wildcards.length ? `<details class="detail-sec" data-section="wildcards">
+          <summary>✨ Wildcards · ${r.wildcards.length}</summary>
+          <div class="detail-body"><ul class="wildcards">${r.wildcards.map(w=>`<li>${w}</li>`).join("")}</ul></div>
+        </details>` : ""}
+        <details class="detail-sec" data-section="access" open>
+          <summary>Access / Road Notes / Restrictions</summary>
+          <div class="detail-body">
+            <div class="access-row"><span class="access-key">Route status</span><span>${r.status}</span></div>
+            <div class="access-row"><span class="access-key">Traffic</span><span>${r.traffic}</span></div>
+            <div class="access-row"><span class="access-key">Geometry</span><span>${r.geometry}</span></div>
+            <div class="access-row"><span class="access-key">Confidence</span><span>${r.confidence}</span></div>
+          </div>
+        </details>
+        <details class="detail-sec" data-section="research">
+          <summary>Research &amp; Sources</summary>
+          <div class="detail-body"><p>Evidence tiers and route geometry notes are documented in the <a href="#sources">primary reference list</a>.</p></div>
+        </details>`;
     }
 
     routes.forEach((r, idx) => {
@@ -883,22 +965,20 @@
     function updatePanelHiddenNote(){
       const note = document.getElementById("activeHiddenNote");
       const entry = layers.get(activeRouteId);
-      if(note) note.hidden = !entry || entry.visible;
+      if(note) note.textContent = entry && entry.visible
+        ? "Visible on map"
+        : "Hidden on map — toggle it on below";
     }
 
     function renderActivePanel(){
       const r = routes.find(x=>x.id===activeRouteId);
+      const head = document.getElementById("activeHead");
       const detail = document.getElementById("activeDetail");
       const prevBtn = document.getElementById("prevRoute");
       const nextBtn = document.getElementById("nextRoute");
-      if(!r){ detail.innerHTML = ""; return; }
+      if(!r){ head.innerHTML = ""; detail.innerHTML = ""; return; }
+      head.innerHTML = routeHeaderHtml(r);
       detail.innerHTML = routeDetailHtml(r);
-      const focus = detail.querySelector(".focus");
-      focus.addEventListener("click", ()=>{
-        const entry = layers.get(r.id);
-        map.fitBounds(entry.line.getBounds().pad(.28), {maxZoom:14});
-        entry.line.openPopup();
-      });
       const i = routes.findIndex(x=>x.id===activeRouteId);
       prevBtn.disabled = i <= 0;
       nextBtn.disabled = i >= routes.length - 1;
@@ -927,6 +1007,18 @@
     document.getElementById("nextRoute").addEventListener("click", ()=>{
       const i = routes.findIndex(x=>x.id===activeRouteId);
       if(i >= 0 && i < routes.length - 1) setActiveRoute(routes[i+1].id,{scroll:true});
+    });
+    document.getElementById("focusRoute").addEventListener("click", ()=>{
+      const entry = layers.get(activeRouteId);
+      if(!entry) return;
+      map.fitBounds(entry.line.getBounds().pad(.28), {maxZoom:14});
+      entry.line.openPopup();
+    });
+    document.getElementById("expandAllDisc").addEventListener("click", ()=>{
+      document.querySelectorAll("#activeDetail details").forEach(detail=>{ detail.open = true; });
+    });
+    document.getElementById("collapseAllDisc").addEventListener("click", ()=>{
+      document.querySelectorAll("#activeDetail details").forEach(detail=>{ detail.open = false; });
     });
 
     function updateCount(){
@@ -1425,9 +1517,9 @@
   })();
   </script>
 
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.30.6" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.30.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · Princeton Wildlife Road Cruises · version 2026.08.30.6
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.31.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.31.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Princeton Wildlife Road Cruises · version 2026.08.31.1
   </footer>
 </body>
 </html>
