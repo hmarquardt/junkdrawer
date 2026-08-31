@@ -44,3 +44,18 @@ GET /v1/zones?lat=&lon=&radius_miles=
 ```
 
 Responses should retain `provider`, `dataset`, `queried_at`, `effective_at`, `resolution`, `license`, `cache_status`, and per-field uncertainty. The browser scorer can then remain deterministic and unchanged while raw GIS joins, scheduled ingestion, sensitive keys, and cross-device persistence move server-side.
+
+## Optional OpenRouter intelligence boundary
+
+Added 2026-08-31. OpenRouter is an explicitly invoked interpretation and research layer; it is not part of the opportunity model.
+
+- `scoreSpecies()`, component values, species weights, the season gate, observation scoring, confidence, zone scores, and `analysis.ranked` remain the only forecast/ranking path. OpenRouter responses are stored only under `analysis.intelligence` and are never parsed into deterministic fields.
+- The browser sends a compact evidence digest: immutable rankings and components, broad zones, normalized weather metrics, short forecast arrays, aggregate observation signals, relevant species configuration, missing-input flags, and model version. It does not send raw hourly arrays.
+- Analyst Brief and contextual Q&A use `POST https://openrouter.ai/api/v1/chat/completions` only after a user action. Online Intelligence additionally enables OpenRouter's server-operated `openrouter:web_search` and `openrouter:web_fetch` tools; there is no browser-side scraper.
+- Current-report provenance is retained from OpenRouter's standardized `url_citation` annotations and recoverable URLs in the response. A missing source list is surfaced as a verification failure, not silently hidden.
+- OpenRouter settings are a small guarded preference inside `fruitingForecast.preferences.v1`. The selected model defaults to `openai/gpt-4.1-mini`; the current catalog is fetched from `GET /api/v1/models`, grouped by provider, and cached as one re-creatable IndexedDB record. Catalog failure exposes a manual model-ID fallback.
+- Generated briefs, research, and up to 20 Q&A records are attached to the analysis they describe. They inherit the analysis store's 90-day / 60-record retention. Current online research records include a six-hour freshness timestamp and require an explicit refresh.
+- Diagnostics include model, request type, duration, status, web-tool state, and returned usage/cost. API keys and authorization headers are redacted and never logged.
+- The UI labels all output as AI interpretation of deterministic data and shows deterministic opportunity separately from supporting/neutral/conflicting/insufficient online evidence.
+
+OpenRouter's server-tool APIs are currently beta and may change. Relevant primary documentation: [models schema](https://openrouter.ai/docs/guides/overview/models), [server tools](https://openrouter.ai/docs/guides/features/server-tools/overview), [web search](https://openrouter.ai/docs/guides/features/server-tools/web-search), [web fetch](https://openrouter.ai/docs/guides/features/server-tools/web-fetch), and [usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting).
