@@ -173,11 +173,11 @@ test('full autonomous pipeline: geography → QA → guide ready', async ({ page
   await expect(page.locator('#pvGuideHead')).toContainText('Nashville Wildlife Road Cruises');
   await expect(page.locator('.stage[data-stage="geography"] .stage-status-label')).toHaveText('Complete');
   await expect(page.locator('.stage[data-stage="candidateTriage"] .stage-sub')).toContainText('3 rejected');
-  await expect(page.locator('#pvActive')).toContainText('Test route for Old River Bottoms Loop');
+  await expect(page.locator('#pvActiveHead')).toContainText('Test route for Old River Bottoms Loop');
 
   await page.locator('#pvRouteList .route').first().click();
-  await expect(page.locator('#pvActive')).toContainText('Access verified');
-  await expect(page.locator('#pvActive')).toContainText('Score rationale');
+  await expect(page.locator('#pvActiveHead')).toContainText('Access verified');
+  await expect(page.locator('#pvActiveBody')).toContainText('Score rationale');
   await expect(page.locator('.tier.t-documented').first()).toBeVisible();
 
   expect(pageErrors).toEqual([]);

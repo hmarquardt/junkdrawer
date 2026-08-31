@@ -146,9 +146,126 @@ test('active route panel shows full field guide with access and research', async
   await page.locator('#jsonEditor').fill(JSON.stringify(SAMPLE_PACKAGE, null, 2));
   await page.click('#btnApplyJson');
   await page.locator('#pvRouteList .route').first().click();
-  await expect(page.locator('#pvActive')).toContainText('Why this road is interesting');
-  await expect(page.locator('#pvActive')).toContainText('Access probable');
-  await expect(page.locator('#pvActive')).toContainText('Sources for this route');
+  await expect(page.locator('#pvActiveHead')).toContainText('Test Bottoms Loop');
+  await expect(page.locator('#pvActiveHead')).toContainText('Access probable');
+  await expect(page.locator('#pvActiveBody')).toContainText('Why this road is interesting');
+  await expect(page.locator('#pvActiveBody')).toContainText('Sources for this route');
+});
+
+test('desktop: opportunities begin directly under the map, independent of active route height', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await page.click('#tabbtn-data');
+  await page.locator('#jsonEditor').fill(JSON.stringify(SAMPLE_PACKAGE, null, 2));
+  await page.click('#btnApplyJson');
+  const colCount = await page.evaluate(() =>
+    getComputedStyle(document.querySelector('.guide-layout')).gridTemplateColumns.split(' ').length);
+  expect(colCount).toBe(2);
+  const structure = await page.evaluate(() => ({
+    map: !!document.querySelector('.guide-left > .map-card'),
+    opps: !!document.querySelector('.guide-left > .opportunities'),
+    layoutChildren: document.querySelector('.guide-layout').children.length
+  }));
+  expect(structure.map).toBe(true);
+  expect(structure.opps).toBe(true);
+  expect(structure.layoutChildren).toBe(2);
+  const mapBox = await page.locator('#pvMap').boundingBox();
+  const oppBox = await page.locator('.guide-left > .opportunities').boundingBox();
+  const panelBox = await page.locator('#pvActivePanel').boundingBox();
+  const delta = oppBox.y - (mapBox.y + mapBox.height);
+  expect(delta).toBeGreaterThanOrEqual(-2);
+  expect(delta).toBeLessThan(120);
+  expect(panelBox.x).toBeGreaterThan(mapBox.x + mapBox.width - 10);
+  const oppYBefore = oppBox.y;
+  await page.click('#pvExpandAll');
+  const oppYAfter = (await page.locator('.guide-left > .opportunities').boundingBox()).y;
+  expect(Math.abs(oppYAfter - oppYBefore)).toBeLessThan(2);
+});
+
+test('active route sections use the documented disclosure defaults', async ({ page }) => {
+  await page.click('#tabbtn-data');
+  await page.locator('#jsonEditor').fill(JSON.stringify(SAMPLE_PACKAGE, null, 2));
+  await page.click('#btnApplyJson');
+  const state = await page.evaluate(() => {
+    const q = sel => { const d = document.querySelector(`#pvActiveBody details[data-section="${sel}"]`); return d ? d.open : null; };
+    const cat = sel => { const d = document.querySelector(`#pvActiveBody .w-cat[data-cat="${sel}"]`); return d ? d.open : null; };
+    return {
+      why: q('why'), wildlife: q('wildlife'), best: q('best'), cues: q('cues'),
+      seasons: q('seasons'), wildcards: q('wildcards'), access: q('access'), research: q('research'),
+      birds: cat('birds'), mammals: cat('mammals'), herps: cat('herps'), other: cat('other'),
+      wildlifeSummary: document.querySelector('#pvActiveBody details[data-section="wildlife"] summary').textContent.replace(/\s+/g, ' ').trim(),
+      catCount: document.querySelectorAll('#pvActiveBody .w-cat').length
+    };
+  });
+  expect(state.why).toBe(true);
+  expect(state.wildlife).toBe(true);
+  expect(state.best).toBe(true);
+  expect(state.cues).toBe(false);
+  expect(state.seasons).toBe(false);
+  expect(state.wildcards).toBe(false);
+  expect(state.access).toBe(true);
+  expect(state.research).toBe(false);
+  expect(state.birds).toBe(true);
+  expect(state.mammals).toBe(false);
+  expect(state.herps).toBe(false);
+  expect(state.other).toBe(null);
+  expect(state.catCount).toBe(3);
+  expect(state.wildlifeSummary).toContain('Wildlife');
+  expect(state.wildlifeSummary).toContain('1 birds');
+  expect(state.wildlifeSummary).toContain('1 mammals');
+  expect(state.wildlifeSummary).toContain('1 herps');
+  expect(state.wildlifeSummary).not.toContain('other');
+});
+
+test('expand all / collapse all affect only active route sections', async ({ page }) => {
+  await page.click('#tabbtn-data');
+  await page.locator('#jsonEditor').fill(JSON.stringify(SAMPLE_PACKAGE, null, 2));
+  await page.click('#btnApplyJson');
+  await page.click('#pvExpandAll');
+  let openStates = await page.evaluate(() => [...document.querySelectorAll('#pvActiveBody details')].map(d => d.open));
+  expect(openStates.length).toBeGreaterThanOrEqual(6);
+  expect(openStates.every(Boolean)).toBe(true);
+  await page.click('#pvCollapseAll');
+  openStates = await page.evaluate(() => [...document.querySelectorAll('#pvActiveBody details')].map(d => d.open));
+  expect(openStates.every(x => !x)).toBe(true);
+  await expect(page.locator('#pvActiveHead .detail-title')).toBeVisible();
+  await page.click('#tabbtn-investigate');
+  const stageStillPending = await page.evaluate(() =>
+    document.querySelector('.stage[data-stage="geography"]').classList.contains('st-pending'));
+  expect(stageStillPending).toBe(true);
+});
+
+test('selecting another route resets disclosure defaults', async ({ page }) => {
+  await page.click('#tabbtn-data');
+  await page.locator('#jsonEditor').fill(JSON.stringify(SAMPLE_PACKAGE, null, 2));
+  await page.click('#btnApplyJson');
+  await page.click('#pvExpandAll');
+  await page.locator('#pvRouteList .route').nth(1).click();
+  const after = await page.evaluate(() => {
+    const q = sel => { const d = document.querySelector(`#pvActiveBody details[data-section="${sel}"]`); return d ? d.open : null; };
+    return { why: q('why'), research: q('research'), access: q('access'), name: document.querySelector('#pvActiveHead .detail-title').textContent.trim() };
+  });
+  expect(after.name).toContain('Exploratory Slough');
+  expect(after.why).toBe(true);
+  expect(after.access).toBe(true);
+  expect(after.research).toBe(false);
+});
+
+test('mobile: map, active route, then opportunities; no overflow at 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.click('#tabbtn-data');
+  await page.locator('#jsonEditor').fill(JSON.stringify(SAMPLE_PACKAGE, null, 2));
+  await page.click('#btnApplyJson');
+  const tops = await page.evaluate(() => ({
+    map: document.querySelector('#pvMap').getBoundingClientRect().top,
+    panel: document.querySelector('#pvActivePanel').getBoundingClientRect().top,
+    opps: document.querySelector('.guide-left > .opportunities').getBoundingClientRect().top
+  }));
+  expect(tops.map).toBeLessThan(tops.panel);
+  expect(tops.panel).toBeLessThan(tops.opps);
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.waitForTimeout(250);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 });
 
 test('export downloads JSON that re-imports', async ({ page }) => {
