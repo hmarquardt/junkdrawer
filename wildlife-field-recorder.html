@@ -448,6 +448,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
       <button id="build-trips" class="btn">Build/name trips</button>
       <button id="submit-ready" class="btn btn-primary">Submit ready with trips</button>
       <button id="retry-failed" class="btn">Retry failed</button>
+      <button id="backfill-weather" class="btn">Backfill missing weather</button>
     </div>
   </div>
   <div class="card">
@@ -708,9 +709,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.29.10" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.29.10" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.29.10
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.30.11" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.30.11" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.08.30.11
 </footer>
 </div>
 
@@ -718,7 +719,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.08.29.10';
+const APP_VERSION = '2026.08.30.11';
 
 /* ========================
    DB (Dexie)
@@ -1361,9 +1362,19 @@ function weatherCodeLabel(code) {
   };
   return labels[code] || 'weather';
 }
+function weatherPendingStatusText(o) {
+  const s = o && o.weatherStatus;
+  if (s === 'deferred') return 'Weather deferred';
+  if (s === 'pending' || s === 'running') return 'Weather pending';
+  return null;
+}
 function observationWeather(o) {
   const current = o && o.weatherRaw && o.weatherRaw.current ? o.weatherRaw.current : null;
-  if (!current) return o && o.weatherStatus ? o.weatherStatus : 'weather n/a';
+  if (!current) {
+    const pending = weatherPendingStatusText(o);
+    if (pending) return pending;
+    return o && o.weatherStatus ? o.weatherStatus : 'weather n/a';
+  }
   const parts = [];
   if (current.weather_code != null) parts.push(weatherCodeLabel(current.weather_code));
   if (current.temperature_2m != null) parts.push(Math.round(current.temperature_2m) + '°F');
@@ -1374,7 +1385,11 @@ function observationWeather(o) {
 }
 function shortWeather(o) {
   const current = o && o.weatherRaw && o.weatherRaw.current ? o.weatherRaw.current : null;
-  if (!current) return o && o.weatherStatus ? o.weatherStatus : 'n/a';
+  if (!current) {
+    const pending = weatherPendingStatusText(o);
+    if (pending) return pending;
+    return o && o.weatherStatus ? o.weatherStatus : 'n/a';
+  }
   const condition = current.weather_code != null ? weatherCodeLabel(current.weather_code) : 'weather';
   const temp = current.temperature_2m != null ? Math.round(current.temperature_2m) + '°F' : null;
   return [condition, temp].filter(Boolean).join(', ');
@@ -1650,7 +1665,13 @@ function updateNetChip() {
   if (navigator.onLine) { chip.textContent = 'Online'; chip.className = 'status-chip ok'; }
   else { chip.textContent = 'Offline'; chip.className = 'status-chip off'; }
 }
-window.addEventListener('online', () => { updateNetChip(); logInfo('Network online'); });
+window.addEventListener('online', () => {
+  updateNetChip();
+  logInfo('Network online');
+  // Deferred capture-time weather is repaired opportunistically when
+  // connectivity returns. Bounded, serialized, local-enrichment only.
+  autoWeatherBackfillPass().catch(e => logWarn('Weather auto-backfill failed: ' + e.message));
+});
 window.addEventListener('offline', () => { updateNetChip(); logWarn('Network offline'); });
 updateNetChip();
 
@@ -1758,12 +1779,14 @@ async function startCapture(opts = {}) {
     session.gps = gps;
     if (session.gps.status === 'ok') {
       $('gps-chip').textContent = 'GPS ok'; $('gps-chip').className = 'status-chip ok';
-      const weather = navigator.onLine ? await fetchWeather(session.gps.latitude, session.gps.longitude) : { status: 'skipped' };
+      let weather;
+      if (!navigator.onLine) weather = { status: 'offline' };
+      else weather = await fetchWeather(session.gps.latitude, session.gps.longitude);
       if (activeCapture && activeCapture.id === session.id) session.weather = weather;
     } else {
       $('gps-chip').textContent = session.gps.status === 'unsupported' ? 'GPS n/a' : 'GPS err';
       $('gps-chip').className = 'status-chip warn';
-      session.weather = { status: 'skipped' };
+      session.weather = { status: 'unavailable', reason: 'missing_gps' };
     }
   });
 
@@ -1807,6 +1830,45 @@ function resetCaptureBtn() {
   $('capture-discard-wrap').style.display = 'none';
 }
 
+/** Capture-time weather outcome for a voice observation. Offline or transient
+ *  live-weather failure stays RECOVERABLE ("deferred") so historical backfill
+ *  can repair it later; only missing GPS/time is terminal. */
+function voiceWeatherRecord(session) {
+  const w = session && session.weather ? session.weather : null;
+  const gpsOk = !!(session && session.gps && session.gps.status === 'ok');
+  if (gpsOk && w && w.status === 'ok') {
+    return {
+      weatherStatus: 'ok',
+      weatherApiUrl: w.apiUrl,
+      weatherFetchedAt: w.fetchedAt,
+      weatherRaw: w.raw,
+      weatherDeferredReason: null,
+      weatherProvenance: { mode: 'capture_live', provider: 'open-meteo', capturedAt: Date.now() }
+    };
+  }
+  const base = { weatherApiUrl: null, weatherFetchedAt: null, weatherRaw: null, weatherProvenance: null };
+  if (!gpsOk) return Object.assign(base, { weatherStatus: 'missing-location', weatherDeferredReason: null });
+  if (w && w.status === 'error') return Object.assign(base, { weatherStatus: 'deferred', weatherDeferredReason: 'capture_fetch_failed' });
+  // Offline (or otherwise skipped) at capture time with usable GPS: repairable.
+  return Object.assign(base, { weatherStatus: 'deferred', weatherDeferredReason: 'offline_at_capture' });
+}
+
+/** Immutable time context for later historical-weather lookup, recorded at
+ *  capture time from the capturing device's own clock and zone (never the
+ *  future processing device's zone). */
+function weatherTimeProvenanceFromCapture(session) {
+  const ms = session && isFinite(session.startedAt) ? session.startedAt : Date.now();
+  const utcOffsetSeconds = -new Date(ms).getTimezoneOffset() * 60;
+  return {
+    source: 'capture_clock',
+    utcIso: new Date(ms).toISOString(),
+    wallIso: new Date(ms + utcOffsetSeconds * 1000).toISOString().slice(0, 19),
+    timezone: deviceTimezoneName(),
+    utcOffsetSeconds,
+    capturedAt: Date.now()
+  };
+}
+
 async function onCaptureStop(sessionId) {
   const session = activeCapture;
   // MediaRecorder shutdown is asynchronous; this guard makes saving exactly-once per capture token.
@@ -1837,6 +1899,7 @@ async function onCaptureStop(sessionId) {
   const blob = session.chunks.length ? new Blob(session.chunks, { type: mime }) : null;
   const audioLooksPlausible = !blob || blob.size >= 44;
   const localId = uuid();
+  const weatherRecord = voiceWeatherRecord(session);
   const audioBlobId = blob && blob.size > 0 ? ('audio-' + localId) : null;
   if (blob && audioBlobId) {
     try { await db.audioBlobs.put({ blobId: audioBlobId, blob, mimeType: mime, sizeBytes: blob.size, createdAt: Date.now() }); }
@@ -1860,10 +1923,13 @@ async function onCaptureStop(sessionId) {
     speed: session.gps && session.gps.status === 'ok' ? session.gps.speed : null,
     gpsStatus: session.gps ? session.gps.status : 'unknown',
     gpsError: session.gps && session.gps.error ? session.gps.error : null,
-    weatherStatus: session.weather ? session.weather.status : 'unknown',
-    weatherApiUrl: session.weather ? session.weather.apiUrl : null,
-    weatherFetchedAt: session.weather ? session.weather.fetchedAt : null,
-    weatherRaw: session.weather ? session.weather.raw : null,
+    weatherStatus: (weatherRecord.weatherStatus),
+    weatherApiUrl: weatherRecord.weatherApiUrl,
+    weatherFetchedAt: weatherRecord.weatherFetchedAt,
+    weatherRaw: weatherRecord.weatherRaw,
+    weatherDeferredReason: weatherRecord.weatherDeferredReason,
+    weatherProvenance: weatherRecord.weatherProvenance,
+    weatherTimeProvenance: weatherTimeProvenanceFromCapture(session),
     audioBlobId,
     audioMimeType: mime,
     audioSizeBytes: blob ? blob.size : 0,
@@ -1990,7 +2056,20 @@ async function loadProcess() {
     else if (o.transcriptionStatus === 'done') buckets.transcribed++;
     else buckets.local++;
   }
-  $('process-buckets').innerHTML = Object.entries(buckets).map(([k,v]) => `<span class="chip">${k}: ${v}</span>`).join(' ');
+  const weatherBuckets = weatherBucketCounts(all);
+  $('process-buckets').innerHTML = Object.entries(buckets).map(([k,v]) => `<span class="chip">${k}: ${v}</span>`).join(' ') +
+    '<div id="process-weather" style="margin-top:4px;">Weather: ' +
+    Object.entries(weatherBuckets).map(([k,v]) => `${k}: ${v}`).join(' · ') + '</div>';
+}
+
+function weatherBucketCounts(observations) {
+  const counts = { complete: 0, deferred: 0, unavailable: 0 };
+  for (const o of observations) {
+    if (o.weatherRaw && o.weatherRaw.current) counts.complete++;
+    else if (['deferred', 'pending', 'running'].includes(o.weatherStatus)) counts.deferred++;
+    else counts.unavailable++;
+  }
+  return counts;
 }
 
 function needsProcessing(obs) {
@@ -2074,6 +2153,22 @@ $('retry-failed').addEventListener('click', async () => {
   loadProcess(); updateQueueChip();
   $('process-log').textContent = `${failed.length} failed record(s) marked ready.`;
 });
+$('backfill-weather').addEventListener('click', async () => {
+  if (!navigator.onLine) {
+    $('process-log').textContent = 'Internet connection required to retrieve historical weather.';
+    return;
+  }
+  $('process-log').textContent = 'Backfilling missing weather...';
+  const result = await runManualWeatherBackfill();
+  if (result.status === 'offline') { $('process-log').textContent = 'Internet connection required to retrieve historical weather.'; return; }
+  loadProcess();
+  $('process-log').textContent =
+    `Weather backfill complete — ${result.eligible} eligible, ${result.updated} updated, ` +
+    `${result.alreadyComplete} already complete, ${result.unavailable} unavailable, ${result.failed} failed` +
+    (result.patched || result.patchFailed ? `, ${result.patched} backend updated` : '') +
+    (result.patchFailed ? `, ${result.patchFailed} backend sync failed (retry later)` : '') + '.';
+});
+
 $('dry-run-btn').addEventListener('click', async () => {
   const ready = await db.observations.where('submitStatus').equals('ready').toArray();
   const out = ready.map(o => ({ localId: o.localId, category: o.category, subject: o.subjectCommonName, trip: o.tripLocalId, backendId: o.backendObservationId }));
@@ -2084,6 +2179,10 @@ $('dry-run-btn').addEventListener('click', async () => {
 
 async function processObservation(obs) {
   let statusMsg = '';
+  // Weather repair runs first during processing when online: a queued
+  // observation with recoverable weather is enriched before anything else.
+  try { await repairObservationWeatherBeforeSubmit(obs); }
+  catch (e) { logWarn('Process weather repair error: ' + e.message); }
   try {
     if (!obs.audioBlobId) {
       obs.transcriptionStatus = 'done';
@@ -3775,6 +3874,270 @@ async function runWeatherStage(localId) {
   });
 }
 
+/* ---- General weather backfill (any observation source) ----
+   Reuses enrichWeatherAt() — no parallel weather implementation. Observations
+   captured offline keep a recoverable "deferred" weather state and are later
+   enriched against their own original timestamp + coordinates. */
+const WEATHER_BACKFILL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // auto-backfill age window
+const WEATHER_BACKFILL_CONCURRENCY = 1; // serialized: be gentle with Open-Meteo
+let weatherBackfillRunning = false;
+
+const WEATHER_BACKFILL_RECOVERABLE_STATES = ['deferred', 'skipped', 'error', 'stale', 'unknown', 'legacy_missing'];
+
+/** Central eligibility predicate. Legacy/null weather states normalize lazily
+ *  here — no up-front migration rewrite of every observation is required. */
+function weatherBackfillEligibility(obs) {
+  if (!obs) return { eligible: false, reason: 'missing_observation', weatherStatus: null };
+  const status = obs.weatherStatus == null ? 'legacy_missing' : String(obs.weatherStatus);
+  const lat = obs.latitude, lng = obs.longitude;
+  if (typeof lat !== 'number' || !isFinite(lat) || lat < -90 || lat > 90 ||
+      typeof lng !== 'number' || !isFinite(lng) || lng < -180 || lng > 180) {
+    return { eligible: false, reason: 'missing_location', weatherStatus: status };
+  }
+  const hasCurrent = !!(obs.weatherRaw && obs.weatherRaw.current);
+  if (status === 'ok' && hasCurrent) return { eligible: false, reason: 'already_complete', weatherStatus: status };
+  if (!isFinite(obs.createdAt)) return { eligible: false, reason: 'missing_timestamp', weatherStatus: status };
+  if (status === 'ok' && !hasCurrent) return { eligible: true, reason: null, weatherStatus: status }; // inconsistent record
+  if (status === 'running' || status === 'pending') return { eligible: false, reason: 'in_progress', weatherStatus: status };
+  if (status === 'missing-location' || status === 'missing-timestamp') return { eligible: false, reason: status, weatherStatus: status };
+  if (!WEATHER_BACKFILL_RECOVERABLE_STATES.includes(status)) return { eligible: false, reason: 'not_recoverable_state', weatherStatus: status };
+  return { eligible: true, reason: null, weatherStatus: status };
+}
+
+/** Derive capture-time context for historical weather lookup.
+ *  Preference order: explicit weatherTimeProvenance → photo timeProvenance →
+ *  createdAt + stored offset → Open-Meteo location metadata. The CURRENT
+ *  PROCESSING DEVICE's timezone is never used as historical evidence: the
+ *  device may be in a different zone than the observation (travel, repair on
+ *  another device). If location metadata cannot establish the observation-
+ *  local offset, the observation stays deferred with an explicit reason. */
+async function captureTimeForWeatherBackfill(obs) {
+  const wtp = obs.weatherTimeProvenance || null;
+  const tp = obs.timeProvenance || {};
+  if (wtp && wtp.wallIso && isFinite(Date.parse(wtp.utcIso || ''))) {
+    return {
+      wallIso: wtp.wallIso,
+      utcOffsetSeconds: wtp.utcOffsetSeconds != null ? wtp.utcOffsetSeconds : null,
+      timezone: wtp.timezone || null,
+      timezoneConfidence: 'high',
+      source: 'weather_time_provenance'
+    };
+  }
+  if (tp.wallIso) {
+    return {
+      wallIso: tp.wallIso,
+      utcOffsetSeconds: tp.utcOffsetSeconds != null ? tp.utcOffsetSeconds : null,
+      timezone: tp.timezone || null,
+      timezoneConfidence: tp.timezoneConfidence || 'medium',
+      source: 'time_provenance'
+    };
+  }
+  if (!isFinite(obs.createdAt)) return null;
+  const storedOffset = typeof tp.utcOffsetSeconds === 'number' && isFinite(tp.utcOffsetSeconds) ? tp.utcOffsetSeconds :
+    (wtp && typeof wtp.utcOffsetSeconds === 'number' && isFinite(wtp.utcOffsetSeconds)) ? wtp.utcOffsetSeconds : null;
+  if (storedOffset != null) {
+    return {
+      wallIso: new Date(obs.createdAt + storedOffset * 1000).toISOString().slice(0, 19),
+      utcOffsetSeconds: storedOffset,
+      timezone: tp.timezone || (wtp && wtp.timezone) || null,
+      timezoneConfidence: 'medium',
+      source: 'stored_offset'
+    };
+  }
+  // No stored timezone evidence: derive the observation-local offset from
+  // location metadata (Open-Meteo timezone=auto at the observation
+  // coordinates). Never fall back to the processing device's local zone.
+  const resolved = await resolveWeatherTimezoneAtLocation(obs.latitude, obs.longitude, obs.createdAt);
+  if (!resolved) return { unresolved: 'timezone_unresolved' };
+  return {
+    wallIso: new Date(obs.createdAt + resolved.utcOffsetSeconds * 1000).toISOString().slice(0, 19),
+    utcOffsetSeconds: resolved.utcOffsetSeconds,
+    timezone: resolved.timezone,
+    timezoneConfidence: 'medium',
+    source: 'location_metadata'
+  };
+}
+
+/** Fetch the location's UTC offset from Open-Meteo (timezone=auto metadata)
+ *  for the observation date. Returns null when it cannot be established. */
+async function resolveWeatherTimezoneAtLocation(lat, lng, utcMs) {
+  try {
+    const dateKey = new Date(utcMs).toISOString().slice(0, 10);
+    const ageDays = (Date.now() - utcMs) / 86400000;
+    const kind = ageDays >= -1 && ageDays <= 7 ? 'recent' : 'archive';
+    const data = await fetchJson(weatherUrlFor(kind, lat, lng, dateKey));
+    const offsetSeconds = Number(data && data.utc_offset_seconds);
+    if (!isFinite(offsetSeconds)) return null;
+    return { utcOffsetSeconds: offsetSeconds, timezone: (data && data.timezone) || null };
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Backfill historical weather for one observation using enrichWeatherAt().
+ *  Never mutates createdAt/startedAt — weather is downstream enrichment only.
+ *  Does not overwrite good weather; transient failures return the record to a
+ *  retryable "deferred" state. */
+async function backfillObservationWeather(localId, options = {}) {
+  const obs = await db.observations.get(localId);
+  if (!obs) return { status: 'skipped', reason: 'not_found' };
+  const elig = weatherBackfillEligibility(obs);
+  if (!elig.eligible) {
+    if (elig.reason === 'already_complete') return { status: 'already_complete' };
+    if (elig.reason === 'missing_location' || elig.reason === 'missing_timestamp') return { status: 'unavailable', reason: elig.reason };
+    return { status: 'skipped', reason: elig.reason };
+  }
+  if (obs.weatherStatus === 'running') return { status: 'skipped', reason: 'already_running' };
+  const ct = await captureTimeForWeatherBackfill(obs);
+  if (!ct || !ct.wallIso) {
+    await mutateObservation(localId, o => {
+      if (ct && ct.unresolved) {
+        o.weatherStatus = 'deferred';
+        o.weatherDeferredReason = ct.unresolved;
+        o.weatherSubmitError = 'Observation-local timezone could not be established from stored provenance or location metadata';
+      } else {
+        o.weatherStatus = 'missing-timestamp';
+      }
+    });
+    return { status: ct && ct.unresolved ? 'deferred' : 'unavailable', reason: ct && ct.unresolved ? ct.unresolved : 'missing_timestamp' };
+  }
+  await mutateObservation(localId, o => { o.weatherStatus = 'pending'; });
+  const result = await enrichWeatherAt(obs.latitude, obs.longitude, ct);
+  if (result.status === 'ok') {
+    await mutateObservation(localId, o => {
+      o.weatherRaw = result;
+      o.weatherStatus = 'ok';
+      o.weatherApiUrl = result.apiUrl;
+      o.weatherFetchedAt = result.fetchedAt;
+      o.weatherSubmitError = null;
+      o.weatherDeferredReason = null;
+      o.weatherProvenance = {
+        mode: 'historical_backfill',
+        provider: 'open-meteo',
+        strategy: result.strategy,
+        sourceTimeLocal: result.sourceTimeLocal,
+        differenceMinutes: result.differenceMinutes,
+        confidence: result.confidence,
+        captureTimeSource: ct.source,
+        backfilledAt: Date.now()
+      };
+      // Photo observations: keep the enrichment stage bookkeeping consistent.
+      if (o.photoEnrichment && ['pending', 'error'].includes(o.photoEnrichment.weather)) {
+        o.photoEnrichment.weather = 'done';
+      }
+      const wtp = o.weatherTimeProvenance;
+      if (wtp && wtp.utcOffsetSeconds == null && ct.utcOffsetSeconds != null) {
+        wtp.utcOffsetSeconds = ct.utcOffsetSeconds;
+        wtp.timezone = wtp.timezone || ct.timezone;
+      }
+    });
+    return { status: 'ok', strategy: result.strategy, sourceTimeLocal: result.sourceTimeLocal };
+  }
+  if (result.status === 'unavailable') {
+    await mutateObservation(localId, o => {
+      o.weatherStatus = 'missing-timestamp';
+      o.weatherSubmitError = result.reason || null;
+    });
+    return { status: 'unavailable', reason: result.reason };
+  }
+  // Transient network/API error: remain retryable, never corrupt the record.
+  await mutateObservation(localId, o => {
+    o.weatherStatus = 'deferred';
+    o.weatherDeferredReason = 'backfill_failed';
+    o.weatherSubmitError = result.error || null;
+  });
+  return { status: 'error', error: result.error || 'Weather backfill failed' };
+}
+
+/** Pre-submit repair: while online, attempt historical weather enrichment for
+ *  recoverable weather BEFORE the backend submission. Weather failure is
+ *  logged but never blocks a submission that is otherwise ready. */
+async function repairObservationWeatherBeforeSubmit(obs) {
+  if (!navigator.onLine) return { status: 'offline' };
+  if (!weatherBackfillEligibility(obs).eligible) return { status: 'not_eligible' };
+  const result = await backfillObservationWeather(obs.localId);
+  if (result.status === 'ok') {
+    const fresh = await db.observations.get(obs.localId);
+    if (fresh) Object.assign(obs, fresh);
+    logInfo('Weather backfilled before submission ' + obs.localId);
+  } else {
+    logWarn('Weather backfill before submit failed (' + result.status + '): ' + (result.error || result.reason || 'n/a'));
+  }
+  return result;
+}
+
+/** Online-event auto-backfill: bounded background scan of RECENT local
+ *  observations with recoverable weather. Serialized (concurrency 1), guarded
+ *  against overlapping passes, local enrichment only — never PATCHes the
+ *  backend; older records are handled via explicit manual backfill. */
+async function autoWeatherBackfillPass() {
+  if (weatherBackfillRunning) return { status: 'already_running', updated: 0, scanned: 0 };
+  if (!navigator.onLine) return { status: 'offline', updated: 0, scanned: 0 };
+  weatherBackfillRunning = true;
+  try {
+    const cutoff = Date.now() - WEATHER_BACKFILL_WINDOW_MS;
+    const all = await db.observations.toArray();
+    const targets = all
+      .filter(o => isFinite(o.createdAt) && o.createdAt >= cutoff)
+      .filter(o => weatherBackfillEligibility(o).eligible)
+      // Local/unsubmitted observations first, then recently submitted ones.
+      .sort((a, b) => ((a.backendObservationId ? 1 : 0) - (b.backendObservationId ? 1 : 0)) || (a.createdAt - b.createdAt));
+    let updated = 0;
+    for (const target of targets) {
+      if (!navigator.onLine) break;
+      const result = await backfillObservationWeather(target.localId);
+      if (result.status === 'ok') updated++;
+    }
+    if (updated) {
+      loadProcess();
+      try { renderReview(); } catch (e) { /* review tab may not be rendered */ }
+    }
+    return { status: 'done', updated, scanned: targets.length };
+  } finally {
+    weatherBackfillRunning = false;
+  }
+}
+
+/** Manual "Backfill Missing Weather": scans ALL local observations regardless
+ *  of age. After successful local enrichment, already-submitted observations
+ *  are PATCHed through the existing updateBackendObservation() path (no POST,
+ *  no duplicates). Backend PATCH failure keeps the good local weather and
+ *  records a retryable sync diagnostic. */
+async function runManualWeatherBackfill() {
+  if (!navigator.onLine) return { status: 'offline' };
+  const all = await db.observations.toArray();
+  const candidates = all.filter(o => {
+    const e = weatherBackfillEligibility(o);
+    return e.eligible || e.reason === 'already_complete';
+  });
+  const eligible = candidates.filter(o => weatherBackfillEligibility(o).eligible);
+  let updated = 0, alreadyComplete = 0, unavailable = 0, failed = 0, patched = 0, patchFailed = 0;
+  for (const target of candidates) {
+    if (!weatherBackfillEligibility(target).eligible) { alreadyComplete++; continue; }
+    const result = await backfillObservationWeather(target.localId);
+    if (result.status === 'ok') {
+      updated++;
+      const fresh = await db.observations.get(target.localId);
+      if (fresh && fresh.backendObservationId) {
+        try {
+          // Narrow weather-only sync: no photo uploads, no submit-state changes.
+          await updateBackendObservation(fresh, { weatherSync: true });
+          patched++;
+        } catch (e) {
+          patchFailed++;
+          await mutateObservation(target.localId, o => {
+            o.weatherBackendSyncStatus = 'pending';
+            o.weatherBackendSyncError = e.message;
+          });
+        }
+      }
+    } else if (result.status === 'already_complete') alreadyComplete++;
+    else if (result.status === 'unavailable') unavailable++;
+    else failed++;
+  }
+  return { status: 'done', eligible: eligible.length, updated, alreadyComplete, unavailable, failed, patched, patchFailed };
+}
+
 async function runIdentificationStage(localId) {
   const obs = await db.observations.get(localId);
   if (!obs || !obs.photoEnrichment) return;
@@ -5042,6 +5405,7 @@ function renderReview() {
         <button class="btn btn-small" data-obs-play="${o.localId}">Play audio</button>
         <button class="btn btn-small" data-obs-add-photo="${o.localId}">Add photos</button>
         <button class="btn btn-small" data-obs-download="${o.localId}">Download audio</button>
+        ${weatherBackfillEligibility(o).eligible ? `<button class="btn btn-small" data-obs-retry-weather="${o.localId}">Retry weather</button>` : ''}
         <button class="btn btn-small btn-danger" data-obs-delete="${o.localId}">Delete</button>
       </div>
       <div class="photo-grid" id="photos-${o.localId}"></div>
@@ -5063,6 +5427,14 @@ document.addEventListener('click', async e => {
   if (dlBtn) { await downloadObsAudio(dlBtn.dataset.obsDownload); }
   const addPhotoBtn = e.target.closest('button[data-obs-add-photo]');
   if (addPhotoBtn) { openPhotoPicker(addPhotoBtn.dataset.obsAddPhoto); }
+  const retryWxBtn = e.target.closest('button[data-obs-retry-weather]');
+  if (retryWxBtn) {
+    if (!navigator.onLine) { logWarn('Internet connection required to retrieve historical weather.'); return; }
+    const result = await backfillObservationWeather(retryWxBtn.dataset.obsRetryWeather);
+    if (result.status === 'ok') logInfo('Weather backfilled ' + retryWxBtn.dataset.obsRetryWeather);
+    else logWarn('Weather retry failed (' + result.status + '): ' + (result.error || result.reason || ''));
+    renderReview();
+  }
   const delBtn = e.target.closest('button[data-obs-delete]');
   if (delBtn) {
     const obs = await db.observations.get(delBtn.dataset.obsDelete);
@@ -5398,6 +5770,10 @@ async function exportGPX(tripId) {
 async function submitObservation(obs) {
   if (!settings.token) { const err = new Error('No backend token'); logWarn(err.message); throw err; }
   if (!settings.apiBase) { const err = new Error('No API base'); logWarn(err.message); throw err; }
+  // Repair recoverable weather BEFORE submitting while online; a backfill
+  // failure must not block an otherwise-ready submission.
+  try { await repairObservationWeatherBeforeSubmit(obs); }
+  catch (e) { logWarn('Pre-submit weather repair error: ' + e.message); }
   // Avoid duplicates
   if (obs.backendObservationId) {
     // Update instead
@@ -5480,8 +5856,13 @@ async function submitObservation(obs) {
   }
 }
 
-async function updateBackendObservation(obs) {
+async function updateBackendObservation(obs, options = {}) {
   if (!obs.backendObservationId) return;
+  // weatherSync mode: a narrowly scoped update used by manual weather
+  // backfill. It PATCHes ONLY the existing backend observation — no pending
+  // photo uploads, no submit-status promotion/demotion, no unrelated
+  // processing. Payload schema is unchanged.
+  const weatherSync = !!options.weatherSync;
   const payload = {
     localId: obs.localId,
     tripLocalId: obs.tripLocalId,
@@ -5520,15 +5901,33 @@ async function updateBackendObservation(obs) {
     const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}`;
     const r = await fetch(url, { method: 'PATCH', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload }) });
     if (!r.ok) throw await httpError(r);
-    const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
-    for (const ph of photos) { if (ph.uploadStatus !== 'uploaded') await uploadPhoto(ph); }
-    obs.submitStatus = 'submitted';
-    obs.submitError = null;
+    if (!weatherSync) {
+      const photos = await db.photos.where('observationLocalId').equals(obs.localId).toArray();
+      for (const ph of photos) { if (ph.uploadStatus !== 'uploaded') await uploadPhoto(ph); }
+      obs.submitStatus = 'submitted';
+      obs.submitError = null;
+    }
+    obs.submitError = weatherSync ? obs.submitError : null;
+    if (weatherSync) {
+      obs.weatherBackendSyncStatus = 'synced';
+      obs.weatherBackendSyncError = null;
+    }
     obs.updatedAt = Date.now();
     await db.observations.put(obs);
-    logInfo('Observation updated ' + obs.localId);
+    logInfo(weatherSync ? 'Weather synced to backend ' + obs.localId : 'Observation updated ' + obs.localId);
     loadProcess(); updateQueueChip();
   } catch(e) {
+    if (weatherSync) {
+      // Already-submitted observations must never be demoted by a weather
+      // sync failure; record only the weather synchronization diagnostic.
+      obs.weatherBackendSyncStatus = 'pending';
+      obs.weatherBackendSyncError = e.message;
+      obs.updatedAt = Date.now();
+      await db.observations.put(obs);
+      logError('Weather sync failed ' + obs.localId + ': ' + e.message);
+      loadProcess(); updateQueueChip();
+      throw e;
+    }
     obs.submitStatus = 'failed';
     obs.submitError = e.message;
     await db.observations.put(obs);
@@ -7089,6 +7488,9 @@ window.__WFR_TEST__ = {
   BREADCRUMB_STATIONARY_RADIUS_METERS, BREADCRUMB_STATIONARY_MIN_POINTS,
   BREADCRUMB_HIGH_CONFIDENCE_MAX_GAP_MS,
   enrichWeatherAt, classifyPhotoObservation, normalizeTaxonomy, resizeImageFile, sha256Hex,
+  weatherBackfillEligibility, captureTimeForWeatherBackfill, backfillObservationWeather,
+  autoWeatherBackfillPass, runManualWeatherBackfill, voiceWeatherRecord,
+  WEATHER_BACKFILL_WINDOW_MS,
   measureSubjectGeometry, runSubjectGeometryStage, normalizeCaptureGeometry, fieldOfViewRadians,
   opticalFocalLengthRange, subjectAngularSeparationRadians, subjectDistanceFromAngularSize,
   subjectBearingFromFrame, destinationPointDegrees, estimateSubjectRange, validateSubjectMeasurementResponse,

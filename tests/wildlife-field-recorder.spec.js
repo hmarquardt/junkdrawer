@@ -1178,7 +1178,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.29.10');
+    expect(post.body.data.appVersion).toBe('2026.08.30.11');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -1811,7 +1811,7 @@ test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing s
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe('~openai/gpt-latest');
   const prompt = calls[0].messages.map(m => m.content).join('\n');
-  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.29.10');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.30.11');
   expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
   expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
   expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);
@@ -2141,7 +2141,7 @@ test('OUTING-AB/AC: Safari remains fallback while EXIF still bypasses every prov
   expect(result.noTrack.reason).toContain('Safari breadcrumb source is not configured'); expect(result.obs.latitude).toBe(1); expect(result.obs.photoEnrichment.location).toBe('pending');
 });
 
-/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.29.10) ---------- */
+/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.30.11) ---------- */
 
 const INDIANA_OUTING = {
   format: 'wfr-outing-track', version: 1,
@@ -2854,5 +2854,571 @@ test('GEO-ACTIVE-OUTING: photo resolves against a still-active outing without st
   });
   expect(outing.active).toBe(true);
   expect(outing.status).toBe('active');
+  expect(errors).toEqual([]);
+});
+
+/* ========================================================
+   Weather lifecycle: offline voice capture, deferred state,
+   historical backfill, pre-submit repair, backend PATCH
+   (2026.08.30.11)
+   ======================================================== */
+
+const WX_OFFSET = -14400; // America/Indiana/Indianapolis
+
+function wxWallIso(utcMs, offsetSeconds = WX_OFFSET) {
+  return new Date(utcMs + offsetSeconds * 1000).toISOString().slice(0, 19);
+}
+
+function wxTimeProvenance(ageMs, wallOverride) {
+  const utcMs = Date.now() - ageMs;
+  return {
+    source: 'capture_clock',
+    utcIso: new Date(utcMs).toISOString(),
+    wallIso: wallOverride || wxWallIso(utcMs),
+    timezone: 'America/Indiana/Indianapolis',
+    utcOffsetSeconds: WX_OFFSET,
+    capturedAt: Date.now()
+  };
+}
+
+function wxSeedObs(overrides = {}) {
+  const ageMs = overrides.__ageMs != null ? overrides.__ageMs : 3600000;
+  delete overrides.__ageMs;
+  const wtp = wxTimeProvenance(ageMs);
+  return Object.assign({
+    localId: 'wx-voice',
+    createdAt: Date.parse(wtp.utcIso),
+    startedAt: Date.parse(wtp.utcIso) - 5000,
+    stoppedAt: Date.parse(wtp.utcIso),
+    durationSeconds: 5,
+    latitude: 38.355,
+    longitude: -87.5381,
+    accuracyMeters: 12,
+    altitude: null, heading: null, speed: null, gpsStatus: 'ok',
+    weatherStatus: 'deferred',
+    weatherDeferredReason: 'offline_at_capture',
+    weatherApiUrl: null, weatherFetchedAt: null, weatherRaw: null,
+    weatherProvenance: null,
+    weatherTimeProvenance: wtp,
+    audioBlobId: null, audioMimeType: null, audioSizeBytes: 0,
+    userNoteText: 'cardinal by the fence',
+    transcriptionStatus: 'not_applicable', transcript: null,
+    classificationStatus: 'done', subjectCommonName: 'Northern Cardinal',
+    subjectScientificName: 'Cardinalis cardinalis', subjectConfidence: 0.8,
+    category: 'bird', categoryConfidence: 0.8, tags: [],
+    behavior: null, habitat: null, count: 1, summary: '', llmRaw: '',
+    tripLocalId: null, backendObservationId: null,
+    backendFileIds: [], photoFileIds: [], photoLocalIds: [],
+    submitStatus: 'local', submitError: null,
+    updatedAt: Date.now()
+  }, overrides);
+}
+
+async function seedWxObs(page, overrides) {
+  return page.evaluate(async seed => {
+    const T = window.__WFR_TEST__;
+    await T.db.observations.put(seed);
+    return true;
+  }, wxSeedObs(overrides || {}));
+}
+
+async function getWxObs(page, localId = 'wx-voice') {
+  return page.evaluate(async id => {
+    const T = window.__WFR_TEST__;
+    return T.db.observations.get(id);
+  }, localId);
+}
+
+/* ---------- WB-A: offline voice capture ---------- */
+
+test('WB-A: voice capture while offline defers weather without blocking the observation', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await page.addInitScript(() => {
+    navigator.geolocation.getCurrentPosition = cb => cb({ coords: { latitude: 38.355, longitude: -87.5381, accuracy: 9 } });
+    const stream = { getTracks: () => [{ stop() {} }] };
+    navigator.mediaDevices.getUserMedia = async () => stream;
+    window.MediaRecorder = class {
+      constructor() { this.state = 'recording'; }
+      start() {}
+      stop() { this.state = 'inactive'; setTimeout(() => this.onstop && this.onstop(), 10); }
+      static isTypeSupported() { return true; }
+    };
+  });
+  await openCaptureTab(page);
+  await page.context().setOffline(true);
+  await page.click('#capture-btn');
+  await page.waitForTimeout(600); // recording starts; context promise resolves offline
+  await page.click('#capture-btn'); // stop recording → finalize
+  await dbWait(page, o => o.weatherStatus === 'deferred');
+
+  const obs = await getObs(page);
+  expect(obs.weatherStatus).toBe('deferred');
+  expect(obs.weatherDeferredReason).toBe('offline_at_capture');
+  expect(obs.weatherRaw).toBeNull();
+  expect(obs.latitude).toBeCloseTo(38.355);
+  expect(obs.submitStatus).toBe('local');
+  const wtp = obs.weatherTimeProvenance;
+  expect(wtp.source).toBe('capture_clock');
+  expect(wtp.utcIso).toBe(new Date(obs.startedAt).toISOString());
+  expect(wtp.utcOffsetSeconds).toBe(-new Date(obs.startedAt).getTimezoneOffset() * 60);
+  expect(wtp.wallIso).toBeTruthy();
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-B: later historical backfill ---------- */
+
+test('WB-B: backfillObservationWeather enriches a deferred voice observation in place', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+  await seedWxObs(page, {
+    weatherTimeProvenance: {
+      source: 'capture_clock',
+      utcIso: '2026-05-14T21:17:42.381Z',
+      wallIso: '2026-05-14T17:17:42',
+      timezone: 'America/Indiana/Indianapolis',
+      utcOffsetSeconds: WX_OFFSET,
+      capturedAt: Date.now()
+    },
+    createdAt: Date.parse('2026-05-14T21:17:42.381Z'),
+    startedAt: Date.parse('2026-05-14T21:17:42.381Z') - 5000,
+    stoppedAt: Date.parse('2026-05-14T21:17:42.381Z')
+  });
+
+  const before = await getWxObs(page);
+  const result = await page.evaluate(async () => window.__WFR_TEST__.backfillObservationWeather('wx-voice'));
+  expect(result.status).toBe('ok');
+
+  const obs = await getWxObs(page);
+  expect(obs.weatherStatus).toBe('ok');
+  expect(obs.weatherRaw.current).toBeTruthy();
+  expect(obs.weatherRaw.current.temperature_2m).toBeCloseTo(70 + 17 * 0.1, 5); // nearest hour 17:00
+  expect(obs.weatherRaw.sourceTimeLocal).toBe('2026-05-14T17:00');
+  expect(obs.weatherFetchedAt).toBeGreaterThan(0);
+  expect(obs.weatherApiUrl).toContain('start_date=');
+  expect(obs.weatherProvenance.mode).toBe('historical_backfill');
+  expect(obs.weatherProvenance.provider).toBe('open-meteo');
+  expect(obs.weatherProvenance.strategy).toBeTruthy();
+  expect(obs.weatherProvenance.sourceTimeLocal).toBe('2026-05-14T17:00');
+  expect(obs.weatherProvenance.backfilledAt).toBeGreaterThan(0);
+  expect(obs.weatherDeferredReason).toBeNull();
+  // Observation time must never be mutated by weather backfill.
+  expect(obs.createdAt).toBe(before.createdAt);
+  expect(obs.startedAt).toBe(before.startedAt);
+  expect(meteo.calls.length).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-C: pre-submit repair ---------- */
+
+test('WB-C: submit repairs deferred weather first, then submits the enriched observation', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+  await seedWxObs(page, { submitStatus: 'ready' });
+
+  const submissions = [];
+  await page.route('**/wildlife-field-recorder/observations', async route => {
+    submissions.push({ method: route.request().method(), body: route.request().postDataJSON() });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'be-wx-1' }) });
+  });
+
+  await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.token = 'test-token';
+    const obs = await T.db.observations.get('wx-voice');
+    await T.submitObservation(obs);
+  });
+
+  expect(meteo.calls.length).toBeGreaterThanOrEqual(1); // weather fetched BEFORE submit
+  expect(submissions.length).toBe(1);
+  expect(submissions[0].method).toBe('POST');
+  expect(submissions[0].body.data.weatherStatus).toBe('ok');
+  expect(submissions[0].body.data.weatherRaw.current).toBeTruthy();
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-D: manual backfill PATCHes an already-submitted observation ---------- */
+
+test('WB-D: manual backfill PATCHes the existing backend observation, never POSTs a duplicate', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+  await seedWxObs(page, { backendObservationId: 'wx-be-77', submitStatus: 'submitted' });
+
+  const backend = [];
+  await page.route('**/wildlife-field-recorder/observations', async route => {
+    backend.push({ method: route.request().method(), url: route.request().url() });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'new-dup' }) });
+  });
+  await page.route('**/observations/wx-be-77', async route => {
+    backend.push({ method: route.request().method(), url: route.request().url() });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'wx-be-77' }) });
+  });
+
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.token = 'test-token';
+    return T.runManualWeatherBackfill();
+  });
+
+  expect(result.status).toBe('done');
+  expect(result.updated).toBe(1);
+  expect(result.patched).toBe(1);
+  expect(backend.length).toBe(1);
+  expect(backend[0].method).toBe('PATCH');
+  expect(backend[0].url).toContain('/observations/wx-be-77');
+  const obs = await getWxObs(page);
+  expect(obs.weatherStatus).toBe('ok');
+  expect(obs.weatherRaw.current).toBeTruthy();
+  expect(obs.weatherProvenance.mode).toBe('historical_backfill');
+  expect(obs.backendObservationId).toBe('wx-be-77');
+  expect(meteo.calls.length).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-E: PATCH failure keeps good local weather ---------- */
+
+test('WB-E: backend PATCH failure retains enriched local weather with a sync diagnostic', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockMeteo(page);
+  await openCaptureTab(page);
+  await seedWxObs(page, { backendObservationId: 'wx-be-88', submitStatus: 'submitted' });
+  await page.route('**/observations/wx-be-88', route => route.abort());
+
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.token = 'test-token';
+    return T.runManualWeatherBackfill();
+  });
+
+  expect(result.updated).toBe(1);
+  expect(result.patchFailed).toBe(1);
+  const obs = await getWxObs(page);
+  expect(obs.weatherStatus).toBe('ok'); // no rollback
+  expect(obs.submitStatus).toBe('submitted'); // never demoted by weather PATCH failure
+  expect(obs.backendObservationId).toBe('wx-be-88'); // backend id intact
+  expect(obs.weatherRaw.current).toBeTruthy();
+  expect(obs.weatherProvenance.mode).toBe('historical_backfill');
+  expect(obs.weatherBackendSyncStatus).toBe('pending');
+  expect(obs.weatherBackendSyncError).toBeTruthy();
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-F: good weather is never overwritten ---------- */
+
+test('WB-F: auto and manual backfill never touch observations with complete weather', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+  await seedWxObs(page, {
+    weatherStatus: 'ok',
+    weatherRaw: { current: { temperature_2m: 55, weather_code: 1 } },
+    weatherProvenance: { mode: 'capture_live', provider: 'open-meteo', capturedAt: 1 }
+  });
+
+  const auto = await page.evaluate(async () => window.__WFR_TEST__.autoWeatherBackfillPass());
+  const manual = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.token = 'test-token';
+    return T.runManualWeatherBackfill();
+  });
+
+  expect(auto.updated).toBe(0);
+  expect(manual.updated).toBe(0);
+  expect(manual.alreadyComplete).toBe(1);
+  expect(meteo.calls.length).toBe(0);
+  const obs = await getWxObs(page);
+  expect(obs.weatherRaw.current.temperature_2m).toBe(55);
+  expect(obs.weatherProvenance.mode).toBe('capture_live');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-G/H: ineligible observations + network failure ---------- */
+
+test('WB-G: missing GPS or missing time is ineligible and never calls Open-Meteo', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+
+  const res = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    const noGps = T.weatherBackfillEligibility({ latitude: null, longitude: null, createdAt: Date.now(), weatherStatus: 'deferred', weatherRaw: null });
+    const noTime = T.weatherBackfillEligibility({ latitude: 38.3, longitude: -87.5, createdAt: NaN, weatherStatus: 'deferred', weatherRaw: null });
+    const legacyNull = T.weatherBackfillEligibility({ latitude: 38.3, longitude: -87.5, createdAt: Date.now(), weatherStatus: null, weatherRaw: null });
+    const skippedLegacy = T.weatherBackfillEligibility({ latitude: 38.3, longitude: -87.5, createdAt: Date.now(), weatherStatus: 'skipped', weatherRaw: null });
+    await T.db.observations.put({
+      localId: 'wx-nogps', createdAt: Date.now(), startedAt: Date.now(),
+      latitude: null, longitude: null, gpsStatus: 'missing',
+      weatherStatus: 'deferred', weatherDeferredReason: 'offline_at_capture',
+      weatherApiUrl: null, weatherFetchedAt: null, weatherRaw: null,
+      submitStatus: 'local', updatedAt: Date.now()
+    });
+    const backfill = await T.backfillObservationWeather('wx-nogps');
+    const stored = await T.db.observations.get('wx-nogps');
+    return { noGps, noTime, legacyNull, skippedLegacy, backfill, storedStatus: stored.weatherStatus };
+  });
+
+  expect(res.noGps.eligible).toBe(false);
+  expect(res.noGps.reason).toBe('missing_location');
+  expect(res.noTime.eligible).toBe(false);
+  expect(res.noTime.reason).toBe('missing_timestamp');
+  expect(res.legacyNull.eligible).toBe(true); // legacy missing state normalizes lazily
+  expect(res.skippedLegacy.eligible).toBe(true);
+  expect(res.backfill.status).toBe('unavailable');
+  expect(res.storedStatus).not.toBe('ok');
+  expect(meteo.calls.length).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('WB-H: weather endpoint failure leaves the observation retryable and uncorrupted', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  meteo.mode = 'fail';
+  await openCaptureTab(page);
+  await seedWxObs(page);
+
+  const result = await page.evaluate(async () => window.__WFR_TEST__.backfillObservationWeather('wx-voice'));
+  expect(result.status).toBe('error');
+  const obs = await getWxObs(page);
+  expect(obs.weatherStatus).toBe('deferred');
+  expect(obs.weatherDeferredReason).toBe('backfill_failed');
+  expect(obs.weatherRaw).toBeNull();
+  expect(obs.weatherSubmitError).toBeTruthy();
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-I/J: online event auto-backfill + age window ---------- */
+
+test('WB-I: online event repairs only eligible recent observations, no overlapping pass', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+
+  await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    const seed = overrides => T.db.observations.put(Object.assign({
+      localId: 'x', createdAt: Date.now() - 3600000, startedAt: Date.now() - 3600000,
+      latitude: 38.355, longitude: -87.5381, gpsStatus: 'ok',
+      weatherApiUrl: null, weatherFetchedAt: null, weatherRaw: null,
+      submitStatus: 'local', updatedAt: Date.now()
+    }, overrides));
+    const wtp = {
+      source: 'capture_clock',
+      utcIso: new Date(Date.now() - 3600000).toISOString(),
+      wallIso: new Date(Date.now() - 3600000 + 14400000).toISOString().slice(0, 19),
+      timezone: 'America/Indiana/Indianapolis', utcOffsetSeconds: -14400, capturedAt: Date.now()
+    };
+    const wtp2 = Object.assign({}, wtp, {
+      utcIso: new Date(Date.now() - 7200000).toISOString(),
+      wallIso: new Date(Date.now() - 7200000 + 14400000).toISOString().slice(0, 19)
+    });
+    await seed({ localId: 'wx-d1', weatherStatus: 'deferred', weatherDeferredReason: 'offline_at_capture', weatherTimeProvenance: wtp });
+    await seed({ localId: 'wx-d2', weatherStatus: 'deferred', weatherDeferredReason: 'offline_at_capture', weatherTimeProvenance: wtp2 });
+    await seed({ localId: 'wx-ok', weatherStatus: 'ok', weatherRaw: { current: { temperature_2m: 50 } } });
+    await seed({ localId: 'wx-nogps', weatherStatus: 'deferred', weatherDeferredReason: 'offline_at_capture', latitude: null, longitude: null });
+  });
+
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.evaluate(() => window.dispatchEvent(new Event('online'))); // must not double-process
+  await page.waitForTimeout(1500);
+
+  const d1 = await getWxObs(page, 'wx-d1');
+  const d2 = await getWxObs(page, 'wx-d2');
+  const ok = await getWxObs(page, 'wx-ok');
+  const noGps = await getWxObs(page, 'wx-nogps');
+  expect(d1.weatherStatus).toBe('ok');
+  expect(d1.weatherProvenance.mode).toBe('historical_backfill');
+  expect(d2.weatherStatus).toBe('ok');
+  expect(ok.weatherRaw.current.temperature_2m).toBe(50); // untouched
+  expect(noGps.weatherStatus).toBe('deferred'); // ineligible, skipped
+  expect(meteo.calls.length).toBe(2); // exactly one fetch per eligible observation
+  expect(errors).toEqual([]);
+});
+
+test('WB-J: observations older than the auto window are not auto-repaired but manual backfill repairs them', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  const meteo = await mockMeteo(page);
+  await openCaptureTab(page);
+  await seedWxObs(page, { __ageMs: 30 * 24 * 60 * 60 * 1000 });
+
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForTimeout(1200);
+  let obs = await getWxObs(page);
+  expect(obs.weatherStatus).toBe('deferred'); // outside WEATHER_BACKFILL_WINDOW_MS
+  expect(meteo.calls.length).toBe(0);
+
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.token = 'test-token';
+    return T.runManualWeatherBackfill();
+  });
+  expect(result.updated).toBe(1);
+  obs = await getWxObs(page);
+  expect(obs.weatherStatus).toBe('ok');
+  expect(obs.weatherProvenance.mode).toBe('historical_backfill');
+  expect(meteo.calls.length).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-K: same trip, independent per-observation hourly matching ---------- */
+
+test('WB-K: multiple same-trip observations are matched independently against hourly data', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockMeteo(page);
+  await openCaptureTab(page);
+
+  await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    const mk = (localId, wall) => {
+      const utcMs = Date.parse(wall + 'Z') + 14400000;
+      return T.db.observations.put({
+        localId, createdAt: utcMs, startedAt: utcMs,
+        latitude: 38.355, longitude: -87.5381, gpsStatus: 'ok',
+        weatherStatus: 'deferred', weatherDeferredReason: 'offline_at_capture',
+        weatherApiUrl: null, weatherFetchedAt: null, weatherRaw: null, weatherProvenance: null,
+        weatherTimeProvenance: { source: 'capture_clock', utcIso: new Date(utcMs).toISOString(), wallIso: wall, timezone: 'America/Indiana/Indianapolis', utcOffsetSeconds: -14400, capturedAt: Date.now() },
+        submitStatus: 'local', updatedAt: Date.now()
+      });
+    };
+    await mk('wx-m1', '2026-05-14T08:17:00');
+    await mk('wx-m2', '2026-05-14T14:43:00');
+    const r1 = await T.backfillObservationWeather('wx-m1');
+    const r2 = await T.backfillObservationWeather('wx-m2');
+    return [r1.status, r2.status];
+  });
+
+  const m1 = await getWxObs(page, 'wx-m1');
+  const m2 = await getWxObs(page, 'wx-m2');
+  expect(m1.weatherStatus).toBe('ok');
+  expect(m2.weatherStatus).toBe('ok');
+  expect(m1.weatherRaw.sourceTimeLocal).toBe('2026-05-14T08:00');
+  expect(m2.weatherRaw.sourceTimeLocal).toBe('2026-05-14T15:00');
+  expect(m1.weatherRaw.current.temperature_2m).toBeCloseTo(70 + 8 * 0.1, 5);
+  expect(m2.weatherRaw.current.temperature_2m).toBeCloseTo(70 + 15 * 0.1, 5);
+  expect(m1.weatherProvenance.sourceTimeLocal).toBe('2026-05-14T08:00');
+  expect(m2.weatherProvenance.sourceTimeLocal).toBe('2026-05-14T15:00');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- WB-L: legacy timezone derives from location, never the processing device ---------- */
+
+function indianaMeteoBody(dateKey) {
+  const body = meteoBody(dateKey, fullDayTimes(dateKey));
+  body.timezone = 'America/Indiana/Indianapolis';
+  body.timezone_abbreviation = 'EDT';
+  body.utc_offset_seconds = -14400;
+  return body;
+}
+
+test('WB-L: legacy observation without stored timezone resolves Indiana hour regardless of device zone', async ({ browser }) => {
+  const seed = {
+    localId: 'wx-tz',
+    createdAt: Date.parse('2026-05-14T21:17:42.381Z'),
+    startedAt: Date.parse('2026-05-14T21:17:42.381Z'),
+    latitude: 38.355, longitude: -87.5381, gpsStatus: 'ok',
+    weatherStatus: 'deferred', weatherDeferredReason: 'offline_at_capture',
+    weatherApiUrl: null, weatherFetchedAt: null, weatherRaw: null,
+    submitStatus: 'local', updatedAt: Date.now()
+  };
+
+  async function repairIn(timezoneId) {
+    const context = await browser.newContext({ timezoneId });
+    const page = await context.newPage();
+    const errors = collectErrors(page);
+    blockExternal(page);
+    await mockMeteo(page);
+    // Later route wins: serve Indiana timezone metadata for these coordinates.
+    await page.route('**open-meteo.com**', async route => {
+      const url = new URL(route.request().url());
+      const dateKey = url.searchParams.get('start_date') || '2026-05-14';
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(indianaMeteoBody(dateKey)) });
+    });
+    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(async s => {
+      const T = window.__WFR_TEST__;
+      await T.db.observations.put(Object.assign({}, s));
+      return T.backfillObservationWeather('wx-tz');
+    }, seed);
+    const obs = await page.evaluate(async () => window.__WFR_TEST__.db.observations.get('wx-tz'));
+    await context.close();
+    return { obs, errors };
+  }
+
+  const denver = await repairIn('America/Denver');
+  const indiana = await repairIn('America/Indiana/Indianapolis');
+
+  for (const run of [denver, indiana]) {
+    expect(run.obs.weatherStatus).toBe('ok');
+    expect(run.obs.weatherRaw.sourceTimeLocal).toBe('2026-05-14T17:00'); // Indiana wall hour (UTC-4)
+    expect(run.obs.weatherRaw.current.temperature_2m).toBeCloseTo(70 + 17 * 0.1, 5);
+    expect(run.obs.weatherProvenance.captureTimeSource).toBe('location_metadata');
+    expect(run.errors).toEqual([]);
+  }
+  // Device zone must not influence the repair outcome.
+  expect(denver.obs.weatherRaw.sourceTimeLocal).toBe(indiana.obs.weatherRaw.sourceTimeLocal);
+  expect(denver.obs.weatherRaw.current.temperature_2m).toBe(indiana.obs.weatherRaw.current.temperature_2m);
+});
+
+/* ---------- WB-M: weather-only backend sync has no unrelated side effects ---------- */
+
+test('WB-M: weather-only sync neither demotes submitted state nor uploads unrelated photos', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockMeteo(page);
+  await openCaptureTab(page);
+  await seedWxObs(page, { backendObservationId: 'wx-be-99', submitStatus: 'submitted' });
+  await page.evaluate(async pngB64 => {
+    const T = window.__WFR_TEST__;
+    const bin = Uint8Array.from(atob(pngB64), c => c.charCodeAt(0));
+    await T.db.photos.put({
+      localPhotoId: 'wx-ph-1', observationLocalId: 'wx-voice', backendObservationId: null,
+      createdAt: Date.now(), blobId: 'wx-ph-1', mimeType: 'image/jpeg', sizeBytes: bin.length,
+      width: 1, height: 1, originalFilename: 'p.jpg', uploadStatus: 'pending',
+      backendFileId: null, backendFileUrl: null, uploadError: null, updatedAt: Date.now()
+    });
+    await T.db.audioBlobs.put({ blobId: 'wx-ph-1', blob: new Blob([bin], { type: 'image/jpeg' }), mimeType: 'image/jpeg', sizeBytes: bin.length, createdAt: Date.now() });
+  }, PNG.toString('base64'));
+
+  const backend = [];
+  await page.route('**/observations/wx-be-99', async route => {
+    backend.push(route.request().method());
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'wx-be-99' }) });
+  });
+  let fileUploads = 0;
+  await page.route('**/observations/*/files', async route => {
+    fileUploads++;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'be-file-x' }) });
+  });
+
+  const result = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    T.settings.token = 'test-token';
+    return T.runManualWeatherBackfill();
+  });
+
+  expect(result.updated).toBe(1);
+  expect(result.patched).toBe(1);
+  expect(backend).toEqual(['PATCH']); // PATCH only — no POST, no file uploads
+  expect(fileUploads).toBe(0);
+  const obs = await getWxObs(page);
+  expect(obs.submitStatus).toBe('submitted'); // untouched by weather-only sync
+  expect(obs.backendObservationId).toBe('wx-be-99');
+  expect(obs.weatherBackendSyncStatus).toBe('synced');
+  expect(obs.weatherStatus).toBe('ok');
+  const photo = await page.evaluate(async () => window.__WFR_TEST__.db.photos.get('wx-ph-1'));
+  expect(photo.uploadStatus).toBe('pending'); // unrelated upload NOT triggered
   expect(errors).toEqual([]);
 });
