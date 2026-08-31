@@ -1178,7 +1178,7 @@ test('N: voice + photo observations submit the existing backend payload shape', 
     'weatherStatus', 'subjectCommonName', 'subjectScientificName', 'category', 'tags',
     'userNoteText', 'photoCount', 'appVersion'];
   for (const post of obsPosts) {
-    expect(post.body.data.appVersion).toBe('2026.08.30.11');
+    expect(post.body.data.appVersion).toBe('2026.08.31.12');
     for (const key of Object.keys(post.body.data)) {
       expect(EXPECTED_KEYS).toContain(key);
     }
@@ -1811,7 +1811,7 @@ test('REC-O/P/Q/R/S/Z: GPT Latest evaluates actual candidates without changing s
   expect(calls).toHaveLength(1);
   expect(calls[0].model).toBe('~openai/gpt-latest');
   const prompt = calls[0].messages.map(m => m.content).join('\n');
-  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.30.11');
+  expect(prompt).toContain('Wildlife Field Recorder version 2026.08.31.12');
   expect(prompt).toMatch(/FIELD TRANSCRIPTION/i);
   expect(prompt).toMatch(/STRUCTURED OBSERVATION CLASSIFICATION/i);
   expect(prompt).toMatch(/WILDLIFE PHOTO IDENTIFICATION/i);
@@ -2141,7 +2141,7 @@ test('OUTING-AB/AC: Safari remains fallback while EXIF still bypasses every prov
   expect(result.noTrack.reason).toContain('Safari breadcrumb source is not configured'); expect(result.obs.latitude).toBe(1); expect(result.obs.photoEnrichment.location).toBe('pending');
 });
 
-/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.30.11) ---------- */
+/* ---------- Pixel UTC semantics, filename hypotheses, Safari fallback (2026.08.31.12) ---------- */
 
 const INDIANA_OUTING = {
   format: 'wfr-outing-track', version: 1,
@@ -2858,9 +2858,110 @@ test('GEO-ACTIVE-OUTING: photo resolves against a still-active outing without st
 });
 
 /* ========================================================
+   Screen Wake Lock: optional "Keep screen awake" (2026.08.31.12)
+   ======================================================== */
+
+function mockWakeLock(page, { fail = false } = {}) {
+  return page.context().addInitScript(({ fail }) => {
+    try { localStorage.removeItem('wfr_keep_screen_awake'); } catch (e) {}
+    const requests = [];
+    let releaseCount = 0;
+    let sentinel = null;
+    const makeSentinel = () => {
+      const listeners = { release: [] };
+      const s = {
+        released: false,
+        addEventListener(type, fn) { if (listeners[type]) listeners[type].push(fn); },
+        async release() {
+          if (s.released) return;
+          s.released = true;
+          releaseCount++;
+          listeners.release.forEach(f => f());
+        }
+      };
+      return s;
+    };
+    navigator.wakeLock = undefined; // clear prototype accessor first
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, get: () => wakeLockApi });
+    const wakeLockApi = {
+      request: async type => {
+        requests.push(type);
+        if (fail) throw new Error('NotAllowedError: user agent refused');
+        sentinel = makeSentinel();
+        return sentinel;
+      }
+    };
+    window.__WAKELOCK_TEST__ = {
+      get requests() { return requests.slice(); },
+      get releaseCount() { return releaseCount; },
+      get sentinel() { return sentinel; },
+      async releaseSentinel() { if (sentinel) await sentinel.release(); }
+    };
+  }, { fail });
+}
+
+function setDocumentVisibility(page, state) {
+  return page.evaluate(state => {
+    Object.defineProperty(document, 'visibilityState', { get: () => state, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+test('WK-A: wake lock control is hidden when the API is unsupported', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await page.addInitScript(() => {
+    try { localStorage.removeItem('wfr_keep_screen_awake'); } catch (e) {}
+    Object.defineProperty(navigator, 'wakeLock', { get: () => undefined, configurable: true });
+  });
+  await openCaptureTab(page);
+  await expect(page.locator('#wake-lock-row')).toBeHidden();
+  await expect(page.locator('#wake-note')).toBeHidden();
+  const state = await page.evaluate(() => window.__WFR_TEST__.getWakeLockState());
+  expect(state.supported).toBe(false);
+  expect(state.desired).toBe(false);
+  // Capture tab remains functional.
+  await page.click('#capture-btn');
+  await page.waitForFunction(() => /Audio error|Recording/i.test(document.getElementById('capture-status').textContent), undefined, { timeout: 10000 });
+  expect(errors).toEqual([]);
+});
+
+test('WK-B: enabling requests the screen lock once and stores the preference', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockWakeLock(page);
+  await openCaptureTab(page);
+  await page.check('#wake-toggle');
+  await page.waitForFunction(() => document.getElementById('wake-status').textContent === 'Screen awake');
+  const state = await page.evaluate(() => window.__WFR_TEST__.getWakeLockState());
+  expect(state.desired).toBe(true);
+  expect(state.held).toBe(true);
+  expect(await page.evaluate(() => window.__WAKELOCK_TEST__.requests)).toEqual(['screen']);
+  expect(await page.evaluate(() => localStorage.getItem('wfr_keep_screen_awake'))).toBe('true');
+  expect(errors).toEqual([]);
+});
+
+test('WK-C: disabling releases the sentinel exactly once and clears runtime state', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockWakeLock(page);
+  await openCaptureTab(page);
+  await page.check('#wake-toggle');
+  await page.waitForFunction(() => document.getElementById('wake-status').textContent === 'Screen awake');
+  await page.uncheck('#wake-toggle');
+  await page.waitForFunction(() => document.getElementById('wake-status').textContent === '');
+  const state = await page.evaluate(() => window.__WFR_TEST__.getWakeLockState());
+  expect(state.desired).toBe(false);
+  expect(state.held).toBe(false);
+  expect(await page.evaluate(() => window.__WAKELOCK_TEST__.releaseCount)).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem('wfr_keep_screen_awake'))).toBe('false');
+  expect(errors).toEqual([]);
+});
+
+/* ========================================================
    Weather lifecycle: offline voice capture, deferred state,
    historical backfill, pre-submit repair, backend PATCH
-   (2026.08.30.11)
+   (2026.08.31.12)
    ======================================================== */
 
 const WX_OFFSET = -14400; // America/Indiana/Indianapolis
@@ -3421,4 +3522,105 @@ test('WB-M: weather-only sync neither demotes submitted state nor uploads unrela
   const photo = await page.evaluate(async () => window.__WFR_TEST__.db.photos.get('wx-ph-1'));
   expect(photo.uploadStatus).toBe('pending'); // unrelated upload NOT triggered
   expect(errors).toEqual([]);
+});
+
+test('WK-D: wake lock reacquires on visibility return (photo-picker pattern)', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockWakeLock(page);
+  await openCaptureTab(page);
+  await page.check('#wake-toggle');
+  await page.waitForFunction(() => document.getElementById('wake-status').textContent === 'Screen awake');
+  expect(await page.evaluate(() => window.__WAKELOCK_TEST__.requests.length)).toBe(1);
+
+  // Picker/app opens: document hidden, browser releases the lock.
+  await setDocumentVisibility(page, 'hidden');
+  await page.evaluate(() => window.__WAKELOCK_TEST__.releaseSentinel());
+  await page.waitForFunction(() => !window.__WFR_TEST__.getWakeLockState().held);
+  expect(await page.evaluate(() => window.__WAKELOCK_TEST__.requests.length)).toBe(1); // no request while hidden
+
+  // Back in WFR: exactly one reacquisition, desired state untouched.
+  await setDocumentVisibility(page, 'visible');
+  await page.waitForFunction(() => window.__WFR_TEST__.getWakeLockState().held);
+  expect(await page.evaluate(() => window.__WAKELOCK_TEST__.requests.length)).toBe(2);
+  const state = await page.evaluate(() => window.__WFR_TEST__.getWakeLockState());
+  expect(state.desired).toBe(true);
+  expect(await page.isChecked('#wake-toggle')).toBe(true);
+  // Photo pipeline unaffected: a photo import still completes normally.
+  const png = await page.evaluate(async () => {
+    const T = window.__WFR_TEST__;
+    window.exifr.parse = async () => ({});
+    const bin = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), c => c.charCodeAt(0));
+    const r = await T.importPhotoFile(new File([bin], 'wake-test.png', { type: 'image/png' }));
+    return r.status;
+  });
+  expect(png).toBe('imported');
+  expect(errors).toEqual([]);
+});
+
+test('WK-E: system-initiated release keeps the desired preference and stops claiming the lock', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockWakeLock(page);
+  await openCaptureTab(page);
+  await page.check('#wake-toggle');
+  await page.waitForFunction(() => document.getElementById('wake-status').textContent === 'Screen awake');
+
+  await page.evaluate(() => window.__WAKELOCK_TEST__.releaseSentinel());
+  await page.waitForFunction(() => !window.__WFR_TEST__.getWakeLockState().held);
+
+  const state = await page.evaluate(() => window.__WFR_TEST__.getWakeLockState());
+  expect(state.desired).toBe(true);
+  expect(state.held).toBe(false);
+  expect(await page.evaluate(() => localStorage.getItem('wfr_keep_screen_awake'))).toBe('true');
+  expect(await page.isChecked('#wake-toggle')).toBe(true);
+  expect(await page.textContent('#wake-status')).not.toBe('Screen awake');
+  expect(errors).toEqual([]);
+});
+
+test('WK-F: request refusal is calm, isolated, and does not retry in a loop', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockWakeLock(page, { fail: true });
+  await openCaptureTab(page);
+  await page.check('#wake-toggle');
+  await page.waitForFunction(() => document.getElementById('wake-status').textContent === 'Wake lock unavailable');
+  await page.waitForTimeout(600); // no retry loop
+  expect(await page.evaluate(() => window.__WAKELOCK_TEST__.requests.length)).toBe(1);
+  const state = await page.evaluate(() => window.__WFR_TEST__.getWakeLockState());
+  expect(state.desired).toBe(true); // user intent preserved; OFF/ON retries
+  expect(state.held).toBe(false);
+  expect(await page.evaluate(() => localStorage.getItem('wfr_keep_screen_awake'))).toBe('true');
+  // WFR remains usable.
+  await page.click('#capture-btn');
+  await page.waitForFunction(() => /Audio error|Recording/i.test(document.getElementById('capture-status').textContent), undefined, { timeout: 10000 });
+  expect(errors).toEqual([]);
+});
+
+test('WK-G: persisted preference restores the toggle and reacquires on load', async ({ page }) => {
+  const errors = collectErrors(page);
+  blockExternal(page);
+  await mockWakeLock(page);
+  await page.addInitScript(() => { try { localStorage.setItem('wfr_keep_screen_awake', 'true'); } catch (e) {} });
+  await openCaptureTab(page);
+  await page.waitForFunction(() => window.__WFR_TEST__.getWakeLockState().held);
+  expect(await page.isChecked('#wake-toggle')).toBe(true);
+  expect(await page.evaluate(() => window.__WAKELOCK_TEST__.requests)).toEqual(['screen']);
+
+  // Seeded OFF: no request at all.
+  const page2 = await page.context().newPage();
+  const errors2 = collectErrors(page2);
+  blockExternal(page2);
+  await page2.addInitScript(() => {
+    try { localStorage.setItem('wfr_keep_screen_awake', 'false'); } catch (e) {}
+  });
+  await page2.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+  await page2.waitForLoadState('networkidle');
+  await page2.click('nav#tabs button[data-tab="capture"]');
+  await page2.waitForTimeout(400);
+  expect(await page2.isChecked('#wake-toggle')).toBe(false);
+  expect(await page2.evaluate(() => window.__WAKELOCK_TEST__.requests.length)).toBe(0);
+  await page2.close();
+  expect(errors).toEqual([]);
+  expect(errors2).toEqual([]);
 });
