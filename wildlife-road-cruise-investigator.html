@@ -1,0 +1,3098 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Wildlife Road Cruise Investigator</title>
+  <meta name="description" content="Autonomous LLM research pipeline that investigates a new geography and builds a portable wildlife road-cruise field guide as portable JSON.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔭</text></svg>" />
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script
+    src="analytics-lite.js"
+    data-site-id="junkdrawer"
+    data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+    defer>
+  </script>
+  <style>
+    :root{
+      color-scheme: dark;
+      --bg:#0d1110;
+      --panel:#141a17;
+      --panel2:#19211d;
+      --panel3:#111714;
+      --line:#2a3730;
+      --line2:#314038;
+      --text:#edf3ef;
+      --muted:#9fb0a7;
+      --accent:#9fd28f;
+      --accent2:#d9b76e;
+      --blue:#8da0cb;
+      --danger:#e39b8f;
+      --shadow:0 14px 35px rgba(0,0,0,.24);
+      --radius:16px;
+    }
+    *{box-sizing:border-box}
+    [hidden]{display:none!important}
+    html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    body{min-height:100vh}
+    a{color:#b7d9ff}
+    button,input,select,textarea{font:inherit}
+    .page{max-width:1400px;margin:0 auto;padding:18px}
+    header.top{display:flex;gap:18px;align-items:flex-end;justify-content:space-between;margin-bottom:12px;padding:4px 2px;flex-wrap:wrap}
+    h1{font-size:clamp(1.5rem,3vw,2.2rem);line-height:1.05;margin:0 0 6px;letter-spacing:-.03em}
+    .subtitle{color:var(--muted);max-width:860px}
+    .pill{
+      display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);
+      background:var(--panel);padding:7px 10px;border-radius:999px;color:var(--muted);font-size:.84rem;white-space:nowrap
+    }
+    .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+    .tabs button{
+      border:1px solid var(--line);background:var(--panel);color:var(--muted);
+      padding:10px 16px;border-radius:12px;cursor:pointer;font-weight:600;font-size:.92rem
+    }
+    .tabs button[aria-selected="true"]{color:var(--text);border-color:var(--accent);background:#18231c;box-shadow:0 0 0 1px var(--accent) inset}
+    .tabs button:hover{border-color:#506159}
+    .tabsec[hidden]{display:none}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+    .card .pad{padding:13px 15px}
+    .card h2{font-size:1rem;margin:0}
+    .card-head{display:flex;gap:10px;align-items:baseline;justify-content:space-between;padding:12px 15px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+    .tiny{font-size:.78rem;color:var(--muted)}
+    .tiny em{font-style:normal;color:#7e8f86}
+    .help{margin:.15rem 0 0;color:var(--muted)}
+
+    /* Investigate layout */
+    .invest-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,.8fr);gap:14px;align-items:start}
+    .invest-main,.invest-side{display:grid;gap:14px}
+    .intake{padding:14px 15px}
+    .intake-grid{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+    .field{display:flex;flex-direction:column;gap:5px;margin:0}
+    .field>span{font-size:.82rem;font-weight:700;color:#c8d4cd}
+    .field>span em{font-weight:400;color:var(--muted)}
+    .field input[type="text"],.field input[type="password"],.field input[type="number"],.field select{
+      background:var(--panel3);border:1px solid var(--line2);color:var(--text);
+      border-radius:10px;padding:10px 12px;width:100%
+    }
+    .field input:focus,.field select:focus{outline:2px solid #3d5a45;outline-offset:0}
+    .warn-inline{color:var(--accent2);font-size:.78rem}
+    .err-inline{color:var(--danger);font-size:.78rem}
+    .intake-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+    .intake-actions .field-inline{display:flex;gap:7px;align-items:center;font-size:.84rem;color:var(--muted)}
+    .intake-actions select{background:var(--panel3);border:1px solid var(--line2);color:var(--text);border-radius:9px;padding:7px 9px}
+    button.primary{
+      border:1px solid #3d5a45;background:#18231c;color:var(--accent);
+      border-radius:11px;padding:11px 18px;cursor:pointer;font-weight:700
+    }
+    button.primary:hover{border-color:#547a60}
+    button.primary:disabled{opacity:.45;cursor:default}
+    button.ghost,button.danger-ghost{
+      border:1px solid var(--line);background:var(--panel3);color:var(--text);
+      border-radius:11px;padding:10px 14px;cursor:pointer
+    }
+    button.ghost:hover{border-color:#54665d}
+    button.danger-ghost{border-color:#5d3a33;color:#f2cdc4}
+    button.danger-ghost:hover{border-color:#7a4a41}
+    button:disabled{opacity:.45;cursor:default}
+    .chip-row{display:flex;flex-wrap:wrap;gap:6px}
+    .chip{border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:5px 11px;border-radius:999px;cursor:pointer;font-size:.78rem}
+    .chip:hover{border-color:#506159}
+    .chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:#18231c}
+
+    /* Resume strip */
+    .resume-strip{
+      display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+      border:1px solid #4d5a33;background:#1d2416;color:#e4ecc9;
+      border-radius:13px;padding:11px 14px;margin-bottom:14px;font-size:.88rem
+    }
+    .resume-strip .spacer{flex:1}
+    .resume-strip button{border:1px solid #55663a;background:#242d1a;color:#dbe7b8;border-radius:9px;padding:7px 12px;cursor:pointer}
+
+    /* Pipeline */
+    .timeline{display:flex;flex-direction:column;padding:6px 15px 12px}
+    .stage{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;position:relative}
+    .stage-rail{position:relative;display:flex;justify-content:center}
+    .stage-rail::before{content:"";position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--line)}
+    .stage:first-child .stage-rail::before{top:18px}
+    .stage:last-child .stage-rail::before{bottom:auto;height:20px}
+    .dot{
+      position:relative;z-index:1;width:15px;height:15px;border-radius:50%;
+      margin-top:16px;border:2px solid var(--line2);background:var(--panel);flex-shrink:0
+    }
+    .st-pending .dot{}
+    .st-running .dot{border-color:var(--accent);background:var(--accent);box-shadow:0 0 0 4px rgba(159,210,143,.15);animation:wrci-pulse 1.5s ease-in-out infinite}
+    .st-complete .dot{background:var(--accent);border-color:var(--accent)}
+    .st-warning .dot{background:var(--accent2);border-color:var(--accent2)}
+    .st-needs-input .dot{background:var(--accent2);border-color:var(--accent2)}
+    .st-failed .dot{background:var(--danger);border-color:var(--danger)}
+    .st-skipped .dot{background:var(--line2);border-color:var(--line2)}
+    @keyframes wrci-pulse{0%,100%{box-shadow:0 0 0 3px rgba(159,210,143,.12)}50%{box-shadow:0 0 0 7px rgba(159,210,143,.05)}}
+    .stage-body{border:1px solid var(--line);border-radius:13px;background:var(--panel2);margin:5px 0;min-width:0}
+    .st-running .stage-body{border-color:#3d5a45}
+    .st-needs-input .stage-body{border-color:var(--accent2);box-shadow:0 0 0 1px var(--accent2) inset}
+    .st-failed .stage-body{border-color:#5d3a33}
+    .stage-head{
+      display:flex;gap:9px;align-items:center;width:100%;text-align:left;
+      background:none;border:0;color:var(--text);padding:10px 12px;cursor:pointer;border-radius:13px
+    }
+    .stage-head:hover{background:#1d2620}
+    .stage-glyph{font-size:1rem;width:1.3em;text-align:center;flex-shrink:0}
+    .stage-name{font-weight:700;font-size:.92rem;flex-shrink:0}
+    .stage-status-label{font-size:.7rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--muted);flex-shrink:0}
+    .st-running .stage-status-label{color:var(--accent)}
+    .st-complete .stage-status-label{color:var(--accent)}
+    .st-warning .stage-status-label{color:var(--accent2)}
+    .st-needs-input .stage-status-label{color:var(--accent2)}
+    .st-failed .stage-status-label{color:var(--danger)}
+    .stage-sub{
+      flex:1;min-width:0;font-size:.8rem;color:var(--muted);
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right
+    }
+    .stage-caret{color:var(--muted);font-size:.72rem;transition:transform .15s ease;flex-shrink:0}
+    .stage.open .stage-caret{transform:rotate(90deg)}
+    .stage-detail{padding:2px 13px 12px;border-top:1px solid var(--line)}
+    .stage-detail ul{list-style:none;margin:8px 0 4px;padding:0}
+    .stage-detail li{font-size:.82rem;color:#d7e0da;margin:.3rem 0;line-height:1.45}
+    .stage-detail li::before{content:"· ";color:var(--accent);font-weight:700}
+    .stage-detail li.warn::before{content:"⚠ ";color:var(--accent2)}
+    .stage-detail li.err{color:#f2cdc4}
+    .stage-detail li.err::before{content:"✗ ";color:var(--danger)}
+    .counter-row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px}
+    .counter-chip{font-size:.72rem;border:1px solid var(--line);background:var(--panel3);border-radius:999px;padding:3px 9px;color:#c8d4cd}
+    .counter-chip b{color:var(--accent);font-weight:700}
+    .question-block{
+      border:1px solid var(--accent2);background:#211d12;border-radius:11px;
+      padding:11px 13px;margin:9px 0 4px
+    }
+    .question-block .q-title{font-weight:700;margin-bottom:8px;color:#efe3bd}
+    .q-choice{display:flex;gap:9px;align-items:flex-start;padding:7px 9px;border:1px solid var(--line);border-radius:9px;margin:5px 0;cursor:pointer;background:var(--panel3)}
+    .q-choice:hover{border-color:#54665d}
+    .q-choice input{margin-top:3px;accent-color:var(--accent2)}
+    .q-choice .q-label{font-weight:600;font-size:.86rem}
+    .q-choice .q-detail{display:block;font-size:.76rem;color:var(--muted)}
+    .retry-row{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+    .retry-row button{border:1px solid var(--line2);background:var(--panel3);color:var(--text);border-radius:9px;padding:7px 12px;cursor:pointer;font-size:.82rem}
+    .retry-row button:hover{border-color:#54665d}
+
+    /* Activity side */
+    .activity ul{list-style:none;margin:0;padding:10px 15px;max-height:340px;overflow-y:auto}
+    .activity li{font-size:.78rem;margin:.34rem 0;color:#d7e0da;line-height:1.4;display:flex;gap:7px}
+    .activity li .t{color:#68796f;font-variant-numeric:tabular-nums;flex-shrink:0}
+    .activity li.k-ok{color:var(--accent)}
+    .activity li.k-warn{color:var(--accent2)}
+    .activity li.k-err{color:#f2cdc4}
+    .usage-line{padding:9px 15px 12px;border-top:1px solid var(--line);font-size:.76rem;color:var(--muted);line-height:1.6}
+    .config .pad{padding:12px 15px}
+    .config .field{margin-bottom:10px}
+    .side-card{padding:12px 15px}
+
+    /* Preview */
+    .pv-head{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}
+    .pv-head h2{margin:0 0 4px;font-size:clamp(1.2rem,2.4vw,1.7rem);letter-spacing:-.02em}
+    .pv-head .desc{color:var(--muted);max-width:860px}
+    .layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(330px,.75fr);gap:14px;align-items:start}
+    .map-card{overflow:hidden}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--line)}
+    .toolbar button{
+      border:1px solid var(--line);background:var(--panel2);color:var(--text);
+      padding:8px 11px;border-radius:10px;cursor:pointer
+    }
+    .toolbar button:hover{border-color:#506159}
+    .toolbar .spacer{flex:1}
+    .toolbar label.pill{cursor:pointer}
+    .toolbar label.pill input{accent-color:var(--accent)}
+    #pvMap{height:min(68vh,740px);min-height:480px;background:#101512}
+    .side{padding:12px}
+    .side-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+    .side h2,.opportunities h2{font-size:1rem;margin:0}
+    .count{color:var(--muted);font-size:.86rem}
+    .route-detail{color:#d7e0da;font-size:.9rem}
+    .route-detail p{margin:.4rem 0 .7rem}
+    .panel-nav{display:flex;gap:8px;margin-top:12px}
+    .panel-nav button{
+      flex:1;border:1px solid var(--line);background:var(--panel2);color:var(--text);
+      border-radius:10px;padding:9px 10px;cursor:pointer
+    }
+    .panel-nav button:hover{border-color:#506159}
+    .panel-nav button:disabled{opacity:.4;cursor:default}
+    .routes{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(310px,1fr))}
+    .route{
+      border:1px solid var(--line);border-radius:13px;background:var(--panel2);
+      padding:12px 13px;cursor:pointer;display:flex;flex-direction:column;gap:7px
+    }
+    .route:hover{border-color:#506159}
+    .route.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+    .route.match{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+    .route.dim{opacity:.42;filter:saturate(.55)}
+    .route input{width:19px;height:19px;accent-color:var(--accent);cursor:pointer}
+    .route-title{font-weight:700;line-height:1.2}
+    .route-sub{font-size:.78rem;color:var(--muted);margin-top:3px}
+    .score{
+      min-width:52px;text-align:center;border:1px solid var(--line);border-radius:999px;
+      padding:4px 8px;font-weight:700;font-size:.8rem;flex-shrink:0
+    }
+    .score.s-high{color:var(--accent);border-color:#3d5a45}
+    .score.s-mid{color:var(--accent2);border-color:#5d5133}
+    .score.s-low{color:var(--danger);border-color:#5d3a33}
+    .class-chip{font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+    .cls-recommended{color:var(--accent);border-color:#3d5a45}
+    .cls-strong{color:#a8c8e8;border-color:#3c4a63}
+    .cls-exploratory{color:var(--accent2);border-color:#5d5133}
+    .cls-marginal{color:var(--danger);border-color:#5d3a33}
+    .card-top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+    .card-name{font-weight:700;line-height:1.25;font-size:.95rem}
+    .card-desc{margin:0;font-size:.84rem;color:#d7e0da}
+    .card-habitat{font-size:1rem;letter-spacing:.15em}
+    .card-watch{font-size:.8rem;color:var(--accent2)}
+    .card-best{font-size:.78rem;color:var(--muted)}
+    .card-best strong{color:#c8d4cd}
+    .card-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:auto;flex-wrap:wrap}
+    .card-actions .details,.card-actions .research-btn{
+      border:1px solid var(--line);background:var(--panel3);color:var(--text);
+      border-radius:9px;padding:7px 11px;cursor:pointer;font-size:.8rem
+    }
+    .card-actions .details:hover,.card-actions .research-btn:hover{border-color:#54665d}
+    .card-vis{cursor:pointer;gap:6px}
+    .meta{display:flex;gap:6px;flex-wrap:wrap;margin:.55rem 0}
+    .tag{font-size:.73rem;padding:4px 7px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--panel3)}
+    .tag.a-ok{color:var(--accent);border-color:#3d5a45}
+    .tag.a-mid{color:var(--accent2);border-color:#5d5133}
+    .tag.a-low{color:var(--danger);border-color:#5d3a33}
+    .route-detail-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+    .detail-title{font-size:1.02rem}
+    .route-key{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:7px;vertical-align:-1px}
+    .micro{font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);margin:.9rem 0 .35rem;font-weight:700}
+    .w-group{margin:.45rem 0}
+    .w-title{display:block;font-size:.8rem;font-weight:700;margin-bottom:3px}
+    .w-group ul{list-style:none;margin:0;padding:0}
+    .w-group li{font-size:.8rem;line-height:1.45;margin:.24rem 0;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+    .tier{font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:999px;border:1px solid;white-space:nowrap;letter-spacing:.03em}
+    .t-documented{color:var(--accent);border-color:#3d5a45}
+    .t-regularly-reported{color:var(--accent2);border-color:#5d5133}
+    .t-habitat-supported{color:#8da0cb;border-color:#3c4a63}
+    .t-seasonal-possibility{color:#b9a7d9;border-color:#4a4166}
+    .w-name{font-weight:600}
+    .w-note{color:var(--muted)}
+    .cues{list-style:none;margin:.3rem 0;padding:0}
+    .cues li{margin:.3rem 0;font-size:.82rem;color:#d7e0da}
+    .seasons{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;margin:.4rem 0}
+    .season{background:var(--panel3);border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:.76rem;color:#d7e0da}
+    .season span{display:block;color:var(--accent2);font-weight:700;font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+    .wildcards{list-style:none;margin:.3rem 0;padding:0}
+    .wildcards li{font-size:.8rem;font-style:italic;color:#c8d4cd;margin:.3rem 0}
+    .wildcards li::before{content:"✦ ";color:var(--accent2);font-style:normal}
+    .focus{
+      border:1px solid var(--line);background:var(--panel3);color:var(--text);
+      border-radius:9px;padding:7px 10px;cursor:pointer
+    }
+    .focus:hover{border-color:#54665d}
+    .pw{display:inline-block;background:var(--panel3);border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:3px 4px 0 0;font-size:.75rem;color:#edf3ef}
+    .pw-row{margin-top:6px}
+    .uq-list{list-style:none;margin:.3rem 0;padding:0}
+    .uq-list li{font-size:.8rem;color:#e2d9bd;margin:.3rem 0}
+    .uq-list li::before{content:"❓ ";font-size:.75rem}
+    .src-list{list-style:none;margin:.3rem 0;padding:0}
+    .src-list li{font-size:.78rem;margin:.3rem 0;color:var(--muted)}
+    .opportunities,.legend-note,.sources{
+      margin-top:14px;border:1px solid var(--line);background:var(--panel);
+      border-radius:var(--radius);box-shadow:var(--shadow);padding:12px
+    }
+    .legend-note strong{color:var(--accent)}
+    .filters{margin-bottom:10px;border:1px solid var(--line);background:var(--panel);border-radius:13px;padding:9px 10px}
+    .filters-head{font-weight:700;font-size:.9rem;margin-bottom:7px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+    .empty-note{padding:26px 10px;text-align:center;color:var(--muted)}
+    .leaflet-container{font:14px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#17201b;color:#edf3ef}
+    .leaflet-popup-content{margin:10px 12px}
+    .leaflet-control-layers,.leaflet-bar a{background:#17201b;color:#edf3ef;border-color:#314038}
+    .leaflet-control-attribution{background:rgba(13,17,16,.82)!important;color:#c1cdc6}
+    .leaflet-control-attribution a{color:#b7d9ff}
+
+    /* Data tab */
+    .data-actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+    #jsonEditor{
+      width:100%;min-height:420px;background:#0f1412;border:1px solid var(--line2);color:#d7e0da;
+      border-radius:12px;padding:13px;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      resize:vertical;white-space:pre;tab-size:2
+    }
+    .data-status{font-size:.84rem;margin-top:9px}
+    .data-status.ok{color:var(--accent)}
+    .data-status.err{color:#f2cdc4}
+
+    /* Modal + toast */
+    .modal-backdrop{
+      position:fixed;inset:0;background:rgba(5,8,7,.72);display:flex;align-items:center;justify-content:center;
+      z-index:1000;padding:18px
+    }
+    .modal[hidden]{display:none}
+    .modal-box{
+      background:var(--panel);border:1px solid var(--line2);border-radius:16px;box-shadow:var(--shadow);
+      max-width:520px;width:100%;padding:18px
+    }
+    .modal h3{margin:0 0 8px;font-size:1.05rem}
+    .modal .modal-body{color:#d7e0da;font-size:.9rem;margin-bottom:14px}
+    .modal .modal-actions{display:flex;gap:9px;justify-content:flex-end;flex-wrap:wrap}
+    #toast{
+      position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+      background:#1d2620;border:1px solid var(--line2);color:var(--text);
+      padding:10px 16px;border-radius:12px;font-size:.86rem;z-index:1100;
+      box-shadow:var(--shadow);max-width:min(90vw,560px);text-align:center
+    }
+    #toast[hidden]{display:none}
+    #toast.err{border-color:#5d3a33;color:#f2cdc4}
+
+    @media(max-width:960px){
+      .invest-grid{grid-template-columns:1fr}
+      .layout{grid-template-columns:1fr}
+      #pvMap{height:56vh;min-height:420px}
+      .intake-grid{grid-template-columns:1fr}
+      header.top{align-items:flex-start;flex-direction:column}
+    }
+    @media(max-width:520px){
+      .page{padding:10px}
+      #pvMap{min-height:380px}
+      .routes{grid-template-columns:1fr}
+      .toolbar button{padding:11px 14px}
+      .tabs button{padding:11px 14px}
+    }
+    @media(prefers-reduced-motion:reduce){
+      *{animation:none!important;transition:none!important}
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="top">
+      <div>
+        <h1>Wildlife Road Cruise Investigator</h1>
+        <div class="subtitle">
+          Point it at unfamiliar territory and it runs the whole research pipeline — geography, habitat, candidates,
+          roads, wildlife evidence, verification, real route geometry — then hands you a portable field-guide JSON
+          with its confidence shown honestly.
+        </div>
+      </div>
+      <div class="pill" id="sessionPill">No investigation yet</div>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" id="tabbtn-investigate" aria-controls="tab-investigate" aria-selected="true">🔭 Investigate</button>
+      <button type="button" role="tab" id="tabbtn-preview" aria-controls="tab-preview" aria-selected="false">🗺️ Guide Preview</button>
+      <button type="button" role="tab" id="tabbtn-data" aria-controls="tab-data" aria-selected="false">🧾 Data / JSON</button>
+    </nav>
+
+    <!-- ============ TAB: INVESTIGATE ============ -->
+    <section id="tab-investigate" class="tabsec" role="tabpanel" aria-labelledby="tabbtn-investigate">
+      <div class="resume-strip" id="resumeStrip" hidden>
+        <span id="resumeMsg"></span>
+        <span class="spacer"></span>
+        <button type="button" id="btnResume" class="primary">▶ Resume</button>
+        <button type="button" id="btnExportState" class="ghost">Export current state</button>
+        <button type="button" id="btnDiscardSession" class="danger-ghost">Start over</button>
+      </div>
+
+      <div class="invest-grid">
+        <div class="invest-main">
+          <form id="intakeForm" class="card intake" autocomplete="off">
+            <div class="intake-grid">
+              <label class="field" style="grid-column:1/-1">
+                <span>Location <em>city and state/province — e.g. Nashville, Tennessee</em></span>
+                <input id="locInput" type="text" placeholder="Nashville, Tennessee" spellcheck="false">
+              </label>
+              <label class="field">
+                <span>Radius (miles)</span>
+                <input id="radiusInput" type="number" min="3" max="150" step="1" value="25" inputmode="numeric">
+                <span class="warn-inline" id="radiusWarn" hidden>Very large search area — expect thinner research and higher cost.</span>
+              </label>
+              <label class="field">
+                <span>Guide title <em>optional — suggested once geography resolves</em></span>
+                <input id="titleInput" type="text" placeholder="Auto: “Nashville Wildlife Road Cruises”" spellcheck="false">
+              </label>
+            </div>
+            <div class="field" style="margin-top:12px">
+              <span>Wildlife focus <em>biases, not hard exclusions</em></span>
+              <div class="chip-row" id="focusRow" role="group" aria-label="Wildlife focus"></div>
+            </div>
+            <div class="intake-actions">
+              <button type="submit" id="btnInvestigate" class="primary">🔎 Investigate Area</button>
+              <button type="button" id="btnImportGuide" class="ghost">📂 Import Existing Guide</button>
+              <label class="field-inline">Depth
+                <select id="depthSelect" aria-label="Research depth">
+                  <option value="deep" selected>Deep investigation</option>
+                  <option value="recon">Quick recon</option>
+                </select>
+              </label>
+              <span id="intakeStatus" class="tiny" role="status"></span>
+            </div>
+            <input type="file" id="fileImport" accept=".json,application/json" hidden>
+          </form>
+
+          <div class="card" aria-label="Investigation pipeline">
+            <div class="card-head">
+              <h2>Investigation Pipeline</h2>
+              <span style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <span class="tiny" id="pipelineState">Idle — the Investigator makes the intermediate decisions for you</span>
+                <button type="button" id="btnCancel" class="ghost" hidden>✕ Cancel</button>
+              </span>
+            </div>
+            <div id="pipeline" class="timeline"></div>
+          </div>
+        </div>
+
+        <aside class="invest-side">
+          <div class="card activity" aria-label="Research activity log">
+            <div class="card-head"><h2>Current Activity</h2><span class="tiny" id="logCount"></span></div>
+            <ul id="activityLog" aria-live="polite"></ul>
+            <div class="usage-line" id="usageLine">No LLM activity yet.</div>
+          </div>
+
+          <div class="card config" aria-label="Model and key settings">
+            <div class="card-head"><h2>Model &amp; Key</h2><span class="tiny">OpenRouter</span></div>
+            <div class="pad">
+              <label class="field">
+                <span>OpenRouter API key <em>stored only in this browser</em></span>
+                <input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-or-v1-…" spellcheck="false">
+              </label>
+              <label class="field" style="margin-top:10px">
+                <span>Research model</span>
+                <select id="modelSelect" aria-label="Research model"></select>
+              </label>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap">
+                <button type="button" id="btnRefreshModels" class="ghost">Refresh models</button>
+                <a class="tiny" href="openrouter.html">What is an OpenRouter key?</a>
+              </div>
+              <div class="tiny" id="modelStatus" role="status" aria-live="polite" style="margin-top:8px"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="pad side-card tiny">
+              <strong style="color:#c8d4cd">How it decides</strong>
+              <p class="help">You provide only a place and a radius. The Investigator discovers candidate landscapes, rejects the
+              unsuitable ones, investigates the actual roads, verifies access and wildlife evidence, pulls route geometry from
+              mapped road data, and ranks what survives. It only asks you a question when the geography itself is ambiguous.</p>
+              <p class="help">Agentic web search runs through OpenRouter; road geometry comes from OpenStreetMap via targeted,
+              rate-limited queries — never invented. The exported JSON is the portable record of everything found and everything
+              still uncertain.</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============ TAB: GUIDE PREVIEW ============ -->
+    <section id="tab-preview" class="tabsec" role="tabpanel" aria-labelledby="tabbtn-preview" hidden>
+      <div class="pv-head" id="pvGuideHead"></div>
+      <section class="layout">
+        <div class="card map-card">
+          <div class="toolbar">
+            <button id="pvShowAll" type="button">Show all routes</button>
+            <button id="pvHideAll" type="button">Hide all routes</button>
+            <button id="pvFit" type="button">Fit visible</button>
+            <label class="pill"><input id="pvCandToggle" type="checkbox"> Candidate sites</label>
+            <label class="pill"><input id="pvRadiusToggle" type="checkbox" checked> Radius</label>
+            <span class="spacer"></span>
+            <span class="tiny" id="pvCount"></span>
+          </div>
+          <div id="pvMap" aria-label="Interactive OpenStreetMap showing investigated wildlife road-cruise routes"></div>
+        </div>
+        <aside class="card side" id="pvActivePanel" aria-label="Active route detail">
+          <div class="side-top">
+            <h2>Active route</h2>
+            <span class="count" id="pvVisibleCount"></span>
+          </div>
+          <span class="tag" id="pvHiddenNote" hidden>Hidden on map — toggle it on below</span>
+          <div class="route-detail" id="pvActive"></div>
+          <div class="panel-nav">
+            <button id="pvPrev" type="button">← Previous</button>
+            <button id="pvNext" type="button">Next →</button>
+          </div>
+        </aside>
+      </section>
+
+      <section class="opportunities" aria-label="Road cruise opportunities">
+        <div class="side-top">
+          <h2>Road Cruise Opportunities</h2>
+          <span class="tiny">tap a card to open its full field guide beside the map</span>
+        </div>
+        <div class="filters" role="group" aria-label="Highlight routes by what you want to see">
+          <div class="filters-head">What are you looking for? <span class="tiny" style="font-weight:400">highlights matching routes — nothing is hidden</span></div>
+          <div class="chip-row" id="pvFilterRow"></div>
+        </div>
+        <div class="routes" id="pvRouteList"></div>
+      </section>
+
+      <section class="legend-note">
+        <strong>Important:</strong> these are research-built scouting overlays, not turn-by-turn navigation. Access ratings
+        come from public web sources and OpenStreetMap and can be wrong or out of date. Always follow posted signs, closures,
+        refuge hours, and safe pull-off rules. Traffic ratings are qualitative. Routes marked <em>exploratory</em> are the
+        ones where you are effectively the field tester.
+      </section>
+
+      <section class="sources">
+        <h2>Sources used in this guide</h2>
+        <ul class="src-list" id="pvSources" style="padding-left:4px"></ul>
+        <div class="tiny" style="margin-top:9px" id="pvAttribution">Map tiles © OpenStreetMap contributors. Leaflet 1.9.4. Wildlife evidence tiers: <span class="tier t-documented">documented</span> official species records · <span class="tier t-regularly-reported">regularly-reported</span> recurring observations · <span class="tier t-habitat-supported">habitat-supported</span> plausible from habitat · <span class="tier t-seasonal-possibility">seasonal-possibility</span> season-specific chance.</div>
+      </section>
+    </section>
+
+    <!-- ============ TAB: DATA / JSON ============ -->
+    <section id="tab-data" class="tabsec" role="tabpanel" aria-labelledby="tabbtn-data" hidden>
+      <div class="card">
+        <div class="card-head">
+          <h2>Portable JSON Package</h2>
+          <span class="tiny" id="dataPkgInfo">No package loaded</span>
+        </div>
+        <div class="pad">
+          <div class="data-actions">
+            <button type="button" id="btnExportJson" class="primary">⬇ Export Guide JSON</button>
+            <button type="button" id="btnImportJson" class="ghost">📂 Import Guide JSON</button>
+            <button type="button" id="btnValidateJson" class="ghost">✔ Validate</button>
+            <button type="button" id="btnApplyJson" class="ghost">Apply editor changes</button>
+            <button type="button" id="btnNewInvestigation" class="danger-ghost">✕ New Investigation</button>
+          </div>
+          <div class="data-status" id="dataStatus" role="status" aria-live="polite"></div>
+          <textarea id="jsonEditor" spellcheck="false" aria-label="Guide JSON editor"></textarea>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="pad side-card tiny">
+          <strong style="color:#c8d4cd">Package structure (schemaVersion 1)</strong>
+          <p class="help"><code>guide</code> — title, resolved location, radius, philosophy. <code>routes[]</code> — the published
+          field-guide opportunities: content, access, scores, GeoJSON geometry, evidence-tiered wildlife. <code>research</code> —
+          provenance: pipeline stage records, candidate trail (kept vs rejected), road findings, deduplicated sources, warnings,
+          unresolved questions, usage counters. <code>fieldReports[]</code> — reserved for future human observations; automated
+          research never writes here.</p>
+          <p class="help">Research evidence (facts) is stored separately from interpretation. Species entries carry an evidence
+          tier; anything marked <em>habitat-supported</em> or <em>seasonal-possibility</em> is inference, not record.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="modal" id="modal" hidden>
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <h3 id="modalTitle"></h3>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-actions" id="modalActions"></div>
+      </div>
+    </div>
+    <div id="toast" role="status" hidden></div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+  (() => {
+  "use strict";
+
+  const SCHEMA_VERSION = 1;
+  const GENERATOR = { name: "Wildlife Road Cruise Investigator", version: "2026.08.31.1" };
+  const LS_KEY = "wrci.settings.v1";
+  const DB_NAME = "WildlifeRoadCruiseInvestigator";
+  const DB_VERSION = 1;
+  const LOG_CAP = 100;
+  const ARCHIVE_CAP = 2;
+  const OR_BASE = "https://openrouter.ai/api/v1";
+  const DEFAULT_MODEL = "openai/gpt-4.1-mini";
+  const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+  const OVERPASS_MIN_MS = 1500;
+  const OVERPASS_MAX_QUERIES = 14;
+  const ROUTE_COLORS = ["#e69f6b","#66c2a5","#8da0cb","#e78ac3","#ffd166","#a1d99b","#9e9ac8","#f4a261","#76b7b2","#e15759","#b3cde3","#decbe4"];
+  const TIERS = ["documented","regularly-reported","habitat-supported","seasonal-possibility"];
+  const TIER_ALIASES = { likely:"regularly-reported", watch:"habitat-supported", seasonal:"seasonal-possibility", uncommon:"habitat-supported", reported:"regularly-reported", possible:"habitat-supported", documented:"documented" };
+  const REASON_CODES = ["walking-oriented","high-traffic","no-road-access","poor-adjacency","private-access","outside-radius","insufficient-evidence","redundant","seasonal-closed","hunting-safety","verification-failed","not-evaluated","other"];
+  const CLASSIFICATIONS = ["recommended","strong","exploratory","marginal"];
+
+  // Score weighting is intentionally explicit: biological interest and actual
+  // road-cruise fit dominate; traffic, habitat diversity, access and evidence
+  // confidence modulate. overall = Σ(weight × component), computed in code —
+  // never blindly trusted from the LLM.
+  const SCORE_WEIGHTS = {
+    biologicalPotential: 0.25,
+    roadCruiseSuitability: 0.25,
+    trafficSuitability: 0.15,
+    habitatDiversity: 0.15,
+    accessConfidence: 0.10,
+    evidenceConfidence: 0.10
+  };
+
+  const STAGE_DEFS = [
+    { id:"geography",           label:"Geography",     glyph:"📍", blurb:"Resolve the place" },
+    { id:"landscape",           label:"Landscape",     glyph:"🌿", blurb:"What habitat opportunities exist here" },
+    { id:"candidateDiscovery",  label:"Candidates",    glyph:"🔍", blurb:"Broad discovery of landscapes" },
+    { id:"candidateTriage",     label:"Triage",        glyph:"⚖️", blurb:"Reject weak candidates autonomously" },
+    { id:"roadInvestigation",   label:"Roads",         glyph:"🛣️", blurb:"Investigate the actual roads" },
+    { id:"wildlifeEnrichment",  label:"Wildlife",      glyph:"🦉", blurb:"Evidence-tiered wildlife content" },
+    { id:"verification",        label:"Verification",  glyph:"🛡️", blurb:"Adversarial check of every route" },
+    { id:"routeGeometry",       label:"Geometry",      glyph:"📐", blurb:"Route lines from mapped roads" },
+    { id:"ranking",             label:"Ranking",       glyph:"🏆", blurb:"Scores, classification, assembly" },
+    { id:"qa",                  label:"QA",            glyph:"✅", blurb:"Structured final audit" }
+  ];
+
+  const FOCUS_OPTIONS = [
+    { k:"all",       label:"All wildlife", icon:"✳️", exclusive:true },
+    { k:"birds",     label:"Birds", icon:"🦅" },
+    { k:"mammals",   label:"Mammals", icon:"🦌" },
+    { k:"herps",     label:"Reptiles / amphibians", icon:"🐍" },
+    { k:"wetlands",  label:"Wetlands", icon:"💧" },
+    { k:"grassland", label:"Grassland", icon:"🌾" },
+    { k:"forest",    label:"Forest", icon:"🌲" },
+    { k:"nocturnal", label:"Nocturnal / post-rain", icon:"🌙" },
+    { k:"photography", label:"Photography", icon:"📷" }
+  ];
+
+  const CRUISING_PHILOSOPHY = [
+    "Slow vehicle-based wildlife observation",
+    "Minimal walking",
+    "Low traffic strongly preferred",
+    "Habitat adjacent to the road",
+    "Public/legal vehicle access",
+    "Safe stopping/pull-off opportunities desirable",
+    "Vehicle acts as a mobile blind"
+  ];
+
+  const SYS_PROMPT = [
+    "You are the research engine inside the Wildlife Road Cruise Investigator, a browser tool that builds wildlife road-cruise field guides for travelers who know NOTHING about the local geography.",
+    "Fixed cruising philosophy (never question it): slow vehicle-based wildlife observation; minimal walking; low traffic strongly preferred; habitat adjacent to the road; public/legal vehicle access; safe pull-offs desirable; the vehicle is a mobile blind.",
+    "Evidence discipline: distinguish documented facts from interpretation. Never turn a broad property-level species record into a claim about one precise road. Use evidence tiers: documented, regularly-reported, habitat-supported, seasonal-possibility.",
+    "Never invent road geometry, road names, or coordinates. If you do not know, say so — an honest 'unresolved' is more valuable than a plausible guess.",
+    "Prefer authoritative sources: federal and state wildlife agencies, official county/municipal resources, conservation organizations, recognized birding organizations, eBird, reputable local naturalist material.",
+    "The user cannot answer local-knowledge questions. Make intermediate decisions yourself. Output STRICT JSON only — no prose outside JSON."
+  ].join("\n");
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  const nowIso = () => new Date().toISOString();
+  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+  const isNum = (v) => typeof v === "number" && isFinite(v);
+  const uid = () => Math.random().toString(36).slice(2, 9);
+  const slugify = (s) => String(s || "").toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "guide";
+
+  function haversineMiles(lat1, lng1, lat2, lng2){
+    const R = 3958.8, rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function fmtK(n){ return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(Math.round(n)); }
+
+  function parseJsonLoose(text){
+    try { return { ok: true, value: JSON.parse(text) }; } catch (_) {}
+    const stripped = String(text || "").replace(/^\s*```(?:json)?/i, "").replace(/```\s*$/,"").trim();
+    try { return { ok: true, value: JSON.parse(stripped) }; } catch (_) {}
+    const start = stripped.indexOf("{");
+    if (start >= 0){
+      let depth = 0, inStr = false, escNext = false;
+      for (let i = start; i < stripped.length; i++){
+        const ch = stripped[i];
+        if (escNext) { escNext = false; continue; }
+        if (ch === "\\") { escNext = true; continue; }
+        if (ch === '"') inStr = !inStr;
+        if (inStr) continue;
+        if (ch === "{") depth++;
+        else if (ch === "}"){
+          depth--;
+          if (depth === 0){
+            try { return { ok: true, value: JSON.parse(stripped.slice(start, i + 1)) }; }
+            catch (e) { return { ok: false, error: e.message }; }
+          }
+        }
+      }
+    }
+    return { ok: false, error: "no valid JSON found in response" };
+  }
+
+  /* ---------------- settings (localStorage: small prefs only) ---------------- */
+
+  function loadSettings(){
+    const base = { apiKey: "", model: DEFAULT_MODEL, tab: "investigate", depth: "deep" };
+    try { return Object.assign(base, JSON.parse(localStorage.getItem(LS_KEY) || "{}")); }
+    catch (_) { return base; }
+  }
+  function saveSettings(){
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ apiKey: S.settings.apiKey, model: S.settings.model, tab: S.settings.tab, depth: S.settings.depth })); }
+    catch (_) {}
+  }
+
+  /* ---------------- IndexedDB session store ---------------- */
+
+  function idbOpen(){
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("sessions")) db.createObjectStore("sessions", { keyPath: "id" });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+    });
+  }
+  function idbPut(store, val){
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readwrite");
+      tx.objectStore(store).put(val);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    }));
+  }
+  function idbGet(store, key){
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+      const req = db.transaction(store, "readonly").objectStore(store).get(key);
+      req.onsuccess = () => { db.close(); resolve(req.result || null); };
+      req.onerror = () => { db.close(); reject(req.error); };
+    }));
+  }
+  function idbKeys(store){
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+      const req = db.transaction(store, "readonly").objectStore(store).getAllKeys();
+      req.onsuccess = () => { db.close(); resolve(req.result || []); };
+      req.onerror = () => { db.close(); reject(req.error); };
+    }));
+  }
+  function idbDel(store, key){
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readwrite");
+      tx.objectStore(store).delete(key);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    }));
+  }
+
+  let saveTimer = null;
+  function scheduleSave(){
+    if (saveTimer) return;
+    saveTimer = setTimeout(() => { saveTimer = null; saveNow(); }, 900);
+  }
+  async function saveNow(){
+    if (!S.session) return;
+    S.session.updatedAt = nowIso();
+    try { await idbPut("sessions", S.session); } catch (_) {}
+  }
+  async function archiveCurrentSession(){
+    if (!S.session) return;
+    const old = S.session;
+    if (old.id === "current" && (old.pkg || (old.stages || []).some(s => s.status !== "pending"))){
+      try {
+        const keys = await idbKeysSafe();
+        const archives = keys.filter(k => k.startsWith("archive-")).sort();
+        while (archives.length >= ARCHIVE_CAP){
+          const victim = archives.shift();
+          await idbDel("sessions", victim);
+        }
+        await idbPut("sessions", Object.assign({}, old, { id: "archive-" + Date.now() }));
+      } catch (_) {}
+    }
+  }
+  async function idbKeysSafe(){
+    try { return await idbKeys("sessions"); } catch (_) { return []; }
+  }
+
+  /* ---------------- app state ---------------- */
+
+  const S = {
+    settings: loadSettings(),
+    session: null,
+    running: false,
+    abortCtrl: null,
+    titleTouched: false,
+    routeVis: new Map(),
+    activeRouteId: null,
+    filters: [],
+    map: null,
+    routeLayers: new Map(),
+    candLayer: null,
+    radiusCircle: null,
+    centerMarker: null,
+    editorDirty: false,
+    usage: null,
+    overpass: { lastAt: 0, count: 0, cache: new Map() }
+  };
+
+  function freshUsage(){
+    return { llmCalls: 0, searchCalls: 0, fetchCalls: 0, citations: [], mapQueries: 0, tokensIn: 0, tokensOut: 0, cost: 0, costKnown: false };
+  }
+
+  function freshSession(input){
+    return {
+      id: "current",
+      status: "idle",
+      input: input || { location: "", radiusMiles: 25, title: "", focus: ["all"], depth: "deep" },
+      stages: STAGE_DEFS.map(d => ({ id: d.id, label: d.label, status: "pending", startedAt: null, completedAt: null, summary: "", lines: [], counters: {}, warnings: [], error: null, question: null, sourceIds: [], attempts: 0 })),
+      pkg: null,
+      log: [],
+      usage: freshUsage(),
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+  }
+
+  function getStage(id){ return S.session.stages.find(s => s.id === id); }
+  function stageCtx(stageId){
+    const stage = getStage(stageId);
+    return {
+      stage,
+      signal: () => S.abortCtrl ? S.abortCtrl.signal : undefined,
+      line: (text, kind) => { stage.lines.push({ text: String(text), kind: kind || "info" }); renderStageDetail(stageId); scheduleSave(); },
+      warn: (text) => { stage.warnings.push(String(text)); renderStageDetail(stageId); scheduleSave(); },
+      counter: (label, value) => { stage.counters[label] = value; renderStageDetail(stageId); scheduleSave(); },
+      summary: (text) => { stage.summary = String(text); renderStageNode(stageId); scheduleSave(); },
+      addSources: (list, supports) => addSources(stageId, list, supports),
+      ask: (q) => askQuestion(stageId, q),
+      input: S.session.input
+    };
+  }
+
+  /* ---------------- logging + usage ---------------- */
+
+  function log(msg, kind){
+    if (!S.session) return;
+    S.session.log.push({ t: nowIso(), msg: String(msg), kind: kind || "info" });
+    if (S.session.log.length > LOG_CAP) S.session.log.splice(0, S.session.log.length - LOG_CAP);
+    renderActivity();
+    scheduleSave();
+  }
+  function renderActivity(){
+    const ul = $("activityLog");
+    if (!ul) return;
+    const entries = S.session ? S.session.log : [];
+    const show = entries.slice(-14);
+    ul.innerHTML = show.map(e => `<li class="k-${esc(e.kind)}"><span class="t">${esc(e.t.slice(11, 16) || "")}</span><span>${esc(e.msg)}</span></li>`).join("");
+    ul.scrollTop = ul.scrollHeight;
+    $("logCount").textContent = entries.length ? `${entries.length} events (last ${LOG_CAP} kept)` : "";
+  }
+
+  function noteCitations(message){
+    if (!S.session || !S.session.usage) return;
+    const ann = message && message.annotations;
+    if (!Array.isArray(ann)) return;
+    for (const a of ann){
+      const uc = a && (a.url_citation || a);
+      const url = typeof uc.url === "string" ? uc.url : (typeof uc === "string" ? uc : null);
+      if (!url) continue;
+      if (!S.session.usage.citations.some(c => c.url === url)){
+        S.session.usage.citations.push({ url, title: uc.title || "" });
+      }
+    }
+    renderUsage();
+  }
+
+  function renderUsage(){
+    const u = S.session ? S.session.usage : null;
+    const el = $("usageLine");
+    if (!el) return;
+    if (!u || !u.llmCalls){ el.textContent = "No LLM activity yet."; return; }
+    const parts = [
+      `LLM calls: <b>${u.llmCalls}</b>`,
+      `search-enabled: <b>${u.searchCalls}</b>`,
+      `fetch-enabled: <b>${u.fetchCalls}</b>`,
+      `unique citations: <b>${u.citations.length}</b>`,
+      `map queries: <b>${u.mapQueries}</b>`
+    ];
+    if (u.tokensIn || u.tokensOut) parts.push(`tokens: <b>${fmtK(u.tokensIn)} in / ${fmtK(u.tokensOut)} out</b>`);
+    if (u.costKnown) parts.push(`cost: <b>$${u.cost.toFixed(3)}</b>`);
+    el.innerHTML = parts.join(" · ");
+  }
+
+  /* ---------------- OpenRouter client ---------------- */
+
+  const WEB_SEARCH_TOOL = { type: "openrouter:web_search", parameters: { engine: "auto", max_results: 6, max_total_results: 30, search_context_size: "medium" } };
+  const WEB_FETCH_TOOL = { type: "openrouter:web_fetch", parameters: { engine: "auto", max_uses: 2, max_content_tokens: 20000 } };
+  const RESEARCH_TOOLS = [WEB_SEARCH_TOOL, WEB_FETCH_TOOL];
+  const SEARCH_ONLY_TOOLS = [WEB_SEARCH_TOOL];
+
+  function orHeaders(key){
+    return {
+      "Authorization": "Bearer " + key,
+      "Content-Type": "application/json",
+      "HTTP-Referer": location.origin,
+      "X-Title": "Wildlife Road Cruise Investigator"
+    };
+  }
+
+  function explainOrError(status, bodyText){
+    const snippet = (bodyText || "").slice(0, 220);
+    if (status === 401) return "OpenRouter rejected the API key (401). Check the key under Model & Key.";
+    if (status === 402) return "OpenRouter reports insufficient credits (402) for this model.";
+    if (status === 429) return "OpenRouter rate limit hit (429). Wait a moment, then Retry Stage.";
+    if (status === 408 || status === 504) return "The model timed out (research with web tools can be slow). Retry Stage, or pick a faster model.";
+    return `OpenRouter error ${status}: ${snippet}`;
+  }
+
+  async function orCall({ system, user, json = true, tools = null, temperature = 0.2, signal }){
+    const key = (S.settings.apiKey || "").trim();
+    if (!key) throw new Error("No OpenRouter API key. Add one under Model & Key, then investigate.");
+    const model = S.settings.model || DEFAULT_MODEL;
+    const messages = [];
+    if (system) messages.push({ role: "system", content: system });
+    messages.push({ role: "user", content: user });
+    const buildBody = (useJson, useTools) => {
+      const body = { model, messages, temperature, usage: { include: true } };
+      if (useJson) body.response_format = { type: "json_object" };
+      if (useTools && useTools.length) body.tools = useTools;
+      return body;
+    };
+    let data;
+    const attempt = async (useJson, useTools) => {
+      const r = await fetch(OR_BASE + "/chat/completions", { method: "POST", headers: orHeaders(key), body: JSON.stringify(buildBody(useJson, useTools)), signal });
+      if (!r.ok){
+        const t = await r.text().catch(() => "");
+        const err = new Error(explainOrError(r.status, t));
+        err.status = r.status;
+        throw err;
+      }
+      return r.json();
+    };
+    try {
+      data = await attempt(json, tools);
+    } catch (e1){
+      if (e1.status === 400 && /response_format|json_object/i.test(e1.message)){
+        data = await attempt(false, tools);
+      } else if (e1.status === 400 && tools && tools.length > 1 && /tool|web_fetch|web_search/i.test(e1.message)){
+        data = await attempt(json, SEARCH_ONLY_TOOLS);
+      } else throw e1;
+    }
+    const u = S.session.usage;
+    u.llmCalls++;
+    if (tools && tools.some(t => t.type === "openrouter:web_search")) u.searchCalls++;
+    if (tools && tools.some(t => t.type === "openrouter:web_fetch")) u.fetchCalls++;
+    const choice = data && data.choices && data.choices[0];
+    const usage = data && data.usage;
+    if (usage){
+      if (isNum(usage.prompt_tokens)) u.tokensIn += usage.prompt_tokens;
+      if (isNum(usage.completion_tokens)) u.tokensOut += usage.completion_tokens;
+      if (isNum(usage.cost)) { u.cost += usage.cost; u.costKnown = true; }
+    }
+    noteCitations(choice && choice.message);
+    renderUsage();
+    const content = choice && choice.message && choice.message.content;
+    if (!content || !String(content).trim()) throw new Error("Model returned no message content" + (choice && choice.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : "") + ". Retry Stage, or choose a model that supports tool-driven research.");
+    return String(content);
+  }
+
+  async function llmJson({ system, user, tools, temperature = 0.2, validate }){
+    const signal = S.abortCtrl ? S.abortCtrl.signal : undefined;
+    const attempt = async (note) => {
+      const raw = await orCall({ system, user: user + (note || ""), json: true, tools, temperature, signal });
+      const parsed = parseJsonLoose(raw);
+      if (!parsed.ok) throw new Error("Model returned invalid JSON (" + parsed.error + ").");
+      return parsed.value;
+    };
+    let value;
+    try {
+      value = await attempt();
+      const vErr = validate ? validate(value) : null;
+      if (vErr) throw new Error(vErr);
+      return value;
+    } catch (e1){
+      if (signal && signal.aborted) throw e1;
+      log("Model response problem — retrying once with corrective feedback: " + e1.message, "warn");
+      value = await attempt("\n\nYour previous response had a problem: " + e1.message + " Return corrected STRICT JSON matching the requested schema exactly, with no extra text.");
+      const vErr = validate ? validate(value) : null;
+      if (vErr) throw new Error(vErr);
+      return value;
+    }
+  }
+
+  async function fetchModelCatalog(key){
+    const res = await fetch(OR_BASE + "/models", { headers: orHeaders(key) });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    return (data.data || []).map(m => ({ id: m.id, name: m.name || m.id })).sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  function renderModelSelect(select, models, current){
+    select.innerHTML = "";
+    const groups = {};
+    for (const m of models) (groups[m.id.split("/")[0] || "other"] ??= []).push(m);
+    for (const provider of Object.keys(groups).sort()){
+      const og = document.createElement("optgroup");
+      og.label = provider;
+      for (const m of groups[provider].sort((a, b) => a.id.localeCompare(b.id))) og.append(new Option(m.name || m.id, m.id));
+      select.append(og);
+    }
+    if (current && !models.some(m => m.id === current)){
+      const fallback = new Option(current + " (saved)", current);
+      select.append(fallback);
+    }
+    select.value = current || DEFAULT_MODEL;
+    if (!select.value) select.value = DEFAULT_MODEL;
+  }
+
+  async function refreshModels(){
+    const key = $("apiKeyInput").value.trim();
+    const status = $("modelStatus");
+    if (!key){ status.textContent = "Enter an API key first."; return; }
+    status.textContent = "Loading models…";
+    try {
+      const models = await fetchModelCatalog(key);
+      renderModelSelect($("modelSelect"), models, S.settings.model);
+      status.textContent = models.length + " models loaded.";
+    } catch (err){
+      renderModelSelect($("modelSelect"), [], S.settings.model);
+      status.textContent = "Model list failed (" + err.message + "). Saved model remains usable.";
+    }
+  }
+
+  /* ---------------- sources registry ---------------- */
+
+  function authorityFromUrl(url){
+    try {
+      const host = new URL(url).hostname.replace(/^www\./, "");
+      if (/\.(gov|us)$/.test(host)) return host.includes("fws.gov") || host.includes("nps.gov") || host.includes("usda") ? "federal-agency" : "state-agency";
+      if (/\.edu$/.test(host)) return "academic";
+      if (/(ebird|audubon)\./.test(host)) return "birding-org";
+      if (/(nature|tnc|trust|conservanc)/.test(host)) return "conservation-org";
+      return "web";
+    } catch (_) { return "web"; }
+  }
+
+  function addSources(stageId, list, defaultSupports){
+    const pkg = S.session.pkg;
+    if (!pkg || !Array.isArray(list)) return [];
+    const ids = [];
+    for (const s of list){
+      if (!s || typeof s !== "object") continue;
+      const url = String(s.url || s.sourceUrl || "").trim();
+      const title = String(s.title || s.name || url || "Source").trim();
+      if (!url && !title) continue;
+      let existing = url ? pkg.research.sources.find(x => x.url === url) : null;
+      if (!existing){
+        existing = {
+          id: "src-" + (pkg.research.sources.length + 1) + "-" + uid(),
+          title,
+          url,
+          sourceType: String(s.sourceType || authorityFromUrl(url)),
+          supports: Array.isArray(s.supports) ? s.supports.map(String).slice(0, 8) : [],
+          accessedAt: nowIso(),
+          authorityTier: String(s.authorityTier || authorityFromUrl(url))
+        };
+        pkg.research.sources.push(existing);
+      }
+      if (defaultSupports && Array.isArray(defaultSupports)){
+        for (const sup of defaultSupports) if (!existing.supports.includes(sup)) existing.supports.push(sup);
+      }
+      if (!getStage(stageId).sourceIds) getStage(stageId).sourceIds = [];
+      if (!getStage(stageId).sourceIds.includes(existing.id)) getStage(stageId).sourceIds.push(existing.id);
+      ids.push(existing.id);
+    }
+    scheduleSave();
+    return ids;
+  }
+
+  /* ---------------- pipeline rendering ---------------- */
+
+  const STATUS_LABEL = { pending: "Pending", running: "Running", complete: "Complete", warning: "Warning", "needs-input": "Needs Input", failed: "Failed", skipped: "Skipped" };
+
+  function renderPipeline(){
+    const wrap = $("pipeline");
+    if (!S.session){ wrap.innerHTML = ""; return; }
+    const existing = new Map([...wrap.children].map(c => [c.dataset.stage, c]));
+    for (const def of STAGE_DEFS){
+      const st = getStage(def.id);
+      let node = existing.get(def.id);
+      if (!node){
+        node = document.createElement("div");
+        node.className = "stage";
+        node.dataset.stage = def.id;
+        node.innerHTML = `
+          <div class="stage-rail"><span class="dot" aria-hidden="true"></span></div>
+          <div class="stage-body">
+            <button type="button" class="stage-head" aria-expanded="false">
+              <span class="stage-glyph" aria-hidden="true">${def.glyph}</span>
+              <span class="stage-name">${def.label}</span>
+              <span class="stage-status-label"></span>
+              <span class="stage-sub"></span>
+              <span class="stage-caret" aria-hidden="true">▶</span>
+            </button>
+            <div class="stage-detail" hidden></div>
+          </div>`;
+        wrap.appendChild(node);
+        node.querySelector(".stage-head").addEventListener("click", () => toggleStageOpen(def.id));
+      }
+      node.className = "stage st-" + st.status + (node.classList.contains("open") ? " open" : "");
+      node.querySelector(".stage-status-label").textContent = STATUS_LABEL[st.status] || st.status;
+      const sub = node.querySelector(".stage-sub");
+      sub.textContent = st.summary || def.blurb;
+      sub.title = st.summary || def.blurb;
+      const head = node.querySelector(".stage-head");
+      head.setAttribute("aria-expanded", node.classList.contains("open") ? "true" : "false");
+      renderStageDetail(def.id, node);
+    }
+    updateSessionPill();
+  }
+
+  function renderStageDetail(stageId, nodeRef){
+    const node = nodeRef || document.querySelector('.stage[data-stage="' + stageId + '"]');
+    if (!node) return;
+    const st = getStage(stageId);
+    const detail = node.querySelector(".stage-detail");
+    if (!node.classList.contains("open")){ detail.hidden = true; return; }
+    detail.hidden = false;
+    const parts = [];
+    if (st.counters && Object.keys(st.counters).length){
+      parts.push('<div class="counter-row">' + Object.entries(st.counters).map(([k, v]) => `<span class="counter-chip">${esc(k)}: <b>${esc(v)}</b></span>`).join("") + "</div>");
+    }
+    if (st.lines && st.lines.length){
+      parts.push("<ul>" + st.lines.map(l => `<li class="${esc(l.kind || "info")}">${esc(l.text)}</li>`).join("") + "</ul>");
+    }
+    if (st.warnings && st.warnings.length){
+      parts.push("<ul>" + st.warnings.map(w => `<li class="warn">${esc(w)}</li>`).join("") + "</ul>");
+    }
+    if (st.error){
+      parts.push(`<ul><li class="err">${esc(st.error)}</li></ul>`);
+    }
+    if (st.status === "needs-input" && st.question && !st.question.answered){
+      const q = st.question;
+      parts.push(`
+        <div class="question-block">
+          <div class="q-title">${esc(q.text)}</div>
+          ${q.choices.map((c, i) => `
+            <label class="q-choice"><input type="radio" name="q-${esc(stageId)}" value="${esc(c.id)}" ${i === 0 ? "checked" : ""}>
+              <span><span class="q-label">${esc(c.label)}</span>${c.detail ? `<span class="q-detail">${esc(c.detail)}</span>` : ""}</span>
+            </label>`).join("")}
+          <div class="retry-row"><button type="button" class="q-confirm" data-stage="${esc(stageId)}">Confirm & continue</button></div>
+        </div>`);
+    }
+    if (st.status === "failed"){
+      parts.push('<div class="retry-row"><button type="button" class="q-retry" data-stage="' + esc(stageId) + '">↻ Retry Stage</button></div>');
+    }
+    const srcIds = st.sourceIds || [];
+    if (srcIds.length){
+      const pkg = S.session.pkg;
+      const links = srcIds.map(id => pkg && pkg.research.sources.find(x => x.id === id)).filter(Boolean).slice(0, 6);
+      if (links.length) parts.push('<div class="tiny" style="margin-top:7px">Sources: ' + links.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title.length > 42 ? s.title.slice(0, 42) + "…" : s.title)}</a>`).join(" · ") + "</div>");
+    }
+    detail.innerHTML = parts.join("");
+    const confirmBtn = detail.querySelector(".q-confirm");
+    if (confirmBtn) confirmBtn.addEventListener("click", () => answerQuestion(stageId));
+    const retryBtn = detail.querySelector(".q-retry");
+    if (retryBtn) retryBtn.addEventListener("click", () => retryStage(stageId));
+  }
+
+  function toggleStageOpen(stageId){
+    const node = document.querySelector('.stage[data-stage="' + stageId + '"]');
+    if (!node) return;
+    node.classList.toggle("open");
+    renderStageDetail(stageId, node);
+    node.querySelector(".stage-head").setAttribute("aria-expanded", node.classList.contains("open") ? "true" : "false");
+  }
+
+  function renderStageNode(stageId){
+    const node = document.querySelector('.stage[data-stage="' + stageId + '"]');
+    if (!node) return;
+    const st = getStage(stageId);
+    node.querySelector(".stage-sub").textContent = st.summary || "";
+    node.querySelector(".stage-status-label").textContent = STATUS_LABEL[st.status] || st.status;
+    node.className = "stage st-" + st.status + (node.classList.contains("open") ? " open" : "");
+  }
+
+  function setStage(stageId, patch){
+    const st = getStage(stageId);
+    Object.assign(st, patch);
+    renderStageNode(stageId);
+    renderStageDetail(stageId);
+    scheduleSave();
+  }
+
+  function setStageRunning(stageId){
+    let node = document.querySelector('.stage[data-stage="' + stageId + '"]');
+    if (node){
+      document.querySelectorAll(".stage.open").forEach(n => { if (n !== node){ n.classList.remove("open"); renderStageDetail(n.dataset.stage); } });
+      node.classList.add("open");
+    }
+    setStage(stageId, { status: "running", startedAt: nowIso(), error: null, question: null });
+    node = document.querySelector('.stage[data-stage="' + stageId + '"]');
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function setStageDone(stageId, warnings){
+    const st = getStage(stageId);
+    setStage(stageId, { status: warnings && warnings.length ? "warning" : "complete", completedAt: nowIso() });
+    renderPipeline();
+  }
+
+  function setStageFailed(stageId, message){
+    const st = getStage(stageId);
+    st.error = message;
+    st.status = "failed";
+    st.completedAt = nowIso();
+    const node = document.querySelector('.stage[data-stage="' + stageId + '"]');
+    if (node) node.classList.add("open");
+    renderStageNode(stageId);
+    renderStageDetail(stageId);
+  }
+
+  function updateSessionPill(){
+    const pill = $("sessionPill");
+    const stateEl = $("pipelineState");
+    const cancelBtn = $("btnCancel");
+    if (cancelBtn) cancelBtn.hidden = !S.session || S.session.status !== "running";
+    if (!S.session){ pill.textContent = "No investigation yet"; stateEl.textContent = "Idle — the Investigator makes the intermediate decisions for you"; return; }
+    const loc = S.session.input.location || "—";
+    if (S.session.status === "running"){
+      const active = STAGE_DEFS.map(d => d.id).find(id => getStage(id).status === "running");
+      const def = STAGE_DEFS.find(d => d.id === active);
+      pill.textContent = "Investigating " + loc;
+      stateEl.textContent = def ? ("Running: " + def.label + " — " + def.blurb) : "Running";
+    } else if (S.session.status === "needs-input"){
+      pill.textContent = "Needs your input";
+      stateEl.textContent = "A stage is waiting for your answer below";
+    } else if (S.session.status === "failed"){
+      pill.textContent = "Investigation paused (failed stage)";
+      stateEl.textContent = "A stage failed — open it and use Retry Stage";
+    } else if (S.session.status === "complete"){
+      pill.textContent = "Guide ready · " + loc;
+      stateEl.textContent = "Complete — guide ready in Guide Preview";
+    } else if (S.session.status === "imported"){
+      pill.textContent = "Imported guide loaded";
+      stateEl.textContent = "Imported package — rerun stages or export";
+    } else {
+      pill.textContent = "Ready to investigate " + loc;
+      stateEl.textContent = "Idle";
+    }
+  }
+
+  /* ---------------- questions (needs input) ---------------- */
+
+  function askQuestion(stageId, q){
+    return new Promise(resolve => {
+      const st = getStage(stageId);
+      st.question = { text: q.text, choices: q.choices, answered: null };
+      st.status = "needs-input";
+      S.session.status = "needs-input";
+      renderStageNode(stageId);
+      const node = document.querySelector('.stage[data-stage="' + stageId + '"]');
+      if (node){ node.classList.add("open"); renderStageDetail(stageId, node); node.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      updateSessionPill();
+      log("Needs input: " + q.text, "warn");
+      S.pendingAnswer = { stageId, resolve };
+    });
+  }
+
+  function answerQuestion(){
+    const pending = S.pendingAnswer;
+    if (!pending) return;
+    const node = document.querySelector('.stage[data-stage="' + pending.stageId + '"]');
+    const checked = node ? node.querySelector(".question-block input[type=radio]:checked") : null;
+    const choiceId = checked ? checked.value : (pending.stageId && getStage(pending.stageId).question.choices[0].id);
+    const st = getStage(pending.stageId);
+    st.question.answered = choiceId;
+    st.status = "running";
+    S.session.status = "running";
+    renderStageNode(pending.stageId);
+    renderStageDetail(pending.stageId);
+    updateSessionPill();
+    S.pendingAnswer = null;
+    pending.resolve(choiceId);
+  }
+
+  /* ---------------- orchestrator ---------------- */
+
+  function setSessionStatus(status){
+    S.session.status = status;
+    updateSessionPill();
+    scheduleSave();
+  }
+
+  async function runInvestigation(startIdx){
+    if (S.running) return;
+    const idx = typeof startIdx === "number" ? startIdx : 0;
+    const firstPending = S.session.stages.findIndex(s => s.status === "pending" || s.status === "failed" || s.status === "needs-input");
+    const from = idx > 0 ? idx : Math.max(0, firstPending);
+    S.running = true;
+    S.abortCtrl = new AbortController();
+    setSessionStatus("running");
+    $("btnInvestigate").disabled = true;
+    try {
+      for (let i = from; i < STAGE_DEFS.length; i++){
+        const def = STAGE_DEFS[i];
+        const st = getStage(def.id);
+        if (st.status === "complete" || st.status === "warning" || st.status === "skipped") continue;
+        setStageRunning(def.id);
+        log("Stage " + def.label + ": " + def.blurb, "stage");
+        try {
+          await STAGE_FNS[def.id](stageCtx(def.id));
+          if (getStage(def.id).status === "running") setStageDone(def.id, getStage(def.id).warnings);
+        } catch (err){
+          const aborted = S.abortCtrl && S.abortCtrl.signal.aborted;
+          if (aborted){
+            st.error = "Cancelled by user.";
+            st.status = "failed";
+            renderStageNode(def.id);
+            log("Investigation cancelled — completed stages preserved. Use Retry Stage to continue.", "warn");
+          } else {
+            st.error = err.message || String(err);
+            st.status = "failed";
+            st.completedAt = nowIso();
+            renderStageNode(def.id);
+            renderStageDetail(def.id);
+            log("Stage " + def.label + " failed: " + st.error, "err");
+          }
+          setSessionStatus("failed");
+          return;
+        }
+        renderPipeline();
+        await saveNow();
+      }
+      const allDone = S.session.stages.every(s => s.status === "complete" || s.status === "warning" || s.status === "skipped");
+      setSessionStatus(allDone ? "complete" : "failed");
+      if (allDone){
+        log("Guide ready — see Guide Preview.", "ok");
+        switchTab("preview");
+      }
+      renderPipeline();
+    } finally {
+      S.running = false;
+      S.abortCtrl = null;
+      $("btnInvestigate").disabled = false;
+      await saveNow();
+    }
+  }
+
+  async function retryStage(stageId){
+    if (S.running) { toast("A stage is already running."); return; }
+    const idx = STAGE_DEFS.findIndex(d => d.id === stageId);
+    if (idx < 0) return;
+    const st = getStage(stageId);
+    st.status = "pending";
+    st.error = null;
+    st.attempts++;
+    renderPipeline();
+    log("Retrying stage: " + st.label, "info");
+    await runInvestigation(idx);
+  }
+
+  function cancelInvestigation(){
+    if (S.abortCtrl) S.abortCtrl.abort();
+  }
+
+  /* ================= STAGE IMPLEMENTATIONS ================= */
+
+  const STAGE_FNS = {};
+
+  function inputBlock(){
+    const i = S.session.input;
+    const focus = i.focus.filter(f => f !== "all").map(f => (FOCUS_OPTIONS.find(o => o.k === f) || { label: f }).label);
+    return [
+      "LOCATION: " + i.location,
+      "SEARCH RADIUS (miles): " + i.radiusMiles,
+      "GUIDE TITLE: " + (i.title || "(none yet — suggest one)"),
+      "WILDLIFE FOCUS BIASES: " + (focus.length ? focus.join(", ") : "all wildlife"),
+      "RESEARCH DEPTH: " + i.depth,
+      "CRUISING PHILOSOPHY: " + CRUISING_PHILOSOPHY.join("; ")
+    ].join("\n");
+  }
+
+  function sourcesLine(list){
+    if (!Array.isArray(list) || !list.length) return [];
+    return list
+      .map(s => typeof s === "string" ? { url: s } : { url: String((s && (s.url || s.sourceUrl)) || "") })
+      .filter(s => /^https?:\/\//.test(s.url))
+      .slice(0, 10);
+  }
+
+  function initPkgIfMissing(){
+    if (S.session.pkg) return;
+    const i = S.session.input;
+    S.session.pkg = {
+      schemaVersion: SCHEMA_VERSION,
+      generator: GENERATOR,
+      guide: {
+        id: "",
+        title: "",
+        description: "",
+        location: { input: i.location, canonicalName: "", lat: null, lng: null, region: "", country: "", counties: [] },
+        radiusMiles: i.radiusMiles,
+        generatedAt: null,
+        researchMode: i.depth || "deep",
+        cruisingPhilosophy: CRUISING_PHILOSOPHY.slice()
+      },
+      routes: [],
+      research: {
+        pipeline: [],
+        landscape: null,
+        candidates: [],
+        rejectedCandidates: [],
+        roads: [],
+        sources: [],
+        warnings: [],
+        unresolvedQuestions: [],
+        usage: null
+      },
+      fieldReports: []
+    };
+  }
+
+  /* ---------- Stage 1: Geography ---------- */
+
+  STAGE_FNS.geography = async (ctx) => {
+    const i = ctx.input;
+    ctx.summary("Resolving " + i.location);
+    log("Resolving geography for “" + i.location + "”");
+    const out = await llmJson({
+      system: SYS_PROMPT,
+      tools: RESEARCH_TOOLS,
+      temperature: 0.1,
+      user: inputBlock() + "\n\nTASK: Resolve this location for a wildlife road-cruise investigation. " +
+        "Use web search if the place is ambiguous or you need coordinates.\n\n" +
+        "Return JSON: {" +
+        '"resolved": boolean, "ambiguous": boolean, ' +
+        '"candidates": [{"label": "City, State", "region": "", "country": "", "lat": number, "lng": number, "why": ""}], ' +
+        '"canonicalName": "", "lat": number, "lng": number, "region": "", "country": "", "counties": [""], "notes": "", ' +
+        '"sources": [{"title": "", "url": ""}] }.',
+      validate: (v) => {
+        if (!v || typeof v !== "object") return "response must be an object";
+        if (!Array.isArray(v.candidates)) return "candidates array required";
+        return null;
+      }
+    });
+    ctx.addSources(sourcesLine(out.sources), ["geography"]);
+    const usable = (out.candidates || []).filter(c => isNum(c.lat) && isNum(c.lng));
+    if (out.ambiguous && usableCandidates(out).length > 1){
+      const choiceId = await ctx.ask({
+        text: "“" + i.location + "” matches multiple places. Which did you mean?",
+        choices: usableCandidates(out).slice(0, 6).map((c, idx) => ({
+          id: String(idx),
+          label: c.label || c.canonicalName || "Candidate " + (idx + 1),
+          detail: [c.region, c.country].filter(Boolean).join(", ") + " · " + (+c.lat).toFixed(2) + ", " + (+c.lng).toFixed(2) + (c.why ? " · " + c.why : "")
+        }))
+      });
+      const chosen = usableCandidates(out)[Number(choiceId)] || usableCandidates(out)[0];
+      applyGeography(ctx, chosen.label || out.canonicalName || i.location, chosen, out);
+    } else if (!out.ambiguous && out.resolved !== false && isNum(out.lat) && isNum(out.lng)){
+      applyGeography(ctx, out.canonicalName || i.location, out, out);
+    } else if (usable.length === 1){
+      applyGeography(ctx, usable[0].label || out.canonicalName || i.location, usable[0], out);
+    } else {
+      throw new Error("Could not confidently resolve this location. Add a state/region (e.g. “Springfield, Illinois”) and retry.");
+    }
+  };
+
+  function usableCandidates(out){ return (out.candidates || []).filter(c => isNum(c.lat) && isNum(c.lng)); }
+
+  function applyGeography(ctx, name, geo, out){
+    const loc = S.session.pkg.guide.location;
+    loc.canonicalName = String(name || S.session.input.location);
+    loc.lat = +geo.lat; loc.lng = +geo.lng;
+    loc.region = String(geo.region || "");
+    loc.country = String(geo.country || "");
+    loc.counties = Array.isArray(geo.counties) ? geo.counties.map(String).slice(0, 12) : [];
+    S.session.pkg.guide.id = slugify(loc.canonicalName) + "-wildlife-road-cruises";
+    ctx.line("Resolved " + loc.canonicalName);
+    ctx.line("Center: " + loc.lat.toFixed(3) + ", " + loc.lng.toFixed(3));
+    ctx.line("Search radius: " + S.session.input.radiusMiles + " miles");
+    if (loc.counties.length) ctx.line("Relevant jurisdictions: " + loc.counties.join(", "));
+    if (out && out.notes) ctx.line(String(out.notes));
+    ctx.counter("Center", loc.lat.toFixed(2) + ", " + loc.lng.toFixed(2));
+    ctx.counter("Radius", S.session.input.radiusMiles + " mi");
+    ctx.summary("Resolved " + loc.canonicalName + " · " + S.session.input.radiusMiles + " mi");
+    if (!S.titleTouched || !$("titleInput").value.trim()){
+      const city = loc.canonicalName.split(",")[0].trim();
+      const suggested = city + " Wildlife Road Cruises";
+      $("titleInput").value = suggested;
+      S.session.input.title = suggested;
+      log("Suggested guide title: " + suggested);
+    }
+    renderPreview();
+  }
+
+  /* ---------- Stage 2: Landscape ---------- */
+
+  STAGE_FNS.landscape = async (ctx) => {
+    ctx.summary("Reading the habitat map of the radius");
+    log("Characterizing landscape and habitat opportunities");
+    const out = await llmJson({
+      system: SYS_PROMPT,
+      tools: RESEARCH_TOOLS,
+      temperature: 0.2,
+      user: inputBlock() + "\n\nResolved center: " + S.session.pkg.guide.location.lat + ", " + S.session.pkg.guide.location.lng +
+        "\n\nSTAGE — LANDSCAPE CHARACTERIZATION. Before looking for places, understand the ecology of this radius. Research what major habitat systems exist (rivers, floodplains, wetlands, marsh, reservoirs, lakes, reclaimed mine land, prairie, agricultural edge, forest, bottomland hardwoods, mountains, desert, coastal marsh, refuges, migration corridors, or whatever matters here)." +
+        "\n\nReturn JSON: { \"habitats\": [{\"name\":\"\",\"kind\":\"\",\"description\":\"\",\"roadCruiseRelevance\":\"high|medium|low\"}], \"summary\":\"\", \"seasonalityNotes\":\"\", \"fewQualifyingHabitats\": false, \"suggestedRadiusExpansionMiles\": 0, \"sources\": [{\"title\":\"\",\"url\":\"\"}] }" +
+        "\nIf almost no habitat suitable for ROAD cruising exists within the radius, set fewQualifyingHabitats true and propose suggestedRadiusExpansionMiles (a number > current radius).",
+      validate: (v) => {
+        if (!v || !Array.isArray(v.habitats)) return "habitats array required";
+        if (v.habitats.length < 2) return "expected at least 2 habitat systems";
+        return null;
+      }
+    });
+    ctx.addSources(sourcesLine(out.sources), ["landscape"]);
+    const land = {
+      habitats: out.habitats.slice(0, 24).map(h => ({
+        name: String(h.name || "").slice(0, 120),
+        kind: String(h.kind || "").slice(0, 60),
+        description: String(h.description || "").slice(0, 400),
+        roadCruiseRelevance: ["high","medium","low"].includes(h.roadCruiseRelevance) ? h.roadCruiseRelevance : "medium"
+      })),
+      summary: String(out.summary || "").slice(0, 900),
+      seasonalityNotes: String(out.seasonalityNotes || "").slice(0, 600)
+    };
+    S.session.pkg.research.landscape = land;
+    ctx.line(land.habitats.map(h => h.name).join(" · "));
+    ctx.counter("Habitat systems", land.habitats.length);
+    ctx.summary(land.habitats.slice(0, 4).map(h => h.name).join(" · ") + (land.habitats.length > 4 ? " +" + (land.habitats.length - 4) : ""));
+    if (land.summary) log("Landscape: " + land.summary.slice(0, 110), "info");
+    if (out.fewQualifyingHabitats && isNum(out.suggestedRadiusExpansionMiles) && out.suggestedRadiusExpansionMiles > S.session.input.radiusMiles){
+      const proposed = Math.round(out.suggestedRadiusExpansionMiles);
+      const choiceId = await ctx.ask({
+        text: "Very little qualifying road-cruisable habitat exists within " + S.session.input.radiusMiles + " miles. Expand the investigation to " + proposed + " miles?",
+        choices: [
+          { id: "expand", label: "Expand to " + proposed + " miles", detail: "Wider net; more candidates and more LLM calls" },
+          { id: "keep", label: "Keep " + S.session.input.radiusMiles + " miles", detail: "Proceed even if few candidates qualify" }
+        ]
+      });
+      if (choiceId === "expand"){
+        S.session.input.radiusMiles = proposed;
+        S.session.pkg.guide.radiusMiles = proposed;
+        $("radiusInput").value = String(proposed);
+        ctx.line("Radius expanded to " + proposed + " miles at your direction.");
+        ctx.counter("Radius", proposed + " mi");
+        log("Radius expanded to " + proposed + " miles.", "info");
+      }
+    }
+    renderPreview();
+  };
+
+  /* ---------- Stage 3: Candidate Discovery ---------- */
+
+  STAGE_FNS.candidateDiscovery = async (ctx) => {
+    const deep = S.session.input.depth !== "recon";
+    const target = deep ? "18-40" : "10-18";
+    ctx.summary("Searching agency, conservation and naturalist sources broadly");
+    log("Searching wildlife agency and conservation resources", "info");
+    const out = await llmJson({
+      system: SYS_PROMPT,
+      tools: RESEARCH_TOOLS,
+      temperature: 0.25,
+      user: inputBlock() + "\n\nCenter: " + S.session.pkg.guide.location.lat + ", " + S.session.pkg.guide.location.lng +
+        "\nHabitat profile already established: " + JSON.stringify((S.session.pkg.research.landscape || {}).habitats || []).slice(0, 1500) +
+        "\n\nSTAGE — BROAD CANDIDATE DISCOVERY. Search aggressively for candidate landscapes for wildlife road-cruising inside the radius: National Wildlife Refuges, Wildlife Management Areas, Fish & Wildlife Areas, state natural areas, reservoirs, wetland complexes, river bottoms, reclaimed mine land, forest road systems, prairie preserves with road access, conservation areas, and — importantly — obscure rural road corridors adjoining strong habitat. Do not only search famous parks; the best cruise may be a county road beside a slough. Aim for " + target + " candidates across as many habitat types as the landscape profile suggests." +
+        "\n\nReturn JSON: { \"candidates\": [ {\"name\":\"\", \"type\":\"wma|nwr|fwa|reservoir|wetland|conservation|forest|prairie|road-corridor|other\", \"jurisdiction\":\"\", \"lat\":number, \"lng\":number, \"briefDescription\":\"\", \"habitatKinds\":[\"\"], \"notableSpecies\":[\"\"], \"sourceUrls\":[\"\"] } ] }" +
+        "\nEvery candidate needs approximate lat/lng. If coordinates are unknown use the center and say so in briefDescription.",
+      validate: (v) => {
+        if (!v || !Array.isArray(v.candidates)) return "candidates array required";
+        if (v.candidates.length < 6) return "expected at least 6 candidates, got " + (v.candidates || []).length;
+        return null;
+      }
+    });
+    const cands = out.candidates.slice(0, 60).map((c, i) => {
+      const lat = +c.lat, lng = +c.lng;
+      const dist = isNum(lat) && isNum(lng) ? haversineMiles(S.session.pkg.guide.location.lat, S.session.pkg.guide.location.lng, lat, lng) : null;
+      return {
+        id: "cand-" + (i + 1),
+        name: String(c.name || "").slice(0, 140),
+        type: String(c.type || "other"),
+        jurisdiction: String(c.jurisdiction || "").slice(0, 120),
+        lat: isNum(lat) ? lat : null,
+        lng: isNum(lng) ? lng : null,
+        briefDescription: String(c.briefDescription || "").slice(0, 500),
+        habitatKinds: Array.isArray(c.habitatKinds) ? c.habitatKinds.map(String).slice(0, 6) : [],
+        notableSpecies: Array.isArray(c.notableSpecies) ? c.notableSpecies.map(String).slice(0, 8) : [],
+        sourceUrls: Array.isArray(c.sourceUrls) ? c.sourceUrls.filter(u => /^https?:\/\//.test(u)).slice(0, 6) : [],
+        distanceMiles: dist != null ? +dist.toFixed(1) : null,
+        triage: null
+      };
+    });
+    ctx.addSources(cands.flatMap(c => sourcesLine(c.sourceUrls)), ["candidate-discovery"]);
+    S.session.pkg.research.candidates = cands;
+    const buckets = {};
+    for (const c of cands) buckets[c.type] = (buckets[c.type] || 0) + 1;
+    ctx.line(cands.length + " candidate landscapes discovered");
+    for (const [t, n] of Object.entries(buckets).sort((a, b) => b[1] - a[1])) ctx.line(n + " × " + t);
+    ctx.counter("Candidates", cands.length);
+    ctx.counter("With coordinates", cands.filter(c => isNum(c.lat)).length);
+    ctx.summary(cands.length + " candidates discovered");
+    log(cands.length + " candidate landscapes discovered", "ok");
+    renderPreview();
+  };
+
+  /* ---------- Stage 4: Candidate Triage ---------- */
+
+  STAGE_FNS.candidateTriage = async (ctx) => {
+    const cands = S.session.pkg.research.candidates;
+    ctx.summary("Scoring " + cands.length + " candidates for road-cruise suitability");
+    log("Evaluating candidates for road-cruise suitability", "info");
+    const compact = cands.map(c => ({ name: c.name, type: c.type, jurisdiction: c.jurisdiction, brief: c.briefDescription.slice(0, 160), distanceMiles: c.distanceMiles, habitats: c.habitatKinds }));
+    const out = await llmJson({
+      system: SYS_PROMPT,
+      tools: RESEARCH_TOOLS,
+      temperature: 0.15,
+      user: inputBlock() + "\n\nSTAGE — AUTONOMOUS TRIAGE. Evaluate every candidate for ACTUAL road-cruise suitability. You are the expert here; the user has no local knowledge and will not be asked. Score 0-10 on each dimension: habitatPotential, roadHabitatAdjacency (does good habitat touch or closely parallel a public road), trafficSuitability, vehicleAccess (public vehicles legal), roadGeometry (loop/dead-end/grid favors cruising), observationPracticality, walkingIndependence (10 = zero walking needed), evidenceConfidence. " +
+        "Reject candidates that fail road-cruising requirements. Use reasonCode exactly one of: " + REASON_CODES.slice(0, 11).join(", ") + ". Do not pad the list — six excellent beats twelve mediocre. Reserve 'promoted' for genuinely promising road-cruise properties; 'secondary' for plausible-but-unproven ones worth a lighter look." +
+        "\n\nCandidates: " + JSON.stringify(compact) +
+        "\n\nReturn JSON: { \"evaluations\": [ {\"name\": exact candidate name, \"verdict\": \"rejected|promoted|secondary\", \"reasonCode\": one-of-list, \"reason\": \"\", \"scores\": {8 dims} } ] }",
+      validate: (v) => {
+        if (!v || !Array.isArray(v.evaluations)) return "evaluations array required";
+        if (v.evaluations.length < 4) return "too few evaluations";
+        return null;
+      }
+    });
+    const byName = new Map(cands.map(c => [norm(c.name), c]));
+    let promoted = 0, secondary = 0, rejected = 0, unmatched = 0;
+    S.session.pkg.research.rejectedCandidates = [];
+    for (const ev of out.evaluations){
+      const c = byName.get(norm(ev.name));
+      if (!c){ unmatched++; continue; }
+      const verdict = ["rejected","promoted","secondary"].includes(ev.verdict) ? ev.verdict : "secondary";
+      c.triage = {
+        verdict,
+        reasonCode: REASON_CODES.includes(ev.reasonCode) ? ev.reasonCode : "other",
+        reason: String(ev.reason || "").slice(0, 300),
+        scores: normScores(ev.scores, ["habitatPotential","roadHabitatAdjacency","trafficSuitability","vehicleAccess","roadGeometry","observationPracticality","walkingIndependence","evidenceConfidence"])
+      };
+      if (verdict === "rejected"){
+        rejected++;
+        S.session.pkg.research.rejectedCandidates.push({ name: c.name, type: c.type, reasonCode: c.triage.reasonCode, reason: c.triage.reason, distanceMiles: c.distanceMiles });
+        if (rejected <= 5) log("Rejecting candidate: " + c.name + " — " + c.triage.reasonCode, "warn");
+      } else if (verdict === "promoted") promoted++;
+      else secondary++;
+    }
+    for (const c of cands) if (!c.triage){ c.triage = { verdict: "secondary", reasonCode: "not-evaluated", reason: "Not covered by the triage pass; retained as secondary.", scores: {} }; unmatched++; }
+    const kept = cands.filter(c => c.triage.verdict !== "rejected");
+    ctx.line(cands.length + " candidates evaluated");
+    ctx.line(rejected + " rejected · " + promoted + " promoted · " + secondary + " secondary");
+    if (unmatched) ctx.warn(unmatched + " triage entries did not match a candidate name (ignored).");
+    const topReasons = {};
+    for (const r of S.session.pkg.research.rejectedCandidates) topReasons[r.reasonCode] = (topReasons[r.reasonCode] || 0) + 1;
+    for (const [rc, n] of Object.entries(topReasons)) ctx.line(n + " rejected: " + rc);
+    ctx.counter("Evaluated", cands.length);
+    ctx.counter("Rejected", rejected);
+    ctx.counter("Promoted", promoted);
+    ctx.counter("Secondary", secondary);
+    ctx.summary(cands.length + " evaluated · " + rejected + " rejected · " + kept.length + " kept");
+    log("Triage complete: " + promoted + " promoted, " + secondary + " secondary, " + rejected + " rejected", "ok");
+    renderPreview();
+  };
+
+  function norm(s){ return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+
+  function normScores(raw, keys){
+    const out = {};
+    for (const k of keys){
+      const v = raw && raw[k] != null ? +raw[k] : null;
+      out[k] = isNum(v) ? clamp(v, 0, 10) : 5;
+    }
+    return out;
+  }
+
+  /* ---------- Stage 5: Road-level Investigation ---------- */
+
+  STAGE_FNS.roadInvestigation = async (ctx) => {
+    const cands = S.session.pkg.research.candidates.filter(c => c.triage && c.triage.verdict !== "rejected");
+    const promoted = cands.filter(c => c.triage.verdict === "promoted");
+    ctx.summary("Investigating actual roads at " + cands.length + " surviving properties");
+    log("Investigating vehicle access and road layout at " + cands.length + " properties", "info");
+    const compact = cands.map(c => ({
+      name: c.name, type: c.type, jurisdiction: c.jurisdiction,
+      lat: c.lat, lng: c.lng, distanceMiles: c.distanceMiles,
+      triageVerdict: c.triage.verdict,
+      brief: c.briefDescription.slice(0, 220),
+      scores: c.triage.scores
+    }));
+    const out = await llmJson({
+      system: SYS_PROMPT,
+      tools: RESEARCH_TOOLS,
+      temperature: 0.2,
+      user: inputBlock() + "\n\nSTAGE — ROAD-LEVEL INVESTIGATION. For each surviving candidate, investigate the ACTUAL ROADS a slow vehicle could cruise. Determine where possible: road names (as they appear on maps and signs, e.g. “County Road 775 E” or “Klippel Road”), public/private status, paved/gravel/unpaved, whether the shape is a loop / out-and-back / grid / perimeter road, through-traffic likelihood, seasonal gates or closures, flood susceptibility, refuge hours, vehicle restrictions, roadside pull-offs, and what habitat directly touches the roadway. Flag whether a supposed road is actually a service road or walking trail. Investigate promoted candidates deeply; investigate secondary candidates more briefly and mark them exploratory=true unless evidence is strong. NEVER invent road names or coordinates — use only what sources support; set centerLat/centerLng to the best-known anchor point." +
+        "\n\nCandidates: " + JSON.stringify(compact) +
+        "\n\nReturn JSON: { \"roads\": [ {\"candidateName\": exact candidate name, \"routeName\":\"descriptive route name\", \"roadNames\":[\"road names as mapped\"], \"geometryType\":\"loop|out-and-back|grid|perimeter|wander|point\", \"surface\":\"\", \"publicAccess\":{\"status\":\"verified|probable|unverified\",\"notes\":\"\"}, \"closures\":\"\", \"trafficExpectation\":\"\", \"pulloffs\":\"\", \"adjacencyNotes\":\"\", \"centerLat\":number, \"centerLng\":number, \"estimatedMiles\":number, \"exploratory\":false, \"sourceUrls\":[\"\"] } ] }" +
+        "\nProduce one road system per viable candidate (a candidate with no vehicle-accessible road should simply be omitted — note it in \"omitted\": [{\"candidateName\":\"\",\"reason\":\"\"}]).",
+      validate: (v) => {
+        if (!v || !Array.isArray(v.roads)) return "roads array required";
+        if (!v.roads.length) return "no roads survived — cannot build a guide from these candidates";
+        return null;
+      }
+    });
+    ctx.addSources(sourcesLine((out.roads || []).flatMap(r => r.sourceUrls || [])), ["road-investigation"]);
+    const roads = out.roads.slice(0, 16).map((r, i) => {
+      const cand = cands.find(c => norm(c.name) === norm(r.candidateName));
+      return {
+        id: "r" + (i + 1),
+        candidateName: r.candidateName || (cand ? cand.name : ""),
+        candidateId: cand ? cand.id : null,
+        routeName: String(r.routeName || (cand ? cand.name : "Route " + (i + 1))).slice(0, 120),
+        roadNames: Array.isArray(r.roadNames) ? r.roadNames.map(String).filter(Boolean).slice(0, 8) : [],
+        geometryType: ["loop","out-and-back","grid","perimeter","wander","point"].includes(r.geometryType) ? r.geometryType : "wander",
+        surface: String(r.surface || "").slice(0, 120),
+        publicAccess: {
+          status: ["verified","probable","unverified"].includes(r.publicAccess && r.publicAccess.status) ? r.publicAccess.status : "unverified",
+          notes: String((r.publicAccess && r.publicAccess.notes) || "").slice(0, 500)
+        },
+        closures: String(r.closures || "").slice(0, 300),
+        trafficExpectation: String(r.trafficExpectation || "").slice(0, 160),
+        pulloffs: String(r.pulloffs || "").slice(0, 300),
+        adjacencyNotes: String(r.adjacencyNotes || "").slice(0, 400),
+        centerLat: isNum(r.centerLat) ? +r.centerLat : (cand ? cand.lat : null),
+        centerLng: isNum(r.centerLng) ? +r.centerLng : (cand ? cand.lng : null),
+        estimatedMiles: isNum(r.estimatedMiles) ? +r.estimatedMiles : null,
+        exploratory: !!r.exploratory,
+        sourceUrls: Array.isArray(r.sourceUrls) ? r.sourceUrls.filter(u => /^https?:\/\//.test(u)).slice(0, 6) : []
+      };
+    });
+    S.session.pkg.research.roads = roads;
+    const shapes = {};
+    for (const r of roads) shapes[r.geometryType] = (shapes[r.geometryType] || 0) + 1;
+    ctx.line(roads.length + " road systems examined");
+    ctx.line(Object.entries(shapes).map(([k, n]) => n + " " + k).join(" · "));
+    ctx.counter("Road systems", roads.length);
+    ctx.counter("Exploratory", roads.filter(r => r.exploratory).length);
+    ctx.counter("Access verified", roads.filter(r => r.publicAccess.status === "verified").length);
+    ctx.summary(roads.length + " road systems examined");
+    log(roads.length + " plausible road cruises identified", "ok");
+    for (const om of (out.omitted || []).slice(0, 8)){
+      const cand = cands.find(c => norm(c.name) === norm(om.candidateName));
+      S.session.pkg.research.rejectedCandidates.push({
+        name: String(om.candidateName || (cand ? cand.name : "")),
+        type: cand ? cand.type : "candidate",
+        reasonCode: "no-road-access",
+        reason: String(om.reason || "No vehicle-accessible road identified at road-investigation stage.").slice(0, 300),
+        distanceMiles: cand ? cand.distanceMiles : null
+      });
+      ctx.line("Omitted: " + String(om.candidateName || "") + " — " + String(om.reason || ""), "warn");
+    }
+    renderPreview();
+  };
+
+  /* ---------- Stage 6: Wildlife Enrichment ---------- */
+
+  STAGE_FNS.wildlifeEnrichment = async (ctx) => {
+    const roads = S.session.pkg.research.roads;
+    ctx.summary("Enriching " + roads.length + " routes with evidence-tiered wildlife content");
+    let evidenceCount = 0;
+    for (let i = 0; i < roads.length; i++){
+      const r = roads[i];
+      ctx.counter("Routes enriched", i + " / " + roads.length);
+      log("Enriching wildlife content: " + r.routeName, "info");
+      const cand = S.session.pkg.research.candidates.find(c => c.id === r.candidateId);
+      const out = await llmJson({
+        system: SYS_PROMPT,
+        tools: RESEARCH_TOOLS,
+        temperature: 0.35,
+        user: inputBlock() + "\n\nSTAGE — WILDLIFE ENRICHMENT for one road cruise.\nRoute: " + r.routeName +
+          "\nProperty/candidate: " + r.candidateName + (cand ? " — " + cand.briefDescription.slice(0, 200) : "") +
+          "\nRoads involved: " + r.roadNames.join(", ") +
+          "\nAccess: " + r.publicAccess.status + " — " + r.publicAccess.notes +
+          "\nRegion habitats: " + JSON.stringify((S.session.pkg.research.landscape || {}).habitats || []).slice(0, 900) +
+          "\n\nExplain why this road is biologically interesting (the habitat interaction, e.g. wetland + agricultural edge), then build wildlife possibilities organized as birds / mammals / herps (reptiles+amphibians) / other. For EVERY species give an evidence tier: documented (officially recorded on/for this property), regularly-reported (strong recurring observational evidence), habitat-supported (plausible from habitat + regional occurrence, not proven here), seasonal-possibility (migration/season specific). Use web search for property species lists and local birding reports. Add driving cues (what to watch while driving), season notes, best-time guidance, and wildcards (plausible surprise encounters — clearly possibilities, not promises)." +
+          "\n\nReturn JSON: { \"tagline\":\"\", \"why\":\"\", \"wildlife\":{\"birds\":[{\"n\":\"\",\"t\":\"tier\",\"d\":\"\"}],\"mammals\":[],\"herps\":[],\"other\":[]}, \"cues\":[\"\"], \"seasons\":[{\"season\":\"\",\"text\":\"\"}], \"best\":\"\", \"wildcards\":[\"\"], \"watch\":[\"\"], \"tags\":[\"birds|mammals|herps|wetlands|grassland|forest|dawn|postrain|nocturnal|photography|waterfowl|raptors|shorebirds|winter\"], \"habitatIcons\":[\"emoji strings\"], \"sources\":[{\"title\":\"\",\"url\":\"\"}] }",
+        validate: (v) => {
+          if (!v || typeof v !== "object") return "object required";
+          if (!v.wildlife || typeof v.wildlife !== "object") return "wildlife object required";
+          const total = ["birds","mammals","herps","other"].reduce((n, k) => n + (Array.isArray(v.wildlife[k]) ? v.wildlife[k].length : 0), 0);
+          if (total < 4) return "expected at least 4 wildlife entries";
+          return null;
+        }
+      });
+      ctx.addSources(sourcesLine(out.sources), ["wildlife-evidence"]);
+      const newUrls = sourcesLine(out.sources).map(s => s.url);
+      r.sourceUrls = [...new Set([...(r.sourceUrls || []), ...newUrls])];
+      const wl = {};
+      let itemCount = 0;
+      for (const grp of ["birds","mammals","herps","other"]){
+        wl[grp] = (Array.isArray(out.wildlife[grp]) ? out.wildlife[grp] : []).slice(0, 16).map(it => {
+          const rawTier = String(it.t || "").toLowerCase().trim().replace(/\s+/g, "-");
+          const tier = TIERS.includes(rawTier) ? rawTier : (TIER_ALIASES[rawTier] || "habitat-supported");
+          if (tier !== rawTier && rawTier && !TIER_ALIASES[rawTier]) ctx.warn("Unknown tier “" + rawTier + "” for " + it.n + " — treated as habitat-supported.");
+          return { n: String(it.n || "").slice(0, 80), t: tier, d: String(it.d || "").slice(0, 220) };
+        });
+        evidenceCount += wl[grp].length;
+      }
+      Object.assign(r, {
+        tagline: String(out.tagline || "").slice(0, 220),
+        why: String(out.why || "").slice(0, 1800),
+        wildlife: wl,
+        cues: (Array.isArray(out.cues) ? out.cues : []).map(String).slice(0, 7),
+        seasons: (Array.isArray(out.seasons) ? out.seasons : []).slice(0, 6).map(s => ({ season: String(s.season || "").slice(0, 40), text: String(s.text || "").slice(0, 240) })),
+        best: String(out.best || "").slice(0, 600),
+        wildcards: (Array.isArray(out.wildcards) ? out.wildcards : []).map(String).slice(0, 4),
+        watch: (Array.isArray(out.watch) ? out.watch : []).map(String).slice(0, 6),
+        tags: (Array.isArray(out.tags) ? out.tags : []).map(t => String(t).toLowerCase().replace(/[^a-z]/g, "")).filter(Boolean).slice(0, 10),
+        habitatIcons: (Array.isArray(out.habitatIcons) ? out.habitatIcons : []).map(String).filter(s => s.length <= 4).slice(0, 5)
+      });
+      ctx.counter("Routes enriched", (i + 1) + " / " + roads.length);
+      ctx.counter("Evidence items", evidenceCount);
+      renderStageDetail("wildlifeEnrichment");
+    }
+    const totalItems = roads.reduce((n, r) => n + ["birds","mammals","herps","other"].reduce((m, g) => m + ((r.wildlife || {})[g] || []).length, 0), 0);
+    ctx.line(roads.length + " routes enriched");
+    ctx.line(totalItems + " wildlife observations/evidence items");
+    ctx.line("Seasonality classified for each route");
+    ctx.counter("Evidence items", totalItems);
+    ctx.summary(roads.length + " routes enriched · " + totalItems + " evidence items");
+    log(roads.length + " routes enriched (" + totalItems + " wildlife items)", "ok");
+    renderPreview();
+  };
+
+  /* ---------- Stage 7: Adversarial Verification ---------- */
+
+  STAGE_FNS.verification = async (ctx) => {
+    const roads = S.session.pkg.research.roads;
+    ctx.summary("Trying to disprove each surviving recommendation");
+    log("Adversarial verification pass on " + roads.length + " routes", "info");
+    const compact = roads.map(r => ({
+      routeName: r.routeName, candidateName: r.candidateName, roads: r.roadNames,
+      access: r.publicAccess, estimatedMiles: r.estimatedMiles,
+      centerLat: r.centerLat, centerLng: r.centerLng,
+      wildlifeSummary: ["birds","mammals","herps","other"].map(g => (r.wildlife[g] || []).map(w => w.n + " (" + w.t + ")")).flat().slice(0, 14),
+      exploratory: r.exploratory
+    }));
+    const out = await llmJson({
+      system: SYS_PROMPT,
+      tools: RESEARCH_TOOLS,
+      temperature: 0.15,
+      user: inputBlock() + "\nCenter: " + S.session.pkg.guide.location.lat + ", " + S.session.pkg.guide.location.lng + " · radius " + S.session.pkg.guide.radiusMiles + " miles.\n\nSTAGE — ADVERSARIAL VERIFICATION. Try to DISPROVE each route recommendation. Explicitly test: Is this road really public? Are vehicles actually permitted? Did we mistake a hiking/service trail for a road? Is the habitat actually visible from the road? Is traffic likely higher than assumed? Did we overstate species specificity? Is it really inside the radius (and practically reachable by road)? Any seasonal closures? Did one weak source propagate? Is another candidate essentially the same drive? Does the case rest on theoretical habitat? Use web search to check access rules, closures, and doubtful species claims." +
+        "\n\nRoutes: " + JSON.stringify(compact) +
+        "\n\nReturn JSON: { \"reviews\": [ {\"routeName\": exact name, \"verdict\":\"keep|downgrade|drop\", \"accessVerification\":{\"status\":\"verified|probable|unverified\",\"notes\":\"\"}, \"speciesAdjustments\":[{\"species\":\"\",\"action\":\"remove|downgrade\",\"to\":\"regularly-reported|habitat-supported|seasonal-possibility\",\"reason\":\"\"}], \"unresolvedQuestions\":[\"\"], \"radiusCheck\":{\"withinRadius\":true,\"note\":\"\"}, \"duplicateOf\":\"\", \"notes\":\"\" } ] }",
+      validate: (v) => {
+        if (!v || !Array.isArray(v.reviews)) return "reviews array required";
+        if (!v.reviews.length) return "empty reviews";
+        return null;
+      }
+    });
+    let removed = 0, downgraded = 0, dropped = 0, downgradedRoutes = 0;
+    for (const rev of out.reviews){
+      const r = roads.find(x => norm(x.routeName) === norm(rev.routeName));
+      if (!r){ ctx.warn("Review did not match route “" + rev.routeName + "”."); continue; }
+      const adj = Array.isArray(rev.speciesAdjustments) ? rev.speciesAdjustments : [];
+      for (const adjItem of adj){
+        const groups = ["birds","mammals","herps","other"];
+        for (const g of groups){
+          const list = (r.wildlife[g] || []);
+          const idx = list.findIndex(w => norm(w.n) === norm(adjItem.species));
+          if (idx < 0) continue;
+          if (adjItem.action === "remove"){
+            list.splice(idx, 1);
+            removed++;
+            ctx.line("Removed species claim: " + adjItem.species + " — " + String(adjItem.reason || "").slice(0, 140), "warn");
+          } else if (adjItem.action === "downgrade" && TIERS.includes(adjItem.to)){
+            list[idx].t = adjItem.to;
+            downgraded++;
+            ctx.line("Downgraded: " + adjItem.species + " → " + adjItem.to + " — " + String(adjItem.reason || "").slice(0, 140), "warn");
+          }
+        }
+      }
+      const uqs = Array.isArray(rev.unresolvedQuestions) ? rev.unresolvedQuestions.map(String).slice(0, 5) : [];
+      for (const q of uqs) if (!S.session.pkg.research.unresolvedQuestions.some(x => x.route === r.id && x.text === q))
+        S.session.pkg.research.unresolvedQuestions.push({ route: r.id, routeName: r.routeName, text: q.slice(0, 300) });
+      if (rev.radiusCheck && rev.radiusCheck.note) ctx.line("Radius check — " + r.routeName + ": " + String(rev.radiusCheck.note).slice(0, 160), rev.radiusCheck.withinRadius === false ? "warn" : "info");
+      if (rev.duplicateOf) ctx.line("Duplicate check — " + r.routeName + ": similar to " + String(rev.duplicateOf).slice(0, 80), "warn");
+      if (rev.accessVerification && ["verified","probable","unverified"].includes(rev.accessVerification.status)){
+        r.publicAccess.status = rev.accessVerification.status;
+        if (rev.accessVerification.notes) r.publicAccess.notes = String(rev.accessVerification.notes).slice(0, 500);
+      }
+      if (rev.verdict === "drop"){
+        S.session.pkg.research.roads = S.session.pkg.research.roads.filter(x => x.id !== r.id);
+        S.session.pkg.research.rejectedCandidates.push({ name: r.routeName, type: "route", reasonCode: "verification-failed", reason: String(rev.notes || "Failed adversarial verification").slice(0, 300), distanceMiles: null });
+        dropped++;
+        ctx.line("Dropped route: " + r.routeName + " — " + String(rev.notes || "failed verification").slice(0, 160), "warn");
+        log("Dropping route after verification: " + r.routeName, "warn");
+      } else if (rev.verdict === "downgrade"){
+        r.exploratory = true;
+        downgradedRoutes++;
+        ctx.line("Downgraded route to exploratory: " + r.routeName + " — " + String(rev.notes || "").slice(0, 160), "warn");
+      }
+      if (rev.notes) r.verificationNotes = String(rev.notes).slice(0, 500);
+    }
+    const surviving = S.session.pkg.research.roads.length;
+    ctx.counter("Routes verified", surviving);
+    ctx.counter("Species claims removed", removed);
+    ctx.counter("Species claims downgraded", downgraded);
+    ctx.counter("Routes dropped", dropped);
+    ctx.counter("Routes downgraded", downgradedRoutes);
+    ctx.summary(surviving + " routes survived verification · " + dropped + " dropped");
+    ctx.addSources(sourcesLine((out.reviews || []).flatMap(r => r.checkedSources || [])), ["verification"]);
+    log("Verification: " + surviving + " routes kept, " + dropped + " dropped, " + removed + " species claims removed", "ok");
+    renderPreview();
+  };
+
+  /* ---------- Stage 8: Route Geometry (mapped roads only) ---------- */
+
+  function sleep(ms, signal){
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(resolve, ms);
+      if (signal) signal.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+    });
+  }
+
+  function normRoad(s){ return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+
+  function wayNameMatches(wayName, roadNames){
+    const wn = normRoad(wayName);
+    if (!wn) return false;
+    for (const rn of roadNames){
+      const n = normRoad(rn);
+      if (!n) continue;
+      if (wn.includes(n) || n.includes(wn)) return true;
+      const wnTokens = new Set(wn.split(" ")), nTokens = new Set(n.split(" "));
+      let overlap = 0;
+      for (const t of nTokens) if (wnTokens.has(t)) overlap++;
+      if (overlap / Math.max(nTokens.size, 1) >= 0.67) return true;
+    }
+    return false;
+  }
+
+  async function overpassRoads(lat, lng, roadNames, approxMiles){
+    if (!S.session.usage) S.session.usage = freshUsage();
+    const cacheKey = roadNames.map(normRoad).sort().join("|") + "@" + lat.toFixed(3) + "," + lng.toFixed(3);
+    if (S.overpass.cache.has(cacheKey)) return S.overpass.cache.get(cacheKey);
+    if (S.overpass.count >= OVERPASS_MAX_QUERIES) throw new Error("Overpass query budget for this session is spent (" + OVERPASS_MAX_QUERIES + ").");
+    const wait = OVERPASS_MIN_MS - (Date.now() - S.overpass.lastAt);
+    if (wait > 0) await sleep(wait, S.abortCtrl ? S.abortCtrl.signal : undefined);
+    const around = clamp(Math.round((approxMiles || 4) * 1609 / 2), 1200, 6500);
+    const query = "[out:json][timeout:25];way[\"highway\"][\"name\"](around:" + around + "," + lat + "," + lng + ");out geom;";
+    const res = await fetch(OVERPASS_URL, { method: "POST", body: "data=" + encodeURIComponent(query), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: S.abortCtrl ? S.abortCtrl.signal : undefined });
+    S.overpass.lastAt = Date.now();
+    S.overpass.count++;
+    S.session.usage.mapQueries++;
+    renderUsage();
+    if (res.status === 429) throw new Error("Overpass rate limited (429) — geometry will be retried or marked unresolved.");
+    if (!res.ok) throw new Error("Overpass HTTP " + res.status);
+    const data = await res.json();
+    const skipTypes = new Set(["path","footway","cycleway","steps","pedestrian","bridleway","corridor","elevator"]);
+    const ways = (data.elements || []).filter(e => e.type === "way" && e.geometry && e.geometry.length > 1 && e.tags && !skipTypes.has(e.tags.highway));
+    S.overpass.cache.set(cacheKey, ways);
+    return ways;
+  }
+
+  function buildChain(ways, anchorLat, anchorLng){
+    const ptDist = (p, lat, lng) => Math.hypot(p.lat - lat, p.lon - lng);
+    let best = null, bestD = Infinity;
+    for (const w of ways){
+      const d = Math.min(ptDist(w.geometry[0], anchorLat, anchorLng), ptDist(w.geometry[w.geometry.length - 1], anchorLat, anchorLng));
+      if (d < bestD){ bestD = d; best = w; }
+    }
+    if (!best) return [];
+    const used = new Set([best]);
+    const chain = best.geometry.map(p => [p.lat, p.lon]);
+    const endPt = () => chain[chain.length - 1];
+    const startPt = () => chain[0];
+    for (;;){
+      let found = null, foundD = Infinity, reverse = false;
+      for (const w of ways){
+        if (used.has(w)) continue;
+        const dEnd = Math.min(hyp(w.geometry[0], endPt()), hyp(w.geometry[w.geometry.length - 1], endPt()));
+        const dStart = Math.min(hyp(w.geometry[0], startPt()), hyp(w.geometry[w.geometry.length - 1], startPt()));
+        if (dEnd < dStart && dEnd < foundD && dEnd < 130){ found = w; foundD = dEnd; reverse = wEndNear(w, endPt()); }
+        else if (dStart <= dEnd && dStart < 130){ found = w; foundD = dStart; reverse = wStartNear(w, startPt()); }
+      }
+      if (!found) break;
+      used.add(found);
+      let pts = found.geometry.map(p => [p.lat, p.lon]);
+      if (reverse) pts = pts.slice().reverse();
+      chain.push(...pts);
+    }
+    return chain;
+  }
+  function hyp(p, ll){ return Math.hypot(p.lat - ll[0], p.lon - ll[1]); }
+  function wEndNear(w, ll){ const e = w.geometry[w.geometry.length - 1]; return Math.hypot(e.lat - ll[0], e.lon - ll[1]) <= Math.hypot(w.geometry[0].lat - ll[0], w.geometry[0].lon - ll[1]); }
+  function wStartNear(w, ll){ const s = w.geometry[0]; return Math.hypot(s.lat - ll[0], s.lon - ll[1]) <= Math.hypot(w.geometry[w.geometry.length - 1].lat - ll[0], w.geometry[w.geometry.length - 1].lon - ll[1]); }
+
+  function chainMiles(coords){
+    let m = 0;
+    for (let i = 1; i < coords.length; i++) m += haversineMiles(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1]);
+    return m;
+  }
+
+  STAGE_FNS.routeGeometry = async (ctx) => {
+    const roads = S.session.pkg.research.roads;
+    ctx.summary("Pulling route lines from mapped road data");
+    let built = 0, unresolved = 0, queries = 0;
+    for (let i = 0; i < roads.length; i++){
+      const r = roads[i];
+      ctx.counter("Routes resolved", i + " / " + roads.length);
+      if (!isNum(r.centerLat) || !isNum(r.centerLng) || !r.roadNames.length){
+        r.geometry = null;
+        r.geometryConfidence = "unresolved";
+        r.geometryNote = "No verified anchor/road names — geometry intentionally not invented.";
+        r.exploratory = true;
+        unresolved++;
+        ctx.line("Unresolved (no anchor or road names): " + r.routeName, "warn");
+        continue;
+      }
+      log("Comparing road layout with mapped public roads: " + r.routeName, "info");
+      try {
+        const ways = await overpassRoads(r.centerLat, r.centerLng, r.roadNames, r.estimatedMiles);
+        const matched = ways.filter(w => wayNameMatches(w.tags.name, r.roadNames));
+        const chain = matched.length ? buildChain(matched, r.centerLat, r.centerLng) : [];
+        const miles = chainMiles(chain);
+        if (chain.length >= 3 && miles >= 0.4){
+          r.geometry = { type: "LineString", coordinates: chain.map(p => [p[1], p[0]]) };
+          r.geometryConfidence = "verified";
+          r.geometrySource = "openstreetmap-overpass";
+          r.geometryNote = "Built from " + matched.length + " mapped OSM way(s) matching " + r.roadNames.join(" / ") + ".";
+          r.routeMiles = +miles.toFixed(1);
+          built++;
+          ctx.line("Built " + r.routeName + " — " + r.routeMiles + " mi from " + matched.length + " mapped way(s)");
+        } else if (matched.length){
+          const pts = matched.flatMap(w => w.geometry).slice(0, 40);
+          const centroidLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+          const centroidLng = pts.reduce((s, p) => s + p.lon, 0) / pts.length;
+          r.geometry = null;
+          r.geometryConfidence = "partial";
+          r.geometrySource = "openstreetmap-overpass";
+          r.geometryAnchor = { lat: +centroidLat.toFixed(5), lng: +centroidLng.toFixed(5) };
+          r.geometryNote = "Mapped road " + (r.roadNames[0] || "") + " found near this location but segments did not connect into a full route (" + miles.toFixed(1) + " mi matched). Verify locally.";
+          r.routeMiles = r.estimatedMiles || null;
+          r.exploratory = true;
+          unresolved++;
+          ctx.line("Partial match only for " + r.routeName + " — kept exploratory with map anchor", "warn");
+        } else {
+          r.geometry = null;
+          r.geometryConfidence = "unresolved";
+          r.geometryAnchor = { lat: +r.centerLat.toFixed(5), lng: +r.centerLng.toFixed(5) };
+          r.geometryNote = "Roads not found in OpenStreetMap near this anchor. Geometry intentionally unresolved — verify locally.";
+          r.routeMiles = r.estimatedMiles || null;
+          r.exploratory = true;
+          unresolved++;
+          ctx.line("No mapped-road match for " + r.routeName + " — marked unresolved/exploratory", "warn");
+        }
+      } catch (err){
+        r.geometry = null;
+        r.geometryConfidence = "unresolved";
+        r.geometryAnchor = isNum(r.centerLat) ? { lat: +r.centerLat.toFixed(5), lng: +r.centerLng.toFixed(5) } : null;
+        r.geometryNote = "Map-data query failed (" + err.message + "). Geometry unresolved — research content remains usable.";
+        r.routeMiles = r.estimatedMiles || null;
+        r.exploratory = true;
+        unresolved++;
+        ctx.warn("Map-data query failed for " + r.routeName + ": " + err.message);
+      }
+      ctx.counter("Routes resolved", (i + 1) + " / " + roads.length);
+      renderStageDetail("routeGeometry");
+    }
+    ctx.counter("Polylines built", built);
+    ctx.counter("Map queries", S.session.usage.mapQueries);
+    ctx.line(built + " route polylines constructed from mapped roads");
+    if (unresolved) ctx.line(unresolved + " routes left unresolved → exploratory (no invented geometry)");
+    ctx.summary(built + " polylines built · " + unresolved + " unresolved → exploratory");
+    log("Route geometry: " + built + " verified from OpenStreetMap, " + unresolved + " unresolved", built ? "ok" : "warn");
+    renderPreview();
+  };
+
+  /* ---------- Stage 9: Ranking & Guide Assembly ---------- */
+
+  function computeOverall(scores){
+    let total = 0;
+    for (const [k, w] of Object.entries(SCORE_WEIGHTS)) total += w * (isNum(scores[k]) ? scores[k] : 5);
+    return Math.round(total * 10) / 10;
+  }
+
+  function classifyRoute(scores, route){
+    const o = scores.overall;
+    if (route.publicAccess.status === "unverified" || (isNum(scores.accessConfidence) && scores.accessConfidence < 4.5)) return "exploratory";
+    if (route.geometryConfidence === "unresolved") return "exploratory";
+    if (o >= 8) return "recommended";
+    if (o >= 6.5) return "strong";
+    if (o >= 5) return "exploratory";
+    return "marginal";
+  }
+
+  STAGE_FNS.ranking = async (ctx) => {
+    const roads = S.session.pkg.research.roads;
+    ctx.summary("Scoring, classifying and assembling the guide");
+    log("Ranking final routes and assembling the guide", "info");
+    const compact = roads.map(r => ({
+      routeName: r.routeName, candidateName: r.candidateName, roads: r.roadNames,
+      geometryType: r.geometryType, surface: r.surface, access: r.publicAccess,
+      traffic: r.trafficExpectation, pulloffs: r.pulloffs, adjacency: r.adjacencyNotes,
+      routeMiles: r.routeMiles || r.estimatedMiles, exploratory: r.exploratory,
+      geometryConfidence: r.geometryConfidence || "unresolved",
+      triageScores: (S.session.pkg.research.candidates.find(c => c.id === r.candidateId) || { triage: { scores: {} } }).triage.scores,
+      wildlifeCounts: ["birds","mammals","herps","other"].map(g => (r.wildlife[g] || []).length),
+      verificationNotes: r.verificationNotes || ""
+    }));
+    const out = await llmJson({
+      system: SYS_PROMPT,
+      temperature: 0.2,
+      user: inputBlock() + "\n\nSTAGE — RANKING & GUIDE ASSEMBLY. Score every route 0-10 on exactly these components: biologicalPotential, roadCruiseSuitability, trafficSuitability, habitatDiversity, accessConfidence, evidenceConfidence. Be conservative: accessConfidence must reflect how well public vehicle access is actually supported, and evidenceConfidence how well the wildlife claims are supported. The overall score and Recommended/Exploratory classification are computed by the application from your component scores — do not supply them. Give a one-to-two-sentence score rationale per route." +
+        "\n\nRoutes: " + JSON.stringify(compact) +
+        "\n\nReturn JSON: { \"routes\": [ {\"routeName\": exact, \"scores\": {6 components}, \"rationale\":\"\"} ], \"guideTitle\":\"\", \"guideDescription\":\"\" }",
+      validate: (v) => {
+        if (!v || !Array.isArray(v.routes)) return "routes array required";
+        if (!v.routes.length) return "empty routes";
+        for (const r of v.routes){
+          if (!r.scores || !isNum(+r.scores.biologicalPotential)) return "each route needs numeric component scores";
+        }
+        return null;
+      }
+    });
+    for (const rs of out.routes){
+      const r = roads.find(x => norm(x.routeName) === norm(rs.routeName));
+      if (!r){ ctx.warn("Ranking did not match route “" + rs.routeName + "”."); continue; }
+      const scores = normScores(rs.scores, Object.keys(SCORE_WEIGHTS));
+      scores.overall = computeOverall(scores);
+      r.scores = scores;
+      r.scoreRationale = String(rs.rationale || "").slice(0, 500);
+      r.classification = classifyRoute(scores, r);
+    }
+    const unscored = roads.filter(r => !r.scores);
+    for (const r of unscored){
+      r.scores = normScores({}, Object.keys(SCORE_WEIGHTS));
+      r.scores.overall = computeOverall(r.scores);
+      r.classification = "marginal";
+      ctx.warn("No ranking entry matched route “" + r.routeName + "” — scored neutral/marginal.");
+    }
+    roads.sort((a, b) => {
+      const cRank = c => ["recommended","strong","exploratory","marginal"].indexOf(c.classification);
+      return cRank(a.classification) - cRank(b.classification) || (b.scores.overall - a.scores.overall);
+    });
+    roads.forEach((r, i) => { r.color = ROUTE_COLORS[i % ROUTE_COLORS.length]; });
+    const g = S.session.pkg.guide;
+    g.title = ($("titleInput").value || "").trim() || String(out.guideTitle || "").trim() || (g.location.canonicalName + " Wildlife Road Cruises");
+    g.description = String(out.guideDescription || "").slice(0, 700);
+    g.generatedAt = nowIso();
+    S.session.input.title = g.title;
+    $("titleInput").value = g.title;
+    const counts = {};
+    for (const r of roads) counts[r.classification] = (counts[r.classification] || 0) + 1;
+    ctx.line(Object.entries(counts).map(([k, n]) => n + " " + k).join(" · "));
+    ctx.counter("Recommended", counts.recommended || 0);
+    ctx.counter("Strong", counts.strong || 0);
+    ctx.counter("Exploratory", counts.exploratory || 0);
+    ctx.counter("Marginal", counts.marginal || 0);
+    ctx.summary((counts.recommended || 0) + " recommended · " + (counts.exploratory || 0) + " exploratory");
+    log("Ranking: " + Object.entries(counts).map(([k, n]) => n + " " + k).join(", "), "ok");
+    assemblePackage(ctx);
+  };
+
+  function assemblePackage(ctx){
+    const roads = S.session.pkg.research.roads;
+    const routes = roads.map((r, i) => ({
+      id: r.id,
+      name: r.routeName,
+      short: (r.roadNames || []).slice(0, 3).join(" → ") || r.candidateName,
+      tagline: r.tagline || "",
+      classification: r.classification || "exploratory",
+      color: r.color || ROUTE_COLORS[i % ROUTE_COLORS.length],
+      traffic: r.trafficExpectation || "",
+      geometryType: r.geometryType || "wander",
+      confidence: r.geometryConfidence === "verified" ? "High — mapped-road geometry" : (r.geometryConfidence === "partial" ? "Partial — verify locally" : "Exploratory — geometry unresolved"),
+      habitat: (r.habitatIcons && r.habitatIcons.length ? r.habitatIcons : ["✦"]),
+      why: r.why || "",
+      wildlife: r.wildlife || { birds: [], mammals: [], herps: [], other: [] },
+      cues: r.cues || [],
+      seasons: (r.seasons || []).map(s => [s.season, s.text]),
+      best: r.best || "",
+      wildcards: r.wildcards || [],
+      watch: r.watch || [],
+      tags: r.tags || [],
+      access: { status: r.publicAccess.status, notes: r.publicAccess.notes || "" },
+      geometry: r.geometry || null,
+      geometryConfidence: r.geometryConfidence || "unresolved",
+      geometryNote: r.geometryNote || "",
+      geometryAnchor: r.geometryAnchor || null,
+      routeMiles: r.routeMiles || null,
+      estimatedMiles: r.estimatedMiles || null,
+      scores: r.scores || null,
+      scoreRationale: r.scoreRationale || r.scoreRationale || "",
+      candidateName: r.candidateName,
+      sourceIds: r.sourceUrls ? S.session.pkg.research.sources.filter(s => r.sourceUrls.includes(s.url)).map(s => s.id) : [],
+      sourceUrls: r.sourceUrls || [],
+      unresolvedQuestions: (S.session.pkg.research.unresolvedQuestions || []).filter(u => u.route === r.id).map(u => u.text)
+    }));
+    S.session.pkg.routes = routes;
+    const rejected = S.session.pkg.research.rejectedCandidates || [];
+    ctx.line(routes.length + " routes in the final guide · " + rejected.length + " candidates/routes rejected along the way");
+    renderPreview();
+  }
+
+  /* ---------- Stage 10: QA ---------- */
+
+  STAGE_FNS.qa = async (ctx) => {
+    ctx.summary("Running the structured final audit");
+    const pkg = S.session.pkg;
+    const issues = [];
+    const checks = [];
+    const check = (name, ok, detail) => { ctx.line((ok ? "✓ " : "⚠ ") + name + (detail ? " — " + detail : ""), ok ? "info" : "warn"); if (!ok) issues.push(name); };
+
+    check("Package has routes", pkg.routes.length > 0, pkg.routes.length + " routes");
+    let geoOk = 0, geoUnresolvedOk = 0, geoBad = 0;
+    for (const r of pkg.routes){
+      if (r.geometry && r.geometry.type === "LineString" && Array.isArray(r.geometry.coordinates) && r.geometry.coordinates.length >= 2) geoOk++;
+      else if (["exploratory","marginal"].includes(r.classification)) geoUnresolvedOk++;
+      else geoBad++;
+    }
+    check("Every route has geometry or is explicitly unresolved", geoBad === 0, geoOk + " with geometry · " + geoUnresolvedOk + " marked exploratory");
+    check("Every route has wildlife evidence", pkg.routes.every(r => ["birds","mammals","herps","other"].some(g => (r.wildlife[g] || []).length)), "");
+    check("Every route has at least one source", pkg.routes.every(r => (r.sourceUrls && r.sourceUrls.length) || (r.sources && r.sources.length) || r.sourceIds && r.sourceIds.length));
+    check("Access claims are qualified", pkg.routes.every(r => r.access && ["verified","probable","unverified"].includes(r.status || r.access.status)), "verified/probable/unverified only");
+    check("Species claims use evidence tiers", pkg.routes.every(r => ["birds","mammals","herps","other"].every(g => (r.wildlife[g] || []).every(w => TIERS.includes(w.t)))));
+    check("Scores exist for every route", pkg.routes.every(r => r.scores && isNum(r.scores.overall)));
+    const names = pkg.routes.map(r => norm(r.name));
+    check("No duplicate routes", new Set(names).size === names.length);
+    let radiusOk = true;
+    for (const r of pkg.routes){
+      const pt = r.geometry && r.geometry.coordinates && r.geometry.coordinates[0] ? r.geometry.coordinates[0] : (r.geometryAnchor || null);
+      if (pt && isNum(pkg.guide.location.lat)){
+        const d = haversineMiles(pkg.guide.location.lat, pkg.guide.location.lng, pt[1], pt[0]);
+        if (d > pkg.guide.radiusMiles * 1.15 + 1){ radiusOk = false; ctx.warn(r.name + " sits " + d.toFixed(1) + " mi from center — beyond the requested radius."); }
+      }
+    }
+    check("Radius honored", radiusOk);
+    check("No private roads presented as public", pkg.routes.every(r => r.access.status !== "unverified" || r.classification === "exploratory" || r.classification === "marginal"));
+    check("No service trails represented as vehicle roads", pkg.routes.every(r => !/trail|footpath|walking/i.test(r.name)));
+    let jsonOk = true;
+    try { JSON.parse(JSON.stringify(pkg)); } catch (_) { jsonOk = false; }
+    check("JSON serializes cleanly", jsonOk);
+
+    const srcCount = pkg.research.sources.length;
+    check("Sources retained", srcCount > 0, srcCount + " sources");
+    pkg.guide.generatedAt = nowIso();
+    pkg.research.pipeline = S.session.stages.map(s => ({ id: s.id, label: s.label, status: s.status, summary: s.summary, counters: s.counters, warnings: s.warnings, startedAt: s.startedAt, completedAt: s.completedAt }));
+    pkg.research.usage = Object.assign({}, S.session.usage, { citations: S.session.usage.citations.length });
+    const rejected = pkg.research.rejectedCandidates.length;
+    ctx.counter("Routes", pkg.routes.length);
+    ctx.counter("Sources", srcCount);
+    ctx.counter("Rejected candidates", rejected);
+    if (issues.length){
+      ctx.summary("QA passed with warnings (" + issues.length + " checks flagged)");
+      log("QA complete with warnings: " + issues.join(", "), "warn");
+      setStage("qa", { warnings: ["QA warnings: " + issues.join(", ")] });
+    } else {
+      ctx.summary("All checks passed — guide ready");
+      log("QA passed all checks", "ok");
+    }
+    renderPreview();
+  };
+
+  /* ================= INVESTIGATION CONTROL ================= */
+
+  function intakeFromForm(){
+    const location = $("locInput").value.trim();
+    const radiusMiles = parseInt($("radiusInput").value, 10);
+    const title = $("titleInput").value.trim();
+    const focus = Array.from(document.querySelectorAll("#focusRow .chip[aria-pressed='true']")).map(b => b.dataset.focus);
+    return { location, radiusMiles: isNum(radiusMiles) ? radiusMiles : 25, title, focus: focus.length ? focus : ["all"], depth: $("depthSelect").value };
+  }
+
+  function validateIntake(input){
+    if (!input.location) return "Enter a location (city and state/province work best).";
+    if (!isNum(input.radiusMiles) || input.radiusMiles < 3 || input.radiusMiles > 150) return "Radius must be between 3 and 150 miles.";
+    return null;
+  }
+
+  function updateRadiusWarn(){
+    const r = parseInt($("radiusInput").value, 10);
+    $("radiusWarn").hidden = !(isNum(r) && r > 60);
+  }
+
+  async function startInvestigation(){
+    const input = intakeFromForm();
+    const err = validateIntake(input);
+    if (err){ $("intakeStatus").textContent = err; $("intakeStatus").className = "tiny err-inline"; return; }
+    $("intakeStatus").textContent = "";
+    if (!(S.settings.apiKey || "").trim()){
+      $("modelStatus").textContent = "Add your OpenRouter API key first (stored only in this browser).";
+      toast("Add your OpenRouter API key under Model & Key, then investigate.");
+      $("apiKeyInput").focus();
+      return;
+    }
+    if (input.radiusMiles > 60){
+      const proceed = await confirmModal(
+        "Large search area",
+        "A " + input.radiusMiles + "-mile radius is a very large search area — expect thinner research quality and more LLM calls. Continue?",
+        [{ label: "Investigate anyway", kind: "primary", value: true }, { label: "Go back", kind: "ghost", value: false }]
+      );
+      if (!proceed) return;
+    }
+    await archiveCurrentSession();
+    S.titleTouched = !!input.title;
+    S.session = freshSession(input);
+    S.routeVis = new Map();
+    S.activeRouteId = null;
+    S.filters = [];
+    S.overpass = { lastAt: 0, count: 0, cache: new Map() };
+    initPkgIfMissing();
+    renderPipeline();
+    renderActivity();
+    renderUsage();
+    renderPreview();
+    $("resumeStrip").hidden = true;
+    log("Investigation started: " + input.location + " · " + input.radiusMiles + " mi · " + input.depth + " research", "ok");
+    saveNow();
+    runInvestigation(0);
+  }
+
+  async function restartInvestigation(){
+    const ok = await confirmModal("New investigation", "Discard the current investigation and start fresh? The current session is archived first (use Export if you want a portable copy).",
+      [{ label: "Start over", kind: "danger", value: true }, { label: "Cancel", kind: "ghost", value: false }]);
+    if (!ok) return;
+    await archiveCurrentSession();
+    S.titleTouched = false;
+    S.session = freshSession({ location: "", radiusMiles: 25, title: "", focus: ["all"], depth: $("depthSelect").value });
+    S.routeVis = new Map();
+    S.activeRouteId = null;
+    S.filters = [];
+    S.overpass = { lastAt: 0, count: 0, cache: new Map() };
+    $("locInput").value = ""; $("radiusInput").value = "25"; $("titleInput").value = "";
+    renderPipeline(); renderActivity(); renderUsage(); renderPreview(); refreshDataTab(true);
+    $("resumeStrip").hidden = true;
+    log("Previous investigation archived. Ready for a new location.", "info");
+    saveNow();
+  }
+
+  /* ================= GUIDE PREVIEW ================= */
+
+  const FILTER_ICONS = { birds:"🦅", mammals:"🦌", herps:"🐍", reptiles:"🐍", amphibians:"🐸", wetlands:"💧", grassland:"🌾", forest:"🌲", dawn:"🌅", dusk:"🌅", postrain:"🌧️", nocturnal:"🌙", photography:"📷", waterfowl:"🦆", raptors:"🦅", shorebirds:"🐦", winter:"❄️", migration:"🍃" };
+  const TIER_LABEL = { "documented":"Documented", "regularly-reported":"Regularly reported", "habitat-supported":"Habitat-supported", "seasonal-possibility":"Seasonal possibility" };
+  const CLASS_LABEL = { recommended:"Recommended", strong:"Strong", exploratory:"Exploratory", marginal:"Marginal" };
+
+  function getRoutes(){ return (S.session && S.session.pkg && Array.isArray(S.session.pkg.routes)) ? S.session.pkg.routes : []; }
+
+  function wildlifeHtml(w){
+    const group = (title, items) => (!items || !items.length) ? "" : `
+      <div class="w-group"><span class="w-title">${title}</span>
+        <ul>${items.map(it => `<li><span class="tier t-${esc(it.t)}">${TIER_LABEL[it.t] || esc(it.t)}</span><span class="w-name">${esc(it.n)}</span>${it.d ? `<span class="w-note"> — ${esc(it.d)}</span>` : ""}</li>`).join("")}</ul>
+      </div>`;
+    return group("🐦 Birds", w.birds) + group("🦌 Mammals", w.mammals) + group("🐍 Reptiles & amphibians", w.herps) + group("✦ Other interesting wildlife", w.other);
+  }
+
+  function accessTag(r){
+    const st = r.access && r.access.status ? r.access.status : "unverified";
+    const cls = st === "verified" ? "a-ok" : (st === "probable" ? "a-mid" : "a-low");
+    return `<span class="tag ${cls}">Access ${esc(st)}</span>`;
+  }
+
+  function popupHtml(r){
+    const geo = r.geometry ? "" : `<div style="color:#e2d9bd;font-size:.8rem;margin-top:4px">Approximate location — geometry unresolved; verify locally.</div>`;
+    return `<strong>${esc(r.name)}</strong><br>
+      <span style="color:#b8c5bd">${esc(r.tagline || "")}</span>
+      <div style="margin-top:5px"><span style="color:#b8c5bd">Road-cruise score: ${r.scores ? r.scores.overall : "—"}/10 · ${esc(CLASS_LABEL[r.classification] || r.classification || "")}</span></div>
+      <div class="pw-row">${(r.watch || []).map(w => `<span class="pw">${esc(w)}</span>`).join("")}</div>
+      <div style="margin-top:7px;font-size:.8rem;color:#b8c5bd"><strong>Best:</strong> ${esc(r.best || "")}</div>${geo}`;
+  }
+
+  function routeSourcesHtml(r){
+    const all = routeSourcesList(r);
+    if (!all.length) return "";
+    return `<h3 class="micro">Sources for this route</h3>
+      <ul class="src-list">${all.map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a> <span class="tag">${esc(s.sourceType)}</span></li>`).join("")}</ul>`;
+  }
+
+  function routeSourcesList(r){
+    const pkg = S.session && S.session.pkg;
+    if (!pkg || !pkg.research) return [];
+    const out = [];
+    const seen = new Set();
+    const consider = (s) => { if (s && !seen.has(s.id)){ seen.add(s.id); out.push(s); } };
+    for (const id of (r.sourceIds || [])){ const s = (pkg.research.sources || []).find(x => x.id === id); if (s) consider(s); }
+    for (const u of (r.sourceUrls || [])){ const s = (pkg.research.sources || []).find(x => x.url === u); if (s) consider(s); }
+    return out;
+  }
+
+  function routeDetailHtml(r){
+    const seasons = (r.seasons || []).map(s => Array.isArray(s) ? s : [s.season, s.text]).map(([s, t]) => `<div class="season"><span>${esc(s)}</span>${esc(t)}</div>`).join("");
+    return `
+      <div class="route-detail-head">
+        <div class="route-title detail-title"><span class="route-key" style="background:${esc(r.color)}"></span>${esc(r.name)}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-direction:column">
+          ${r.scores && isNum(r.scores.overall) ? `<div class="score ${r.scores.overall >= 7.5 ? "s-high" : (r.scores.overall >= 5.5 ? "s-mid" : "s-low")}">${r.scores.overall}/10</div>` : ""}
+          <span class="class-chip cls-${esc(r.classification)}">${esc(CLASS_LABEL[r.classification] || r.classification || "")}</span>
+        </div>
+      </div>
+      <div class="route-sub">${esc((r.habitat || []).join(" "))} ${esc(r.short || "")}</div>
+      <p class="tagline">${esc(r.tagline || "")}</p>
+      <h3 class="micro">Why this road is interesting</h3>
+      <p>${esc(r.why || "")}</p>
+      <h3 class="micro">What you might see</h3>
+      ${wildlifeHtml(r.wildlife || {})}
+      <h3 class="micro">Access &amp; roads</h3>
+      <div class="meta">${accessTag(r)}<span class="tag">${esc((r.traffic || "traffic unknown"))}</span><span class="tag">${esc(r.geometryType || "")}</span><span class="tag">${esc(r.confidence || "")}</span>${r.routeMiles ? `<span class="tag">${esc(r.routeMiles)} mi</span>` : ""}</div>
+      ${r.access && r.access.notes ? `<p>${esc(r.access.notes)}</p>` : ""}
+      ${r.geometryNote ? `<p class="tiny">${esc(r.geometryNote)}</p>` : ""}
+      <h3 class="micro">Best time to try</h3>
+      <p>${esc(r.best || "")}</p>
+      <h3 class="micro">What to watch while driving</h3>
+      <ul class="cues">${(r.cues || []).map(c => `<li>${esc(c)}</li>`).join("")}</ul>
+      <h3 class="micro">Why go today</h3>
+      <div class="seasons">${seasons}</div>
+      <h3 class="micro">Wildcards</h3>
+      <ul class="wildcards">${(r.wildcards || []).map(w => `<li>${esc(w)}</li>`).join("")}</ul>
+      ${r.scoreRationale ? `<h3 class="micro">Score rationale</h3><p class="tiny">${esc(r.scoreRationale)}</p>` : ""}
+      ${r.unresolvedQuestions && r.unresolvedQuestions.length ? `<h3 class="micro">Unresolved questions</h3><ul class="uq-list">${r.unresolvedQuestions.map(q => `<li>${esc(q)}</li>`).join("")}</ul>` : ""}
+      ${routeSourcesHtml(r)}
+      <div class="meta">${(r.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+      <button class="focus" type="button">Focus this route</button>`;
+  }
+
+  function renderPreview(){
+    const routes = getRoutes();
+    const pkg = S.session && S.session.pkg;
+    const head = $("pvGuideHead");
+    if (!pkg || !pkg.guide || !pkg.guide.location || !isNum(pkg.guide.location.lat)){
+      head.innerHTML = `<div><h2>Guide Preview</h2><div class="desc">No guide yet. Run an investigation or import a JSON package — the map learns the area as soon as geography resolves, candidate sites appear after discovery, and route lines appear as geometry is verified.</div></div>`;
+      $("pvRouteList").innerHTML = `<div class="empty-note">No guide yet — investigate an area or import a package on the Data / JSON tab.</div>`;
+      $("pvActive").innerHTML = ""; $("pvSources").innerHTML = ""; $("pvCount").textContent = ""; $("pvVisibleCount").textContent = "";
+      return;
+    }
+    const g = pkg.guide;
+    const done = S.session.status === "complete";
+    head.innerHTML = `<div>
+        <h2>${esc(g.title || "Wildlife Road Cruises")}</h2>
+        <div class="desc">${esc(g.description || "")}</div>
+        <div class="meta"><span class="tag">${esc(g.location.canonicalName || g.location.input)}</span><span class="tag">~${esc(g.radiusMiles)}-mile radius</span>${g.generatedAt ? `<span class="tag">researched ${esc(g.generatedAt.slice(0, 10))}</span>` : `<span class="tag">research in progress…</span>`}<span class="tag">${esc(routes.length)} routes</span>${done ? "" : `<span class="tag a-mid">live — updates as stages complete</span>`}</div>
+      </div>`;
+    renderFilters(routes);
+    renderRouteCards(routes);
+    if (routes.length && (!S.activeRouteId || !routes.some(r => r.id === S.activeRouteId))) setActiveRoute(routes[0].id);
+    renderSources();
+    renderMap(routes, pkg);
+  }
+
+  function renderFilters(routes){
+    const row = $("pvFilterRow");
+    const tags = new Set();
+    for (const r of routes) for (const t of (r.tags || [])) tags.add(t);
+    const ordered = Object.keys(FILTER_ICONS).filter(t => tags.has(t));
+    const extras = [...tags].filter(t => !FILTER_ICONS[t]).sort();
+    const all = [...ordered, ...extras];
+    S.filters = S.filters.filter(f => all.includes(f));
+    row.innerHTML = all.length
+      ? all.map(t => `<button type="button" class="chip" data-filter="${esc(t)}" aria-pressed="${S.filters.includes(t)}">${FILTER_ICONS[t] || "✦"} ${esc(t)}</button>`).join("")
+      : `<span class="tiny">Filters appear once routes carry tags.</span>`;
+    row.querySelectorAll(".chip").forEach(b => b.addEventListener("click", () => {
+      const t = b.dataset.filter;
+      const i = S.filters.indexOf(t);
+      if (i >= 0) S.filters.splice(i, 1); else S.filters.push(t);
+      b.setAttribute("aria-pressed", S.filters.includes(t) ? "true" : "false");
+      applyFilters();
+    }));
+  }
+
+  function applyFilters(){
+    const routes = getRoutes();
+    for (const r of routes){
+      const card = document.querySelector(`.route[data-route="${r.id}"]`);
+      if (!card) continue;
+      if (!S.filters.length){ card.classList.remove("match", "dim"); continue; }
+      const m = (r.tags || []).some(t => S.filters.includes(t));
+      card.classList.toggle("match", m);
+      card.classList.toggle("dim", !m);
+    }
+    refreshRouteStyles();
+  }
+
+  function refreshRouteStyles(){
+    for (const [id, entry] of S.routeLayers){
+      const r = getRoutes().find(x => x.id === id);
+      if (!r || !entry.line) continue;
+      let weight = 5, opacity = .86, haloOpacity = 0;
+      if (S.filters.length){
+        const m = (r.tags || []).some(t => S.filters.includes(t));
+        weight = m ? 7 : 4;
+        opacity = m ? .95 : .22;
+      }
+      if (id === S.activeRouteId){ weight += 2; opacity = 1; haloOpacity = .3; }
+      entry.line.setStyle({ weight, opacity });
+      entry.halo.setStyle({ opacity: haloOpacity });
+    }
+  }
+
+  function renderRouteCards(routes){
+    const list = $("pvRouteList");
+    list.innerHTML = "";
+    for (const r of routes){
+      const card = document.createElement("article");
+      card.className = "route";
+      card.dataset.route = r.id;
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      card.setAttribute("aria-label", "Show field guide for " + r.name);
+      const o = r.scores && isNum(r.scores.overall) ? r.scores.overall : null;
+      const cls = o == null ? "" : (o >= 7.5 ? "s-high" : (o >= 5.5 ? "s-mid" : "s-low"));
+      card.innerHTML = `
+        <div class="card-top">
+          <div class="card-name"><span class="route-key" style="background:${esc(r.color)}"></span>${esc(r.name)}</div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <div class="score ${cls}">${o != null ? o + "/10" : "—"}</div>
+            <span class="class-chip cls-${esc(r.classification)}">${esc(CLASS_LABEL[r.classification] || r.classification || "")}</span>
+          </div>
+        </div>
+        <p class="card-desc">${esc(r.tagline || "")}</p>
+        <div class="card-habitat" aria-label="Habitat types">${esc((r.habitat || []).join(" "))}</div>
+        <div class="card-watch">${esc((r.watch || []).join(" · "))}</div>
+        <div class="card-best"><strong>Best:</strong> ${esc(r.best ? r.best.slice(0, 120) : "see field guide")}</div>
+        <div class="meta">${accessTag(r)}<span class="tag">${esc(r.geometryType || "")}</span><span class="tag">${esc(r.confidence || "")}</span></div>
+        <div class="card-actions">
+          <button class="details" type="button">View details</button>
+          <button class="research-btn" type="button">🔬 Research</button>
+          <label class="pill card-vis"><input class="route-toggle" type="checkbox" ${S.routeVis.get(r.id) !== false ? "checked" : ""} aria-label="Toggle ${esc(r.name)} on map"> On map</label>
+        </div>`;
+      list.appendChild(card);
+      const toggle = card.querySelector(".route-toggle");
+      const selectRoute = (e) => {
+        if (e && (e.target === toggle || toggle.contains(e.target))) return;
+        setActiveRoute(r.id, { scroll: true });
+      };
+      card.addEventListener("click", selectRoute);
+      card.addEventListener("keydown", e => {
+        if (e.target !== card) return;
+        if (e.key === "Enter" || e.key === " "){ e.preventDefault(); selectRoute(e); }
+      });
+      toggle.addEventListener("click", e => e.stopPropagation());
+      toggle.addEventListener("change", () => setRouteVisible(r.id, toggle.checked));
+      card.querySelector(".research-btn").addEventListener("click", (e) => { e.stopPropagation(); openResearchModal(r); });
+      card.querySelector(".details").addEventListener("click", (e) => { e.stopPropagation(); setActiveRoute(r.id, { scroll: true }); });
+    }
+  }
+
+  function renderSources(){
+    const pkg = S.session && S.session.pkg;
+    const srcs = pkg && pkg.research ? pkg.research.sources || [] : [];
+    const seen = new Set();
+    const uniq = [];
+    for (const s of srcs){ const k = s.url || s.title; if (!seen.has(k)){ seen.add(k); uniq.push(s); } }
+    $("pvSources").innerHTML = uniq.length
+      ? uniq.map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a> <span class="tag">${esc(s.sourceType)}</span></li>`).join("")
+      : `<li class="tiny">No sources recorded yet.</li>`;
+  }
+
+  function initMap(){
+    if (S.map) return;
+    S.map = L.map("pvMap", { zoomControl: true });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+    }).addTo(S.map);
+  }
+
+  function renderMap(routes, pkg){
+    initMap();
+    const g = pkg.guide;
+    const center = [g.location.lat, g.location.lng];
+    const rMeters = (g.radiusMiles || 25) * 1609.344;
+    if (!S.centerMarker){
+      S.centerMarker = L.circleMarker(center, { radius: 7, color: "#ffffff", weight: 2, fillColor: "#202a25", fillOpacity: 1 }).addTo(S.map);
+    } else S.centerMarker.setLatLng(center);
+    S.centerMarker.bindPopup("<strong>" + esc(g.location.canonicalName || g.location.input) + "</strong><br>Investigation center.");
+    if (!S.radiusCircle){
+      S.radiusCircle = L.circle(center, { radius: rMeters, color: "#9fb0a7", weight: 1.3, opacity: .75, fillColor: "#9fb0a7", fillOpacity: .045, dashArray: "7 7" }).addTo(S.map);
+    } else { S.radiusCircle.setLatLng(center); S.radiusCircle.setRadius(rMeters); }
+    if ($("pvRadiusToggle").checked){ if (!S.map.hasLayer(S.radiusCircle)) S.radiusCircle.addTo(S.map); }
+    else if (S.map.hasLayer(S.radiusCircle)) S.map.removeLayer(S.radiusCircle);
+    S.map.setView(center, S.map.getZoom() || 10, { animate: false });
+
+    for (const [, entry] of S.routeLayers) S.map.removeLayer(entry.group);
+    S.routeLayers = new Map();
+    for (const r of routes){
+      const group = L.layerGroup();
+      const visible = S.routeVis.get(r.id) !== false;
+      const pts = r.geometry && Array.isArray(r.geometry.coordinates) ? r.geometry.coordinates.map(c => [c[1], c[0]]) : null;
+      let line = null, halo = null, anchor = null;
+      if (pts && pts.length >= 2){
+        halo = L.polyline(pts, { color: "#f2f6f2", weight: 11, opacity: 0, lineCap: "round", lineJoin: "round", interactive: false });
+        line = L.polyline(pts, { color: r.color, weight: 5, opacity: .86, lineCap: "round", lineJoin: "round" }).bindPopup(() => popupHtml(r));
+        group.addLayer(halo); group.addLayer(line);
+        const start = L.circleMarker(pts[0], { radius: 6, color: "#101512", weight: 2, fillColor: r.color, fillOpacity: 1 }).bindTooltip(r.name, { direction: "top" });
+        group.addLayer(start);
+        line.on("click", () => setActiveRoute(r.id));
+        start.on("click", () => setActiveRoute(r.id));
+      } else if (r.geometryAnchor && isNum(r.geometryAnchor.lat)){
+        anchor = L.circleMarker([r.geometryAnchor.lat, r.geometryAnchor.lng], { radius: 8, color: r.color, weight: 2.5, fillColor: r.color, fillOpacity: .35, dashArray: "4 4" }).bindPopup(() => popupHtml(r));
+        group.addLayer(anchor);
+        anchor.on("click", () => setActiveRoute(r.id));
+      }
+      group.addTo(S.map);
+      if (!visible) S.map.removeLayer(group);
+      S.routeLayers.set(r.id, { group, line, halo, anchor, visible });
+    }
+    renderCandidateLayer(pkg);
+    refreshRouteStyles();
+    updateVisibleCount();
+    setTimeout(() => S.map.invalidateSize(), 60);
+  }
+
+  function renderCandidateLayer(pkg){
+    if (S.candLayer){ S.map.removeLayer(S.candLayer); S.candLayer = null; }
+    const cands = ((pkg.research.candidates || [])).filter(c => c.triage && c.triage.verdict !== "rejected" && isNum(c.lat));
+    if (!cands.length) return;
+    const layer = L.layerGroup();
+    for (const c of cands){
+      const col = c.triage.verdict === "promoted" ? "#9fd28f" : "#d9b76e";
+      L.circleMarker([c.lat, c.lng], { radius: 4.5, color: col, weight: 1.5, fillColor: col, fillOpacity: .8 })
+        .bindPopup("<strong>" + esc(c.name) + "</strong><br><span style='color:#b8c5bd'>" + esc(c.type) + (c.distanceMiles != null ? " · " + c.distanceMiles + " mi from center" : "") + "</span><br><span class='tiny'>" + esc(c.triage.verdict) + (c.triage.reason ? " — " + esc(c.triage.reason.slice(0, 160)) : "") + "</span>")
+        .addTo(layer);
+    }
+    S.candLayer = layer;
+    if ($("pvCandToggle").checked) layer.addTo(S.map);
+  }
+
+  function updateVisibleCount(){
+    const routes = getRoutes();
+    const count = routes.filter(r => S.routeVis.get(r.id) !== false).length;
+    $("pvVisibleCount").textContent = `${count} of ${routes.length} visible`;
+    $("pvCount").textContent = routes.length ? `${count} of ${routes.length} shown` : "";
+  }
+
+  function setRouteVisible(id, visible){
+    const entry = S.routeLayers.get(id);
+    S.routeVis.set(id, visible);
+    if (entry){
+      entry.visible = visible;
+      if (visible && !S.map.hasLayer(entry.group)) entry.group.addTo(S.map);
+      if (!visible && S.map.hasLayer(entry.group)) S.map.removeLayer(entry.group);
+    }
+    const cb = document.querySelector(`.route[data-route="${id}"] .route-toggle`);
+    if (cb) cb.checked = visible;
+    if (id === S.activeRouteId) $("pvHiddenNote").hidden = visible;
+    updateVisibleCount();
+  }
+
+  function renderActivePanel(){
+    const r = getRoutes().find(x => x.id === S.activeRouteId);
+    const detail = $("pvActive");
+    if (!r){ detail.innerHTML = ""; return; }
+    detail.innerHTML = routeDetailHtml(r);
+    const focus = detail.querySelector(".focus");
+    if (focus) focus.addEventListener("click", () => focusRoute(r.id));
+    $("pvHiddenNote").hidden = S.routeVis.get(r.id) !== false;
+    const i = getRoutes().findIndex(x => x.id === S.activeRouteId);
+    $("pvPrev").disabled = i <= 0;
+    $("pvNext").disabled = i < 0 || i >= getRoutes().length - 1;
+  }
+
+  function setActiveRoute(id, options = {}){
+    const routes = getRoutes();
+    if (!routes.some(r => r.id === id)) return;
+    const changed = S.activeRouteId !== id;
+    S.activeRouteId = id;
+    renderActivePanel();
+    document.querySelectorAll(".route[data-route]").forEach(card => card.classList.toggle("active", card.dataset.route === id));
+    refreshRouteStyles();
+    if (options.scroll && changed) $("pvActivePanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function focusRoute(id){
+    const r = getRoutes().find(x => x.id === id);
+    const entry = S.routeLayers.get(id);
+    if (!r || !entry) return;
+    if (entry.line){
+      S.map.fitBounds(entry.line.getBounds().pad(.28), { maxZoom: 14 });
+      entry.line.openPopup();
+    } else if (entry.anchor){
+      entry.anchor.openPopup();
+      S.map.setView(entry.anchor.getLatLng(), 14);
+    }
+  }
+
+  function fitVisible(){
+    if (!S.map || !S.session || !S.session.pkg) return;
+    const bounds = [];
+    for (const [id, entry] of S.routeLayers){
+      if (S.routeVis.get(id) === false) continue;
+      if (entry.line) bounds.push(entry.line.getBounds());
+      else if (entry.anchor) bounds.push(L.latLngBounds([entry.anchor.getLatLng()]));
+    }
+    if ($("pvRadiusToggle").checked && S.radiusCircle) bounds.push(S.radiusCircle.getBounds());
+    if (!bounds.length){ S.map.setView([S.session.pkg.guide.location.lat, S.session.pkg.guide.location.lng], 10); return; }
+    let merged = bounds[0];
+    for (let i = 1; i < bounds.length; i++) merged = merged.extend(bounds[i]);
+    S.map.fitBounds(merged.pad(.06), { maxZoom: 12 });
+  }
+
+  /* ---------------- research inspector modal ---------------- */
+
+  function openResearchModal(r){
+    const uniq = routeSourcesList(r);
+    const uqs = r.unresolvedQuestions || [];
+    openModal(r.name + " — research", `
+      <h3 class="micro" style="margin-top:0">Sources &amp; evidence</h3>
+      ${uniq.length ? `<ul class="src-list">${uniq.map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a><br><span class="tiny">${esc(s.sourceType)} · ${esc(s.authorityTier)} · accessed ${esc((s.accessedAt || "").slice(0, 10))}${s.supports && s.supports.length ? " · supports: " + esc(s.supports.join(", ")) : ""}</span></li>`).join("")}</ul>` : `<p class="tiny">No sources recorded for this route.</p>`}
+      <h3 class="micro">Unresolved questions</h3>
+      ${uqs.length ? `<ul class="uq-list">${uqs.map(q => `<li>${esc(q)}</li>`).join("")}</ul>` : `<p class="tiny">None recorded.</p>`}
+      ${r.scoreRationale ? `<h3 class="micro">Score rationale</h3><p class="tiny">${esc(r.scoreRationale)}</p>` : ""}
+      ${r.geometryNote ? `<h3 class="micro">Geometry provenance</h3><p class="tiny">${esc(r.geometryNote)}</p>` : ""}
+      ${r.scores ? `<h3 class="micro">Component scores</h3><div class="counter-row">${Object.entries(r.scores).map(([k, v]) => `<span class="counter-chip">${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>` : ""}
+    `, [{ label: "Close", kind: "ghost" }]);
+  }
+
+  /* ================= DATA / JSON TAB ================= */
+
+  function refreshDataTab(force){
+    const pkg = S.session && S.session.pkg;
+    const info = $("dataPkgInfo");
+    if (!pkg || !(pkg.guide && pkg.guide.location && isNum(pkg.guide.location.lat))){
+      info.textContent = "No package loaded";
+      if (force || !$("jsonEditor").value.trim()) $("jsonEditor").value = "";
+      return;
+    }
+    info.textContent = `${(pkg.routes || []).length} routes · schemaVersion ${pkg.schemaVersion} · ${S.session.status}`;
+    if (force || !S.editorDirty) $("jsonEditor").value = JSON.stringify(pkg, null, 2);
+  }
+
+  function validatePackage(obj){
+    const errors = [], warnings = [];
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, errors: ["Root must be an object."], warnings, value: null };
+    if (obj.schemaVersion !== SCHEMA_VERSION) errors.push("schemaVersion must be " + SCHEMA_VERSION + " (got " + JSON.stringify(obj.schemaVersion) + ").");
+    if (!obj.guide || typeof obj.guide !== "object") errors.push("guide object required.");
+    else {
+      if (!obj.guide.location || !isNum(obj.guide.location.lat) || !isNum(obj.guide.location.lng)) errors.push("guide.location.lat/lng must be numbers.");
+      if (!isNum(obj.guide.radiusMiles)) warnings.push("guide.radiusMiles missing — defaulted to 25 on adoption.");
+      if (!obj.guide.title) warnings.push("guide.title missing.");
+    }
+    if (!Array.isArray(obj.routes)) errors.push("routes array required.");
+    else {
+      obj.routes.forEach((r, i) => {
+        if (!r || typeof r !== "object") { errors.push("routes[" + i + "] must be an object."); return; }
+        if (!r.name) errors.push("routes[" + i + "].name required.");
+        if (r.geometry){
+          if (r.geometry.type !== "LineString") warnings.push("routes[" + i + "].geometry: only LineString is supported in v1.");
+          else if (!Array.isArray(r.geometry.coordinates) || r.geometry.coordinates.length < 2) warnings.push("routes[" + i + "].geometry has fewer than 2 coordinates.");
+          else if (!r.geometry.coordinates.every(c => Array.isArray(c) && isNum(c[0]) && isNum(c[1]))) errors.push("routes[" + i + "].geometry.coordinates must be [lng,lat] number pairs.");
+        }
+        if (!r.access) warnings.push("routes[" + i + "] has no access block.");
+      });
+    }
+    if (obj.research && obj.research.sources && !Array.isArray(obj.research.sources)) errors.push("research.sources must be an array.");
+    if (obj.fieldReports && !Array.isArray(obj.fieldReports)) errors.push("fieldReports must be an array.");
+    return { ok: errors.length === 0, errors, warnings, value: obj };
+  }
+
+  function freshStageDefault(d){
+    return { id: d.id, label: d.label, status: "pending", startedAt: null, completedAt: null, summary: "", lines: [], counters: {}, warnings: [], error: null, question: null, attempts: 0 };
+  }
+
+  function normalizeUsage(u){
+    const out = freshUsage();
+    if (!u || typeof u !== "object") return out;
+    for (const k of ["llmCalls","searchCalls","fetchCalls","mapQueries","tokensIn","tokensOut"]){
+      if (isNum(u[k])) out[k] = u[k];
+    }
+    if (isNum(u.cost)){ out.cost = u.cost; out.costKnown = true; }
+    out.citations = Array.isArray(u.citations)
+      ? u.citations.map(c => typeof c === "string" ? { url: c, title: "" } : c).filter(c => c && c.url).slice(0, 500)
+      : [];
+    return out;
+  }
+
+  function adoptPackage(obj, sourceLabel){
+    const v = validatePackage(obj);
+    if (!v.ok){
+      setDataStatus("Import failed: " + v.errors.join(" "), false);
+      return false;
+    }
+    const pkg = v.value;
+    if (!isNum(pkg.guide.radiusMiles)) pkg.guide.radiusMiles = 25;
+    if (!Array.isArray(pkg.fieldReports)) pkg.fieldReports = [];
+    if (!pkg.research || typeof pkg.research !== "object") pkg.research = {};
+    for (const k of ["pipeline","candidates","rejectedCandidates","sources","warnings","unresolvedQuestions","roads"]){
+      if (!Array.isArray(pkg.research[k])) pkg.research[k] = [];
+    }
+    if (!pkg.generator) pkg.generator = GENERATOR;
+    for (const r of pkg.routes){
+      if (!r.access) r.access = { status: "unverified", notes: "" };
+      if (!r.classification) r.classification = r.scores && isNum(r.scores.overall) && r.scores.overall >= 7 ? "strong" : "exploratory";
+      if (!r.color) r.color = ROUTE_COLORS[pkg.routes.indexOf(r) % ROUTE_COLORS.length];
+      if (!r.id) r.id = "r" + (pkg.routes.indexOf(r) + 1);
+      if (r.unresolvedQuestions == null) r.unresolvedQuestions = [];
+    }
+    S.session = freshSession({
+      location: (pkg.guide.location && (pkg.guide.location.input || pkg.guide.location.canonicalName)) || "",
+      radiusMiles: pkg.guide.radiusMiles,
+      title: pkg.guide.title || "",
+      focus: ["all"],
+      depth: pkg.guide.researchMode || "deep"
+    });
+    S.session.pkg = pkg;
+    S.session.status = "imported";
+    S.session.usage = normalizeUsage(pkg.research.usage);
+    S.session.stages = STAGE_DEFS.map(d => {
+      const prev = (pkg.research.pipeline || []).find(p => p.id === d.id);
+      if (prev) return Object.assign(freshStageDefault(d), prev, { id: d.id, label: d.label, question: null, error: null, lines: Array.isArray(prev.lines) ? prev.lines : [], warnings: Array.isArray(prev.warnings) ? prev.warnings : [], counters: prev.counters && typeof prev.counters === "object" ? prev.counters : {} });
+      return freshStageDefault(d);
+    });
+    S.titleTouched = true;
+    $("locInput").value = S.session.input.location;
+    $("radiusInput").value = String(S.session.input.radiusMiles);
+    $("titleInput").value = pkg.guide.title || "";
+    $("radiusWarn").hidden = !(S.session.input.radiusMiles > 60);
+    S.routeVis = new Map();
+    S.activeRouteId = null;
+    S.filters = [];
+    S.overpass = { lastAt: 0, count: 0, cache: new Map() };
+    S.editorDirty = false;
+    renderPipeline(); renderActivity(); renderUsage(); renderPreview(); refreshDataTab(true);
+    setDataStatus((sourceLabel || "Package") + " loaded — " + pkg.routes.length + " routes. Edit here as JSON and use Apply (validated); re-running stages is not required.", true);
+    toast((sourceLabel || "Guide") + " loaded");
+    updateSessionPill();
+    saveNow();
+    return true;
+  }
+
+  function setDataStatus(msg, ok){
+    const el = $("dataStatus");
+    el.textContent = msg;
+    el.className = "data-status " + (ok ? "ok" : "err");
+  }
+
+  function exportJson(){
+    const pkg = S.session && S.session.pkg;
+    if (!pkg || !(pkg.guide && pkg.guide.location && isNum(pkg.guide.location.lat))){ toast("Nothing to export yet — run an investigation or import a package."); return; }
+    const name = slugify(pkg.guide.id || pkg.guide.title || "wildlife-road-cruises") + ".json";
+    const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    log("Exported package: " + name, "ok");
+    toast("Exported " + name);
+  }
+
+  async function importFromFile(file){
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const obj = JSON.parse(text);
+      if (adoptPackage(obj, "Imported " + file.name)) switchTab("preview");
+    } catch (e){
+      setDataStatus("Import failed: not valid JSON — " + e.message, false);
+      toast("Import failed: not valid JSON", true);
+    }
+  }
+
+  function applyEditorJson(){
+    const raw = $("jsonEditor").value;
+    if (!raw.trim()){ setDataStatus("Editor is empty — nothing to apply.", false); return; }
+    let obj;
+    try { obj = JSON.parse(raw); }
+    catch (e){ setDataStatus("Invalid JSON: " + e.message, false); return; }
+    if (adoptPackage(obj, "Edited package")) switchTab("preview");
+  }
+
+  function validateEditorJson(){
+    const raw = $("jsonEditor").value.trim();
+    if (!raw){ setDataStatus("Editor is empty.", false); return; }
+    let obj;
+    try { obj = JSON.parse(raw); }
+    catch (e){ setDataStatus("Invalid JSON: " + e.message, false); return; }
+    const v = validatePackage(obj);
+    if (v.ok) setDataStatus("Valid." + (v.warnings.length ? " Warnings: " + v.warnings.join(" ") : ""), true);
+    else setDataStatus("Invalid: " + v.errors.join(" "), false);
+  }
+
+  /* ================= TABS ================= */
+
+  function switchTab(name){
+    S.settings.tab = name;
+    saveSettings();
+    for (const t of ["investigate", "preview", "data"]){
+      $("tab-" + t).hidden = t !== name;
+      $("tabbtn-" + t).setAttribute("aria-selected", t === name ? "true" : "false");
+    }
+    if (name === "preview"){
+      renderPreview();
+      if (S.map) setTimeout(() => S.map.invalidateSize(), 80);
+    }
+    if (name === "data") refreshDataTab(false);
+  }
+
+  /* ================= MODAL + TOAST ================= */
+
+  function openModal(title, bodyHtml, actions, opts){
+    const o = opts || {};
+    $("modalTitle").textContent = title;
+    $("modalBody").innerHTML = bodyHtml;
+    const wrap = $("modalActions");
+    wrap.innerHTML = "";
+    (actions && actions.length ? actions : [{ label: "Close", kind: "ghost" }]).forEach(a => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = a.kind === "primary" ? "primary" : (a.kind === "danger" ? "danger-ghost" : "ghost");
+      b.textContent = a.label;
+      b.addEventListener("click", () => { closeModal(); if (a.onClick) a.onClick(); });
+      wrap.appendChild(b);
+    });
+    S.modalDismiss = o.onDismiss || null;
+    $("modal").hidden = false;
+    wrap.querySelector("button").focus();
+  }
+
+  function closeModal(){
+    if ($("modal").hidden) return;
+    $("modal").hidden = true;
+    if (S.modalDismiss){ const f = S.modalDismiss; S.modalDismiss = null; f(); }
+  }
+
+  function confirmModal(title, bodyHtml, actions){
+    return new Promise(resolve => {
+      openModal(title, bodyHtml, (actions || []).map(a => Object.assign({}, a, { onClick: () => resolve(a.value) })), { onDismiss: () => resolve(false) });
+    });
+  }
+
+  let toastTimer = null;
+  function toast(msg, isErr){
+    const el = $("toast");
+    el.textContent = msg;
+    if (isErr) el.classList.add("err"); else el.classList.remove("err");
+    el.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 4200);
+  }
+
+  /* ================= INIT ================= */
+
+  function renderFocusChips(){
+    const row = $("focusRow");
+    row.innerHTML = FOCUS_OPTIONS.map(f => `<button type="button" class="chip" data-focus="${f.k}" aria-pressed="${f.k === "all" ? "true" : "false"}">${f.icon} ${f.label}</button>`).join("");
+    row.querySelectorAll(".chip").forEach(b => b.addEventListener("click", () => {
+      const k = b.dataset.focus;
+      const opt = FOCUS_OPTIONS.find(o => o.k === k);
+      if (opt && opt.exclusive){
+        row.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x.dataset.focus === "all" ? "true" : "false"));
+      } else {
+        const allBtn = row.querySelector('[data-focus="all"]');
+        if (allBtn) allBtn.setAttribute("aria-pressed", "false");
+        b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
+        const any = row.querySelector(".chip[aria-pressed='true']");
+        if (!any && allBtn) allBtn.setAttribute("aria-pressed", "true");
+      }
+    }));
+  }
+
+  async function restoreSession(){
+    try {
+      const saved = await idbGet("sessions", "current");
+      if (!saved || !saved.stages) return;
+      if (!(saved.pkg || saved.stages.some(s => s.status !== "pending"))) return;
+      S.session = saved;
+      if (!S.session.usage) S.session.usage = freshUsage();
+      S.overpass = { lastAt: 0, count: 0, cache: new Map() };
+      if (S.session.input){
+        $("locInput").value = S.session.input.location || "";
+        $("radiusInput").value = String(S.session.input.radiusMiles || 25);
+        if (S.session.input.title){ $("titleInput").value = S.session.input.title; S.titleTouched = true; }
+        $("depthSelect").value = S.session.input.depth || "deep";
+        $("radiusWarn").hidden = !((S.session.input.radiusMiles || 0) > 60);
+      }
+      if (S.session.status === "running") S.session.status = "failed";
+      if (S.session.stages.some(s => s.status === "running")) setStage(S.session.stages.find(s => s.status === "running").id, { status: "failed", error: "Interrupted by a page refresh — use Retry Stage." });
+      initPkgIfMissing();
+      renderPipeline(); renderActivity(); renderUsage(); renderPreview();
+      showResumeStrip();
+      if (S.session.pkg && S.session.status === "complete") log("Previous complete guide restored.", "info");
+    } catch (_) {}
+  }
+
+  function showResumeStrip(){
+    const strip = $("resumeStrip");
+    const st = S.session.status;
+    const loc = S.session.input.location || "unknown location";
+    if (st === "failed"){
+      $("resumeMsg").textContent = "Previous investigation for " + loc + " is paused — completed stages are preserved.";
+      $("btnResume").hidden = false;
+      strip.hidden = false;
+    } else if (st === "imported" || st === "complete"){
+      $("resumeMsg").textContent = st === "complete"
+        ? "Restored a completed investigation for " + loc + " — guide is in Preview."
+        : "Imported guide loaded (" + loc + ").";
+      $("btnResume").hidden = true;
+      strip.hidden = false;
+    } else strip.hidden = true;
+  }
+
+  async function resumeInvestigation(){
+    if (!S.session) return;
+    if (!(S.settings.apiKey || "").trim()){
+      toast("Add your OpenRouter API key first.");
+      $("apiKeyInput").focus();
+      return;
+    }
+    $("resumeStrip").hidden = true;
+    await runInvestigation();
+  }
+
+  function wireEvents(){
+    $("tabbtn-investigate").addEventListener("click", () => switchTab("investigate"));
+    $("tabbtn-preview").addEventListener("click", () => switchTab("preview"));
+    $("tabbtn-data").addEventListener("click", () => switchTab("data"));
+
+    $("intakeForm").addEventListener("submit", (e) => { e.preventDefault(); startInvestigation(); });
+    $("radiusInput").addEventListener("input", updateRadiusWarn);
+    $("titleInput").addEventListener("input", () => { S.titleTouched = true; });
+    $("depthSelect").addEventListener("change", () => { S.settings.depth = $("depthSelect").value; saveSettings(); });
+
+    $("btnImportGuide").addEventListener("click", () => $("fileImport").click());
+    $("fileImport").addEventListener("change", (e) => { importFromFile(e.target.files[0]); e.target.value = ""; });
+    $("btnImportJson").addEventListener("click", () => $("fileImport").click());
+    $("btnExportJson").addEventListener("click", exportJson);
+    $("btnValidateJson").addEventListener("click", validateEditorJson);
+    $("btnApplyJson").addEventListener("click", applyEditorJson);
+    $("btnNewInvestigation").addEventListener("click", restartInvestigation);
+
+    $("btnResume").addEventListener("click", resumeInvestigation);
+    $("btnDiscardSession").addEventListener("click", restartInvestigation);
+    $("btnExportState").addEventListener("click", exportJson);
+    $("btnCancel").addEventListener("click", () => {
+      cancelInvestigation();
+      toast("Cancelling after the current call — completed stages are preserved.");
+    });
+
+    $("apiKeyInput").addEventListener("change", () => {
+      S.settings.apiKey = $("apiKeyInput").value.trim();
+      saveSettings();
+    });
+    $("modelSelect").addEventListener("change", () => {
+      S.settings.model = $("modelSelect").value;
+      saveSettings();
+    });
+    $("btnRefreshModels").addEventListener("click", refreshModels);
+
+    $("pvShowAll").addEventListener("click", () => { for (const r of getRoutes()) setRouteVisible(r.id, true); fitVisible(); });
+    $("pvHideAll").addEventListener("click", () => { for (const r of getRoutes()) setRouteVisible(r.id, false); });
+    $("pvFit").addEventListener("click", fitVisible);
+    $("pvRadiusToggle").addEventListener("change", (e) => {
+      if (!S.map) return;
+      if (e.target.checked) S.radiusCircle.addTo(S.map);
+      else S.map.removeLayer(S.radiusCircle);
+    });
+    $("pvCandToggle").addEventListener("change", (e) => {
+      if (!S.map || !S.session || !S.session.pkg) return;
+      if (e.target.checked){
+        if (S.candLayer) S.candLayer.addTo(S.map);
+      } else if (S.candLayer && S.map.hasLayer(S.candLayer)) S.map.removeLayer(S.candLayer);
+    });
+    $("pvPrev").addEventListener("click", () => {
+      const i = getRoutes().findIndex(x => x.id === S.activeRouteId);
+      if (i > 0) setActiveRoute(getRoutes()[i - 1].id, { scroll: true });
+    });
+    $("pvNext").addEventListener("click", () => {
+      const i = getRoutes().findIndex(x => x.id === S.activeRouteId);
+      if (i >= 0 && i < getRoutes().length - 1) setActiveRoute(getRoutes()[i + 1].id, { scroll: true });
+    });
+    $("jsonEditor").addEventListener("input", () => { S.editorDirty = true; });
+    $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeModal(); });
+  }
+
+  async function init(){
+    renderFocusChips();
+    $("apiKeyInput").value = S.settings.apiKey || "";
+    $("depthSelect").value = S.settings.depth || "deep";
+    renderModelSelect($("modelSelect"), [], S.settings.model);
+    if (S.settings.apiKey) refreshModels();
+    updateRadiusWarn();
+    wireEvents();
+    renderPipeline();
+    renderActivity();
+    renderUsage();
+    await restoreSession();
+    if (!S.session){
+      S.session = freshSession();
+      renderPipeline();
+    }
+    switchTab(S.settings.tab || "investigate");
+    if (S.settings.tab === "preview" && !(S.session.pkg)) switchTab("investigate");
+  }
+
+  init();
+  })();
+  </script>
+
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.31.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.31.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · Wildlife Road Cruise Investigator · version 2026.08.31.1
+  </footer>
+</body>
+</html>
