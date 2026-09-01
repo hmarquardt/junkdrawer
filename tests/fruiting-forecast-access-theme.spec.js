@@ -66,10 +66,13 @@ test('real access dataset loads from DuckDB with provenance', async ({ page }) =
     const manifest = await t.gisManifest(false);
     await t.initDuckDB();
     const conn = await t.initDuckDB();
-    const rows = await a.accessPointRows(conn, manifest, {lat:38.35,lon:-87.57}, 50, false, undefined);
-    return { count:rows.length, datasetVersion:manifest.accessPoints && manifest.accessPoints.datasetVersion || null, source:manifest.accessPoints && manifest.accessPoints.source || null };
+    const tiles = t.selectGisTiles(manifest, 38.35, -87.57, 50);
+    const rows = await a.accessPointRows(conn, manifest, {lat:38.35,lon:-87.57}, 50, false, undefined, tiles);
+    const apTiles = tiles.filter(tile => tile.accessPoints && tile.accessPoints.url);
+    const source = apTiles.length ? (manifest.sources.find(s => s.id === 'access') || {}).provider : null;
+    return { count:rows.length, apTiles: apTiles.length, source };
   });
-  expect(result.datasetVersion).toBeTruthy();
+  expect(result.apTiles).toBeGreaterThan(0);
   expect(result.source).toBe('OpenStreetMap');
   expect(result.count).toBeGreaterThan(0);
   expect(errors).toEqual([]);
