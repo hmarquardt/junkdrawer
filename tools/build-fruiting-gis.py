@@ -39,6 +39,12 @@ EPQS = "https://epqs.nationalmap.gov/v1/json"
 PADUS = "https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services/PADUS_Public_Access/FeatureServer/0/query"
 SDA = "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest"
 PADUS_INFO = "https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-download"
+# kumi.systems first: the canonical endpoint rate-limits bulk multi-statement
+# queries aggressively; per-sub-bbox results are cached so retries are cheap.
+OVERPASS_MIRRORS = ["https://overpass.kumi.systems/api/interpreter",
+                    "https://overpass-api.de/api/interpreter",
+                    "https://maps.mail.ru/osm/tools/overpass/api/interpreter"]
+OSM_ATTR = "© OpenStreetMap contributors (ODbL)"
 
 LAND = {41: "deciduous", 42: "evergreen", 43: "mixed", 52: "shrub", 71: "grass", 81: "pasture", 82: "crops", 90: "woody_wetland", 95: "wetland"}
 FOREST = {41, 42, 43, 90}
@@ -158,8 +164,8 @@ def property_type(name: str, manager: str) -> str:
     return "Protected Area"
 
 
-def build_public_lands(features: list, out: Path, coverage: tuple[float, float, float, float]) -> dict:
-    """Write compact named-property Parquet with reusable GeoJSON geometry."""
+def group_pad_properties(features: list, coverage: tuple[float, float, float, float]) -> list:
+    """Deduplicate PAD-US polygons into named property records with merged rings."""
     grouped, seen = {}, set()
     for feature in features:
         attrs, geometry = feature.get("attributes") or {}, feature.get("geometry") or {}
@@ -193,10 +199,23 @@ def build_public_lands(features: list, out: Path, coverage: tuple[float, float, 
         bbox = rec["bbox"]
         access = next(iter(rec["access"])) if len(rec["access"]) == 1 else "MIXED"
         ownership = "PRIVATE" if "private" in manager.lower() else access
-        geometry = {"type": "MultiPolygon", "coordinates": [[[p for p in ring]] for ring in rec["rings"]]}
         records.append({"property_id": hashlib.sha1(f"{name}|{manager}|{kind}".encode()).hexdigest()[:16],
                         "property_name": name, "manager": manager, "property_type": kind,
                         "ownership_class": ownership, "access_class": access,
+                        "rings": rec["rings"], "bbox": bbox})
+    return records
+
+
+def build_public_lands(features: list, out: Path, coverage: tuple[float, float, float, float]) -> dict:
+    """Write compact named-property Parquet with reusable GeoJSON geometry."""
+    properties = group_pad_properties(features, coverage)
+    records = []
+    for rec in properties:
+        name, manager, kind, bbox = rec["property_name"], rec["manager"], rec["property_type"], rec["bbox"]
+        geometry = {"type": "MultiPolygon", "coordinates": [[[p for p in ring]] for ring in rec["rings"]]}
+        records.append({"property_id": rec["property_id"],
+                        "property_name": name, "manager": manager, "property_type": kind,
+                        "ownership_class": rec["ownership_class"], "access_class": rec["access_class"],
                         "geometry_json": json.dumps(geometry, separators=(",", ":")),
                         "min_lon": bbox[0], "min_lat": bbox[1], "max_lon": bbox[2], "max_lat": bbox[3],
                         "center_lon": (bbox[0] + bbox[2]) / 2, "center_lat": (bbox[1] + bbox[3]) / 2,
@@ -210,6 +229,162 @@ def build_public_lands(features: list, out: Path, coverage: tuple[float, float, 
     return {"url": out.name, "properties": len(records), "bytes": out.stat().st_size,
             "sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
             "format": "parquet-geojson-column", "geometryColumn": "geometry_json"}
+
+
+AGENCY_KEYWORDS = ("department of natural resources", " dnr", "forest service", "usfs",
+                   "fish and wildlife", "fish & wildlife", "usfws", "refuge", "state forest")
+
+
+def overpass_features(bbox: tuple[float, float, float, float], cache_dir: Path) -> list:
+    """Fetch OSM access features (Tier-2 source) for the coverage bbox.
+
+    Only genuine access features are requested — public parking, trailheads,
+    boat ramps, publicly passable gates, and visitor information. The region
+    is queried in small sub-bboxes because Overpass rejects region-wide
+    parking queries. Results are cached on disk because Overpass is slow.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    elements = []
+    steps_lon, steps_lat = 8, 4
+    for i in range(steps_lon):
+        for j in range(steps_lat):
+            west = bbox[0] + (bbox[2] - bbox[0]) * i / steps_lon
+            east = bbox[0] + (bbox[2] - bbox[0]) * (i + 1) / steps_lon
+            south = bbox[1] + (bbox[3] - bbox[1]) * j / steps_lat
+            north = bbox[1] + (bbox[3] - bbox[1]) * (j + 1) / steps_lat
+            box = (west, south, east, north)
+            path = cache_dir / f"osm_access_{west:.2f}_{south:.2f}_{east:.2f}_{north:.2f}.json"
+            if path.exists():
+                elements.extend(json.loads(path.read_text()))
+                continue
+            q = (f"[out:json][timeout:120];("
+                 f'nwr["amenity"="parking"]({south:.4f},{west:.4f},{north:.4f},{east:.4f});'
+                 f'nwr["highway"="trailhead"]({south:.4f},{west:.4f},{north:.4f},{east:.4f});'
+                 f'nwr["amenity"="boat_ramp"]({south:.4f},{west:.4f},{north:.4f},{east:.4f});'
+                 f'nwr["barrier"="gate"]["access"~"^(yes|public|permissive)$"]({south:.4f},{west:.4f},{north:.4f},{east:.4f});'
+                 f'nwr["tourism"="information"]["information"~"^(visitor_centre|visitor_center)$"]({south:.4f},{west:.4f},{north:.4f},{east:.4f});'
+                 f");out center tags;")
+            print(f"Querying Overpass sub-bbox {west:.2f},{south:.2f} → {east:.2f},{north:.2f}")
+            batch, last = None, None
+            for endpoint in OVERPASS_MIRRORS:
+                for attempt in range(2):
+                    try:
+                        r = requests.post(endpoint, data={"data": q}, timeout=180,
+                                          headers={"User-Agent": "fruiting-forecast-gis-build/1.0 (static offline preprocessing; junkdrawer local-first tool)"})
+                        r.raise_for_status()
+                        batch = r.json().get("elements") or []
+                        break
+                    except Exception as e:
+                        last = e
+                        print(f"  {endpoint.split('/')[2]} attempt {attempt + 1} failed: {e}")
+                        time.sleep(30 if '429' in str(e) or 'Too Many' in str(e) else 10)
+                if batch is not None:
+                    break
+            if batch is None:
+                raise SystemExit(f"Overpass query failed for sub-bbox {box}: {last}")
+            path.write_text(json.dumps(batch))
+            elements.extend(batch)
+            print(f"  {len(batch)} features")
+            time.sleep(4)
+    print(f"  {len(elements)} OSM access features total")
+    return elements
+
+
+def classify_access(tags: dict, prop: dict | None, edge_deg: float | None) -> tuple[str, str] | None:
+    """Return (type, confidence) or None when the feature must be rejected.
+
+    No coordinates are ever synthesized: a point is only kept when OSM mapped
+    a genuine access feature that falls inside a named public property, or
+    immediately adjacent with explicit access intent.
+    """
+    tags = tags or {}
+    if tags.get("access") in {"private", "no", "customers"}:
+        return None
+    if tags.get("amenity") == "parking":
+        kind = "PARKING"
+    elif tags.get("highway") == "trailhead":
+        kind = "TRAILHEAD"
+    elif tags.get("amenity") == "boat_ramp":
+        kind = "BOAT_RAMP"
+    elif tags.get("barrier") in {"gate", "entrance"}:
+        kind = "GATE"
+    elif tags.get("tourism") == "information":
+        kind = "VISITOR_AREA"
+    else:
+        return None
+    if prop is None:
+        # A nearby-but-outside point must carry explicit access intent and sit
+        # within ~130 m of the boundary; otherwise it is unrelated parking.
+        if kind not in {"TRAILHEAD", "GATE", "PARKING"} or edge_deg is None or edge_deg > 0.0012:
+            return None
+        return kind, "LOW"
+    text = f"{tags.get('name', '')} {tags.get('operator', '')}".lower()
+    if any(k in text for k in AGENCY_KEYWORDS) or prop["property_name"].lower() in text:
+        return kind, "HIGH"
+    return kind, "MEDIUM"
+
+
+def build_access_points(features: list, properties: list, out: Path) -> dict:
+    """Associate OSM access features with named PAD-US properties; write Parquet."""
+    indexed = []
+    for prop in properties:
+        if prop["ownership_class"] in {"PRIVATE", "LIKELY_PRIVATE"}:
+            continue
+        bl = prop["bbox"]
+        indexed.append((prop, (bl[2] - bl[0]) * (bl[3] - bl[1])))
+    # Smallest-area property wins when polygons nest (preserve inside a forest).
+    indexed.sort(key=lambda item: item[1])
+    records, seen = [], set()
+    for element in features:
+        tags = element.get("tags") or {}
+        lat = element.get("lat") or (element.get("center") or {}).get("lat")
+        lon = element.get("lon") or (element.get("center") or {}).get("lon")
+        if lat is None or lon is None:
+            continue
+        prop, edge = None, None
+        for candidate, _area in indexed:
+            bl = candidate["bbox"]
+            if not (bl[0] - 0.004 <= lon <= bl[2] + 0.004 and bl[1] - 0.004 <= lat <= bl[3] + 0.004):
+                continue
+            if any(point_in_rings(lon, lat, [ring]) for ring in candidate["rings"]):
+                prop, edge = candidate, 0.0
+                break
+            nearest = min(min((p[0] - lon) ** 2 + (p[1] - lat) ** 2 for p in ring) for ring in candidate["rings"]) ** 0.5
+            if edge is None or nearest < edge:
+                prop, edge = candidate, nearest
+        if prop is None or edge is None:
+            continue
+        classified = classify_access(tags, prop if edge == 0.0 else None, edge)
+        if not classified:
+            continue
+        kind, confidence = classified
+        cell = (round(lat / 0.0008), round(lon / 0.0008))
+        dedupe_key = (prop["property_id"], kind, cell)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        osm_type = {"node": "node", "way": "way", "relation": "relation"}.get(element.get("type"), "node")
+        name = (tags.get("name") or "").strip() or f"{prop['property_name']} {kind.replace('_', ' ').title()}"
+        notes = ", ".join(v for v in (tags.get("surface") and "surface: " + tags["surface"],
+                                      tags.get("capacity") and "capacity: " + tags["capacity"]) if v) or None
+        records.append({"access_id": hashlib.sha1(f"{prop['property_id']}|{lat:.5f}|{lon:.5f}|{kind}".encode()).hexdigest()[:16],
+                        "property_id": prop["property_id"], "property_name": prop["property_name"],
+                        "name": name, "lat": round(lat, 5), "lon": round(lon, 5), "type": kind,
+                        "source": "OpenStreetMap", "source_url": f"https://www.osm.org/{osm_type}/{element['id']}",
+                        "confidence": confidence, "official": confidence == "HIGH",
+                        "operator": (tags.get("operator") or "").strip() or None, "notes": notes,
+                        "verified_at": time.strftime("%Y-%m-%d")})
+    tmp = out.with_suffix(".jsonl")
+    tmp.write_text("\n".join(json.dumps(row, separators=(",", ":")) for row in records))
+    con = duckdb.connect()
+    q = lambda p: "'" + str(p).replace("'", "''") + "'"
+    con.execute(f"COPY (SELECT * FROM read_json_auto({q(tmp)})) TO {q(out)} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 256)")
+    tmp.unlink()
+    return {"url": out.name, "points": len(records), "bytes": out.stat().st_size,
+            "sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
+            "datasetVersion": time.strftime("%Y.%m.%d"), "source": "OpenStreetMap", "attribution": OSM_ATTR,
+            "confidenceModel": "HIGH agency/property match · MEDIUM inside boundary · LOW adjacent access intent",
+            "note": "Access points are entry/parking evidence, never mushroom locations."}
 
 
 def collecting_rules_descriptor() -> dict:
@@ -299,6 +474,7 @@ def main() -> None:
     ap.add_argument("--skip-forest-groups", action="store_true")
     ap.add_argument("--reuse-existing", action="store_true", help="Reuse checked-in cells and refresh derived forest groups/manifest")
     ap.add_argument("--public-lands-only", action="store_true", help="Refresh named public-land geometry without rebuilding habitat cells")
+    ap.add_argument("--access-points-only", action="store_true", help="Refresh public access/parking points without rebuilding habitat cells")
     args = ap.parse_args()
     west, south, east, north = map(float, args.bbox.split(","))
     points = []
@@ -324,15 +500,37 @@ def main() -> None:
             (math.floor(min(x[1] for x in pts)) - 0.25, math.floor(min(x[0] for x in pts)) - 0.25,
              math.ceil(max(x[1] for x in pts)) + 0.25, math.ceil(max(x[0] for x in pts)) + 0.25), pad_cache)
     OUT.mkdir(parents=True, exist_ok=True)
-    public_lands = build_public_lands(
-        [feature for features in pad_features_by_tile.values() for feature in features],
-        OUT / "public-lands.parquet", (west, south, east, north))
+    pad_all = [feature for features in pad_features_by_tile.values() for feature in features]
+    public_lands = build_public_lands(pad_all, OUT / "public-lands.parquet", (west, south, east, north))
+    access_points = None
+    if args.access_points_only or args.public_lands_only or not args.reuse_existing:
+        properties = group_pad_properties(pad_all, (west, south, east, north))
+        access_points = build_access_points(overpass_features((west, south, east, north), pad_cache),
+                                            properties, OUT / "access-points.parquet")
+    def access_descriptor():
+        if access_points:
+            return access_points
+        path = OUT / "access-points.parquet"
+        if not path.exists():
+            return None
+        return {"url": path.name, "bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "format": "parquet",
+                "source": "OpenStreetMap", "attribution": OSM_ATTR}
+    if args.access_points_only:
+        manifest_path = OUT / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update(accessPoints=access_descriptor())
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"Wrote {access_points['points']} access points, {access_points['bytes']:,} bytes")
+        return
     if args.public_lands_only:
         manifest_path = OUT / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
         manifest.update(datasetVersion=time.strftime("%Y.%m.%d"), generatedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                         publicLands=public_lands,
                         collectingRules=collecting_rules_descriptor())
+        if access_points:
+            manifest.update(accessPoints=access_points)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
         print(f"Wrote {public_lands['properties']} named properties, {public_lands['bytes']:,} bytes")
         return
@@ -389,8 +587,9 @@ def main() -> None:
                       "cells": len(records), "bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
     manifest = {"schemaVersion": 1, "datasetVersion": time.strftime("%Y.%m.%d"), "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "coverage": {"bbox": [west, south, east, north], "region": "Southern Indiana and adjacent Midwest", "cellStepDegrees": args.step},
-                "tiles": tiles, "publicLands": public_lands,
+                "tiles": tiles, "publicLands": public_lands, "accessPoints": access_descriptor(),
                 "collectingRules": collecting_rules_descriptor(), "sources": [
+                    {"id": "access", "provider": "OpenStreetMap", "dataset": "OSM access features (parking, trailheads, boat ramps, public gates, visitor areas)", "url": "https://www.openstreetmap.org/copyright", "attribution": OSM_ATTR},
                     {"id": "nlcd", "provider": "USGS/MRLC", "dataset": "Annual NLCD 2025 Land Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
                     {"id": "canopy", "provider": "USDA Forest Service / MRLC", "dataset": "Annual NLCD 2025 Tree Canopy Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
                     {"id": "forest_type", "provider": "USDA Forest Service FIA/GTAC", "dataset": "Forest Type Groups of the United States", "resolutionM": 250, "url": "https://data.fs.usda.gov/geodata/rastergateway/forest_type/"},
