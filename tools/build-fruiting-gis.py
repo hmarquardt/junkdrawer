@@ -38,6 +38,7 @@ CANOPY = "https://dmsdata.cr.usgs.gov/geoserver/mrlc_NLCD-Tree-Canopy-Native_con
 EPQS = "https://epqs.nationalmap.gov/v1/json"
 PADUS = "https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services/PADUS_Public_Access/FeatureServer/0/query"
 SDA = "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest"
+PADUS_INFO = "https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-download"
 
 LAND = {41: "deciduous", 42: "evergreen", 43: "mixed", 52: "shrub", 71: "grass", 81: "pasture", 82: "crops", 90: "woody_wetland", 95: "wetland"}
 FOREST = {41, 42, 43, 90}
@@ -141,6 +142,84 @@ def pad_point(lat: float, lon: float, features: list) -> dict:
     return best
 
 
+def property_type(name: str, manager: str) -> str:
+    """Infer only a broad display type from authoritative PAD-US labels."""
+    text = f"{name} {manager}".lower()
+    for needle, label in (("national wildlife refuge", "National Wildlife Refuge"),
+                          ("national forest", "National Forest"),
+                          ("fish and wildlife area", "Fish & Wildlife Area"),
+                          ("wildlife management area", "Wildlife Management Area"),
+                          ("state forest", "State Forest"), ("state park", "State Park"),
+                          ("recreation area", "Recreation Area"),
+                          ("nature preserve", "Nature Preserve"),
+                          ("county park", "County Park"), ("city park", "City Park")):
+        if needle in text:
+            return label
+    return "Protected Area"
+
+
+def build_public_lands(features: list, out: Path, coverage: tuple[float, float, float, float]) -> dict:
+    """Write compact named-property Parquet with reusable GeoJSON geometry."""
+    grouped, seen = {}, set()
+    for feature in features:
+        attrs, geometry = feature.get("attributes") or {}, feature.get("geometry") or {}
+        rings = geometry.get("rings") or []
+        name = (attrs.get("Unit_Nm") or attrs.get("BndryName") or "").strip()
+        manager = (attrs.get("MngNm_Desc") or "Unknown manager").strip()
+        access = {"OA": "PUBLIC", "RA": "LIKELY_PUBLIC", "XA": "RESTRICTED_VERIFY"}.get(attrs.get("Pub_Access"), "UNKNOWN")
+        if not name or not rings or access == "UNKNOWN":
+            continue
+        digest = hashlib.sha1(json.dumps(rings, separators=(",", ":")).encode()).hexdigest()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        key = (name, manager, property_type(name, manager))
+        rec = grouped.setdefault(key, {"rings": [], "access": set(), "bbox": [180.0, 90.0, -180.0, -90.0]})
+        rec["access"].add(access)
+        for ring in rings:
+            if len(ring) < 4:
+                continue
+            ring_box = [min(p[0] for p in ring), min(p[1] for p in ring), max(p[0] for p in ring), max(p[1] for p in ring)]
+            if ring_box[0] > coverage[2] or ring_box[2] < coverage[0] or ring_box[1] > coverage[3] or ring_box[3] < coverage[1]:
+                continue
+            rec["rings"].append(ring)
+            for lon, lat, *_ in ring:
+                rec["bbox"] = [min(rec["bbox"][0], lon), min(rec["bbox"][1], lat),
+                               max(rec["bbox"][2], lon), max(rec["bbox"][3], lat)]
+    records = []
+    for (name, manager, kind), rec in grouped.items():
+        if not rec["rings"]:
+            continue
+        bbox = rec["bbox"]
+        access = next(iter(rec["access"])) if len(rec["access"]) == 1 else "MIXED"
+        ownership = "PRIVATE" if "private" in manager.lower() else access
+        geometry = {"type": "MultiPolygon", "coordinates": [[[p for p in ring]] for ring in rec["rings"]]}
+        records.append({"property_id": hashlib.sha1(f"{name}|{manager}|{kind}".encode()).hexdigest()[:16],
+                        "property_name": name, "manager": manager, "property_type": kind,
+                        "ownership_class": ownership, "access_class": access,
+                        "geometry_json": json.dumps(geometry, separators=(",", ":")),
+                        "min_lon": bbox[0], "min_lat": bbox[1], "max_lon": bbox[2], "max_lat": bbox[3],
+                        "center_lon": (bbox[0] + bbox[2]) / 2, "center_lat": (bbox[1] + bbox[3]) / 2,
+                        "geometry_source": "PAD-US Public Access hosted service", "source_url": PADUS_INFO})
+    tmp = out.with_suffix(".jsonl")
+    tmp.write_text("\n".join(json.dumps(row, separators=(",", ":")) for row in records))
+    con = duckdb.connect()
+    q = lambda p: "'" + str(p).replace("'", "''") + "'"
+    con.execute(f"COPY (SELECT * FROM read_json_auto({q(tmp)})) TO {q(out)} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 256)")
+    tmp.unlink()
+    return {"url": out.name, "properties": len(records), "bytes": out.stat().st_size,
+            "sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
+            "format": "parquet-geojson-column", "geometryColumn": "geometry_json"}
+
+
+def collecting_rules_descriptor() -> dict:
+    path = OUT / "public-land-rules.json"
+    data = json.loads(path.read_text())
+    return {"url": path.name, "schemaVersion": data["schemaVersion"],
+            "datasetVersion": data["datasetVersion"], "verifiedAt": data["verifiedAt"],
+            "bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
 def sample(point: tuple[float, float], pad_features: list) -> dict:
     lat, lon = point
     row = {"cell_id": f"{lat:.3f}_{lon:.3f}", "lat": lat, "lon": lon}
@@ -219,6 +298,7 @@ def main() -> None:
     ap.add_argument("--source-cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
     ap.add_argument("--skip-forest-groups", action="store_true")
     ap.add_argument("--reuse-existing", action="store_true", help="Reuse checked-in cells and refresh derived forest groups/manifest")
+    ap.add_argument("--public-lands-only", action="store_true", help="Refresh named public-land geometry without rebuilding habitat cells")
     args = ap.parse_args()
     west, south, east, north = map(float, args.bbox.split(","))
     points = []
@@ -238,16 +318,34 @@ def main() -> None:
     for p in points:
         tiles_points.setdefault(tile_of(p), []).append(p)
 
+    pad_features_by_tile = {}
+    for tile, pts in sorted(tiles_points.items()):
+        pad_features_by_tile[tile] = pad_tile_features(
+            (math.floor(min(x[1] for x in pts)) - 0.25, math.floor(min(x[0] for x in pts)) - 0.25,
+             math.ceil(max(x[1] for x in pts)) + 0.25, math.ceil(max(x[0] for x in pts)) + 0.25), pad_cache)
+    OUT.mkdir(parents=True, exist_ok=True)
+    public_lands = build_public_lands(
+        [feature for features in pad_features_by_tile.values() for feature in features],
+        OUT / "public-lands.parquet", (west, south, east, north))
+    if args.public_lands_only:
+        manifest_path = OUT / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update(datasetVersion=time.strftime("%Y.%m.%d"), generatedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        publicLands=public_lands,
+                        collectingRules=collecting_rules_descriptor())
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"Wrote {public_lands['properties']} named properties, {public_lands['bytes']:,} bytes")
+        return
+
     def sample_tile(item: tuple[str, list]) -> tuple[str, list]:
         tile, pts = item
-        pad_feats = pad_tile_features((math.floor(min(x[1] for x in pts)) - 0.25, math.floor(min(x[0] for x in pts)) - 0.25,
-                                       math.ceil(max(x[1] for x in pts)) + 0.25, math.ceil(max(x[0] for x in pts)) + 0.25), pad_cache)
+        pad_feats = pad_features_by_tile[tile]
         print(f"  tile {tile}: {len(pts)} cells, {len(pad_feats)} PAD-US polygons")
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
             return tile, list(ex.map(lambda p: sample(p, pad_feats), pts))
 
     results = []
-    existing = sorted(OUT.glob("*.parquet")) if OUT.exists() else []
+    existing = sorted(OUT.glob("n*.parquet")) if OUT.exists() else []
     if args.reuse_existing and existing:
         con = duckdb.connect()
         table = con.execute("SELECT * FROM read_parquet(?)", [[str(p) for p in existing]])
@@ -267,7 +365,6 @@ def main() -> None:
                 results.append((tile, rows))
     rows = [r for _, rs in results for r in rs]
     enrich_forest_groups(rows, args.source_cache, args.skip_forest_groups)
-    OUT.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     tiles = []
     for tile, records in sorted(results):
@@ -292,13 +389,14 @@ def main() -> None:
                       "cells": len(records), "bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
     manifest = {"schemaVersion": 1, "datasetVersion": time.strftime("%Y.%m.%d"), "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "coverage": {"bbox": [west, south, east, north], "region": "Southern Indiana and adjacent Midwest", "cellStepDegrees": args.step},
-                "tiles": tiles, "sources": [
+                "tiles": tiles, "publicLands": public_lands,
+                "collectingRules": collecting_rules_descriptor(), "sources": [
                     {"id": "nlcd", "provider": "USGS/MRLC", "dataset": "Annual NLCD 2025 Land Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
                     {"id": "canopy", "provider": "USDA Forest Service / MRLC", "dataset": "Annual NLCD 2025 Tree Canopy Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
                     {"id": "forest_type", "provider": "USDA Forest Service FIA/GTAC", "dataset": "Forest Type Groups of the United States", "resolutionM": 250, "url": "https://data.fs.usda.gov/geodata/rastergateway/forest_type/"},
                     {"id": "ssurgo", "provider": "USDA NRCS", "dataset": "SSURGO / Soil Data Access", "url": "https://sdmdataaccess.nrcs.usda.gov/"},
                     {"id": "3dep", "provider": "USGS", "dataset": "3DEP Elevation Point Query Service", "url": "https://apps.nationalmap.gov/epqs/"},
-                    {"id": "padus", "provider": "USGS GAP (Esri-hosted Public Access edition)", "dataset": "PAD-US Protected Areas, public-access schema", "url": "https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-download", "note": "Hosted service does not state its PAD-US edition; field schema follows the PAD-US 3.0 public-access model. Verify against the current PAD-US release before each rebuild."}]}
+                    {"id": "padus", "provider": "USGS GAP (Esri-hosted Public Access edition)", "dataset": "PAD-US Protected Areas, public-access schema", "url": PADUS_INFO, "note": "Hosted service does not state its PAD-US edition; field schema follows the PAD-US 3.0 public-access model. Verify against the current PAD-US release before each rebuild."}]}
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"Wrote {len(tiles)} tiles, {sum(t['bytes'] for t in tiles):,} bytes")
 
