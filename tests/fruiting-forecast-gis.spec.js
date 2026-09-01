@@ -98,7 +98,7 @@ test('DuckDB-Wasm loads Spatial and queries real local Parquet tiles', async ({ 
     const points = t.zonePoints(38.3553, -87.5675, 25, 'standard');
     const evidence = await t.HabitatProvider.fetch(points, { lat: 38.3553, lon: -87.5675 }, 25, new AbortController().signal, false);
     const state = t.getState();
-    const cachedTiles = (await t.dbAll('cache')).filter(row => row.gis);
+    const cachedTiles = (await t.dbAll('cache')).filter(row => row.key.startsWith('gis-tile:'));
     return { manifest: manifest.datasetVersion, tiles: state.gis.tiles.length, cachedTiles: cachedTiles.length, spatial: state.gis.spatial, cells: evidence.center && evidence.center.sampleCells, forest: evidence.center && evidence.center.forest.cover };
   });
   expect(result.tiles).toBeGreaterThan(0);
@@ -176,6 +176,7 @@ test('live Princeton 50-mile geographic sanity check', async ({ page }) => {
       gis: analysis.gis,
       ranked: analysis.ranked.map(row => ({ species: row.speciesId, score: row.score, habitat: row.components.habitat, best: row.bestZoneId })),
       zones: analysis.zones.map(zone => ({ zone: zone.name, forest: zone.habitat?.forest?.cover, oak: zone.habitat?.hosts?.oakHickory, access: zone.habitat?.access?.classification, utility: zone.accessUtility, opportunity: zone.opportunity, cells: zone.habitat?.sampleCells, properties: zone.habitat?.access?.properties }))
+      ,candidates: analysis.candidates.map(c => ({ name: c.name, biology: c.biologicalOpportunity, huntability: c.huntability.score, action: c.huntability.actionability, rule: c.rule.collectingStatus }))
     };
   });
   console.log(`PRINCETON_GIS ${JSON.stringify(result)}`);
@@ -184,7 +185,14 @@ test('live Princeton 50-mile geographic sanity check', async ({ page }) => {
   expect(new Set(result.zones.map(zone => zone.forest)).size).toBeGreaterThan(2);
   expect(result.zones.every(zone => zone.cells > 1)).toBe(true);
   expect(result.ranked.every(row => Number.isFinite(row.habitat))).toBe(true);
+  expect(result.candidates.some(c => c.name === 'Pike State Forest' && c.action === 'ACTIONABLE_WITH_RESTRICTIONS')).toBe(true);
+  expect(result.candidates.some(c => c.name === 'Patoka River National Wildlife Refuge' && c.rule === 'PROHIBITED')).toBe(true);
   await page.screenshot({ path: '/private/tmp/fruiting-princeton-desktop.png', fullPage: true });
+  await page.locator('#mapLayer').selectOption('huntable');
+  await page.locator('[data-property]').filter({ hasText: 'Pike State Forest' }).click();
+  await expect(page.locator('#detailContent')).toContainText('Pike State Forest');
+  await expect(page.locator('#detailContent')).toContainText('ALLOWED_WITH_LIMITS');
+  await page.screenshot({ path: '/private/tmp/fruiting-princeton-public-lands.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.workspace')).toHaveCSS('display', 'block');
   await page.screenshot({ path: '/private/tmp/fruiting-princeton-mobile.png', fullPage: true });
