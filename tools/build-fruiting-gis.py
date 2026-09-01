@@ -49,6 +49,12 @@ OSM_ATTR = "© OpenStreetMap contributors (ODbL)"
 LAND = {41: "deciduous", 42: "evergreen", 43: "mixed", 52: "shrub", 71: "grass", 81: "pasture", 82: "crops", 90: "woody_wetland", 95: "wetland"}
 FOREST = {41, 42, 43, 90}
 
+# CONUS bounds (approximate lat/lon tile grid)
+CONUS_LAT_MIN = 25
+CONUS_LAT_MAX = 49
+CONUS_LON_MIN = -125
+CONUS_LON_MAX = -67
+
 
 def wms_point(url: str, layer: str, lat: float, lon: float) -> float | None:
     d = 0.001
@@ -465,9 +471,159 @@ def enrich_forest_groups(rows: list[dict], cache_dir: Path, skip: bool) -> None:
         row["elm_ash_cottonwood_signal"] = 1.0 if value == 700 else 0.0
 
 
+# ── Tile utility functions ──────────────────────────────────────────────
+
+
+def tile_of(p: tuple[float, float]) -> str:
+    return f"n{math.floor(p[0]):02d}_w{abs(math.floor(p[1])):03d}"
+
+
+def tile_lat(tile_id: str) -> int:
+    return int(tile_id.split("_")[0][1:])
+
+
+def tile_lon(tile_id: str) -> int:
+    return -int(tile_id.split("_")[1][1:])
+
+
+def tile_bbox(tile_id: str) -> list[float]:
+    lat = tile_lat(tile_id)
+    lon = tile_lon(tile_id)
+    return [lon, lat, lon + 1, lat + 1]
+
+
+def all_conus_tiles() -> list[str]:
+    tiles = []
+    for lat in range(CONUS_LAT_MIN, CONUS_LAT_MAX):
+        for lon in range(CONUS_LON_MIN, CONUS_LON_MAX):
+            tiles.append(tile_of((lat + 0.5, lon + 0.5)))
+    return sorted(tiles)
+
+
+def estimate_land_fraction(tile_id: str) -> float:
+    """Rough heuristic: estimate land fraction by latitudinal zone."""
+    lat = tile_lat(tile_id)
+    if lat >= 47:
+        return 0.4
+    elif lat >= 45:
+        return 0.7
+    elif lat >= 42:
+        return 0.9
+    elif lat >= 37:
+        return 0.95
+    elif lat >= 33:
+        return 0.85
+    elif lat >= 30:
+        return 0.7
+    elif lat >= 27:
+        return 0.5
+    else:
+        return 0.25
+
+
+def dry_run_report(bbox: tuple[float, float, float, float], step: float) -> None:
+    """Print estimated tile counts and sizes for the given bbox."""
+    west, south, east, north = bbox
+    points = []
+    lat = south + step / 2
+    while lat < north:
+        lon = west + step / 2
+        while lon < east:
+            points.append((round(lat, 5), round(lon, 5)))
+            lon += step
+        lat += step
+
+    tiles_map: dict[str, int] = {}
+    for p in points:
+        tid = tile_of(p)
+        tiles_map[tid] = tiles_map.get(tid, 0) + 1
+
+    total_habitat = 0
+    total_pl = 0
+    total_ap = 0
+    land_tiles = 0
+
+    for tid, cells in sorted(tiles_map.items()):
+        frac = estimate_land_fraction(tid)
+        is_land = frac > 0.01
+        hab_bytes = max(2000, int(cells * 75))
+        pl_bytes = int(400 * cells * (0.3 + 0.7 * frac)) if is_land else 0
+        ap_bytes = int(80 * cells * (0.2 + 0.8 * frac)) if is_land else 0
+        total_habitat += hab_bytes
+        total_pl += pl_bytes
+        total_ap += ap_bytes
+        if is_land:
+            land_tiles += 1
+
+    n_tiles = len(tiles_map)
+    print("=" * 60)
+    print(f"DRY RUN — Bbox: [{west:.2f}, {south:.2f}, {east:.2f}, {north:.2f}]")
+    print(f"  Total 1° tiles in bbox      : {n_tiles}")
+    print(f"  Estimated land tiles         : {land_tiles}")
+    print(f"  Total 0.05° sample cells     : {len(points):,}")
+    print(f"  Cells per tile (avg)         : ~{len(points) // max(n_tiles, 1)}")
+    print()
+    print("  Estimated storage:")
+    print(f"    Habitat tiles              : {total_habitat:>10,} B  ({total_habitat/1024:>8.1f} KB)")
+    print(f"    Public land tiles          : {total_pl:>10,} B  ({total_pl/1024:>8.1f} KB)")
+    print(f"    Access point tiles         : {total_ap:>10,} B  ({total_ap/1024:>8.1f} KB)")
+    print(f"    ─────────────────────────────────────")
+    gtotal = total_habitat + total_pl + total_ap
+    print(f"    Total                      : {gtotal:>10,} B  ({gtotal/1024:>8.1f} KB)")
+    print()
+    for radius, nt in [("25-mile (N≈9)", 9), ("50-mile (N≈16)", 16), ("100-mile (N≈49)", 49)]:
+        n = min(nt, n_tiles)
+        r_hab = (total_habitat // n_tiles) * n if n_tiles else 0
+        r_pl = (total_pl // n_tiles) * n if n_tiles else 0
+        r_ap = (total_ap // n_tiles) * n if n_tiles else 0
+        r_total = r_hab + r_pl + r_ap
+        print(f"  Max download {radius:20s}: {r_total:>8,} B  ({r_total/1024:>6.1f} KB)")
+    print()
+    print("  Tile IDs in bbox:")
+    for tid in sorted(tiles_map):
+        frac = estimate_land_fraction(tid)
+        print(f"    {tid}  lat={tile_lat(tid)}° lon={tile_lon(tid)}°  cells={tiles_map[tid]:>4d}  land_est={frac:.0%}")
+    print("=" * 60)
+
+
+def build_tile_catalog(out_dir: Path) -> dict:
+    """Generate tile-catalog.json with every possible CONUS 1° tile and a land boolean."""
+    tiles = all_conus_tiles()
+    catalog = []
+    for tid in tiles:
+        frac = estimate_land_fraction(tid)
+        catalog.append({
+            "id": tid,
+            "lat": tile_lat(tid),
+            "lon": tile_lon(tid),
+            "land": frac > 0.01,
+            "landFraction": round(frac, 4),
+            "bbox": tile_bbox(tid)
+        })
+    catalog.sort(key=lambda t: (t["lat"], t["lon"]))
+    catalog_obj = {
+        "schemaVersion": 1,
+        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "tileDegrees": 1.0,
+        "totalTiles": len(catalog),
+        "landTiles": sum(1 for t in catalog if t["land"]),
+        "tiles": catalog
+    }
+    (out_dir / "tile-catalog.json").write_text(json.dumps(catalog_obj, indent=2) + "\n")
+    print(f"Wrote {len(catalog)} tiles to tile-catalog.json ({sum(1 for t in catalog if t['land'])} land)")
+    return catalog_obj
+
+
+def tile_has_data(tile_id: str, out_dir: Path) -> bool:
+    """Check if a tile already has its habitat parquet."""
+    hab = out_dir / "habitat" / f"{tile_id}.parquet"
+    return hab.exists()
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--bbox", default="-89.25,37.50,-85.25,39.25", help="west,south,east,north")
+    ap = argparse.ArgumentParser(description="Build Fruiting Forecast GIS tiles from authoritative public services.")
+    ap.add_argument("--bbox", default="-91,35,-83,40",
+                    help="West,South,East,North (e.g. -91,35,-83,40 for Ohio+Tennessee Valleys)")
     ap.add_argument("--step", type=float, default=0.05)
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--source-cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
@@ -475,8 +631,28 @@ def main() -> None:
     ap.add_argument("--reuse-existing", action="store_true", help="Reuse checked-in cells and refresh derived forest groups/manifest")
     ap.add_argument("--public-lands-only", action="store_true", help="Refresh named public-land geometry without rebuilding habitat cells")
     ap.add_argument("--access-points-only", action="store_true", help="Refresh public access/parking points without rebuilding habitat cells")
+    ap.add_argument("--tile-id", type=str, default=None,
+                    help="Process a single 1° tile (e.g. n38_w087)")
+    ap.add_argument("--resume", action="store_true",
+                    help="Skip tiles where output parquet already exists in habitat/ subdir")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Estimate tile counts and sizes without fetching data")
+    ap.add_argument("--tile-catalog", action="store_true",
+                    help="Generate tile-catalog.json for all CONUS tiles")
     args = ap.parse_args()
     west, south, east, north = map(float, args.bbox.split(","))
+    pad_cache = args.source_cache
+
+    if args.tile_catalog:
+        OUT.mkdir(parents=True, exist_ok=True)
+        build_tile_catalog(OUT)
+        return
+
+    if args.dry_run:
+        dry_run_report((west, south, east, north), args.step)
+        return
+
+    # Build point grid from bbox
     points = []
     lat = south + args.step / 2
     while lat < north:
@@ -485,14 +661,47 @@ def main() -> None:
             points.append((round(lat, 5), round(lon, 5)))
             lon += args.step
         lat += args.step
-    pad_cache = args.source_cache
-
-    def tile_of(p: tuple[float, float]) -> str:
-        return f"n{math.floor(p[0]):02d}_w{abs(math.floor(p[1])):03d}"
 
     tiles_points: dict[str, list] = {}
     for p in points:
         tiles_points.setdefault(tile_of(p), []).append(p)
+
+    # Filter to single tile if --tile-id given
+    if args.tile_id:
+        if args.tile_id in tiles_points:
+            tiles_points = {args.tile_id: tiles_points[args.tile_id]}
+        else:
+            # Generate points for this tile even if outside bbox
+            tile_lat_val = tile_lat(args.tile_id)
+            tile_lon_val = tile_lon(args.tile_id)
+            pts = []
+            lat = tile_lat_val + args.step / 2
+            while lat < tile_lat_val + 1:
+                lon = tile_lon_val + args.step / 2
+                while lon < tile_lon_val + 1:
+                    pts.append((round(lat, 5), round(lon, 5)))
+                    lon += args.step
+                lat += args.step
+            tiles_points = {args.tile_id: pts}
+        tl = tile_lat(args.tile_id)
+        tln = tile_lon(args.tile_id)
+        west, south, east, north = tln, tl, tln + 1, tl + 1
+
+    # Handle --resume: skip tiles that already exist
+    if args.resume and not args.tile_id:
+        skip = [tid for tid in tiles_points if tile_has_data(tid, OUT)]
+        if skip:
+            print(f"Resume: {len(skip)} tiles exist, skipping: {', '.join(sorted(skip))}")
+            for tid in skip:
+                del tiles_points[tid]
+        if not tiles_points:
+            print("All tiles already built. Nothing to do.")
+            return
+
+    # Ensure subdirs exist
+    (OUT / "habitat").mkdir(parents=True, exist_ok=True)
+    (OUT / "pl").mkdir(parents=True, exist_ok=True)
+    (OUT / "ap").mkdir(parents=True, exist_ok=True)
 
     pad_features_by_tile = {}
     for tile, pts in sorted(tiles_points.items()):
@@ -564,13 +773,15 @@ def main() -> None:
     rows = [r for _, rs in results for r in rs]
     enrich_forest_groups(rows, args.source_cache, args.skip_forest_groups)
     con = duckdb.connect()
-    tiles = []
+    tile_entries = []
     for tile, records in sorted(results):
         tmp = OUT / f".{tile}.json"
         tmp.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in records))
-        path = OUT / f"{tile}.parquet"
+        hab_path = OUT / "habitat" / f"{tile}.parquet"
+
         def sql_path(p: Path) -> str:
             return "'" + str(p).replace("'", "''") + "'"
+
         con.execute(f"""COPY (
           SELECT * EXCLUDE (property_name, access_manager, forest_group, oak_hickory_signal, beech_maple_signal, elm_ash_cottonwood_signal),
             CAST(property_name AS VARCHAR) property_name,
@@ -580,24 +791,98 @@ def main() -> None:
             CAST(beech_maple_signal AS DOUBLE) beech_maple_signal,
             CAST(elm_ash_cottonwood_signal AS DOUBLE) elm_ash_cottonwood_signal
           FROM read_json_auto({sql_path(tmp)})
-        ) TO {sql_path(path)} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 512)""")
+        ) TO {sql_path(hab_path)} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 512)""")
         tmp.unlink()
         lats, lons = [r["lat"] for r in records], [r["lon"] for r in records]
-        tiles.append({"id": tile, "url": path.name, "bbox": [min(lons)-args.step/2, min(lats)-args.step/2, max(lons)+args.step/2, max(lats)+args.step/2],
-                      "cells": len(records), "bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
-    manifest = {"schemaVersion": 1, "datasetVersion": time.strftime("%Y.%m.%d"), "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "coverage": {"bbox": [west, south, east, north], "region": "Southern Indiana and adjacent Midwest", "cellStepDegrees": args.step},
-                "tiles": tiles, "publicLands": public_lands, "accessPoints": access_descriptor(),
-                "collectingRules": collecting_rules_descriptor(), "sources": [
-                    {"id": "access", "provider": "OpenStreetMap", "dataset": "OSM access features (parking, trailheads, boat ramps, public gates, visitor areas)", "url": "https://www.openstreetmap.org/copyright", "attribution": OSM_ATTR},
-                    {"id": "nlcd", "provider": "USGS/MRLC", "dataset": "Annual NLCD 2025 Land Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
-                    {"id": "canopy", "provider": "USDA Forest Service / MRLC", "dataset": "Annual NLCD 2025 Tree Canopy Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
-                    {"id": "forest_type", "provider": "USDA Forest Service FIA/GTAC", "dataset": "Forest Type Groups of the United States", "resolutionM": 250, "url": "https://data.fs.usda.gov/geodata/rastergateway/forest_type/"},
-                    {"id": "ssurgo", "provider": "USDA NRCS", "dataset": "SSURGO / Soil Data Access", "url": "https://sdmdataaccess.nrcs.usda.gov/"},
-                    {"id": "3dep", "provider": "USGS", "dataset": "3DEP Elevation Point Query Service", "url": "https://apps.nationalmap.gov/epqs/"},
-                    {"id": "padus", "provider": "USGS GAP (Esri-hosted Public Access edition)", "dataset": "PAD-US Protected Areas, public-access schema", "url": PADUS_INFO, "note": "Hosted service does not state its PAD-US edition; field schema follows the PAD-US 3.0 public-access model. Verify against the current PAD-US release before each rebuild."}]}
+
+        entry = {
+            "id": tile,
+            "bbox": [min(lons) - args.step/2, min(lats) - args.step/2,
+                     max(lons) + args.step/2, max(lats) + args.step/2],
+            "habitat": {
+                "url": f"habitat/{tile}.parquet",
+                "cells": len(records),
+                "bytes": hab_path.stat().st_size,
+                "sha256": hashlib.sha256(hab_path.read_bytes()).hexdigest()
+            }
+        }
+        pl_path = OUT / "pl" / f"{tile}.parquet"
+        if pl_path.exists():
+            entry["publicLands"] = {
+                "url": f"pl/{tile}.parquet",
+                "properties": 0,
+                "bytes": pl_path.stat().st_size,
+                "sha256": hashlib.sha256(pl_path.read_bytes()).hexdigest()
+            }
+        ap_path = OUT / "ap" / f"{tile}.parquet"
+        if ap_path.exists():
+            entry["accessPoints"] = {
+                "url": f"ap/{tile}.parquet",
+                "points": 0,
+                "bytes": ap_path.stat().st_size,
+                "sha256": hashlib.sha256(ap_path.read_bytes()).hexdigest()
+            }
+        tile_entries.append(entry)
+    # Read property/point counts from existing pl/ap parquets
+    for entry in tile_entries:
+        tid = entry["id"]
+        if "publicLands" in entry:
+            pl_path = OUT / "pl" / f"{tid}.parquet"
+            try:
+                df = con.execute(
+                    f"SELECT count(*) as c FROM read_parquet({sql_path(pl_path)})"
+                ).fetchone()
+                entry["publicLands"]["properties"] = df[0] if df else 0
+            except Exception:
+                pass
+        if "accessPoints" in entry:
+            ap_path = OUT / "ap" / f"{tid}.parquet"
+            try:
+                df = con.execute(
+                    f"SELECT count(*) as c FROM read_parquet({sql_path(ap_path)})"
+                ).fetchone()
+                entry["accessPoints"]["points"] = df[0] if df else 0
+            except Exception:
+                pass
+
+    # Build manifest v3
+    manifest = {
+        "schemaVersion": 3,
+        "datasetVersion": time.strftime("%Y.%m.%d"),
+        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "tiles": tile_entries,
+        "sources": [
+            {"id": "access", "provider": "OpenStreetMap", "dataset": "OSM access features", "url": "https://www.openstreetmap.org/copyright", "attribution": OSM_ATTR},
+            {"id": "nlcd", "provider": "USGS/MRLC", "dataset": "Annual NLCD 2025 Land Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
+            {"id": "canopy", "provider": "USDA Forest Service / MRLC", "dataset": "Annual NLCD 2025 Tree Canopy Cover", "resolutionM": 30, "url": "https://www.mrlc.gov/data-services-page"},
+            {"id": "forest_type", "provider": "USDA Forest Service FIA/GTAC", "dataset": "Forest Type Groups of the United States", "resolutionM": 250, "url": "https://data.fs.usda.gov/geodata/rastergateway/forest_type/"},
+            {"id": "ssurgo", "provider": "USDA NRCS", "dataset": "SSURGO / Soil Data Access", "url": "https://sdmdataaccess.nrcs.usda.gov/"},
+            {"id": "3dep", "provider": "USGS", "dataset": "3DEP Elevation Point Query Service", "url": "https://apps.nationalmap.gov/epqs/"},
+            {"id": "padus", "provider": "USGS GAP (Esri-hosted Public Access edition)", "dataset": "PAD-US Protected Areas, public-access schema", "url": PADUS_INFO, "note": "Hosted service does not state its PAD-US edition; field schema follows the PAD-US 3.0 public-access model. Verify against the current PAD-US release before each rebuild."}
+        ],
+        "publicLands": public_lands if public_lands else None,
+        "collectingRules": collecting_rules_descriptor(),
+        "accessPoints": access_descriptor(),
+        "tileSchema": {
+            "stepDegrees": args.step,
+            "tileDegrees": 1.0,
+            "tileFormat": "parquet",
+            "compression": "zstd",
+            "subdirs": {
+                "habitat": "habitat/",
+                "publicLands": "pl/",
+                "accessPoints": "ap/"
+            },
+            "datasetVersions": {
+                "habitat": {"version": time.strftime("%Y.%m.%d")},
+                "publicLands": {"version": time.strftime("%Y.%m.%d")},
+                "accessPoints": {"version": time.strftime("%Y.%m.%d")}
+            }
+        }
+    }
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"Wrote {len(tiles)} tiles, {sum(t['bytes'] for t in tiles):,} bytes")
+    total_bytes = sum(e["habitat"]["bytes"] for e in tile_entries)
+    print(f"Wrote {len(tile_entries)} tiles, {total_bytes:,} bytes")
 
 
 if __name__ == "__main__":

@@ -40,11 +40,92 @@ Primary DuckDB documentation: [Wasm overview](https://duckdb.org/docs/current/cl
 
 ### Static tile layout and selection
 
-`data/fruiting-forecast/manifest.json` records schema version, build timestamp, source provenance, coverage, cell spacing, and each tile's bounding box, byte size, checksum, and row count. Files use a deterministic 1° key such as `n38_w088.parquet`. A radius query first intersects its latitude/longitude bounding box with the manifest and fetches only matching files. It then aggregates cells within a real great-circle distance of each sector.
+`data/fruiting-forecast/manifest.json` records schema version, build timestamp, source provenance, tile metadata, and each tile's bounding box, byte size, checksum, and row count. Files use a deterministic 1° key such as `n38_w088.parquet`. A radius query first intersects its latitude/longitude bounding box with the manifest and fetches only matching files. It then aggregates cells within a real great-circle distance of each sector.
 
-The initial Southern Indiana build covers approximately 37.5–39.25° N and 89.25–85.25° W, including Princeton/Evansville, Patoka/Pike, and the western/southern Hoosier region. Its 2,800-cell, 0.05° preparation grid is a regional screening surface, not 30 m local precision. The 15 checked-in tiles total about 183 KiB; a Princeton 50-mile analysis selects nine tiles (about 110 KiB) and aggregates roughly 46–50 cells per sector. The manifest preserves native source resolution separately from sample spacing. Broader builds can move to raster-window aggregation without changing the browser schema.
+The initial build covered approximately 37.5–39.25° N and 89.25–85.25° W, including Princeton/Evansville, Patoka/Pike, and the western/southern Hoosier region. The GIS coverage expansion (September 2026) added the Cumberland Plateau / Tennessee Valley region (Crossville, TN) with tiles at 35-36° N, 85-87° W. The architecture is geographic rather than region-specific: any CONUS 1° tile with habitat data can be added to the manifest and the browser will dynamically acquire it when a hunt location requires it.
 
-Ordinary Parquet is used because each habitat row is already a pre-aggregated/sample cell. Named property geometry is stored once as a simplified GeoJSON column in `public-lands.parquet`; DuckDB-Wasm applies bounding-box pushdown before the browser parses the intersecting geometries for Leaflet and point-in-polygon aggregation. This avoids a second geometry download and keeps the format queryable without making GeoParquet metadata support a hard requirement.
+The 0.05° preparation grid (400 cells per 1° tile) is a regional screening surface, not 30 m local precision. The 21 checked-in tiles span approximately 183 KiB (Indiana) + 72 KiB (Tennessee) of habitat data. A Crossville 50-mile analysis selects four tiles (about 48 KB habitat, 2 public-land tiles). The manifest preserves native source resolution separately from sample spacing.
+
+Ordinary Parquet is used because each habitat row is already a pre-aggregated/sample cell. Named property geometry is stored as a simplified GeoJSON column in per-tile `pl/*.parquet` files; DuckDB-Wasm applies bounding-box pushdown before the browser parses the intersecting geometries for Leaflet and point-in-polygon aggregation. Access points are similarly stored per-tile in `ap/*.parquet` files.
+
+### Geographic tile catalog
+
+`data/fruiting-forecast/tile-catalog.json` is a compact CONUS tile lookup (955 land tiles, 25 KB compressed) mapping each 1° tile ID to a boolean land flag. This enables the Coverage Manager to quickly determine whether a requested location has any static tiles available without loading the full manifest. The manifest itself references this catalog via `manifest.tileCatalog.url`.
+
+### Dynamic tile acquisition and persistent DuckDB cache
+
+Fruiting Forecast does not have a runtime GIS backend. Geographic data is statically published in tiles, downloaded only when a requested hunt area needs it, and persistently cached and queryable through DuckDB-Wasm in the user's browser.
+
+The Coverage Manager flow:
+
+1. User enters a location (e.g., Crossville, Tennessee)
+2. Coverage Manager calculates the required 1° tiles intersecting the search radius
+3. Checks persistent DuckDB (OPFS `opfs://fruiting-forecast-gis.duckdb`) for tile status = 'VERIFIED'
+4. Compares dataset versions for staleness
+5. Fetches only MISSING or STALE tiles from the static catalog
+6. Imports tile data into persistent DuckDB tables (habitat_cells, public_properties, access_points)
+7. Issues CHECKPOINT for durability
+8. Queries from local DuckDB
+
+Fallback hierarchy:
+- **OPFS DuckDB** (persistent, preferred) — survives page reloads
+- **Transient DuckDB + IndexedDB tile cache** (fallback when OPFS unavailable)
+- **Basic mode** (no GIS) — when DuckDB entirely fails
+
+#### Persistent DuckDB tables
+
+```sql
+gis_tiles(tile_id, west, south, east, north, dataset_type, dataset_version, sha256, fetched_at, row_count, byte_count, status)
+habitat_cells(tile_id, lat, lon, land_class, forest, deciduous, open_land, canopy, elevation_ft, drainage_class, awc_25_cm, awc_50_cm, ...)
+public_properties(tile_id, property_id, property_name, manager, property_type, ownership_class, access_class, geometry_json, ...)
+access_points(tile_id, access_id, property_id, property_name, name, lat, lon, type, ...)
+dataset_versions(dataset_type, version, updated_at)
+```
+
+#### Dataset versioning
+
+Each tile carries a `sha256` checksum and references the manifest's `datasetVersion`. A cached tile is usable until its dataset version changes in the manifest. On version mismatch, only the stale tile is refreshed — not the entire cache.
+
+#### Cache eviction (LRU)
+
+GIS cache is re-creatable static evidence. If storage is constrained, least-recently-queried tiles may be evicted. User-created data (hunt logs, analyses, photos) is never automatically evicted.
+
+#### Offline capability
+
+Once a region has been cached, habitat/public-land/access analysis for that geography remains queryable from local DuckDB even without network access. Weather and iNaturalist obviously require network freshness, but cached GIS does not.
+
+#### Expected storage
+
+| Dataset | Full CONUS (955 tiles) | 50-mile radius (~16 tiles) |
+|---------|----------------------|---------------------------|
+| Habitat | ~11 MB | ~188 KB |
+| Public lands | ~36 MB | ~625 KB |
+| Access points | ~14 MB | ~234 KB |
+| Manifest + catalog | ~150 KB | — |
+| **Total** | **~61 MB** | **~1 MB** |
+
+Full CONUS hosting is practical for static hosting. At current per-tile averages (~12 KB habitat, ~40 KB public lands, ~15 KB access points), the complete static package is approximately 61 MB compressed — well within GitHub Pages limits.
+
+### Progress reporting
+
+The UI shows meaningful stages during GIS acquisition:
+
+```
+Resolving location
+Starting spatial engine
+Checking local GIS coverage
+Fetching habitat data    (4 / 7 tiles · 312 KB / 540 KB)
+Fetching public-land data
+Fetching access points
+Indexing local GIS
+Ready
+```
+
+- **Cache hit**: "GIS cache ready · 9/9 tiles local" — instantaneous, no animation
+- **First-time download**: Shows tile counts, byte progress, separate "Downloading" from "Indexing"
+- **No fake percentages**: If byte totals are unknown, honest tile-count progress is shown
+- **WASM startup**: "Starting local spatial engine…" shown immediately on first GIS use
+- **Cancellation**: Aborting aborts in-progress fetches; partial tiles are not marked verified
 
 ### Public Lands + Huntability package
 
