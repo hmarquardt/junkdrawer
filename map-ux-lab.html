@@ -1,0 +1,1594 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map UX Lab — Junkdrawer</title>
+<meta name="description" content="Controlled interaction testbed comparing Leaflet and MapLibre GL JS for Junkdrawer embedded maps.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗺️</text></svg>" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous" />
+<script
+  src="analytics-lite.js"
+  data-site-id="junkdrawer"
+  data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+  defer>
+</script>
+<style>
+:root {
+  --bg: #0d1117; --panel: #151b24; --panel-2: #1c2431; --inset: #10161e;
+  --border: #2a3441; --border-strong: #3c4856;
+  --text: #e8eef5; --muted: #9aa9ba; --faint: #6d7d90;
+  --accent: #5aa9ff; --accent-soft: rgba(90,169,255,0.14);
+  --ok: #43c17a; --warn: #e0a83c; --danger: #ff6b6b;
+  --chip: rgba(255,255,255,0.06);
+  --radius: 10px; --panel-w: 320px;
+}
+html[data-theme="light"] {
+  --bg: #f2f5f9; --panel: #ffffff; --panel-2: #eaeff6; --inset: #e7ecf2;
+  --border: #d3dce6; --border-strong: #b9c5d2;
+  --text: #1a2531; --muted: #54677a; --faint: #7d8ea0;
+  --accent: #0b62d6; --accent-soft: rgba(11,98,214,0.10);
+  --ok: #1a7f4b; --warn: #9a6a10; --danger: #c73f3f;
+  --chip: rgba(20,40,70,0.06);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button { font: inherit; }
+
+/* ---------- header ---------- */
+.lab-header {
+  position: sticky; top: 0; z-index: 1400;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  padding: 0.6rem 1rem; display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+}
+.lab-header .brand { display: flex; flex-direction: column; margin-right: auto; min-width: 200px; }
+.lab-header h1 { font-size: 1.02rem; margin: 0; }
+.lab-header .sub { font-size: 0.72rem; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: 0.45rem 0.9rem; cursor: pointer; color: var(--muted); font-weight: 600; font-size: 0.85rem; min-height: 38px; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.hbtn {
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 0.45rem 0.8rem; cursor: pointer; font-size: 0.85rem; min-height: 38px; color: var(--text);
+}
+.hbtn.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.hbtn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+#status { font-size: 0.8rem; color: var(--ok); min-width: 7rem; }
+
+/* ---------- layout ---------- */
+main { max-width: 1500px; margin: 0 auto; padding: 1rem; }
+.intro {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.9rem 1.1rem; margin-bottom: 1rem; font-size: 0.88rem; color: var(--muted);
+}
+.intro strong { color: var(--text); }
+.lab-grid { display: grid; grid-template-columns: 350px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.controls { position: sticky; top: 68px; display: flex; flex-direction: column; gap: 0.6rem; }
+@media (max-width: 980px) { .lab-grid { grid-template-columns: 1fr; } .controls { position: static; } }
+
+.grp { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.grp summary {
+  cursor: pointer; padding: 0.6rem 0.85rem; font-weight: 700; font-size: 0.88rem;
+  display: flex; align-items: center; gap: 0.5rem; list-style: none; user-select: none; min-height: 44px;
+}
+.grp summary::-webkit-details-marker { display: none; }
+.grp summary::after { content: "▸"; margin-left: auto; color: var(--faint); transition: transform .15s; }
+.grp[open] summary::after { transform: rotate(90deg); }
+.grp .grp-body { padding: 0.35rem 0.85rem 0.85rem; display: flex; flex-direction: column; gap: 0.55rem; }
+.badge {
+  font-size: 0.66rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 99px;
+  background: var(--chip); color: var(--muted); border: 1px solid var(--border); white-space: nowrap;
+}
+.badge.mod { color: var(--warn); border-color: var(--warn); background: rgba(224,168,60,0.10); }
+.badge.unsup { color: var(--faint); }
+
+/* controls */
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 0.15rem 0.6rem; align-items: center; }
+.ctl label { font-size: 0.82rem; }
+.ctl .ctl-val { font-size: 0.75rem; color: var(--accent); font-variant-numeric: tabular-nums; }
+.ctl input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); min-height: 26px; }
+.ctl select { grid-column: 1 / -1; background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); border-radius: 7px; padding: 0.35rem 0.5rem; font-size: 0.85rem; min-height: 36px; }
+.seg-mini { display: flex; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; grid-column: 1 / -1; }
+.seg-mini button { flex: 1; background: transparent; border: 0; color: var(--muted); padding: 0.4rem 0.2rem; cursor: pointer; font-size: 0.78rem; min-height: 34px; }
+.seg-mini button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.seg-mini button:disabled { opacity: 0.4; cursor: not-allowed; }
+.ctl-row-check { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; }
+.ctl-row-check input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); flex: 0 0 auto; }
+.ctl-row-check .switch-note { font-size: 0.72rem; color: var(--faint); }
+.ctl.unsup { opacity: 0.55; }
+.unsup-note { grid-column: 1 / -1; font-size: 0.72rem; color: var(--faint); }
+.grp-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.25rem; }
+.hint { font-size: 0.75rem; color: var(--faint); }
+.preset-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.preset-chips button { background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: 99px; padding: 0.35rem 0.75rem; cursor: pointer; font-size: 0.8rem; min-height: 34px; color: var(--text); }
+.preset-chips button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+/* viewport lab */
+.vp-lab { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.8rem 0.9rem; margin-bottom: 0.8rem; }
+.vp-lab h2 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.vp-buttons { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.vp-buttons button { background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: 7px; padding: 0.42rem 0.7rem; font-size: 0.8rem; cursor: pointer; min-height: 38px; color: var(--text); }
+.vp-buttons button:hover { border-color: var(--accent); }
+.userctl { margin-top: 0.6rem; border: 1px dashed var(--border-strong); border-radius: 8px; padding: 0.5rem 0.7rem; display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; font-size: 0.82rem; color: var(--muted); }
+.userctl.taken { border-color: var(--warn); background: rgba(224,168,60,0.07); }
+.userctl.taken .uct-label { color: var(--warn); font-weight: 700; letter-spacing: 0.4px; }
+.userctl .u-btn { margin-left: auto; }
+
+/* map area */
+.map-area { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--inset); }
+.map-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.map-wrap { position: relative; height: clamp(420px, 58vh, 640px); background: var(--inset); }
+.map-wrap.compare { display: grid; grid-template-columns: 1fr 1fr; }
+.map-pane { position: absolute; inset: 0; display: none; }
+.map-pane.active { display: block; }
+.map-wrap.compare .map-pane { display: block; position: relative; width: 100%; height: 100%; }
+.pane-tag {
+  position: absolute; top: 6px; left: 8px; z-index: 900; pointer-events: none;
+  font-size: 0.66rem; font-weight: 700; letter-spacing: 0.6px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+  padding: 0.12rem 0.5rem; border-radius: 99px;
+}
+.coop-hint {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 1100;
+  background: var(--panel); border: 1px solid var(--border-strong); color: var(--text);
+  font-size: 0.75rem; padding: 0.3rem 0.7rem; border-radius: 99px; opacity: 0; transition: opacity .2s; pointer-events: none;
+}
+.coop-hint.show { opacity: 1; }
+.leaflet-container { background: var(--inset); }
+.detail-panel { width: 0; flex: 0 0 auto; border-left: 1px solid var(--border); background: var(--panel); transition: width 0.25s ease; overflow: hidden; display: flex; flex-direction: column; }
+.detail-panel.open { width: var(--panel-w); }
+@media (max-width: 700px) {
+  .map-area { flex-direction: column; }
+  .detail-panel { border-left: 0; border-top: 1px solid var(--border); width: 100% !important; transition: height .25s ease; height: 0; }
+  .detail-panel.open { height: 300px; }
+}
+.dp-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); min-height: 46px; }
+.dp-head h3 { margin: 0; font-size: 0.9rem; flex: 1; }
+.dp-close { background: none; border: 1px solid var(--border-strong); border-radius: 6px; cursor: pointer; color: var(--muted); min-width: 36px; min-height: 36px; }
+.dp-body { padding: 0.7rem 0.8rem; overflow: auto; font-size: 0.82rem; color: var(--muted); display: flex; flex-direction: column; gap: 0.5rem; }
+.dp-body .k { color: var(--faint); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.dp-body .v { color: var(--text); }
+.dp-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.dp-actions button { font-size: 0.78rem; padding: 0.35rem 0.6rem; min-height: 36px; }
+
+/* instrumentation */
+.instr { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 0.4rem; margin-top: 0.6rem; }
+.instr .cell { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.55rem; min-width: 0; }
+.instr .k { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--faint); white-space: nowrap; }
+.instr .v { font-size: 0.78rem; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.instr .v.warn { color: var(--warn); font-weight: 700; }
+
+/* event log */
+.log-sec { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-top: 0.8rem; }
+.log-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.85rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.log-head h2 { margin: 0; font-size: 0.95rem; flex: 1; }
+.log-head button { font-size: 0.75rem; padding: 0.3rem 0.65rem; }
+#event-log { list-style: none; margin: 0; padding: 0.3rem 0; max-height: 300px; overflow: auto; font: 0.74rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+#event-log li { display: flex; gap: 0.6rem; padding: 0.12rem 0.85rem; border-bottom: 1px solid rgba(128,140,160,0.10); }
+#event-log .t { color: var(--faint); flex: 0 0 4rem; }
+#event-log .s { flex: 0 0 3.2rem; font-weight: 700; }
+#event-log .s.user { color: var(--accent); }
+#event-log .s.auto { color: var(--warn); }
+#event-log .s.sys { color: var(--faint); }
+#event-log .blocked { color: var(--danger); }
+#event-log .empty { color: var(--faint); }
+
+/* export */
+.exp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0.8rem; margin-top: 0.8rem; }
+.exp-block { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; min-width: 0; }
+.exp-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border); }
+.exp-head h2 { margin: 0; font-size: 0.85rem; flex: 1; }
+.exp-block pre { margin: 0; padding: 0.7rem 0.85rem; overflow: auto; max-height: 360px; flex: 1; font: 0.73rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); white-space: pre; user-select: all; }
+.exp-block .spec { font: 0.82rem/1.7 system-ui, sans-serif; white-space: normal; }
+.exp-block .spec ul { margin: 0.2rem 0; padding-left: 1.1rem; }
+
+/* torture test */
+.torture { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-top: 0.8rem; padding: 0.8rem 0.9rem; }
+.torture h2 { margin: 0 0 0.5rem; font-size: 0.95rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.torture ol { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 0.3rem; counter-reset: tt; }
+.torture li { font-size: 0.84rem; color: var(--muted); display: flex; gap: 0.55rem; align-items: flex-start; }
+.torture li input { margin-top: 0.2rem; width: 17px; height: 17px; accent-color: var(--ok); flex: 0 0 auto; }
+.torture li.done span { color: var(--faint); text-decoration: line-through; }
+.torture li .n { color: var(--faint); font-variant-numeric: tabular-nums; }
+.tt-progress { font-size: 0.75rem; color: var(--ok); font-weight: 700; }
+
+/* content cards */
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.95rem 1.05rem; margin-top: 0.8rem; }
+.card h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.card p { margin: 0.35rem 0; font-size: 0.86rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<header class="lab-header">
+  <div class="brand">
+    <h1>🗺️ Map UX Lab</h1>
+    <span class="sub">Engine interaction testbed · Leaflet vs MapLibre · not a production map</span>
+  </div>
+  <div class="seg" role="group" aria-label="Active map engine">
+    <button id="eng-leaflet" aria-pressed="true">Leaflet</button>
+    <button id="eng-maplibre" aria-pressed="false">MapLibre</button>
+  </div>
+  <button id="btn-compare" class="hbtn" aria-pressed="false">Compare side-by-side</button>
+  <button id="btn-favorite" class="hbtn primary" title="Save the current engine, all interaction values, and viewport policy as your favorite">★ This Feels Right</button>
+  <button id="btn-theme" class="hbtn" aria-label="Toggle dark/light theme">◐</button>
+  <span id="status" role="status"></span>
+</header>
+
+<main>
+  <section class="intro" aria-label="Instructions">
+    <strong>Purpose:</strong> decide, by using it, how a Junkdrawer embedded map should feel on desktop (mouse/trackpad/wheel) and phone (touch/pinch). Both engines render the <strong>same test environment</strong> — same center (Princeton, Indiana), zoom, markers, route, polygon, circle, and page layout — so only interaction differs. Content above and below the map exists so you can test whether the map <strong>steals page scrolling</strong>. Every change updates the export panel below. Nothing here picks a winner — that call is yours.
+    <div class="hint" style="margin-top:0.35rem;">Pointer mode detected: <span id="pointer-mode">…</span> · Settings autosave locally · ★ favorite restores with one click.</div>
+  </section>
+
+  <div class="lab-grid">
+    <aside class="controls" aria-label="Map interaction controls">
+      <details class="grp" id="grp-engine" open>
+        <summary>⚙️ Engine <span class="badge" id="badge-engine">Leaflet 1.9.4</span></summary>
+        <div class="grp-body">
+          <div class="hint" id="engine-note"></div>
+          <div class="grp-actions">
+            <button class="hbtn" id="btn-engine-reset">Reset engine defaults</button>
+            <button class="hbtn" id="btn-all-reset">Reset all settings</button>
+          </div>
+          <div class="hint" id="favorite-line" hidden></div>
+        </div>
+      </details>
+
+      <details class="grp" open>
+        <summary>🎛️ Presets <span class="badge" id="badge-preset">Default</span><span class="badge mod" id="badge-modified" hidden>Modified</span></summary>
+        <div class="grp-body">
+          <div class="preset-chips" id="preset-chips" role="group" aria-label="Interaction presets"></div>
+          <div class="hint">Presets are real configuration sets, not cosmetics. Switch rapidly and feel the difference.</div>
+        </div>
+      </details>
+
+      <details class="grp" open>
+        <summary>📜 Page scrolling <span class="badge" id="badge-scroll">capture</span></summary>
+        <div class="grp-body" id="scroll-group"></div>
+      </details>
+
+      <details class="grp">
+        <summary>🖱️ Desktop interaction <span class="badge" id="badge-desktop">default</span></summary>
+        <div class="grp-body" id="desktop-group"></div>
+      </details>
+
+      <details class="grp" open>
+        <summary>👆 Touch interaction <span class="badge" id="badge-touch">default</span></summary>
+        <div class="grp-body" id="touch-group"></div>
+      </details>
+
+      <details class="grp" open>
+        <summary>🧭 Viewport policy <span class="badge" id="badge-policy">respect manual</span></summary>
+        <div class="grp-body" id="policy-group"></div>
+      </details>
+    </aside>
+
+    <div class="lab-content">
+      <section class="vp-lab" aria-label="Viewport behavior laboratory">
+        <h2>Viewport Behavior</h2>
+        <div class="vp-buttons" id="vp-buttons"></div>
+        <div class="userctl" id="userctl-box">
+          <span class="uct-label" id="userctl-label">Viewport is app-controlled — manual pan/zoom will be detected.</span>
+          <button class="hbtn u-btn" id="btn-release" hidden>Release manual control</button>
+        </div>
+      </section>
+
+      <div class="map-area">
+        <div class="map-col">
+          <div class="map-wrap" id="map-wrap">
+            <div class="map-pane active" id="map-leaflet" aria-label="Leaflet map"><span class="pane-tag">LEAFLET</span></div>
+            <div class="map-pane" id="map-maplibre" aria-label="MapLibre map"><span class="pane-tag">MAPLIBRE GL</span></div>
+            <div class="coop-hint" id="coop-hint">Use Ctrl / ⌘ + scroll to zoom the map · plain scroll moves the page</div>
+          </div>
+        </div>
+        <aside class="detail-panel" id="detail-panel" aria-label="Simulated detail panel">
+          <div class="dp-head">
+            <h3 id="dp-title">Selected POI</h3>
+            <button class="dp-close" id="dp-close" aria-label="Close detail panel">✕</button>
+          </div>
+          <div class="dp-body" id="dp-body"><span class="hint">Select a POI to populate this panel.</span></div>
+        </aside>
+      </div>
+
+      <div class="instr" aria-label="Live instrumentation">
+        <div class="cell"><div class="k">Engine</div><div class="v" id="i-engine">—</div></div>
+        <div class="cell"><div class="k">Center</div><div class="v" id="i-center">—</div></div>
+        <div class="cell"><div class="k">Zoom</div><div class="v" id="i-zoom">—</div></div>
+        <div class="cell"><div class="k">Bearing / pitch</div><div class="v" id="i-bp">—</div></div>
+        <div class="cell"><div class="k">User control</div><div class="v" id="i-userctl">app-controlled</div></div>
+        <div class="cell"><div class="k">Preset</div><div class="v" id="i-preset">—</div></div>
+        <div class="cell"><div class="k">Viewport policy</div><div class="v" id="i-policy">—</div></div>
+        <div class="cell"><div class="k">Last viewport change</div><div class="v" id="i-lastvp">—</div></div>
+        <div class="cell"><div class="k">Pointer / touch</div><div class="v" id="i-pointer">—</div></div>
+        <div class="cell"><div class="k">Wheel · 1 s window</div><div class="v" id="i-wheel">0 events · Δ0</div></div>
+      </div>
+
+      <section class="log-sec" aria-label="Interaction event log">
+        <div class="log-head">
+          <h2>Event log <span class="badge" id="log-count">0</span></h2>
+          <button class="hbtn" id="btn-log-pause" aria-pressed="false">Pause log</button>
+          <button class="hbtn" id="btn-log-clear">Clear log</button>
+        </div>
+        <ul id="event-log" aria-live="off"><li class="empty">No events yet — interact with the map above.</li></ul>
+      </section>
+
+      <section class="exp-grid" aria-label="Export and specification">
+        <div class="exp-block">
+          <div class="exp-head"><h2>Configuration JSON</h2><button class="hbtn" data-copy="json">Copy JSON</button></div>
+          <pre id="exp-json" tabindex="0"></pre>
+        </div>
+        <div class="exp-block">
+          <div class="exp-head"><h2>Initialization code</h2><button class="hbtn" data-copy="code">Copy code</button></div>
+          <pre id="exp-code" tabindex="0"></pre>
+        </div>
+        <div class="exp-block">
+          <div class="exp-head"><h2>Behavioral specification</h2><button class="hbtn" data-copy="spec">Copy spec</button></div>
+          <pre class="spec" id="exp-spec" tabindex="0"></pre>
+        </div>
+        <div class="exp-block">
+          <div class="exp-head"><h2>Everything</h2><button class="hbtn" data-copy="all">Copy everything</button></div>
+          <pre id="exp-all" tabindex="0"></pre>
+        </div>
+      </section>
+
+      <section class="torture" aria-label="Map torture test checklist">
+        <h2>🔥 Map Torture Test <span class="badge" id="tt-progress">0/11</span></h2>
+        <ol id="tt-list"></ol>
+        <div class="grp-actions" style="margin-top:0.6rem;">
+          <button class="hbtn" id="btn-tt-reset">Reset Test</button>
+        </div>
+      </section>
+
+      <div class="card">
+        <h3>Below-map content 1 — scroll-through range</h3>
+        <p>This region exists so you can roll the wheel or swipe <em>through</em> the map: content above, map in the middle, content below. A well-behaved embedded map lets page scrolling continue when the wheel gesture was not meant for it (or after an explicit opt-in gesture); an aggressive map eats every wheel tick and traps your reading flow. Compare both engines in each scroll mode and note where your hand hesitates.</p>
+        <p>Pay attention to the moment the cursor crosses the map border while you are still reading above-the-map content. A calm map should feel like scrolling past a picture; a greedy map feels like a speed bump.</p>
+      </div>
+      <div class="card">
+        <h3>Below-map content 2 — touch and trackpad reality</h3>
+        <p>On a trackpad, a two-finger scroll produces a stream of high-frequency wheel events with small deltas; on a mouse, one notch produces a single large delta. Engines handle these very differently. Watch the wheel telemetry in the instrumentation strip while scrolling through the map — Leaflet exposes px-per-zoom and debounce; MapLibre hard-codes its wheel curve. That difference is one of the concrete levers this lab exposes.</p>
+        <p>On a phone, one finger over a map usually pans the map instead of the page — that trade-off is exactly what cooperative gesture modes negotiate.</p>
+      </div>
+      <div class="card">
+        <h3>Below-map content 3 — what to write down</h3>
+        <p>For each engine note: (1) how many wheel notches a “useful” zoom step took, (2) whether you accidentally zoomed while trying to scroll, (3) whether inertia carried the map further than you wanted, (4) whether pinch zoomed without accidentally rotating (MapLibre only — Leaflet cannot rotate), and (5) whether the USER HAS TAKEN CONTROL indicator appeared the moment you intended it to.</p>
+        <p>Then press ★ This Feels Right on whichever configuration felt invisible — good map UX is the configuration you stop noticing.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.31.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.31.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--faint); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Map UX Lab · version 2026.08.31.1
+</footer>
+
+<script>
+(function() {
+'use strict';
+/* =====================================================================
+   Map UX Lab — controlled interaction testbed for Leaflet & MapLibre GL.
+   Local-first; the only network use is the pinned engines + OSM tiles.
+   ===================================================================== */
+
+const VERSION = '2026.08.31.1';
+const HOME = { lat: 38.3512, lng: -87.5718, zoom: 13, name: 'Princeton, Indiana' };
+const LOG_MAX = 250;
+
+/* ---------------- test fixture data (shared by both engines) -------- */
+const POIS = [
+  { id: 'p1', name: 'Patoka River Overlook',    lat: 38.3612, lng: -87.5601, type: 'Birding overlook', note: 'Riparian corridor along the Patoka River; herons and raptors in migration.' },
+  { id: 'p2', name: 'Gibson County Fairgrounds', lat: 38.3465, lng: -87.5702, type: 'Event grounds',   note: 'Flat open grounds — good for aerial comparison.' },
+  { id: 'p3', name: 'Princeton Public Library',  lat: 38.3522, lng: -87.5738, type: 'Landmark',        note: 'Downtown landmark; tight streets test drag precision.' },
+  { id: 'p4', name: 'Wabash & Erie Canal Marker', lat: 38.3490, lng: -87.5788, type: 'Historic marker', note: 'Historic canal route marker near the old towpath.' },
+  { id: 'p5', name: 'Goose Pond Access East',    lat: 38.3388, lng: -87.5585, type: 'Wetland access',  note: 'Wetland complex access point; sandhill cranes in winter.' },
+  { id: 'p6', name: 'Aquatic Park',              lat: 38.3589, lng: -87.5811, type: 'Park',            note: 'City park with pond; frequent waterfowl.' }
+];
+const ROUTE = [[38.3512, -87.5718], [38.3560, -87.5640], [38.3610, -87.5560], [38.3662, -87.5445], [38.3701, -87.5322]];
+const POLYGON = [[38.3690, -87.5560], [38.3690, -87.5400], [38.3580, -87.5400], [38.3580, -87.5560]];
+const CIRCLE = { lat: HOME.lat, lng: HOME.lng, radius: 2000 };
+const OBS_POOL = [];
+for (let i = 0; i < 8; i++) {
+  OBS_POOL.push({ name: 'Observation #' + (i + 1), lat: HOME.lat + Math.sin(i * 2.4) * 0.011, lng: HOME.lng + Math.cos(i * 1.7) * 0.014 });
+}
+
+/* ---------- defaults verified against the shipped library dists ------- */
+const DEFAULTS = {
+  leaflet: {
+    scrollMode: 'capture',
+    dragPan: true, wheelZoom: true, wheelPx: 60, wheelDebounce: 40, wheelAround: 'pointer',
+    dblClick: 'on', zoomDelta: 1, zoomSnap: '1',
+    inertia: true, inertiaDecel: 3400,
+    keyboard: true, boxZoom: true,
+    pinchZoom: true, tapTolerance: 15, bounce: false
+  },
+  maplibre: {
+    scrollMode: 'capture',
+    dragPan: true, dragRotate: true, wheelZoom: true, dblClick: 'on',
+    inertiaDecel: 2500, inertiaMaxSpeed: 1400,
+    keyboard: true, boxZoom: true,
+    pinchZoom: true, rotation: true, pitch: true, clickTolerance: 3
+  }
+};
+const PRESETS = {
+  leaflet: {
+    'Leaflet Default': {},
+    'Calm': { wheelPx: 120, wheelDebounce: 80, zoomSnap: '0.5', inertiaDecel: 2200 },
+    'Very Calm': { wheelPx: 260, wheelDebounce: 150, zoomSnap: '1', inertia: false },
+    'Desktop Precision': { wheelPx: 90, wheelDebounce: 0, zoomSnap: '0.25', zoomDelta: 0.5, dblClick: 'center', inertiaDecel: 3400 },
+    'Touch Friendly': { tapTolerance: 30, bounce: true, wheelPx: 100, inertiaDecel: 2600 },
+    'No Scroll Hijack': { scrollMode: 'cooperative', wheelPx: 160, wheelDebounce: 100 }
+  },
+  maplibre: {
+    'MapLibre Default': {},
+    'Calm': { dragRotate: false, rotation: false, pitch: false },
+    'Touch Friendly': { rotation: false, pitch: false, clickTolerance: 8 },
+    'Cooperative Gestures': { scrollMode: 'cooperative' },
+    'Embedded Page Friendly': { scrollMode: 'cooperative', dragRotate: false, rotation: false, pitch: false }
+  }
+};
+
+/* ---------- control schema with honest per-engine support ----------
+ * sup: 'full' | 'shared' (mirrors another control) | 'partial' | 'no'  */
+const CONTROLS = [
+  { group: 'desktop', key: 'dragPan', label: 'Drag pan', type: 'check',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'full' } } },
+  { group: 'desktop', key: 'wheelZoom', label: 'Scroll-wheel zoom', type: 'check',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'full' } } },
+  { group: 'desktop', key: 'wheelPx', label: 'Wheel sensitivity — px of travel per zoom step', type: 'range', min: 30, max: 400, step: 10, unit: 'px',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'no', note: 'MapLibre wheel rate is fixed by the engine' } } },
+  { group: 'desktop', key: 'wheelDebounce', label: 'Wheel debounce', type: 'range', min: 0, max: 200, step: 10, unit: 'ms',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'no', note: 'MapLibre does not debounce wheel input' } } },
+  { group: 'desktop', key: 'wheelAround', label: 'Wheel zoom anchored to', type: 'seg', options: ['pointer', 'center'],
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'no', note: 'MapLibre always zooms toward the cursor' } } },
+  { group: 'desktop', key: 'dblClick', label: 'Double-click zoom', type: 'seg', options: ['on', 'center', 'off'],
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'partial', note: 'MapLibre: on/off only — no center-anchored mode' } } },
+  { group: 'desktop', key: 'zoomDelta', label: 'Zoom increment (delta)', type: 'range', min: 0.5, max: 2, step: 0.5, unit: '×',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'no', note: 'MapLibre step is fixed at 1' } } },
+  { group: 'desktop', key: 'zoomSnap', label: 'Zoom snap (fractional zoom)', type: 'seg', options: ['1', '0.5', '0.25', '0'],
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'no', note: 'MapLibre zoom is always fractional' } } },
+  { group: 'desktop', key: 'inertia', label: 'Drag inertia', type: 'check',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'no', note: 'MapLibre inertia is always on — tune deceleration below' } } },
+  { group: 'desktop', key: 'inertiaDecel', label: 'Inertia deceleration', type: 'range', min: 800, max: 6000, step: 100, unit: '',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'full' } } },
+  { group: 'desktop', key: 'inertiaMaxSpeed', label: 'Inertia max speed', type: 'range', min: 200, max: 5000, step: 100, unit: 'px/s',
+    engines: { leaflet: { sup: 'no', note: 'Leaflet default is unbounded (not exposed here)' }, maplibre: { sup: 'full' } } },
+  { group: 'desktop', key: 'dragRotate', label: 'Drag rotate (right-drag / ctrl-drag)', type: 'check',
+    engines: { leaflet: { sup: 'no', note: 'Leaflet maps cannot rotate' }, maplibre: { sup: 'full' } } },
+  { group: 'desktop', key: 'keyboard', label: 'Keyboard navigation (arrows / + −)', type: 'check',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'full' } } },
+  { group: 'desktop', key: 'boxZoom', label: 'Box zoom (shift-drag)', type: 'check',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'full' } } },
+
+  { group: 'touch', key: 'touchPanAlias', label: 'Touch pan', type: 'check',
+    engines: { leaflet: { sup: 'shared', src: 'dragPan', note: 'shared with Drag pan in Leaflet' }, maplibre: { sup: 'shared', src: 'dragPan', note: 'shared with Drag pan in MapLibre' } } },
+  { group: 'touch', key: 'pinchZoom', label: 'Pinch zoom', type: 'check',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'full' } } },
+  { group: 'touch', key: 'pinchSensitivity', label: 'Pinch sensitivity', type: 'range', min: 0, max: 2, step: 0.5, unit: '×',
+    engines: { leaflet: { sup: 'no', note: 'not configurable in either engine — a direct comparison point' }, maplibre: { sup: 'no', note: 'not configurable in either engine — a direct comparison point' } } },
+  { group: 'touch', key: 'rotation', label: 'Touch rotation', type: 'check',
+    engines: { leaflet: { sup: 'no', note: 'Leaflet maps cannot rotate' }, maplibre: { sup: 'full' } } },
+  { group: 'touch', key: 'pitch', label: 'Touch pitch (two-finger vertical drag)', type: 'check',
+    engines: { leaflet: { sup: 'no', note: 'Leaflet has no pitch' }, maplibre: { sup: 'full' } } },
+  { group: 'touch', key: 'dblTapAlias', label: 'Double-tap zoom', type: 'check',
+    engines: { leaflet: { sup: 'shared', src: 'dblClick', note: 'shared with Double-click zoom' }, maplibre: { sup: 'shared', src: 'dblClick', note: 'shared with Double-click zoom' } } },
+  { group: 'touch', key: 'tapTolerance', label: 'Tap-vs-drag tolerance', type: 'range', min: 1, max: 40, step: 1, unit: 'px',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'full', recreate: true } } },
+  { group: 'touch', key: 'bounce', label: 'Bounce at zoom limits', type: 'check',
+    engines: { leaflet: { sup: 'full' }, maplibre: { sup: 'no', note: 'MapLibre has no bounce control' } } }
+];
+const POLICIES = [
+  { id: 'always_auto',    label: 'Always Auto-Fit',        blurb: 'App actions may reposition the map whenever they want.' },
+  { id: 'respect_manual', label: 'Respect Manual Control', blurb: 'Once you manually pan/zoom, automatic viewport changes stop; explicit commands still work.' },
+  { id: 'explicit_only',  label: 'Explicit Navigation Only', blurb: 'Only explicit commands (Fit, Home, POI click) may move the map.' },
+  { id: 'preserve_zoom',  label: 'Preserve Zoom',          blurb: 'Selection/data actions may recenter but never change your zoom.' },
+  { id: 'preserve_view',  label: 'Preserve View Entirely', blurb: 'Selection changes data/UI but never moves the viewport.' }
+];
+const SCROLL_MODES = [
+  { id: 'capture', label: 'Full capture', blurb: 'The map consumes all wheel input over it for zoom; the page does not scroll while the pointer is over the map.' },
+  { id: 'cooperative', label: 'Cooperative / calm', blurb: 'Plain wheel + touch scrolls the page; Ctrl/Cmd + wheel (or a deliberate gesture) zooms the map. MapLibre: native cooperative gestures. Leaflet: wheel-gate emulation.' },
+  { id: 'ignore', label: 'Never capture', blurb: 'The map ignores wheel input entirely; zoom only via buttons and double-click.' }
+];
+
+/* ---------------- state & persistence ---------------- */
+const LS_CFG = 'map-ux-lab.config', LS_FAV = 'map-ux-lab.favorite';
+const state = {
+  engine: 'leaflet',
+  configs: JSON.parse(JSON.stringify(DEFAULTS)),
+  policy: 'respect_manual',
+  preset: { leaflet: 'Leaflet Default', maplibre: 'MapLibre Default' },
+  ui: { theme: 'dark', panelOpen: false, panelW: 320, compare: false, tt: new Array(11).fill(false) },
+  favorite: null,
+  userControlled: false,
+  selectedPoi: -1,
+  observations: [],
+  radiusIdx: 0,
+  logPaused: false,
+  logCount: 0,
+  syncBusy: false,
+  lastVp: null
+};
+const RADII = [2000, 4000, 8000];
+let programmaticOp = false;
+
+function guardedSet(key, val) {
+  try { localStorage.setItem(key, val); return true; }
+  catch (e) { setStatus('Storage full — settings not saved'); return false; }
+}
+function persist() {
+  guardedSet(LS_CFG, JSON.stringify({
+    engine: state.engine, configs: state.configs, policy: state.policy,
+    preset: state.preset,
+    ui: { theme: state.ui.theme, panelOpen: state.ui.panelOpen, panelW: state.ui.panelW, tt: state.ui.tt }
+  }));
+}
+function loadPersisted() {
+  try {
+    const p = JSON.parse(localStorage.getItem(LS_CFG) || 'null');
+    if (p) {
+      if (p.engine === 'leaflet' || p.engine === 'maplibre') state.engine = p.engine;
+      for (const eng of ['leaflet', 'maplibre']) {
+        if (p.configs && p.configs[eng]) state.configs[eng] = Object.assign({}, DEFAULTS[eng], p.configs[eng]);
+      }
+      if (POLICIES.some(x => x.id === p.policy)) state.policy = p.policy;
+      if (p.preset) state.preset = Object.assign(state.preset, p.preset);
+      if (p.ui) {
+        if (p.ui.theme === 'light' || p.ui.theme === 'dark') state.ui.theme = p.ui.theme;
+        state.ui.panelOpen = !!p.ui.panelOpen;
+        if ([260, 340, 420].includes(p.ui.panelW)) state.ui.panelW = p.ui.panelW;
+        if (Array.isArray(p.ui.tt) && p.ui.tt.length === 11) state.ui.tt = p.ui.tt.map(Boolean);
+      }
+    }
+    const f = JSON.parse(localStorage.getItem(LS_FAV) || 'null');
+    if (f && f.savedAt) state.favorite = f;
+  } catch (e) { /* corrupt storage: fall back to defaults */ }
+}
+
+/* ---------------- tiny DOM helpers ---------------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let statusTimer = null;
+function setStatus(msg) {
+  const el = $('status'); if (!el) return;
+  el.textContent = msg;
+  clearTimeout(statusTimer); statusTimer = setTimeout(() => { el.textContent = ''; }, 3500);
+}
+
+/* =====================================================================
+   EVENT LOG
+   ===================================================================== */
+const logList = $('event-log');
+function logEvent(type, detail, src, decision) {
+  if (state.logPaused) return null;
+  const e = { t: new Date(), type, detail: detail || '', src: src || 'user', decision: decision || '' };
+  const li = document.createElement('li');
+  const t = e.t.toLocaleTimeString([], { hour12: false });
+  li.innerHTML = '<span class="t">' + t + '</span><span class="s ' + e.src + '">' + e.src.toUpperCase() + '</span>' +
+    '<span' + (decision === 'blocked' ? ' class="blocked"' : '') + '>' + esc(type) + (detail ? ' · ' + esc(detail) : '') + '</span>';
+  const empty = logList.querySelector('.empty'); if (empty) empty.remove();
+  logList.prepend(li);
+  while (logList.children.length > LOG_MAX) logList.lastChild.remove();
+  state.logCount++;
+  $('log-count').textContent = String(state.logCount);
+  return li;
+}
+$('btn-log-clear').addEventListener('click', () => { state.logCount = 0; logList.innerHTML = '<li class="empty">Log cleared.</li>'; $('log-count').textContent = '0'; });
+$('btn-log-pause').addEventListener('click', () => {
+  state.logPaused = !state.logPaused;
+  $('btn-log-pause').setAttribute('aria-pressed', String(state.logPaused));
+  $('btn-log-pause').textContent = state.logPaused ? 'Resume log' : 'Pause log';
+  if (!state.logPaused) logEvent('log resumed', '', 'sys');
+});
+
+/* wheel telemetry: rolling 1 s window; log at most one line per 400 ms */
+const wheelTel = { events: [], lastLog: 0, deltaWindow: 0 };
+function recordWheel(dy, withModifier) {
+  const now = Date.now();
+  wheelTel.events.push(now);
+  while (wheelTel.events.length && now - wheelTel.events[0] > 1000) wheelTel.events.shift();
+  if (now - wheelTel.lastLog > 400) {
+    wheelTel.lastLog = now;
+    logEvent('wheel', 'Δ' + Math.round(dy) + (withModifier ? ' +modifier' : ''), 'user');
+  }
+}
+
+/* =====================================================================
+   MAP DATA (both engines)
+   ===================================================================== */
+const maps = { leaflet: null, maplibre: null };
+const leafletLayers = {};
+let mlMarkers = [];
+let mlDataSrc = null;
+
+const RASTER_STYLE = {
+  version: 8,
+  sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '&copy; OpenStreetMap contributors' } },
+  layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
+};
+
+function circleBoundsMeters() {
+  const dLat = CIRCLE.radius / 111320;
+  const dLng = CIRCLE.radius / (111320 * Math.cos(CIRCLE.lat * Math.PI / 180));
+  return { w: CIRCLE.lng - dLng, e: CIRCLE.lng + dLng, s: CIRCLE.lat - dLat, n: CIRCLE.lat + dLat };
+}
+function circlePolygon() {
+  const pts = [];
+  for (let i = 0; i <= 64; i++) {
+    const a = (i / 64) * Math.PI * 2;
+    pts.push([
+      CIRCLE.lng + Math.cos(a) * CIRCLE.radius / (111320 * Math.cos(CIRCLE.lat * Math.PI / 180)),
+      CIRCLE.lat + Math.sin(a) * CIRCLE.radius / 111320
+    ]);
+  }
+  return [pts];
+}
+function ensureObservations() {
+  if (!state.observations.length) {
+    state.observations = OBS_POOL.slice(0, 4).map(o => ({ lat: o.lat, lng: o.lng, name: o.name }));
+  }
+  return state.observations;
+}
+function boundsOfPoints(pts) {
+  let w = 180, e = -180, s = 90, n = -90;
+  for (const p of pts) {
+    const lat = p.lat != null ? p.lat : p[0], lng = p.lng != null ? p.lng : p[1];
+    w = Math.min(w, lng); e = Math.max(e, lng); s = Math.min(s, lat); n = Math.max(n, lat);
+  }
+  return { w, e, s, n };
+}
+function pinHtml(kind) {
+  const color = kind === 'sel' ? '#ff6b6b' : kind === 'obs' ? '#8ec07c' : '#5aa9ff';
+  return '<span style="display:block;width:16px;height:16px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:' + color + ';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);"></span>';
+}
+
+function renderLeafletData() {
+  const m = maps.leaflet;
+  if (!m) return;
+  if (leafletLayers.group) m.removeLayer(leafletLayers.group);
+  leafletLayers.group = L.layerGroup().addTo(m);
+  POIS.forEach((p, i) => {
+    const mk = L.marker([p.lat, p.lng], {
+      icon: L.divIcon({ className: '', html: pinHtml(state.selectedPoi === i ? 'sel' : ''), iconSize: [16, 16], iconAnchor: [8, 8] }),
+      keyboard: false
+    }).addTo(leafletLayers.group);
+    mk.on('click', () => selectPoi(i, 'marker click'));
+  });
+  for (const o of ensureObservations()) {
+    L.marker([o.lat, o.lng], { icon: L.divIcon({ className: '', html: pinHtml('obs'), iconSize: [16, 16], iconAnchor: [8, 8] }), keyboard: false }).addTo(leafletLayers.group);
+  }
+  L.polyline(ROUTE, { color: '#e0a83c', weight: 3, opacity: 0.9 }).addTo(leafletLayers.group);
+  L.polygon(POLYGON, { color: '#5aa9ff', weight: 2, fillOpacity: 0.12 }).addTo(leafletLayers.group);
+  if (leafletLayers.circle) m.removeLayer(leafletLayers.circle);
+  leafletLayers.circle = L.circle([CIRCLE.lat, CIRCLE.lng], { radius: CIRCLE.radius, color: '#43c17a', weight: 2, fillOpacity: 0.06 }).addTo(m);
+}
+
+function mlGeoJSON() {
+  return { type: 'FeatureCollection', features: [
+    { type: 'Feature', properties: { kind: 'route' }, geometry: { type: 'LineString', coordinates: ROUTE.map(p => [p[1], p[0]]) } },
+    { type: 'Feature', properties: { kind: 'poly' }, geometry: { type: 'Polygon', coordinates: [POLYGON.map(p => [p[1], p[0]])] } },
+    { type: 'Feature', properties: { kind: 'circle' }, geometry: { type: 'Polygon', coordinates: circlePolygon() } }
+  ] };
+}
+function renderMaplibreData() {
+  const m = maps.maplibre;
+  if (!m || !m.isStyleLoaded()) return;
+  for (const mk of mlMarkers) mk.remove();
+  mlMarkers = [];
+  POIS.forEach((p, i) => {
+    const mk = new maplibregl.Marker({ color: state.selectedPoi === i ? '#ff6b6b' : '#5aa9ff' }).setLngLat([p.lng, p.lat]).addTo(m);
+    mk.getElement().addEventListener('click', ev => { ev.stopPropagation(); selectPoi(i, 'marker click'); });
+    mlMarkers.push(mk);
+  });
+  for (const o of ensureObservations()) {
+    mlMarkers.push(new maplibregl.Marker({ color: '#8ec07c' }).setLngLat([o.lng, o.lat]).addTo(m));
+  }
+  if (!mlDataSrc) {
+    m.addSource('lab', { type: 'geojson', data: mlGeoJSON() });
+    m.addLayer({ id: 'poly-fill', type: 'fill', source: 'lab', filter: ['==', ['get', 'kind'], 'poly'], paint: { 'fill-color': '#5aa9ff', 'fill-opacity': 0.12 } });
+    m.addLayer({ id: 'poly-line', type: 'line', source: 'lab', filter: ['==', ['get', 'kind'], 'poly'], paint: { 'line-color': '#5aa9ff', 'line-width': 2 } });
+    m.addLayer({ id: 'route-line', type: 'line', source: 'lab', filter: ['==', ['get', 'kind'], 'route'], paint: { 'line-color': '#e0a83c', 'line-width': 3 } });
+    m.addLayer({ id: 'circle-fill', type: 'fill', source: 'lab', filter: ['==', ['get', 'kind'], 'circle'], paint: { 'fill-color': '#43c17a', 'fill-opacity': 0.06 } });
+    m.addLayer({ id: 'circle-line', type: 'line', source: 'lab', filter: ['==', ['get', 'kind'], 'circle'], paint: { 'line-color': '#43c17a', 'line-width': 2 } });
+    mlDataSrc = m.getSource('lab');
+  } else {
+    mlDataSrc.setData(mlGeoJSON());
+  }
+}
+function renderData() {
+  renderLeafletData();
+  if (maps.maplibre && maps.maplibre.isStyleLoaded()) renderMaplibreData();
+}
+
+/* =====================================================================
+   ENGINE LIFECYCLE
+   ===================================================================== */
+function createLeaflet() {
+  if (maps.leaflet) return;
+  maps.leaflet = L.map($('map-leaflet'), { center: [HOME.lat, HOME.lng], zoom: HOME.zoom });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(maps.leaflet);
+  const m = maps.leaflet;
+  m.on('dragstart', () => { markUserControl('drag'); logEvent('dragstart', '', 'user'); });
+  m.on('dragend', () => logEvent('dragend', '', 'user'));
+  m.on('zoomstart', () => { if (!programmaticOp) markUserControl('zoom'); logEvent('zoomstart', '', programmaticOp ? 'auto' : 'user'); });
+  m.on('zoomend', () => { logEvent('zoomend', '', programmaticOp ? 'auto' : 'user'); scheduleInstrumentation(); });
+  m.on('dblclick', () => logEvent('double-click zoom', '', 'user'));
+  m.on('click', e => logEvent('map click', e.latlng.lat.toFixed(5) + ', ' + e.latlng.lng.toFixed(5), 'user'));
+  m.on('boxzoomstart', () => { markUserControl('box zoom'); logEvent('boxzoomstart', '', 'user'); });
+  m.on('boxzoomend', () => logEvent('boxzoomend', '', 'user'));
+  m.on('move', () => scheduleInstrumentation());
+  m.on('moveend', () => { scheduleInstrumentation(); if (state.ui.compare && !state.syncBusy) syncFrom('leaflet'); });
+  renderLeafletData();
+}
+
+function createMaplibre() {
+  if (maps.maplibre) return;
+  const cfgE = state.configs.maplibre;
+  const el = $('map-maplibre');
+  el.classList.add('active');
+  const m = new maplibregl.Map({
+    container: el,
+    style: RASTER_STYLE,
+    center: [HOME.lng, HOME.lat],
+    zoom: HOME.zoom,
+    cooperativeGestures: cfgE.scrollMode === 'cooperative',
+    clickTolerance: cfgE.clickTolerance,
+    attributionControl: { compact: window.innerWidth < 700 }
+  });
+  m._muxCooperative = cfgE.scrollMode === 'cooperative';
+  m._muxClickTolerance = cfgE.clickTolerance;
+  maps.maplibre = m;
+  m.on('load', () => renderMaplibreData());
+  m.on('dragstart', () => { markUserControl('drag'); logEvent('dragstart', '', 'user'); });
+  m.on('dragend', () => logEvent('dragend', '', 'user'));
+  m.on('zoomstart', () => { if (!programmaticOp) markUserControl('zoom'); logEvent('zoomstart', '', programmaticOp ? 'auto' : 'user'); });
+  m.on('zoomend', () => { logEvent('zoomend', '', programmaticOp ? 'auto' : 'user'); scheduleInstrumentation(); });
+  m.on('wheel', e => { recordWheel(e.originalEvent ? e.originalEvent.deltaY : 0, e.originalEvent && (e.originalEvent.ctrlKey || e.originalEvent.metaKey)); scheduleInstrumentation(); });
+  m.on('rotatestart', () => { markUserControl('rotate'); logEvent('rotatestart', '', 'user'); });
+  m.on('pitchstart', () => { markUserControl('pitch'); logEvent('pitchstart', '', 'user'); });
+  m.on('dblclick', () => logEvent('double-click zoom', '', 'user'));
+  m.on('click', e => logEvent('map click', e.lngLat.lat.toFixed(5) + ', ' + e.lngLat.lng.toFixed(5), 'user'));
+  m.on('boxzoomstart', () => { markUserControl('box zoom'); logEvent('boxzoomstart', '', 'user'); });
+  m.on('boxzoomend', () => logEvent('boxzoomend', '', 'user'));
+  m.on('touchstart', e => { if (e.points && e.points.length >= 2) { markUserControl('pinch'); logEvent('pinch start', e.points.length + ' touches', 'user'); } });
+  m.on('moveend', () => { if (state.ui.compare && !state.syncBusy) syncFrom('maplibre'); });
+  applyMaplibreInteractions();
+}
+
+function applyMaplibreInteractions() {
+  const m = maps.maplibre, c = state.configs.maplibre;
+  if (!m) return;
+  if (c.dragPan) m.dragPan.enable({ linearity: 0.3, deceleration: c.inertiaDecel, maxSpeed: c.inertiaMaxSpeed });
+  else m.dragPan.disable();
+  c.dragRotate ? m.dragRotate.enable() : m.dragRotate.disable();
+  c.wheelZoom ? m.scrollZoom.enable() : m.scrollZoom.disable();
+  c.dblClick === 'on' ? m.doubleClickZoom.enable() : m.doubleClickZoom.disable();
+  c.keyboard ? m.keyboard.enable() : m.keyboard.disable();
+  c.boxZoom ? m.boxZoom.enable() : m.boxZoom.disable();
+  c.pinchZoom ? m.touchZoomRotate.enable() : m.touchZoomRotate.disable();
+  if (c.rotation) m.touchZoomRotate.enableRotation(); else m.touchZoomRotate.disableRotation();
+  c.pitch ? m.touchPitch.enable() : m.touchPitch.disable();
+}
+
+function recreateMaplibre(reason) {
+  if (!maps.maplibre) return;
+  const c = maps.maplibre.getCenter(), z = maps.maplibre.getZoom();
+  maps.maplibre.remove();
+  maps.maplibre = null;
+  mlDataSrc = null;
+  createMaplibre();
+  maps.maplibre.jumpTo({ center: [c.lng, c.lat], zoom: z });
+  renderMaplibreData();
+  logEvent('maplibre recreated', reason, 'sys');
+}
+
+function resizeMaps() {
+  if (maps.leaflet) maps.leaflet.invalidateSize({ animate: false }); // pan:true default keeps the geographic center
+  if (maps.maplibre) maps.maplibre.resize();
+}
+
+/* ---------------- wheel gating (the page-scroll experiment) ---------- */
+let hintTimer = null;
+function showCoopHint() {
+  const h = $('coop-hint'); h.classList.add('show');
+  clearTimeout(hintTimer); hintTimer = setTimeout(() => h.classList.remove('show'), 1400);
+}
+$('map-wrap').addEventListener('wheel', e => {
+  const c = state.configs[state.engine];
+  const withMod = e.ctrlKey || e.metaKey;
+  const dy = e.deltaY == null ? 0 : e.deltaY;
+  if (state.engine === 'maplibre' && c.scrollMode === 'cooperative') {
+    recordWheel(dy, withMod); // native cooperative handling
+    return;
+  }
+  if (c.scrollMode === 'ignore') {
+    e.stopPropagation();
+    recordWheel(0, withMod);
+    return;
+  }
+  if (c.scrollMode === 'cooperative') {
+    recordWheel(dy, withMod);
+    if (!withMod) { e.stopPropagation(); showCoopHint(); return; }
+    if (c.wheelZoom) markUserControl('ctrl+wheel zoom');
+    return;
+  }
+  recordWheel(dy, withMod);
+  if (c.wheelZoom) markUserControl('wheel');
+}, { capture: true, passive: true });
+
+/* =====================================================================
+   CONTROL SCHEMA → UI + ENGINE APPLICATION
+   ===================================================================== */
+function cfg() { return state.configs[state.engine]; }
+
+function renderControls() {
+  const eng = state.engine;
+  const dg = $('desktop-group'), tg = $('touch-group');
+  dg.innerHTML = ''; tg.innerHTML = '';
+  for (const def of CONTROLS) {
+    const target = def.group === 'desktop' ? dg : tg;
+    if (def.engines[eng]) target.appendChild(controlFor(def));
+  }
+  $('engine-note').textContent = eng === 'leaflet'
+    ? 'Leaflet 1.9.4 — raster tiles, DOM markers, mature runtime options. No rotation/pitch.'
+    : 'MapLibre GL JS 4.7.1 — WebGL, always-fractional zoom, rotation/pitch, native cooperative gestures. A few options are constructor-only (the map is recreated when they change).';
+  $('badge-engine').textContent = eng === 'leaflet' ? 'Leaflet 1.9.4' : 'MapLibre GL 4.7.1';
+  $('eng-leaflet').setAttribute('aria-pressed', String(eng === 'leaflet'));
+  $('eng-maplibre').setAttribute('aria-pressed', String(eng === 'maplibre'));
+  renderScroll();
+  renderPresets();
+  renderPolicy();
+}
+
+function controlFor(def) {
+  const eng = def.engines[state.engine] || {};
+  const sup = eng.sup || 'full';
+  const cur = sup === 'shared' ? cfg()[def.src] : cfg()[def.key];
+  const row = document.createElement('div');
+  row.className = 'ctl' + (sup === 'no' ? ' unsup' : '');
+  const label = document.createElement('label');
+  label.textContent = def.label;
+  row.appendChild(label);
+
+  if (def.type === 'check') {
+    const wrap = document.createElement('div'); wrap.className = 'ctl-row-check';
+    const cb = document.createElement('input'); cb.type = 'checkbox';
+    cb.id = 'ctl-' + def.key; cb.setAttribute('aria-label', def.label);
+    cb.checked = !!cur; cb.disabled = (sup === 'no' || sup === 'shared');
+    cb.addEventListener('change', () => {
+      if (sup === 'shared') cfg()[def.src] = cb.checked; else cfg()[def.key] = cb.checked;
+      applyEngineConfig(); touchPreset(); persist(); refreshExport(); renderPresets();
+      logEvent('setting', def.label + ' → ' + cb.checked, 'sys');
+    });
+    wrap.appendChild(cb);
+    if (eng.note) { const n = document.createElement('span'); n.className = 'switch-note'; n.textContent = eng.note; wrap.appendChild(n); }
+    row.appendChild(wrap);
+  } else if (def.type === 'range') {
+    const val = document.createElement('span'); val.className = 'ctl-val'; val.id = 'ctlv-' + def.key;
+    val.textContent = String(cur) + (def.unit ? ' ' + def.unit : '');
+    row.appendChild(val);
+    const input = document.createElement('input');
+    input.type = 'range'; input.id = 'ctl-' + def.key; input.setAttribute('aria-label', def.label);
+    input.min = def.min; input.max = def.max; input.step = def.step; input.value = cur;
+    input.disabled = (sup === 'no');
+    input.addEventListener('input', () => {
+      const v = Number(input.value);
+      cfg()[def.key] = v;
+      val.textContent = String(v) + (def.unit ? ' ' + def.unit : '');
+      applyEngineConfig(); touchPreset(); persist(); refreshExport(); renderPresets();
+    });
+    row.appendChild(input);
+    if (eng.note) { const n = document.createElement('span'); n.className = 'unsup-note'; n.textContent = eng.note; row.appendChild(n); }
+  } else if (def.type === 'seg') {
+    const seg = document.createElement('div'); seg.className = 'seg-mini'; seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', def.label);
+    for (const o of def.options) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = o;
+      b.setAttribute('aria-pressed', String(cur === o));
+      b.disabled = (sup === 'no') || (sup === 'partial' && o === 'center' && state.engine === 'maplibre');
+      b.addEventListener('click', () => {
+        cfg()[def.key] = o;
+        applyEngineConfig(); touchPreset(); persist(); refreshExport(); renderPresets(); renderControls();
+        logEvent('setting', def.label + ' → ' + o, 'sys');
+      });
+      seg.appendChild(b);
+    }
+    row.appendChild(seg);
+    if (eng.note) { const n = document.createElement('span'); n.className = 'unsup-note'; n.textContent = eng.note; row.appendChild(n); }
+  }
+  if (sup === 'shared') {
+    const n = document.createElement('span'); n.className = 'unsup-note'; n.style.gridColumn = '1 / -1';
+    n.textContent = '⇄ ' + eng.note;
+    row.appendChild(n);
+  } else if (sup === 'no') {
+    const b = document.createElement('span'); b.className = 'badge unsup';
+    b.textContent = 'engine-specific';
+    row.appendChild(b);
+    if (eng.note && def.type === 'check') {
+      const n = document.createElement('span'); n.className = 'unsup-note'; n.style.gridColumn = '1 / -1';
+      n.textContent = eng.note;
+      row.appendChild(n);
+    }
+  }
+  return row;
+}
+
+/* ---------------- scroll mode group ---------------- */
+function renderScroll() {
+  const g = $('scroll-group');
+  const c = cfg();
+  g.innerHTML = '';
+  const cur = SCROLL_MODES.find(x => x.id === c.scrollMode);
+  const info = document.createElement('div');
+  info.innerHTML = '<label style="font-size:0.82rem;">Mode: <strong>' + esc(cur.label) + '</strong></label>' +
+    '<span class="unsup-note" style="display:block;">' + esc(cur.blurb) + '</span>';
+  const seg = document.createElement('div'); seg.className = 'seg-mini'; seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', 'Scroll capture mode');
+  for (const m of SCROLL_MODES) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = m.label;
+    b.setAttribute('aria-pressed', String(c.scrollMode === m.id));
+    b.addEventListener('click', () => {
+      cfg().scrollMode = m.id;
+      applyEngineConfig(); touchPreset(); persist(); refreshExport(); renderScroll(); renderPresets();
+      logEvent('scroll mode', m.label + ' (' + state.engine + ')', 'sys');
+    });
+    seg.appendChild(b);
+  }
+  g.appendChild(info); g.appendChild(seg);
+  $('badge-scroll').textContent = c.scrollMode;
+}
+
+/* ---------------- presets ---------------- */
+function renderPresets() {
+  const wrap = $('preset-chips'); wrap.innerHTML = '';
+  for (const name of Object.keys(PRESETS[state.engine])) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = name;
+    b.setAttribute('aria-pressed', String(state.preset[state.engine] === name));
+    b.addEventListener('click', () => applyPreset(name));
+    wrap.appendChild(b);
+  }
+  const modified = diffFromDefault();
+  $('badge-preset').textContent = state.preset[state.engine];
+  $('badge-modified').hidden = !modified || state.preset[state.engine] !== 'Custom' && !modified;
+  $('badge-modified').hidden = !modified;
+  $('i-preset').textContent = state.preset[state.engine] + (modified ? ' (modified)' : '');
+}
+function applyPreset(name) {
+  const p = PRESETS[state.engine][name];
+  if (!p) return;
+  state.configs[state.engine] = Object.assign({}, DEFAULTS[state.engine], p);
+  state.preset[state.engine] = name;
+  applyEngineConfig(); renderControls(); persist(); refreshExport();
+  setStatus('Preset: ' + name);
+  logEvent('preset applied', name + ' (' + state.engine + ')', 'sys');
+}
+function touchPreset() {
+  const base = Object.assign({}, DEFAULTS[state.engine], PRESETS[state.engine][state.preset[state.engine]] || {});
+  const c = cfg();
+  if (Object.keys(base).some(k => String(base[k]) !== String(c[k]))) state.preset[state.engine] = 'Custom';
+}
+function diffFromDefault() {
+  const d = DEFAULTS[state.engine], c = cfg();
+  return Object.keys(d).some(k => String(d[k]) !== String(c[k]));
+}
+
+/* ---------------- apply config to engines ---------------- */
+function applyEngineConfig() {
+  if (state.engine === 'leaflet') {
+    applyLeafletConfig();
+  } else {
+    const m = maps.maplibre, c = state.configs.maplibre;
+    if (!m) return;
+    const coopChanged = (c.scrollMode === 'cooperative') !== !!m._muxCooperative;
+    const tolChanged = Number(c.clickTolerance) !== Number(m._muxClickTolerance);
+    if (coopChanged) { recreateMaplibre('cooperative gestures changed'); return; }
+    if (tolChanged) { recreateMaplibre('click tolerance changed'); return; }
+    applyMaplibreInteractions();
+  }
+  scheduleInstrumentation();
+}
+function applyLeafletConfig() {
+  const m = maps.leaflet, c = state.configs.leaflet;
+  if (!m) return;
+  m.options.dragging = c.dragPan;
+  c.dragPan ? m.dragging.enable() : m.dragging.disable();
+  m.options.wheelPxPerZoomLevel = c.wheelPx;
+  if (Number(m.options.wheelDebounceTime) !== Number(c.wheelDebounce)) {
+    const wasEnabled = m.scrollWheelZoom.enabled();
+    m.options.wheelDebounceTime = c.wheelDebounce;
+    m.scrollWheelZoom.disable();
+    if (wasEnabled) m.scrollWheelZoom.enable(); // re-binds the debounce wrapper
+  }
+  m.options.scrollWheelZoom = c.wheelZoom ? (c.wheelAround === 'center' ? 'center' : true) : false;
+  m.options.doubleClickZoom = c.dblClick === 'on' ? true : c.dblClick === 'center' ? 'center' : false;
+  m.options.zoomDelta = c.zoomDelta;
+  m.options.zoomSnap = Number(c.zoomSnap);
+  m.options.inertia = c.inertia;
+  m.options.inertiaDeceleration = c.inertiaDecel;
+  m.options.keyboard = c.keyboard;
+  c.keyboard ? m.keyboard.enable() : m.keyboard.disable();
+  m.options.boxZoom = c.boxZoom;
+  c.boxZoom ? m.boxZoom.enable() : m.boxZoom.disable();
+  m.options.touchZoom = c.pinchZoom;
+  c.pinchZoom ? m.touchZoom.enable() : m.touchZoom.disable();
+  m.options.tapTolerance = c.tapTolerance;
+  m.options.bounceAtZoomLimits = c.bounce;
+}
+
+/* =====================================================================
+   VIEWPORT POLICY ENGINE
+   ===================================================================== */
+function renderPolicy() {
+  const g = $('policy-group'); g.innerHTML = '';
+  for (const p of POLICIES) {
+    const row = document.createElement('label');
+    row.className = 'ctl-row-check';
+    const r = document.createElement('input'); r.type = 'radio'; r.name = 'vp-policy'; r.value = p.id;
+    r.checked = state.policy === p.id;
+    r.addEventListener('change', () => {
+      state.policy = p.id; persist(); refreshExport(); renderPolicy();
+      logEvent('policy set', p.label, 'sys');
+    });
+    const t = document.createElement('span'); t.style.fontSize = '0.82rem';
+    t.innerHTML = '<strong>' + esc(p.label) + '</strong><br><span class="switch-note">' + esc(p.blurb) + '</span>';
+    row.appendChild(r); row.appendChild(t); g.appendChild(row);
+  }
+  const rel = document.createElement('div'); rel.className = 'unsup-note';
+  rel.textContent = 'Implicit = data-driven refits (Load observations, radius, refresh). Explicit = direct commands (Fit, Home, POI selection).';
+  g.appendChild(rel);
+  $('badge-policy').textContent = POLICIES.find(x => x.id === state.policy).label.toLowerCase();
+  $('i-policy').textContent = POLICIES.find(x => x.id === state.policy).label;
+}
+
+function markUserControl(source) {
+  if (programmaticOp || state.userControlled) return;
+  state.userControlled = true;
+  $('userctl-box').classList.add('taken');
+  document.querySelector('#userctl-box .uct-label').textContent =
+    'USER HAS TAKEN CONTROL — via ' + source + ' at ' + new Date().toLocaleTimeString();
+  $('btn-release').hidden = false;
+  logEvent('USER HAS TAKEN CONTROL', 'via ' + source, 'user');
+  renderInstrumentation();
+}
+$('btn-release').addEventListener('click', () => {
+  state.userControlled = false;
+  $('userctl-box').classList.remove('taken');
+  document.querySelector('#userctl-box .uct-label').textContent = 'Control released — app actions may reposition again (per policy).';
+  $('btn-release').hidden = true;
+  logEvent('control released', '', 'sys');
+  renderInstrumentation();
+});
+
+function decideViewport(kind) {
+  if (kind === 'panel') return { ok: true };
+  if (state.policy === 'always_auto') return { ok: true };
+  if (state.policy === 'preserve_view') return { ok: false, why: 'policy: preserve view entirely' };
+  if (state.policy === 'explicit_only') return (kind === 'explicit' || kind === 'select') ? { ok: true } : { ok: false, why: 'policy: explicit navigation only' };
+  if (state.policy === 'respect_manual') {
+    if (kind === 'implicit' && state.userControlled) return { ok: false, why: 'policy: respecting manual control' };
+    return { ok: true };
+  }
+  if (state.policy === 'preserve_zoom') return { ok: true, keepZoom: kind === 'implicit' || kind === 'select' };
+  return { ok: true };
+}
+
+function currentView() {
+  const m = getActiveMap();
+  if (!m) return { lat: HOME.lat, lng: HOME.lng, zoom: HOME.zoom };
+  const c = m.getCenter();
+  return { lat: c.lat, lng: c.lng, zoom: m.getZoom() };
+}
+function getActiveMap() { return maps[state.engine]; }
+
+function fitBoundsBox(box) {
+  programmaticOp = true;
+  try {
+    if (state.engine === 'leaflet') maps.leaflet.fitBounds([[box.s, box.w], [box.n, box.e]], { padding: [40, 40], maxZoom: 16 });
+    else maps.maplibre.fitBounds([[box.w, box.s], [box.e, box.n]], { padding: 40, duration: 700, maxZoom: 16 });
+  } finally { setTimeout(() => { programmaticOp = false; }, 80); }
+}
+function keepZoomCenter(lat, lng) {
+  programmaticOp = true;
+  try {
+    if (state.engine === 'leaflet') maps.leaflet.setView([lat, lng], maps.leaflet.getZoom(), { animate: true });
+    else maps.maplibre.easeTo({ center: [lng, lat], duration: 500 });
+  } finally { setTimeout(() => { programmaticOp = false; }, 80); }
+}
+function flyTo(lat, lng, zoom) {
+  programmaticOp = true;
+  try {
+    if (state.engine === 'leaflet') maps.leaflet.flyTo([lat, lng], zoom, { duration: 0.8 });
+    else maps.maplibre.flyTo({ center: [lng, lat], zoom: zoom, duration: 800 });
+  } finally { setTimeout(() => { programmaticOp = false; }, 80); }
+}
+
+function runViewport(actionId) {
+  const A = ACTIONS[actionId];
+  const kind = A.kind;
+  if (kind === 'panel') { A.exec(null); renderInstrumentation(); return; }
+  const d = decideViewport(kind);
+  if (!d.ok) {
+    const li = logEvent('viewport BLOCKED', A.label + ' — ' + d.why, 'auto', 'blocked');
+    if (li) li.classList.add('blocked');
+    state.lastVp = A.label + ' — blocked (' + d.why + ')';
+    renderInstrumentation();
+    return;
+  }
+  A.exec(d);
+  state.lastVp = A.label + ' — executed' + (d.keepZoom ? ' (zoom preserved)' : '');
+  logEvent('viewport change', A.label + ' → executed' + (d.keepZoom ? ' (zoom preserved)' : ''), 'auto');
+  renderInstrumentation();
+}
+
+const ACTIONS = {
+  fitAll: { label: 'Fit all results', kind: 'explicit', exec: d => {
+    const box = boundsOfPoints(POIS.map(p => ({ lat: p.lat, lng: p.lng })).concat(ROUTE.map(r => ({ lat: r[0], lng: r[1] }))));
+    if (d && d.keepZoom) keepZoomCenter((box.n + box.s) / 2, (box.e + box.w) / 2); else fitBoundsBox(box);
+  } },
+  loadObs: { label: 'Load new observations', kind: 'implicit', exec: d => {
+    state.observations = OBS_POOL.slice().sort(() => Math.random() - 0.5).slice(0, 4).map(o => ({ lat: o.lat, lng: o.lng, name: o.name }));
+    renderData();
+    const box = boundsOfPoints(state.observations);
+    if (d && d.keepZoom) keepZoomCenter((box.n + box.s) / 2, (box.e + box.w) / 2); else fitBoundsBox(box);
+  } },
+  changeRadius: { label: 'Change search radius', kind: 'implicit', exec: d => {
+    state.radiusIdx = (state.radiusIdx + 1) % RADII.length;
+    CIRCLE.radius = RADII[state.radiusIdx];
+    renderData();
+    const b = circleBoundsMeters();
+    if (d && d.keepZoom) keepZoomCenter((b.n + b.s) / 2, (b.e + b.w) / 2); else fitBoundsBox(b);
+  } },
+  selectPoi: { label: 'Select POI', kind: 'select', exec: d => {
+    selectPoi((state.selectedPoi + 1 + POIS.length) % POIS.length, 'Select POI action', d);
+  } },
+  openPanel: { label: 'Open detail panel', kind: 'panel', exec: () => setPanel(true) },
+  closePanel: { label: 'Close detail panel', kind: 'panel', exec: () => setPanel(false) },
+  resizeSidebar: { label: 'Resize sidebar', kind: 'panel', exec: () => {
+    const widths = [260, 340, 420];
+    state.ui.panelW = widths[(widths.indexOf(state.ui.panelW) + 1) % widths.length];
+    document.documentElement.style.setProperty('--panel-w', state.ui.panelW + 'px');
+    setTimeout(resizeMaps, 280);
+    logEvent('sidebar width', state.ui.panelW + 'px', 'sys');
+    persist();
+  } },
+  refreshData: { label: 'Refresh data', kind: 'panel', exec: () => {
+    renderData(); resizeMaps();
+    logEvent('data refreshed', 'map resized, viewport untouched', 'auto');
+  } },
+  home: { label: 'Return home', kind: 'explicit', exec: () => flyTo(HOME.lat, HOME.lng, HOME.zoom) },
+  fitRoute: { label: 'Fit route', kind: 'explicit', exec: d => {
+    const box = boundsOfPoints(ROUTE.map(r => ({ lat: r[0], lng: r[1] })));
+    if (d && d.keepZoom) keepZoomCenter((box.n + box.s) / 2, (box.e + box.w) / 2); else fitBoundsBox(box);
+  } }
+};
+
+function renderVpButtons() {
+  const wrap = $('vp-buttons'); wrap.innerHTML = '';
+  for (const id of Object.keys(ACTIONS)) {
+    const b = document.createElement('button'); b.type = 'button';
+    b.textContent = ACTIONS[id].label;
+    b.setAttribute('aria-label', ACTIONS[id].label + ' — viewport ' + ACTIONS[id].kind + ' action');
+    b.addEventListener('click', () => runViewport(id));
+    wrap.appendChild(b);
+  }
+}
+
+function selectPoi(idx, source, decision) {
+  state.selectedPoi = idx;
+  const p = POIS[idx];
+  const d = decision || decideViewport('select');
+  if (d && d.ok) {
+    if (d.keepZoom) keepZoomCenter(p.lat, p.lng);
+    else flyTo(p.lat, p.lng, getActiveMap().getZoom());
+  logEvent('POI selected', p.name + ' — viewport follows policy', 'auto');
+  } else if (d && !d.ok) {
+    logEvent('viewport BLOCKED', 'select POI — ' + d.why, 'auto', 'blocked');
+  }
+  renderData();
+  setPanel(true);
+  $('dp-title').textContent = p.name;
+  $('dp-body').innerHTML =
+    '<div><span class="k">Type</span><br><span class="v">' + esc(p.type) + '</span></div>' +
+    '<div><span class="k">Approx. coordinates</span><br><span class="v">' + p.lat.toFixed(5) + ', ' + p.lng.toFixed(5) + '</span></div>' +
+    '<div><span class="k">Field note</span><br><span class="v">' + esc(p.note) + '</span></div>' +
+    '<div><span class="k">Selection</span><br><span class="v">' + esc(source) + ' · policy: ' + esc(POLICIES.find(x => x.id === state.policy).label) + '</span></div>' +
+    '<div class="dp-actions"><button class="hbtn" id="dp-zoom">Zoom here (explicit)</button><button class="hbtn" id="dp-fitr">Fit route (explicit)</button></div>';
+  $('dp-zoom').addEventListener('click', () => flyTo(p.lat, p.lng, 15));
+  $('dp-fitr').addEventListener('click', () => runViewport('fitRoute'));
+}
+
+/* ---------------- detail panel ---------------- */
+function setPanel(open) {
+  const before = currentView();
+  state.ui.panelOpen = open;
+  $('detail-panel').classList.toggle('open', open);
+  setTimeout(() => {
+    resizeMaps();
+    const after = currentView();
+    const moved = Math.abs(before.lat - after.lat) > 1e-9 || Math.abs(before.lng - after.lng) > 1e-9 || Math.abs(before.zoom - after.zoom) > 1e-9;
+    logEvent('detail panel ' + (open ? 'opened' : 'closed'), moved ? 'center SHIFTED' : 'center preserved', 'sys');
+    renderInstrumentation();
+  }, 320);
+  persist();
+}
+$('dp-close').addEventListener('click', () => { setPanel(false); logEvent('panel closed', 'via ✕ button', 'user'); });
+
+/* =====================================================================
+   INSTRUMENTATION
+   ===================================================================== */
+let instrQueued = false;
+function scheduleInstrumentation() {
+  if (instrQueued) return;
+  instrQueued = true;
+  requestAnimationFrame(() => { instrQueued = false; renderInstrumentation(); });
+}
+function renderInstrumentation() {
+  const v = currentView();
+  $('i-engine').textContent = state.engine === 'leaflet' ? 'Leaflet 1.9.4' : 'MapLibre GL 4.7.1';
+  $('i-center').textContent = v.lat.toFixed(5) + ', ' + v.lng.toFixed(5);
+  $('i-zoom').textContent = v.zoom.toFixed(2);
+  $('i-bp').textContent = (state.engine === 'maplibre' && maps.maplibre)
+    ? Math.round(maps.maplibre.getBearing()) + '° / ' + Math.round(maps.maplibre.getPitch()) + '°'
+    : 'n/a (Leaflet)';
+  $('i-userctl').textContent = state.userControlled ? 'USER CONTROL' : 'app-controlled';
+  $('i-userctl').classList.toggle('warn', state.userControlled);
+  $('i-policy').textContent = POLICIES.find(x => x.id === state.policy).label;
+  $('i-lastvp').textContent = state.lastVp || '—';
+  $('i-wheel').textContent = wheelTel.events.length + ' events · Δ' + Math.round(wheelTel.deltaWindow);
+  $('i-pointer').textContent = window.matchMedia('(pointer: coarse)').matches ? 'touch (coarse)' : 'mouse/trackpad (fine)';
+  const p = $('i-preset');
+  if (p) p.textContent = state.preset[state.engine] + (diffFromDefault() ? ' (modified)' : '');
+}
+$('map-wrap').addEventListener('wheel', e => {
+  wheelTel.deltaWindow += Math.abs(e.deltaY == null ? 0 : e.deltaY);
+  scheduleInstrumentation();
+  clearTimeout(wheelTel._t);
+  wheelTel._t = setTimeout(() => { wheelTel.deltaWindow = 0; renderInstrumentation(); }, 1000);
+}, { capture: true, passive: true });
+
+/* =====================================================================
+   EXPORT — JSON / INIT CODE / BEHAVIORAL SPEC
+   ===================================================================== */
+function nativeOptions() {
+  const c = cfg();
+  if (state.engine === 'leaflet') {
+    return { 'L.map options': {
+      dragging: c.dragPan,
+      scrollWheelZoom: c.wheelZoom ? (c.wheelAround === 'center' ? 'center' : true) : false,
+      doubleClickZoom: c.dblClick === 'on' ? true : c.dblClick === 'center' ? 'center' : false,
+      touchZoom: c.pinchZoom, zoomSnap: Number(c.zoomSnap), zoomDelta: c.zoomDelta,
+      inertia: c.inertia, inertiaDeceleration: c.inertiaDecel,
+      wheelPxPerZoomLevel: c.wheelPx, wheelDebounceTime: c.wheelDebounce,
+      tapTolerance: c.tapTolerance, bounceAtZoomLimits: c.bounce,
+      keyboard: c.keyboard, boxZoom: c.boxZoom
+    } };
+  }
+  return { 'maplibregl.Map options': {
+    cooperativeGestures: c.scrollMode === 'cooperative',
+    clickTolerance: c.clickTolerance,
+    dragPan: c.dragPan ? { linearity: 0.3, deceleration: c.inertiaDecel, maxSpeed: c.inertiaMaxSpeed } : false,
+    dragRotate: c.dragRotate, scrollZoom: c.wheelZoom, doubleClickZoom: c.dblClick === 'on',
+    boxZoom: c.boxZoom, keyboard: c.keyboard,
+    touchZoomRotate: c.pinchZoom ? { rotation: c.rotation } : false,
+    touchPitch: c.pitch
+  } };
+}
+function configJson() {
+  const c = cfg();
+  const supported = d => (d.engines[state.engine] || {}).sup === 'full';
+  return {
+    artifact: 'map-ux-lab', version: VERSION, generatedAt: new Date().toISOString(),
+    engine: state.engine,
+    location: { name: 'Princeton, Indiana', center: [HOME.lat, HOME.lng], zoom: HOME.zoom },
+    scrollBehavior: c.scrollMode,
+    viewportPolicy: { id: state.policy, label: POLICIES.find(x => x.id === state.policy).label },
+    desktop: Object.fromEntries(CONTROLS.filter(d => d.group === 'desktop' && supported(d)).map(d => [d.key, c[d.key]])),
+    touch: Object.fromEntries(CONTROLS.filter(d => d.group === 'touch' && supported(d)).map(d => [d.key, c[d.key]])),
+    unsupportedInEngine: CONTROLS.filter(d => (d.engines[state.engine] || {}).sup === 'no').map(d => d.key),
+    engineSpecific: nativeOptions(),
+    ui: { detailPanel: state.ui.panelOpen ? 'open' : 'closed', sidebarWidthPx: state.ui.panelW, theme: state.ui.theme }
+  };
+}
+function initCode() {
+  const c = cfg(), out = [];
+  if (state.engine === 'leaflet') {
+    out.push('// Leaflet 1.9.4 — generated by Map UX Lab ' + VERSION);
+    out.push("const map = L.map('map', {");
+    out.push('  center: [' + HOME.lat + ', ' + HOME.lng + '], zoom: ' + HOME.zoom + ',');
+    out.push('  dragging: ' + c.dragPan + ', touchZoom: ' + c.pinchZoom + ',');
+    out.push('  scrollWheelZoom: ' + (c.wheelZoom ? (c.wheelAround === 'center' ? "'center'" : 'true') : 'false') + ',');
+    out.push('  doubleClickZoom: ' + (c.dblClick === 'on' ? 'true' : c.dblClick === 'center' ? "'center'" : 'false') + ',');
+    out.push('  zoomSnap: ' + Number(c.zoomSnap) + ', zoomDelta: ' + c.zoomDelta + ',');
+    out.push('  inertia: ' + c.inertia + ', inertiaDeceleration: ' + c.inertiaDecel + ',');
+    out.push('  wheelPxPerZoomLevel: ' + c.wheelPx + ', wheelDebounceTime: ' + c.wheelDebounce + ',');
+    out.push('  tapTolerance: ' + c.tapTolerance + ', bounceAtZoomLimits: ' + c.bounce + ',');
+    out.push('  boxZoom: ' + c.boxZoom + ', keyboard: ' + c.keyboard);
+    out.push('});');
+    out.push("L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);");
+    if (c.scrollMode === 'cooperative') {
+      out.push('// Page-scroll friendly: a plain wheel gesture scrolls the page; Ctrl/Cmd + wheel zooms.');
+      out.push("mapEl.addEventListener('wheel', (e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }, { capture: true, passive: true });");
+    } else if (c.scrollMode === 'ignore') {
+      out.push('// The map never captures wheel input; the page scrolls everywhere.');
+      out.push("mapEl.addEventListener('wheel', (e) => e.stopPropagation(), { capture: true, passive: true });");
+    }
+  } else {
+    out.push('// MapLibre GL JS 4.7.1 — generated by Map UX Lab ' + VERSION);
+    out.push('const map = new maplibregl.Map({');
+    out.push("  container: 'map',");
+    out.push("  style: { version: 8, sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '&copy; OpenStreetMap contributors' } }, layers: [{ id: 'osm', type: 'raster', source: 'osm' }] },");
+    out.push('  center: [' + HOME.lng + ', ' + HOME.lat + '], zoom: ' + HOME.zoom + ',');
+    out.push('  cooperativeGestures: ' + (c.scrollMode === 'cooperative') + ',');
+    out.push('  clickTolerance: ' + c.clickTolerance + ',');
+    out.push('  attributionControl: { compact: true }');
+    out.push('});');
+    if (c.dragPan) out.push('map.dragPan.enable({ linearity: 0.3, deceleration: ' + c.inertiaDecel + ', maxSpeed: ' + c.inertiaMaxSpeed + ' });');
+    else out.push('map.dragPan.disable();');
+    if (!c.dragRotate) out.push('map.dragRotate.disable();');
+    if (!c.wheelZoom) out.push('map.scrollZoom.disable();');
+    if (c.dblClick !== 'on') out.push('map.doubleClickZoom.disable();');
+    if (!c.boxZoom) out.push('map.boxZoom.disable();');
+    if (!c.keyboard) out.push('map.keyboard.disable();');
+    if (!c.pinchZoom) out.push('map.touchZoomRotate.disable();');
+    else if (!c.rotation) out.push('map.touchZoomRotate.disableRotation();');
+    if (!c.pitch) out.push('map.touchPitch.disable();');
+  }
+  const pol = {
+    always_auto: '// Viewport policy: application actions may reposition the map at any time.',
+    respect_manual: '// Viewport policy: stop automatic viewport changes after manual navigation.\nlet userControlled = false;\nmap.on("dragstart", () => { userControlled = true; });\nmap.on("zoomstart", () => { userControlled = true; });\nfunction autoFit(fn) { if (!userControlled) fn(); }',
+    explicit_only: '// Viewport policy: only explicit commands (Fit / Home / POI selection) may move the map.',
+    preserve_zoom: '// Viewport policy: selections recenter but must preserve the current zoom.\nfunction selectPoi(lat, lng) { map.setView([lat, lng], map.getZoom()); }',
+    preserve_view: '// Viewport policy: selection changes never alter the viewport.'
+  }[state.policy];
+  out.push(pol);
+  return out.join('\n');
+}
+function behaviorSpec() {
+  const c = cfg(), out = [];
+  out.push('Mapping interaction requirements for Junkdrawer embedded maps (' + state.engine + ', generated from Map UX Lab ' + VERSION + '):');
+  if (c.scrollMode === 'capture') out.push('• The map captures wheel input over it for zooming; the surrounding page does not scroll while the pointer is over the map.');
+  if (c.scrollMode === 'cooperative') out.push('• Embedded maps must not aggressively capture normal page scrolling: a plain wheel gesture scrolls the page, and zooming requires a deliberate modifier gesture (Ctrl/Cmd + wheel) or cooperative touch handling. When a gesture is handed back to the page, show a hint such as “Use Ctrl + scroll to zoom”.');
+  if (c.scrollMode === 'ignore') out.push('• The map never captures wheel input; the page scrolls everywhere and zooming happens only through visible controls.');
+  if (state.engine === 'leaflet') {
+    out.push('• Scroll zoom must be ' + (c.wheelPx > 60 ? 'intentionally dampened' : 'calibrated') + ': about ' + c.wheelPx + ' px of wheel travel per zoom step (engine default is 60; higher is calmer)' + (c.wheelDebounce ? ', with a ' + c.wheelDebounce + ' ms wheel debounce.' : ', with no debounce.'));
+    out.push('• Wheel zoom is anchored to the ' + (c.wheelAround === 'center' ? 'map center' : 'pointer position') + '.');
+    out.push('• Zoom snap is ' + (Number(c.zoomSnap) === 0 ? 'fully fractional (0)' : Number(c.zoomSnap)) + ' and the zoom increment is ' + c.zoomDelta + '.');
+    out.push('• Drag inertia is ' + (c.inertia ? 'enabled (deceleration ' + c.inertiaDecel + ')' : 'disabled') + '.');
+    out.push('• Touch rotation and pitch are not supported by this engine — they cannot be triggered accidentally.');
+    out.push('• Tap-vs-drag tolerance is ' + c.tapTolerance + ' px of finger travel, so small jitter still counts as a tap.');
+    out.push(c.bounce ? '• The map bounces at zoom limits (rubber-band feedback).' : '• No bounce at zoom limits; movement stops hard at min/max zoom.');
+    out.push('• Double-click zoom is ' + (c.dblClick === 'off' ? 'disabled' : c.dblClick === 'center' ? 'enabled and anchored to the map center' : 'enabled and anchored to the cursor') + '.');
+  } else {
+    out.push('• Double-click zoom is ' + (c.dblClick === 'on' ? 'enabled' : 'disabled') + '; zoom is always fractional and the wheel rate is engine-fixed.');
+    out.push('• Pan inertia deceleration is ' + c.inertiaDecel + ' with max speed ' + c.inertiaMaxSpeed + ' (lower deceleration = longer glide).');
+    out.push('• Drag rotation (right-drag / ctrl-drag) is ' + (c.dragRotate ? 'enabled' : 'disabled') + '.');
+    out.push('• Touch rotation is ' + (c.rotation ? 'enabled — a pinch may rotate the map unless rotation is disabled' : 'disabled — pinch zoom cannot accidentally rotate the map') + '; touch pitch is ' + (c.pitch ? 'enabled' : 'disabled') + '.');
+    out.push('• Click-vs-drag tolerance is ' + c.clickTolerance + ' px so map clicks do not misfire during small drags.');
+    if (c.scrollMode === 'cooperative') out.push('• Cooperative gestures are enabled natively: a single-finger touch scrolls the page (the map shows a hint), and wheel zoom requires Ctrl/Cmd.');
+  }
+  out.push(c.keyboard ? '• Keyboard navigation (arrow pan, +/− zoom) is enabled.' : '• Keyboard navigation is disabled.');
+  out.push(c.boxZoom ? '• Shift-drag box zoom is enabled.' : '• Box zoom is disabled.');
+  out.push({
+    always_auto: '• Application actions (data reloads, radius changes, refresh) may reposition the map whenever appropriate.',
+    respect_manual: '• Automatic viewport changes stop after the user manually pans or zooms; explicit navigation commands still reposition the map.',
+    explicit_only: '• Only explicit commands (Fit results, Home, Fit route, POI selection) may change the viewport; background data changes never do.',
+    preserve_zoom: '• Selecting a result may recenter the map but must preserve the user’s current zoom level.',
+    preserve_view: '• Selection and data changes update data/UI but never change the viewport.'
+  }[state.policy]);
+  out.push('• Opening or closing the detail panel resizes the map and must not shift the map center or reset user navigation state.');
+  return out.join('\n');
+}
+function refreshExport() {
+  const j = JSON.stringify(configJson(), null, 2);
+  const code = initCode();
+  const spec = behaviorSpec();
+  $('exp-json').textContent = j;
+  $('exp-code').textContent = code;
+  $('exp-spec').innerHTML = '<ul>' + spec.split('\n').map(l => '<li>' + esc(l.replace(/^• /, '')) + '</li>').join('') + '</ul>';
+  $('exp-all').textContent = '=== CONFIGURATION JSON ===\n' + j + '\n\n=== INITIALIZATION CODE ===\n' + code + '\n\n=== BEHAVIORAL SPECIFICATION ===\n' + spec;
+}
+function copyText(text, label) {
+  const done = () => setStatus('✓ ' + label + ' copied');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, label, done));
+  } else fallbackCopy(text, label, done);
+}
+function fallbackCopy(text, label, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { setStatus('Copy failed — select the text manually'); }
+  ta.remove();
+}
+document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
+  const kind = b.getAttribute('data-copy');
+  copyText(
+    kind === 'json' ? $('exp-json').textContent :
+    kind === 'code' ? $('exp-code').textContent :
+    kind === 'spec' ? $('exp-spec').textContent : $('exp-all').textContent,
+    { json: 'JSON', code: 'Init code', spec: 'Behavioral spec', all: 'Everything' }[kind]
+  );
+}));
+
+/* =====================================================================
+   FAVORITE
+   ===================================================================== */
+$('btn-favorite').addEventListener('click', () => {
+  const fav = {
+    savedAt: new Date().toISOString(),
+    engine: state.engine,
+    configs: JSON.parse(JSON.stringify(state.configs)),
+    policy: state.policy,
+    preset: JSON.parse(JSON.stringify(state.preset)),
+    ui: { panelOpen: state.ui.panelOpen, panelW: state.ui.panelW }
+  };
+  state.favorite = fav;
+  guardedSet(LS_FAV, JSON.stringify(fav));
+  renderFavoriteLine();
+  setStatus('★ Favorite saved ' + new Date().toLocaleTimeString());
+  logEvent('favorite saved', state.engine + ' · ' + state.preset[state.engine], 'sys');
+});
+function renderFavoriteLine() {
+  const line = $('favorite-line');
+  if (!state.favorite) { line.hidden = true; return; }
+  line.hidden = false;
+  line.innerHTML = '★ Favorite saved <strong>' + new Date(state.favorite.savedAt).toLocaleString() + '</strong> (' + esc(state.favorite.engine) + ') — <button class="hbtn" id="btn-restore-fav" style="font-size:0.75rem;padding:0.25rem 0.6rem;">Restore favorite</button>';
+  $('btn-restore-fav').addEventListener('click', restoreFavorite);
+}
+function restoreFavorite() {
+  const f = state.favorite;
+  if (!f) return;
+  state.configs = JSON.parse(JSON.stringify(DEFAULTS));
+  for (const eng of ['leaflet', 'maplibre']) Object.assign(state.configs[eng], f.configs[eng] || {});
+  state.policy = POLICIES.some(x => x.id === f.policy) ? f.policy : state.policy;
+  state.preset = Object.assign(state.preset, f.preset || {});
+  if (f.engine) switchEngine(f.engine, true);
+  else { applyEngineConfig(); renderControls(); }
+  persist(); refreshExport();
+  setStatus('Favorite restored');
+  logEvent('favorite restored', f.savedAt, 'sys');
+}
+
+/* =====================================================================
+   ENGINE SWITCH + COMPARE + SYNC
+   ===================================================================== */
+function switchEngine(eng, silent) {
+  state.engine = eng;
+  $('map-leaflet').classList.toggle('active', eng === 'leaflet' || state.ui.compare === true);
+  if (eng === 'maplibre' || state.ui.compare) {
+    if (!maps.maplibre) createMaplibre();
+  }
+  $('map-maplibre').classList.toggle('active', eng === 'maplibre' || state.ui.compare);
+  if (!maps.leaflet) createLeaflet();
+  applyEngineConfig();
+  resizeMaps();
+  renderControls();
+  refreshExport();
+  renderInstrumentation();
+  if (!silent) { setStatus('Engine: ' + (eng === 'leaflet' ? 'Leaflet' : 'MapLibre')); logEvent('engine switched', eng, 'sys'); }
+  persist();
+}
+$('eng-leaflet').addEventListener('click', () => switchEngine('leaflet'));
+$('eng-maplibre').addEventListener('click', () => switchEngine('maplibre'));
+$('btn-engine-reset').addEventListener('click', () => applyPreset(state.engine === 'leaflet' ? 'Leaflet Default' : 'MapLibre Default'));
+$('btn-all-reset').addEventListener('click', () => {
+  try { localStorage.removeItem(LS_CFG); localStorage.removeItem(LS_FAV); } catch (e) { /* ignore */ }
+  state.configs = JSON.parse(JSON.stringify(DEFAULTS));
+  state.preset = { leaflet: 'Leaflet Default', maplibre: 'MapLibre Default' };
+  state.policy = 'respect_manual';
+  state.favorite = null;
+  applyEngineConfig(); renderControls(); refreshExport(); renderFavoriteLine(); renderInstrumentation();
+  setStatus('All settings reset to defaults');
+  logEvent('settings reset', 'all', 'sys');
+});
+
+$('btn-compare').addEventListener('click', () => {
+  state.ui.compare = !state.ui.compare;
+  $('btn-compare').setAttribute('aria-pressed', String(state.ui.compare));
+  $('map-wrap').classList.toggle('compare', state.ui.compare);
+  $('map-leaflet').classList.toggle('active', state.ui.compare || state.engine === 'leaflet');
+  $('map-maplibre').classList.toggle('active', state.ui.compare || state.engine === 'maplibre');
+  if (state.ui.compare) {
+    if (!maps.leaflet) createLeaflet();
+    if (!maps.maplibre) createMaplibre();
+    setTimeout(() => { resizeMaps(); if (maps.leaflet && maps.maplibre) syncNow(state.engine); }, 80);
+    logEvent('compare mode', 'enabled — both engines share the fixture', 'sys');
+  } else {
+    resizeMaps();
+    logEvent('compare mode', 'disabled', 'sys');
+  }
+});
+function syncNow(fromEngine) {
+  const from = maps[fromEngine], toName = fromEngine === 'leaflet' ? 'maplibre' : 'leaflet';
+  const to = maps[toName];
+  if (!from || !to || state.syncBusy) return;
+  state.syncBusy = true;
+  try {
+    const c = from.getCenter(), z = from.getZoom();
+    const t = to.getCenter(), tz = to.getZoom();
+    if (Math.abs(t.lat - c.lat) > 1e-7 || Math.abs(t.lng - c.lng) > 1e-7 || Math.abs(tz - z) > 0.005) {
+      if (toName === 'maplibre') to.jumpTo({ center: [c.lng, c.lat], zoom: z });
+      else to.setView([c.lat, c.lng], z, { animate: false });
+    }
+  } finally { setTimeout(() => { state.syncBusy = false; }, 90); }
+}
+function syncFrom(fromEngine) { syncNow(fromEngine); }
+
+/* =====================================================================
+   TORTURE TEST
+   ===================================================================== */
+const TORTURE = [
+  'Drag Princeton from the center toward the upper-left.',
+  'Zoom in approximately two useful levels (wheel or pinch).',
+  'Zoom back out one level.',
+  'Click a marker without unintentionally moving the map.',
+  'Pan a short distance and feel the inertia stop.',
+  'Make a very small zoom gesture (one wheel notch / tiny pinch).',
+  'Scroll the surrounding webpage across the map.',
+  'Select a POI (button or marker click).',
+  'Trigger “Load new observations.”',
+  'Open and close the detail panel.',
+  'Repeat the full sequence on a phone using touch/pinch.'
+];
+function renderTorture() {
+  const ol = $('tt-list'); ol.innerHTML = '';
+  TORTURE.forEach((txt, i) => {
+    const li = document.createElement('li');
+    const n = document.createElement('span'); n.className = 'n'; n.textContent = (i + 1) + '.';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'tt-' + i;
+    cb.checked = !!state.ui.tt[i];
+    cb.addEventListener('change', () => {
+      state.ui.tt[i] = cb.checked;
+      li.classList.toggle('done', cb.checked);
+      updateTtProgress(); persist();
+    });
+    if (cb.checked) li.classList.add('done');
+    const sp = document.createElement('span'); sp.textContent = txt;
+    li.appendChild(n); li.appendChild(cb); li.appendChild(sp);
+    ol.appendChild(li);
+  });
+  updateTtProgress();
+}
+function updateTtProgress() {
+  $('tt-progress').textContent = state.ui.tt.filter(Boolean).length + '/' + TORTURE.length;
+}
+$('btn-tt-reset').addEventListener('click', () => { state.ui.tt = new Array(11).fill(false); renderTorture(); persist(); setStatus('Torture test reset'); });
+
+/* =====================================================================
+   THEME + RESIZE + BOOT
+   ===================================================================== */
+$('btn-theme').addEventListener('click', () => {
+  state.ui.theme = state.ui.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', state.ui.theme);
+  persist();
+});
+const ro = new ResizeObserver(() => { clearTimeout(ro._t); ro._t = setTimeout(resizeMaps, 120); });
+ro.observe($('map-wrap'));
+
+loadPersisted();
+document.documentElement.setAttribute('data-theme', state.ui.theme);
+document.documentElement.style.setProperty('--panel-w', state.ui.panelW + 'px');
+$('pointer-mode').textContent = window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse/trackpad';
+renderVpButtons();
+renderTorture();
+switchEngine(state.engine, true);
+renderFavoriteLine();
+setPanel(state.ui.panelOpen);
+refreshExport();
+renderInstrumentation();
+logEvent('lab ready', 'engine: ' + state.engine, 'sys');
+
+/* ---------------- test hook ---------------- */
+window.__MAPUX_TEST__ = {
+  get state() { return state; },
+  get maps() { return maps; },
+  cfg, configJson, initCode, behaviorSpec, nativeOptions,
+  applyPreset, switchEngine, runViewport, ACTIONS, POLICIES, SCROLL_MODES,
+  markUserControl, decideViewport, currentView, resizeMaps,
+  wheelTel, logEvent, selectPoi, setPanel, CONTROLS, DEFAULTS, PRESETS
+};
+})();
+</script>
+</body>
+</html>
