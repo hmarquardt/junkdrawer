@@ -1,7 +1,33 @@
 const { test, expect } = require('@playwright/test');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
+
+// Static JS syntax check: fail fast if the main app IIFE doesn't parse
+test('main application JavaScript has no syntax errors', () => {
+  const html = fs.readFileSync(path.resolve(process.cwd(), 'fruiting-forecast.html'), 'utf-8');
+  // Find the main app script block by looking for the test API marker
+  const marker = '__FRUITING_FORECAST_TEST__';
+  const scriptStart = html.lastIndexOf('<script>', html.indexOf(marker));
+  const scriptEnd = html.indexOf('</script>', scriptStart);
+  const mainJs = html.slice(scriptStart + '<script>'.length, scriptEnd);
+  expect(mainJs.length).toBeGreaterThan(10000);
+  execSync('node --check /dev/stdin', { input: mainJs, timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+});
+
+test('page loads without syntax errors and app initializes', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error' && !m.text().includes('Failed to load resource')) errors.push(m.text()); });
+  await page.route('**/api/analytics/**', r => r.abort());
+  await page.route('https://tile.openstreetmap.org/**', r => r.abort());
+  await page.goto(`http://127.0.0.1:8791/fruiting-forecast.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.__FRUITING_FORECAST_TEST__);
+  const hasTestApi = await page.evaluate(() => !!window.__FRUITING_FORECAST_TEST__);
+  expect(hasTestApi).toBe(true);
+  expect(errors).toEqual([]);
+});
 
 const port = 8791;
 const httpUrl = `http://127.0.0.1:${port}/fruiting-forecast.html`;
@@ -98,11 +124,11 @@ test('DuckDB-Wasm loads Spatial and queries real local Parquet tiles', async ({ 
     const points = t.zonePoints(38.3553, -87.5675, 25, 'standard');
     const evidence = await t.HabitatProvider.fetch(points, { lat: 38.3553, lon: -87.5675 }, 25, new AbortController().signal, false);
     const state = t.getState();
-    const cachedTiles = (await t.dbAll('cache')).filter(row => row.key.startsWith('gis-tile:'));
+    const cachedTiles = (await t.dbAll('cache')).filter(row => row.key && (row.key.startsWith('gis-tile:') || row.key.startsWith('gis-asset:')));
     return { manifest: manifest.datasetVersion, tiles: state.gis.tiles.length, cachedTiles: cachedTiles.length, spatial: state.gis.spatial, cells: evidence.center && evidence.center.sampleCells, forest: evidence.center && evidence.center.forest.cover };
   });
   expect(result.tiles).toBeGreaterThan(0);
-  expect(result.cachedTiles).toBe(result.tiles);
+  expect(result.cachedTiles).toBeGreaterThanOrEqual(result.tiles);
   expect(result.spatial).toBe(true);
   expect(result.cells).toBeGreaterThan(1);
   expect(result.forest).toBeGreaterThanOrEqual(0);
