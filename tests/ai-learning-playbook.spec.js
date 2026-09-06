@@ -5,7 +5,10 @@ test.use({ channel: 'chrome' });
 
 const url = `file://${path.resolve(process.cwd(), 'ai-learning-playbook.html')}`;
 const viewports = [
+  { width: 360, height: 800 },
   { width: 390, height: 844 },
+  { width: 412, height: 915 },
+  { width: 430, height: 932 },
   { width: 768, height: 1024 },
   { width: 1024, height: 768 },
   { width: 1440, height: 900 },
@@ -26,11 +29,99 @@ for (const viewport of viewports) {
     for (const id of ['start', 'builder', 'modes', 'voice', 'library', 'cost', 'evidence', 'terms', 'guide']) {
       await page.evaluate(section => window.__AI_PLAYBOOK_TEST__.go(section, false), id);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-      expect(overflow).toBeLessThanOrEqual(1);
+      expect(overflow, `${id} section overflow at ${viewport.width}px`).toBeLessThanOrEqual(1);
+    }
+    await page.locator('[data-lang="es"]').click();
+    for (const id of ['start', 'builder', 'modes', 'voice', 'library', 'cost', 'evidence', 'terms', 'guide']) {
+      await page.evaluate(section => window.__AI_PLAYBOOK_TEST__.go(section, false), id);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `${id} section Spanish overflow at ${viewport.width}px`).toBeLessThanOrEqual(1);
     }
     expect(errors).toEqual([]);
   });
 }
+
+test('descriptive builder choices use separated, mobile-friendly card structure', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  await page.route('**/api/analytics/**', route => route.fulfill({ status: 204, body: '' }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${url}#builder`, { waitUntil: 'domcontentloaded' });
+
+  const assistance = page.locator('#assistanceChoices .choice');
+  await expect(assistance).toHaveCount(3);
+  await expect(assistance.locator('.choice-title')).toHaveCount(3);
+  await expect(assistance.locator('.choice-description')).toHaveCount(3);
+  await expect(page.locator('.approach .choice-content')).toHaveCount(3);
+  await expect(page.locator('#tutorLanguageChoices .choice-content')).toHaveCount(4);
+
+  const layout = await page.locator('#assistanceChoices').evaluate(grid => {
+    const columns = getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/);
+    return {
+      columns: columns.length,
+      choices: [...grid.querySelectorAll('.choice')].map(choice => {
+        const label = choice.querySelector('label');
+        const content = choice.querySelector('.choice-content');
+        const title = choice.querySelector('.choice-title');
+        const description = choice.querySelector('.choice-description');
+        const labelStyle = getComputedStyle(label);
+        return {
+          contentDisplay: getComputedStyle(content).display,
+          titleDisplay: getComputedStyle(title).display,
+          descriptionDisplay: getComputedStyle(description).display,
+          labelWidth: label.getBoundingClientRect().width,
+          choiceWidth: choice.getBoundingClientRect().width,
+          labelHeight: label.getBoundingClientRect().height,
+          paddingInline: parseFloat(labelStyle.paddingLeft),
+          paddingBlock: parseFloat(labelStyle.paddingTop),
+        };
+      }),
+    };
+  });
+  expect(layout.columns).toBe(1);
+  for (const choice of layout.choices) {
+    expect(choice.contentDisplay).toBe('grid');
+    expect(choice.titleDisplay).toBe('block');
+    expect(choice.descriptionDisplay).toBe('block');
+    expect(Math.abs(choice.labelWidth - choice.choiceWidth)).toBeLessThanOrEqual(1);
+    expect(choice.labelHeight).toBeGreaterThanOrEqual(44);
+    expect(choice.paddingInline).toBeGreaterThanOrEqual(14);
+    expect(choice.paddingBlock).toBeGreaterThanOrEqual(12);
+  }
+
+  await assistance.first().locator('label').click();
+  await expect(assistance.first().locator('input')).toBeChecked();
+  const selectedColors = await assistance.first().evaluate(choice => {
+    const label = choice.querySelector('label');
+    const title = choice.querySelector('.choice-title');
+    const description = choice.querySelector('.choice-description');
+    return {
+      background: getComputedStyle(label).backgroundColor,
+      title: getComputedStyle(title).color,
+      description: getComputedStyle(description).color,
+    };
+  });
+  expect(selectedColors.title).toBe(selectedColors.description);
+  expect(selectedColors.title).not.toBe(selectedColors.background);
+  await assistance.first().locator('input').focus();
+  const focusOutline = await assistance.first().locator('label').evaluate(label => parseFloat(getComputedStyle(label).outlineWidth));
+  expect(focusOutline).toBeGreaterThanOrEqual(3);
+  await page.locator('[data-lang="es"]').click();
+  await expect(assistance.first().locator('.choice-title')).toHaveText('Primero el aprendizaje');
+  await expect(assistance.first().locator('.choice-description')).toContainText('Prioriza la comprensión');
+  const spanishLayout = await page.locator('#assistanceChoices').evaluate(grid => ({
+    columns: getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length,
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  }));
+  expect(spanishLayout.columns).toBe(1);
+  expect(spanishLayout.overflow).toBeLessThanOrEqual(1);
+
+  await page.locator('#assistanceChoices').screenshot({ path: '/private/tmp/ai-learning-playbook-assistance-390.png' });
+  expect(errors).toEqual([]);
+});
 
 test('builder, copy, filters, calculator and tab focus behavior work', async ({ page }) => {
   const errors = [];
