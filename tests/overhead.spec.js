@@ -1,11 +1,15 @@
 const {test,expect}=require('@playwright/test');
 const path=require('path');
+const fs=require('fs');
+const http=require('http');
+const {execFileSync}=require('child_process');
 test.use({channel:'chrome'});
+test.setTimeout(90000);
 const iss={OBJECT_NAME:'ISS (ZARYA)',OBJECT_ID:'1998-067A',EPOCH:'2026-09-07T11:57:47.376864',MEAN_MOTION:15.49018229,ECCENTRICITY:.00049836,INCLINATION:51.6306,RA_OF_ASC_NODE:252.7093,ARG_OF_PERICENTER:115.8922,MEAN_ANOMALY:244.258,EPHEMERIS_TYPE:0,CLASSIFICATION_TYPE:'U',NORAD_CAT_ID:25544,ELEMENT_SET_NO:999,REV_AT_EPOCH:58451,BSTAR:.00010434666,MEAN_MOTION_DOT:.00005306,MEAN_MOTION_DDOT:0};
 const start=Date.parse('2026-09-06T00:00Z')/1000;
 const hourly={time:Array.from({length:264},(_,i)=>start+i*3600)};
 for(const [key,value]of Object.entries({cloud_cover:12,cloud_cover_low:5,cloud_cover_mid:0,cloud_cover_high:7,visibility:30000,precipitation:0,relative_humidity_2m:60,weather_code:0,temperature_2m:20}))hourly[key]=Array(264).fill(value);
-async function boot(page,{offline=false}={}){const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!m.text().includes('Failed to load resource'))errors.push(m.text());});await page.clock.setFixedTime(new Date('2026-09-07T18:00Z'));await page.route('**/api/analytics/**',r=>r.fulfill({status:204,body:''}));await page.route('**celestrak.org/**',r=>r.fulfill({json:offline?{error:'Unavailable'}:[iss]}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:offline?{error:'Unavailable'}:{timezone:'America/Chicago',hourly}}));await page.goto(`file://${path.resolve('overhead.html')}`);await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);return errors;}
+async function boot(page,{offline=false,url}={}){const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!m.text().includes('Failed to load resource'))errors.push(m.text());});await page.clock.setFixedTime(new Date('2026-09-07T18:00Z'));await page.route('**/api/analytics/**',r=>r.fulfill({status:204,body:''}));await page.route('**celestrak.org/**',r=>r.fulfill({json:offline?{error:'Unavailable'}:[iss]}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:offline?{error:'Unavailable'}:{timezone:'America/Chicago',hourly}}));await page.goto(url||`file://${path.resolve('overhead.html')}`);await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);return errors;}
 test('all widths, seven nights, sky chart, favorite, settings and saved sites',async({page})=>{const errors=await boot(page);for(const width of [390,768,1024,1440,1920]){await page.setViewportSize({width,height:950});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await expect(page.locator('#headline')).not.toBeEmpty();}
  await page.getByRole('tab',{name:'NEXT 7 DAYS'}).click();await expect(page.locator('#week button')).toHaveCount(7);await page.locator('[data-day="1"]').click();await page.locator('.event').first().click();await expect(page.locator('#detail-title')).toContainText('ISS');await expect(page.locator('#detail-content svg')).toBeVisible();await page.getByRole('button',{name:'Favorite spacecraft'}).click();expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('overhead.favorites')))).toEqual(['25544']);await page.keyboard.press('Escape');
  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.locator('[name="minimum"]').selectOption('30');await page.locator('[name="clock"]').selectOption('24');await page.getByRole('button',{name:'Apply settings'}).click();await page.waitForFunction(()=>!__OVERHEAD_TEST__.state.busy);expect(await page.evaluate(()=>__OVERHEAD_TEST__.state.settings.minimum)).toBe('30');
@@ -14,3 +18,81 @@ test('all widths, seven nights, sky chart, favorite, settings and saved sites',a
 });
 test('API failures never create events; import restores real orbital calculation',async({page})=>{const errors=await boot(page,{offline:true});await expect(page.locator('.event')).toHaveCount(0);await expect(page.locator('#headline')).toContainText('data isn’t');await expect(page.locator('#night-score')).toHaveText('—');await page.locator('#diagnostics summary').click();await page.locator('#import').setInputFiles({name:'iss.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify([iss]))});await page.waitForFunction(()=>!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();expect(await page.evaluate(()=>Object.values(__OVERHEAD_TEST__.state.results).flat().every(p=>p.provisional))).toBe(true);expect(errors).toEqual([]);});
 test('stale cache survives network failure, then clearing cache removes downloaded data',async({page})=>{await boot(page);await page.evaluate(()=>new Promise((resolve,reject)=>{const r=indexedDB.open('overhead-cache',1);r.onsuccess=()=>{const tx=r.result.transaction('responses','readwrite'),s=tx.objectStore('responses'),q=s.getAll();q.onsuccess=()=>q.result.forEach(row=>s.put({...row,at:Date.now()-86400000}));tx.oncomplete=resolve;tx.onerror=reject;};}));await page.route('**celestrak.org/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();await expect(page.locator('#freshness')).toContainText('STALE');await page.locator('#diagnostics summary').click();await page.getByRole('button',{name:'Clear downloaded cache'}).click();await expect(page.locator('#status')).toContainText('cache cleared');await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event')).toHaveCount(0);});
+test('theme-only rendering, deployed dark parity, contrast and persistence',async({page,browser})=>{
+ const baseline=execFileSync('git',['show','8725153:overhead.html'],{encoding:'utf8'});
+ const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
+ const old=await browser.newPage();
+ try{
+ await page.addInitScript(()=>requestAnimationFrame(()=>{window.__firstTheme=document.documentElement.dataset.theme||'dark';}));
+ await page.emulateMedia({colorScheme:'light'});const errors=await boot(page,{url:origin+'/overhead.html'});const oldErrors=await boot(old,{url:origin+'/baseline/overhead.html'});
+ expect(await page.evaluate(()=>getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
+ const boxes=()=>page.evaluate(()=>Object.fromEntries(['header','.toolbar','.briefing','.layout','#events','.chart-panel','.timeline-panel'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [s,[r.x,r.y,r.width,r.height]];})));
+ const application=()=>page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return JSON.stringify({site:s.site,settings:s.settings,selected:s.selected,results:s.results,view:s.view,day:s.day,favorites:s.favorites});});
+ for(const width of [390,768,1024,1440,1920]){
+   await page.setViewportSize({width,height:1000});await old.setViewportSize({width,height:1000});await page.waitForTimeout(250);
+   const before=await boxes();const data=await application();
+   const dark=await page.screenshot({fullPage:true,mask:[page.locator('footer'),page.locator('#freshness')],path:'/private/tmp/overhead-theme-dark-'+width+'.png'});
+   const original=await old.screenshot({fullPage:true,mask:[old.locator('footer'),old.locator('#freshness')],path:'/private/tmp/overhead-theme-original-'+width+'.png'});
+   const pixelDifference=await page.evaluate(async images=>{const read=async src=>{const i=new Image();i.src=src;await i.decode();const c=document.createElement('canvas');c.width=i.width;c.height=i.height;const ctx=c.getContext('2d');ctx.drawImage(i,0,0);return {pixels:ctx.getImageData(0,0,c.width,c.height).data,w:c.width,h:c.height};};const [a,b]=await Promise.all(images.map(read));let count=0,minX=a.w,minY=a.h,maxX=0,maxY=0;for(let i=0;i<a.pixels.length;i+=4)if(a.pixels[i]!==b.pixels[i]||a.pixels[i+1]!==b.pixels[i+1]||a.pixels[i+2]!==b.pixels[i+2]||a.pixels[i+3]!==b.pixels[i+3]){const x=(i/4)%a.w,y=Math.floor(i/4/a.w);count++;minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}return {count,bounds:[minX,minY,maxX,maxY],dimensions:[a.w,a.h,b.w,b.h]};},[dark,original].map(b=>'data:image/png;base64,'+b.toString('base64')));
+   console.log('Dark comparison',width,pixelDifference);
+   expect(pixelDifference.count,'Original dark rendering at '+width+'px').toBe(0);
+   await page.locator('#settings-open').click();await page.getByRole('button',{name:'Use light theme'}).click();
+   await expect(page.getByRole('button',{name:'Use light theme'})).toHaveAttribute('aria-pressed','true');
+   await page.keyboard.press('Escape');await page.mouse.click(1,1);
+   expect(await boxes()).toEqual(before);expect(await application()).toBe(data);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(width);
+   await page.screenshot({fullPage:true,path:'/private/tmp/overhead-theme-light-'+width+'.png'});
+   await page.locator('#settings-open').click();await page.getByRole('button',{name:'Use dark theme'}).click();await page.keyboard.press('Escape');await page.mouse.click(1,1);
+   expect(await boxes()).toEqual(before);
+ }
+ await page.locator('#settings-open').click();await page.getByRole('button',{name:'Use light theme'}).focus();await page.keyboard.press('Enter');
+ expect(await page.getByRole('button',{name:'Use light theme'}).evaluate(el=>getComputedStyle(el).outlineStyle)).toBe('solid');
+ const contrast=await page.evaluate(()=>{
+  const css=getComputedStyle(document.documentElement),hex=n=>css.getPropertyValue('--'+n).trim();
+  const rgb=h=>h.match(/[a-f0-9]{2}/gi).map(v=>parseInt(v,16)/255),lum=c=>c.map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((a,v,i)=>a+v*[.2126,.7152,.0722][i],0);
+  const ratio=(a,b)=>{const x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+  const result={};for(const fg of ['ink','muted','lime','blue','amber','danger','route','footer'])for(const bg of ['bg','panel','status-bg','hover','event-hover'])result[fg+'/'+bg]=ratio(rgb(hex(fg)),rgb(hex(bg)));
+  result['action text']=ratio(rgb(hex('on-action')),rgb(hex('lime')));result['sky grid']=ratio(rgb(hex('sky-grid')),rgb(hex('panel')));result['input border']=ratio(rgb(hex('control-border')),rgb(hex('input-bg')));
+  const cloud=rgb(hex('timeline-cloud')),alpha=+hex('cloud-opacity');for(const bg of ['timeline-night','twilight-civil','twilight-nautical','twilight-astro']){const back=rgb(hex(bg));result['cloud/'+bg]=ratio(cloud.map((x,i)=>x*alpha+back[i]*(1-alpha)),back);result['event/'+bg]=ratio(rgb(hex('lime')),back);}
+  return result;
+ });
+ for(const [name,ratio]of Object.entries(contrast))expect(ratio,name).toBeGreaterThanOrEqual(name.startsWith('cloud/')||name.startsWith('event/')||name==='sky grid'||name==='input border'?3:4.5);
+ console.log('Light contrast ratios',JSON.stringify(contrast));
+ await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);
+ expect(await page.evaluate(()=>document.documentElement.dataset.theme)).toBe('light');expect(await page.evaluate(()=>window.__firstTheme)).toBe('light');await page.emulateMedia({colorScheme:'dark'});expect(await page.evaluate(()=>document.documentElement.dataset.theme)).toBe('light');
+ await page.locator('.event').first().click();await page.screenshot({path:'/private/tmp/overhead-theme-detail-light.png'});await page.keyboard.press('Escape');
+ await page.getByRole('tab',{name:'NEXT 7 DAYS'}).click();await page.screenshot({fullPage:true,path:'/private/tmp/overhead-theme-week-light.png'});
+ // Existing map instance, camera, data source and selected pass must survive palette changes.
+ await page.locator('.event').first().click();await page.locator('#map-open').click();
+ await page.waitForFunction(()=>__OVERHEAD_TEST__.getMap()?.getLayer('pass'),null,{timeout:30000});
+ await page.evaluate(()=>{const m=__OVERHEAD_TEST__.getMap();m.jumpTo({zoom:3.25,center:[-86,37]});window.__themeMap=m;window.__themeSource=m.getSource('pass');window.__themeResults=__OVERHEAD_TEST__.state.results;});
+ const camera=()=>page.evaluate(()=>{const m=__OVERHEAD_TEST__.getMap();return [m.getZoom(),...m.getCenter().toArray(),m.getBearing(),m.getPitch()];});
+ const fixedCamera=await camera();const passId=await page.evaluate(()=>__OVERHEAD_TEST__.state.selected.id);
+ for(const width of [390,768,1024,1440,1920]){
+   await page.setViewportSize({width,height:1000});await page.evaluate(()=>__OVERHEAD_TEST__.getMap().resize());
+   for(const theme of ['dark','light']){
+     await page.evaluate(theme=>document.querySelector('[data-theme-choice="'+theme+'"]').click(),theme);
+     expect(await camera()).toEqual(fixedCamera);
+     expect(await page.evaluate(()=>__themeMap===__OVERHEAD_TEST__.getMap()&&__themeSource===__themeMap.getSource('pass')&&__themeResults===__OVERHEAD_TEST__.state.results)).toBe(true);
+     expect(await page.evaluate(()=>__OVERHEAD_TEST__.state.selected.id)).toBe(passId);
+     expect(await page.evaluate(()=>__themeMap.getPaintProperty('tiles','raster-brightness-max'))).toBe(theme==='light'?1:.55);
+     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(width);
+     await page.locator('#map').scrollIntoViewIfNeeded();await page.waitForTimeout(400);await page.screenshot({path:'/private/tmp/overhead-theme-map-'+theme+'-'+width+'.png'});
+   }
+ }
+ await page.keyboard.press('Escape');
+ await page.locator('#location-open').click();await page.locator('#save-location').click();await page.screenshot({path:'/private/tmp/overhead-theme-location.png'});await page.keyboard.press('Escape');
+ await page.locator('#settings-open').click();await page.screenshot({path:'/private/tmp/overhead-theme-settings.png'});await page.keyboard.press('Escape');
+ await page.locator('#diagnostics summary').click();await page.screenshot({fullPage:true,path:'/private/tmp/overhead-theme-diagnostics.png'});
+ expect(errors).toEqual([]);expect(oldErrors).toEqual([]);
+ }finally{await old.close();await new Promise(r=>server.close(r));}
+});
+test('theme switching survives failed storage and missing source data',async({page})=>{
+ await page.addInitScript(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='overhead.theme')throw new DOMException('Storage full','QuotaExceededError');return original.call(this,key,value);};});
+ const errors=await boot(page,{offline:true});await page.setViewportSize({width:390,height:844});
+ await page.locator('#settings-open').click();await page.getByRole('button',{name:'Use light theme'}).click();await page.keyboard.press('Escape');
+ expect(await page.evaluate(()=>document.documentElement.dataset.theme)).toBe('light');await expect(page.locator('#status')).toContainText('could not be saved');await expect(page.locator('.event')).toHaveCount(0);
+ await page.screenshot({fullPage:true,path:'/private/tmp/overhead-theme-empty-light.png'});
+ await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);expect(await page.evaluate(()=>getComputedStyle(document.documentElement).colorScheme)).toBe('dark');expect(errors).toEqual([]);
+});
