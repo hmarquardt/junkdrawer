@@ -130,6 +130,45 @@ The map disables wheel, pinch, double-click and rotation zoom. Mouse dragging pa
 
 Both Overhead and the updated Storage Manager pass the repository compliance audit with zero errors and zero warnings.
 
+## Best Thing This Week
+
+A weekly interpretation layer answers "what is the single best thing I could see in the next seven nights, and is it actually exceptional, or just the best of a mediocre week?" It lives in `overhead-weekly.js` (`OverheadWeekly`), is consumed only by the weekly card, the seven-night strip and the diagnostics panel, and never edits or re-derives scored passes — it consumes the same `state.results` the lists already use.
+
+### Functions
+
+- `rankWeeklyEvents(results, nights, options)` — collects likely, sunlit, dark (Sun ≤ −6°), not-yet-ended passes across the first seven nights (deduplicated by pass id), computes relative context for each, and returns the winner, runner-up, ties, best ISS event, best event per night, score/significance gaps, nights without a worthwhile event (score < 60), comparable later events, and the actual horizon end.
+- `classifyEventQuality(pass, ctx, relative)` — deterministic classification into `Routine`, `Fair opportunity`, `Good`, `Excellent`, `Potentially exceptional`, `Exceptional`.
+- `calculateEventSignificance(pass, relative)` — sighting score + prominence points + relative bonus (median gap, capped at 2). Sighting Quality and Event Significance stay logically distinct; the raw sighting score is never distorted for prominence.
+- `findComparableEvents(event, entries)` — later same-or-better-significance events, used for "next event this good".
+- `buildViewingInstruction(pass, {time, now})` — plain-English instruction from entry azimuth (16-point compass), peak elevation (≥75° → "goes almost overhead"; <30° → "look low"), and start time rounded to the minute minus two minutes.
+
+### Classification thresholds
+
+`Excellent` baseline: score ≥ 75, peak elevation ≥ 35°, duration ≥ 120 s. `Good`: score ≥ 60, elevation ≥ 20°, duration ≥ 60 s. `Fair opportunity`: score ≥ 40. Otherwise `Routine`.
+
+`Exceptional` requires **all** of: score ≥ 90; geometry (peak ≥ 60°, ≥ 240 s useful duration, Sun ≤ −12°, spacecraft fully sunlit); prominence ≥ 3 (station-class); weather confidence "current forecast" (fresh source, pass within 72 h); clear weather (cloud ≤ 15%, visibility ≥ 16 km, no precipitation); relative distinctness (median gap ≥ 10 with ≥ 5 passes in the week, or ≥ 8 points over the same object's other passes, or — for small samples — score ≥ 95 with elevation ≥ 75° and ≥ 300 s); and complete seven-night source/calculation coverage. Each failed requirement is recorded as a downgrade reason. Any failure while geometry and prominence are strong yields `Potentially exceptional` rather than a confident `Exceptional`, so missing/stale weather can never produce a confident exceptional claim from geometry alone. All requirements are also surfaced as human-readable reasons/downgrades in the diagnostics panel.
+
+### Prominence
+
+ISS (25544) = 4; Tiangong (48274) = 3; recognizable stations (20580, 25994, 27424) = 2; recent-launch group = 2 (visual catalog) or 1; bright-catalog objects = 1; other = 0. Recent-launch brightness uncertainty is labeled explicitly.
+
+### Relative vs absolute quality
+
+The absolute sighting score is untouched. Relative context is computed against the week's median score, the same object's other passes, and the runner-up. Ties use a 5-point quality band and a 2-point significance tolerance; effectively equal events are reported as "two or more similarly good opportunities" with the earlier/better one primary — no fabricated precision.
+
+### Honesty rules
+
+A high-scoring week of similar passes is *not* exceptional (repetitive-score scenario verified). Missing weather → "Potentially exceptional"; incomplete seven-night coverage → heading becomes "BEST FOUND SO FAR · THIS WEEK" and exceptional claims are withheld; no passes → "No likely visible passes remain in the seven-night window." No claim ever extends past the calculated horizon ("No comparable later pass before ⟨date⟩").
+
+### Validation
+
+`tests/overhead-weekly.cjs` covers 16 scenarios: the twelve required cases (obvious exceptional ISS, mediocre week, near-tied excellent passes, heavy clouds, missing weather, obscure-vs-ISS significance, no passes, daylight only, low long pass, overhead short pass, UTC-crossing night ownership, weather-update winner change), plus stale/extended/incomplete-coverage handling, deduplication and input immutability, same-class comparables, and an "ordinary repetitive high week is not exceptional" case. A 576-combination sweep uses the unchanged real `OverheadEngine.scorePass` (3 objects × 4 elevations × 4 durations × 3 sun altitudes × 4 cloud covers); exceptional classified 10/576 (<2%), and every exceptional sweep event had cloud ≤ 15%, elevation ≥ 60°, duration ≥ 240 s and score ≥ 90. Browser QA (`tests/overhead.spec.js`, "weekly conclusion" test) verifies detail-dialog reuse, state immutability, weather-driven reclassification, tonight and seven-day integration, diagnostics output, focus visibility, zero horizontal overflow and identical card geometry across 390–1920 px in both themes.
+
+### Diagnostics
+
+A collapsible "Weekly ranking diagnostics" `<details>` beside the existing diagnostics panel dumps, as JSON: coverage completeness, events considered, winner/runner-up/highest-quality/best-ISS (object, NORAD, night, quality, significance, classification, relative context), score and significance gaps, tie count, median quality, nights without worthwhile events, best event per night, horizon end, and an explicit note that the baseline is selected upcoming passes only — no historical rarity claim.
+
+## Known limitations
 ## Known limitations
 
 1. A catalog brightness category does not guarantee naked-eye visibility. No modeled magnitude, spacecraft phase, tumbling, light pollution, horizon obstruction, observer elevation input, or empirical photometric calibration yet.

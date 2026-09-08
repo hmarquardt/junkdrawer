@@ -20,12 +20,14 @@ test('API failures never create events; import restores real orbital calculation
 test('stale cache survives network failure, then clearing cache removes downloaded data',async({page})=>{await boot(page);await page.evaluate(()=>new Promise((resolve,reject)=>{const r=indexedDB.open('overhead-cache',1);r.onsuccess=()=>{const tx=r.result.transaction('responses','readwrite'),s=tx.objectStore('responses'),q=s.getAll();q.onsuccess=()=>q.result.forEach(row=>s.put({...row,at:Date.now()-86400000}));tx.oncomplete=resolve;tx.onerror=reject;};}));await page.route('**celestrak.org/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();await expect(page.locator('#freshness')).toContainText('STALE');await page.locator('#diagnostics summary').click();await page.getByRole('button',{name:'Clear downloaded cache'}).click();await expect(page.locator('#status')).toContainText('cache cleared');await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event')).toHaveCount(0);});
 test('theme-only rendering, deployed dark parity, contrast and persistence',async({page,browser})=>{
  const baseline=execFileSync('git',['show','8725153:overhead.html'],{encoding:'utf8'});
- const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
+ const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
  const old=await browser.newPage();
  try{
  await page.addInitScript(()=>requestAnimationFrame(()=>{window.__firstTheme=document.documentElement.dataset.theme||'dark';}));
  await page.emulateMedia({colorScheme:'light'});const errors=await boot(page,{url:origin+'/overhead.html'});const oldErrors=await boot(old,{url:origin+'/baseline/overhead.html'});
+ // Isolate the pre-existing dark dashboard for pixel parity; the new card has its own QA below.
+ await page.addStyleTag({content:'#weekly-card,#weekly-tonight,#weekly-ranking-diagnostics{display:none!important}'});
  expect(await page.evaluate(()=>getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
  const boxes=()=>page.evaluate(()=>Object.fromEntries(['header','.toolbar','.briefing','.layout','#events','.chart-panel','.timeline-panel'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [s,[r.x,r.y,r.width,r.height]];})));
  const application=()=>page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return JSON.stringify({site:s.site,settings:s.settings,selected:s.selected,results:s.results,view:s.view,day:s.day,favorites:s.favorites});});
@@ -87,6 +89,38 @@ test('theme-only rendering, deployed dark parity, contrast and persistence',asyn
  await page.locator('#diagnostics summary').click();await page.screenshot({fullPage:true,path:'/private/tmp/overhead-theme-diagnostics.png'});
  expect(errors).toEqual([]);expect(oldErrors).toEqual([]);
  }finally{await old.close();await new Promise(r=>server.close(r));}
+});
+test('weekly conclusion, detail reuse, forecast updates and both-theme responsive QA',async({page})=>{
+ const errors=await boot(page);const {pass,now}=require('./overhead-weekly.cjs');
+ const seed=pass(now+3600000);
+ await page.evaluate(seed=>{
+  const s=__OVERHEAD_TEST__.state;s.worker?.terminate();s.busy=false;s.loading=false;
+  const move=(night,score,name)=>{const t=s.nights[night].start+3600000,delta=t-seed.start;const p=structuredClone(seed);Object.assign(p,{id:'weekly-'+night,name,score,start:t,end:t+342000,rise:t-60000,set:t+400000});for(const k of ['entry','exit','peak','orbitalPeak'])p[k].t+=delta;p.path.forEach(x=>x.t+=delta);return p;};
+  s.results=Object.fromEntries(s.nights.map((_,i)=>[i,[]]));s.results[0]=[move(0,70,'ISS')];s.results[1]=[move(1,96,'International Space Station — a deliberately long observing target name')];s.day=0;s.view='tonight';__OVERHEAD_TEST__.render();window.__weeklyResults=s.results;
+ },seed);
+ await expect(page.locator('.weekly-grade')).toHaveText('96 · Exceptional');
+ const stateBefore=await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return JSON.stringify([s.site,s.settings,s.day,s.view,s.favorites]);});
+ for(const width of [390,768,1024,1440,1920]){
+  await page.setViewportSize({width,height:1000});let box;
+  for(const theme of ['dark','light']){
+   await page.evaluate(theme=>document.querySelector('[data-theme-choice="'+theme+'"]').click(),theme);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(width);
+   const current=await page.locator('#weekly-card').boundingBox();if(box)expect(current).toEqual(box);box=current;
+   await page.locator('#weekly-open').focus();expect(await page.locator('#weekly-open').evaluate(el=>getComputedStyle(el).outlineStyle)).toBe('solid');
+   await page.screenshot({fullPage:true,path:'/private/tmp/overhead-weekly-'+theme+'-'+width+'.png'});
+  }
+ }
+ await page.keyboard.press('Enter');await expect(page.locator('#event-dialog')).toBeVisible();await expect(page.locator('#detail-title')).toContainText('deliberately long');
+ await page.evaluate(()=>__OVERHEAD_TEST__.render());expect(await page.evaluate(()=>__OVERHEAD_TEST__.state.selected.id)).toBe('weekly-1');
+ expect(await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return JSON.stringify([s.site,s.settings,s.day,s.view,s.favorites]);})).toBe(stateBefore);
+ expect(await page.evaluate(()=>__weeklyResults===__OVERHEAD_TEST__.state.results)).toBe(true);await page.keyboard.press('Escape');
+ await page.getByRole('tab',{name:'NEXT 7 DAYS'}).click();await expect(page.locator('[data-week-best="true"]')).toHaveCount(1);await expect(page.locator('[data-day="1"]')).toContainText('BEST');
+ await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;s.results[1][0].score=12;s.results[1][0].w.cloud_cover=85;__OVERHEAD_TEST__.render();});await expect(page.locator('.weekly-grade')).toHaveText('70 · Good');await expect(page.locator('#weekly-card')).toContainText('Nothing exceptional');
+ await page.getByRole('tab',{name:'TONIGHT',exact:true}).click();await expect(page.locator('#weekly-tonight')).toContainText('best opportunity');
+ await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;s.results[1][0].score=75;s.results[1][0].provisional=true;s.results[1][0].w=null;__OVERHEAD_TEST__.render();});await expect(page.locator('.weekly-grade')).toContainText('Potentially exceptional');await expect(page.locator('#weekly-card')).toContainText('forecast unavailable');
+ await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;delete s.results[6];__OVERHEAD_TEST__.render();});await expect(page.locator('#weekly-card')).toContainText('BEST FOUND SO FAR');await expect(page.locator('#weekly-tonight')).toBeHidden();
+ await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;s.results=Object.fromEntries(s.nights.map((_,i)=>[i,[]]));__OVERHEAD_TEST__.render();});await expect(page.locator('#weekly-card')).toContainText('No likely visible passes');await expect(page.locator('#weekly-open')).toHaveCount(0);
+ await expect(page.locator('#weekly-diagnostics')).toContainText('eventsConsidered');expect(errors).toEqual([]);
 });
 test('theme switching survives failed storage and missing source data',async({page})=>{
  await page.addInitScript(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='overhead.theme')throw new DOMException('Storage full','QuotaExceededError');return original.call(this,key,value);};});
