@@ -17,7 +17,7 @@ test('all widths, seven nights, sky chart, favorite, settings and saved sites',a
  await page.getByRole('tab',{name:'NOW',exact:true}).click();await expect(page.locator('#night-label')).toContainText('NEXT TWO HOURS');expect(errors).toEqual([]);
 });
 test('API failures never create events; import restores real orbital calculation',async({page})=>{const errors=await boot(page,{offline:true});await expect(page.locator('.event')).toHaveCount(0);await expect(page.locator('#headline')).toContainText('data isn’t');await expect(page.locator('#night-score')).toHaveText('—');await page.locator('#diagnostics summary').click();await page.locator('#import').setInputFiles({name:'iss.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify([iss]))});await page.waitForFunction(()=>!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();expect(await page.evaluate(()=>Object.values(__OVERHEAD_TEST__.state.results).flat().every(p=>p.provisional))).toBe(true);expect(errors).toEqual([]);});
-test('stale cache survives network failure, then clearing cache removes downloaded data',async({page})=>{await boot(page);await page.evaluate(()=>new Promise((resolve,reject)=>{const r=indexedDB.open('overhead-cache',1);r.onsuccess=()=>{const tx=r.result.transaction('responses','readwrite'),s=tx.objectStore('responses'),q=s.getAll();q.onsuccess=()=>q.result.forEach(row=>s.put({...row,at:Date.now()-86400000}));tx.oncomplete=resolve;tx.onerror=reject;};}));await page.route('**celestrak.org/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();await expect(page.locator('#freshness')).toContainText('STALE');await page.locator('#diagnostics summary').click();await page.getByRole('button',{name:'Clear downloaded cache'}).click();await expect(page.locator('#status')).toContainText('cache cleared');await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event')).toHaveCount(0);});
+test('stale cache survives network failure, then clearing cache removes downloaded data',async({page})=>{await boot(page);await page.evaluate(()=>new Promise((resolve,reject)=>{const r=indexedDB.open('overhead-cache',1);r.onsuccess=()=>{const tx=r.result.transaction('responses','readwrite'),s=tx.objectStore('responses'),q=s.getAll();q.onsuccess=()=>q.result.forEach(row=>s.put({...row,at:Date.now()-86400000}));tx.oncomplete=resolve;tx.onerror=reject;};}));await page.route('**celestrak.org/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();await expect(page.locator('#freshness')).toContainText(/stale cache/i);await page.locator('#diagnostics summary').click();await page.getByRole('button',{name:'Clear downloaded cache'}).click();await expect(page.locator('#status')).toContainText('cache cleared');await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event')).toHaveCount(0);});
 test('theme-only rendering, deployed dark parity, contrast and persistence',async({page,browser})=>{
  const baseline=execFileSync('git',['show','8725153:overhead.html'],{encoding:'utf8'});
  const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-trains.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
@@ -192,6 +192,90 @@ test('Starlink Train Watch rendering, weekly integration and About tab',async({p
  }
  await page.screenshot({fullPage:true,path:'/private/tmp/overhead-train-about-dark-390.png'});
  expect(errors).toEqual([]);
+});
+
+test('public footer freshness, staged train source fetching and cache capacity',async({page})=>{
+ const errors=await boot(page);
+ // --- Footer freshness: seeded sources render aggregated, key-free public text; diagnostics stay raw. ---
+ await page.evaluate(()=>{
+  const s=__OVERHEAD_TEST__.state,now=Date.now();
+  s.sources={'weather:38.355,-87.568':{at:now-5*60000},'weather:51.5,-0.1':{at:now-90*60000},
+   'orbits:stations':{at:now-120*60000},'orbits:visual':{at:now-130*60000},'orbits:last-30-days':{at:now-10*60000},
+   'orbits:supgp:2026-197':{at:now-18*60000},'orbits:supgp:2026-196':{at:now-24*60000},'satcat:2026-197':{at:now-2*60000}};
+  __OVERHEAD_TEST__.render();
+ });
+ const text=await page.locator('#freshness').textContent();
+ expect(text.split('Weather updated').length-1).toBe(1);
+ expect(text).toContain('Orbital data updated 2h ago');
+ expect(text).toContain('Starlink supplemental data updated 18m ago');
+ expect(text).not.toMatch(/satcat:|orbits:|weather:/);
+ expect(text).not.toContain('2026-197');
+ expect(await page.locator('footer.site-footer').count()).toBe(1);
+ await expect(page.locator('footer.site-footer .footer-meta')).toContainText('version 2026.');
+ // Stale variants are compact and public.
+ await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;s.sources={'weather:38.355,-87.568':{at:Date.now(),stale:true},'orbits:stations':{at:Date.now()-7200000,stale:true}};__OVERHEAD_TEST__.render();});
+ await expect(page.locator('#freshness')).toContainText('Weather: stale cached forecast');
+ await expect(page.locator('#freshness')).toContainText('Orbital data: stale cache · refresh recommended');
+ // Diagnostics retain the full raw source telemetry.
+ await page.locator('#diagnostics summary').click();
+ await expect(page.locator('#diagnostic-output')).toContainText('weather:38.355,-87.568');
+ const member=(desig,i,norad)=>({OBJECT_NAME:'STARLINK-'+norad,OBJECT_ID:desig+'-'+i,NORAD_CAT_ID:norad,EPOCH:'2026-09-07T12:00:00.000000',MEAN_MOTION:15.06,MEAN_MOTION_DOT:.00002,MEAN_MOTION_DDOT:0,ECCENTRICITY:.0001,INCLINATION:53,RA_OF_ASC_NODE:140,ARG_OF_PERICENTER:0,MEAN_ANOMALY:(i*.4)%360,EPHEMERIS_TYPE:0,CLASSIFICATION_TYPE:'U',ELEMENT_SET_NO:999,REV_AT_EPOCH:100,BSTAR:0});
+ const cohort=(desig,noradBase)=>Array.from({length:8},(_,i)=>member(desig,i,noradBase+i));
+ const omm=[...cohort('2026-180',80000),...cohort('2026-181',81000),...cohort('2026-182',82000),...cohort('2026-183',83000)];
+ const requests={satcat:[],supgp:[]};
+ // Later routes win: override boot's CelesTrak catch-all for the train-specific endpoints.
+ await page.route('**/gp.php*GROUP=last-30-days*',r=>r.fulfill({json:omm}));
+ await page.route('**/satcat/records.php*',r=>{
+  const intdes=new URL(r.request().url()).searchParams.get('INTDES');requests.satcat.push(intdes);
+  const launch={'2026-180':'2026-08-01','2026-181':'2026-09-06','2026-183':'2026-09-06'}[intdes];
+  if(intdes==='2026-182')return r.fulfill({status:500,body:'unavailable'}); // SATCAT failure: age must stay unknown
+  r.fulfill({json:[{OBJECT_NAME:'STARLINK-'+intdes,OBJECT_ID:intdes+'A',NORAD_CAT_ID:1,LAUNCH_DATE:launch}]});
+ });
+ await page.route('**sup-gp.php*',r=>{
+  const intdes=new URL(r.request().url()).searchParams.get('INTDES');requests.supgp.push(intdes);
+  if(intdes==='2026-183')return r.fulfill({status:500,body:'unavailable'}); // SupGP failure: general-catalog fallback
+  r.fulfill({json:omm.filter(o=>o.OBJECT_ID.startsWith(intdes))});
+ });
+ await page.locator('#refresh').click();
+ await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy&&!__OVERHEAD_TEST__.state.loading,null,{timeout:60000});
+ await page.waitForTimeout(500);
+ const flow=await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return {cohorts:s.trainCohorts.map(c=>({id:c.id,age:c.launchAgeDays,src:c.ageSource,elements:c.source})),skipped:s.trainSkipped,diag:s.trainDiagnostics};});
+ // Old cohort: SATCAT asked, then rejected before any SupGP request.
+ expect(flow.skipped.some(s=>s.id==='2026-180'&&/Launched ~3\d days ago/.test(s.reason))).toBe(true);
+ expect(requests.satcat).toContain('2026-180');
+ expect(requests.supgp).not.toContain('2026-180');
+ // Young cohort: SATCAT then SupGP, SpaceX-ephemeris elements.
+ expect(requests.supgp).toContain('2026-181');
+ expect(flow.cohorts.some(c=>c.id==='2026-181'&&c.age!==null&&c.src==='SATCAT launch date'&&/SupGP/.test(c.elements))).toBe(true);
+ // Unknown launch age (SATCAT 500): kept without fabrication, SupGP still requested.
+ expect(flow.cohorts.some(c=>c.id==='2026-182'&&c.age===null&&c.src==='unknown')).toBe(true);
+ expect(requests.supgp).toContain('2026-182');
+ // SupGP failure: general-catalog fallback, train pipeline still alive.
+ expect(flow.cohorts.some(c=>c.id==='2026-183'&&/general catalog/.test(c.elements))).toBe(true);
+ // On file:// the worker is blocked and Train Watch detection disables itself (documented
+ // fallback); the staged FETCH behavior is what this test verifies, via real network counts.
+ expect(requests.supgp).toContain('2026-181');
+ expect(requests.supgp).not.toContain('2026-180');
+ // --- Cache capacity: 41 records evict to the bounded 32, newest kept. ---
+ const size=await page.evaluate(async()=>{
+  const T=window.__OVERHEAD_TEST__;const now=Date.now();
+  await T.cachePut({key:'weather:core',at:now,data:{kept:true}});
+  for(let i=0;i<40;i++)await T.cachePut({key:'filler:'+i,at:now+i,data:i});
+  return T.cacheSize();
+ });
+ expect(size).toBe(32);
+ expect(errors).toEqual([]);
+ // Footer responsive/theme QA at desktop width resembling the reported failure.
+ await page.setViewportSize({width:1024,height:900});
+ for(const theme of ['light','dark']){
+  await page.evaluate(theme=>document.querySelector('[data-theme-choice="'+theme+'"]').click(),theme);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(1024);
+  const box=await page.locator('footer.site-footer').boundingBox();
+  expect(box.height).toBeLessThan(220);
+  const sources=await page.locator('.footer-sources').boundingBox();
+  expect(sources.height).toBeLessThan(60); // no narrow vertical strip
+ }
+ await page.screenshot({fullPage:true,path:'/private/tmp/overhead-footer-1024.png'});
 });
 
 test('theme switching survives failed storage and missing source data',async({page})=>{

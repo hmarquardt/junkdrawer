@@ -201,5 +201,26 @@ check('19 separation primitive is correct',()=>{
  assert.ok(Math.abs(T.separation({az:0,el:0},{az:180,el:0})-180)<1e-9);
  assert.ok(Math.abs(T.separation({az:0,el:30},{az:90,el:30})-75.5225)<1e-3);
 });
+/* 20 public freshness formatter (footer): aggregation, no raw keys, stale states */
+check('20 public footer freshness is aggregated, key-free and honest',()=>{
+ const now=Date.parse('2026-09-08T18:00Z');
+ const F=src=>E.publicFreshness(src,now);
+ const at=m=>now-m*60000;
+ // Weather appears at most once even with multiple weather keys (e.g. after a location change).
+ const multi=F({'weather:38.355,-87.568':{at:at(5)},'weather:51.5,-0.1':{at:at(90)},'orbits:stations':{at:at(120)},'orbits:visual':{at:at(130)},'orbits:last-30-days':{at:at(10)},'orbits:supgp:2026-197':{at:at(18)},'orbits:supgp:2026-196':{at:at(24)},'satcat:2026-197':{at:at(2)}});
+ assert.equal(multi.split('Weather updated').length-1,1);
+ assert(multi.includes('Orbital data updated 2h ago'),'orbital uses the oldest active catalog');
+ assert(multi.includes('Starlink supplemental data updated 18m ago'),'supgp aggregates to the freshest');
+ assert(!multi.includes('satcat:')&&!multi.includes('orbits:')&&!multi.includes('weather:'),'no raw keys leak');
+ assert(!multi.includes('2026-197'),'no cohort identifiers leak');
+ // Stale states are compact and explicit.
+ assert.equal(F({'weather:38.355,-87.568':{at:at(5),stale:true}}),'Weather: stale cached forecast');
+ assert.equal(F({'orbits:stations':{at:at(120),stale:true}}),'Orbital data: stale cache · refresh recommended');
+ assert.equal(F({'orbits:supgp:2026-197':{at:at(18),stale:true}}),'Starlink supplemental data updated 18m ago (stale cache)');
+ // SATCAT-only and empty source sets.
+ assert.equal(F({'satcat:2026-197':{at:at(2)}}),'No source data available');
+ assert.equal(F({}),'No source data available');
+});
+
 console.log('PASS '+cases.length+' train scenarios:\n'+cases.join('\n'));
 

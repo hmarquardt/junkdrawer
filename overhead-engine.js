@@ -143,5 +143,22 @@
     return rows.filter(o=>o.EPOCH&&Number.isFinite(epoch(o.EPOCH))&&(o.tle||[o.MEAN_MOTION,o.INCLINATION,o.ECCENTRICITY,o.RA_OF_ASC_NODE,o.ARG_OF_PERICENTER,o.MEAN_ANOMALY].every(Number.isFinite)))
       .map(o=>({...o,groups:[group]}));
   }
-  root.OverheadEngine={illuminated,sample,visible,detectPasses,weatherAt,scorePass,label,compass,localDate,zonedTime,nights,parseElements};
+  function publicFreshness(sources, now=Date.now()) {
+    // Deterministic, public-facing freshness summary. Never exposes raw source keys;
+    // full per-key telemetry stays in diagnostics. Weather aggregates to one value,
+    // core orbital catalogs report the OLDEST active catalog age (conservative),
+    // SupGP supplemental data aggregates to one value, SATCAT is not surfaced.
+    const entries=Object.entries(sources||{}).filter(([k,v])=>v&&Number.isFinite(v.at));
+    const select=test=>entries.filter(([k])=>test(k)).map(([,v])=>v);
+    const fmt=ms=>{const m=Math.max(0,Math.floor((now-ms)/60000));return m<1?'just now':m<60?m+'m ago':m<1440?Math.floor(m/60)+'h ago':Math.floor(m/1440)+'d ago';};
+    const parts=[];
+    const weather=select(k=>k.startsWith('weather:'));
+    if(weather.length)parts.push(weather.some(v=>v.stale)?'Weather: stale cached forecast':'Weather updated '+fmt(Math.max(...weather.map(v=>v.at))));
+    const orbits=select(k=>k.startsWith('orbits:')&&!k.startsWith('orbits:supgp:'));
+    if(orbits.length)parts.push(orbits.some(v=>v.stale)?'Orbital data: stale cache · refresh recommended':'Orbital data updated '+fmt(Math.min(...orbits.map(v=>v.at))));
+    const supgp=select(k=>k.startsWith('orbits:supgp:'));
+    if(supgp.length)parts.push('Starlink supplemental data updated '+fmt(Math.max(...supgp.map(v=>v.at)))+(supgp.some(v=>v.stale)?' (stale cache)':''));
+    return parts.join(' · ')||'No source data available';
+  }
+  root.OverheadEngine={illuminated,sample,visible,detectPasses,weatherAt,scorePass,label,compass,localDate,zonedTime,nights,parseElements,publicFreshness};
 })(typeof self!=='undefined'?self:globalThis);
