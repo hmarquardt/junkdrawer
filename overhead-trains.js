@@ -24,10 +24,12 @@ function identifyCohorts(objects,{now=Date.now(),launchDates={},maxAgeDays=RULES
  const cohorts=[],skipped=[];
  for(const [id,members] of byId){
   const launchDate=launchDates[id]||null;
-  const ageDays=launchDate?(now-Date.parse(launchDate+'T12:00:00Z'))/DAY:null;
+  // SATCAT provides a launch DATE only, not a deployment timestamp: age is approximate.
+  const launchAgeDays=launchDate?(now-Date.parse(launchDate+'T12:00:00Z'))/DAY:null;
+  const ageSource=launchDate?'SATCAT launch date':'unknown';
   if(members.length<minMembers){skipped.push({id,reason:'Fewer than '+minMembers+' cataloged members'});continue;}
-  if(ageDays!==null&&ageDays>maxAgeDays){skipped.push({id,reason:'Deployed '+Math.round(ageDays)+' days ago (limit '+maxAgeDays+')'});continue;}
-  cohorts.push({id,name:'Starlink train '+id,launchDate,ageDays:ageDays===null?null:Math.round(ageDays*10)/10,
+  if(launchAgeDays!==null&&launchAgeDays>maxAgeDays){skipped.push({id,reason:'Launched ~'+Math.round(launchAgeDays)+' days ago (limit '+maxAgeDays+')'});continue;}
+  cohorts.push({id,name:'Starlink train '+id,launchDate,ageSource,launchAgeDays:launchAgeDays===null?null:Math.round(launchAgeDays*10)/10,
    members:members.slice().sort((a,b)=>String(a.NORAD_CAT_ID).localeCompare(String(b.NORAD_CAT_ID))).slice(0,RULES.maxMembers),
    memberCount:members.length});
  }
@@ -72,7 +74,7 @@ const STATE_WEIGHT={'Fresh Train':1,'Dispersing Train':.7,'Weak Train':.4,'Dispe
 function scoreTrain(metrics,weather,{stale=false}={}){
  const known=!!weather&&Number.isFinite(weather.cloud_cover)&&Number.isFinite(weather.visibility)&&Number.isFinite(weather.precipitation);
  const weight=STATE_WEIGHT[metrics.state]??0;
- const factors={visibleCount:25*Math.min(1,metrics.visibleCount/25),coherence:20*weight,
+ const factors={visibleCount:20*Math.min(1,metrics.visibleCount/25),coherence:20*weight,
   elevation:15*clamp(metrics.peakEl/80),strongWindow:10*Math.min(1,metrics.strongSeconds/300),
   darkness:10*clamp((-metrics.sun-3)/12),
   clouds:known?20*(1-weather.cloud_cover/100):0,visibility:known?5*clamp(weather.visibility/20000):0};
@@ -91,7 +93,7 @@ function scoreTrain(metrics,weather,{stale=false}={}){
 /* Staged detection for one cohort across all planning windows. */
 function detectTrains(cohort,site,windows,minimum,{now=Date.now()}={}){
  const diagnostics={cohort:cohort.id,memberCount:cohort.memberCount,propagated:cohort.members.length,launchDate:cohort.launchDate,
-  ageDays:cohort.ageDays,windowsConsidered:windows.length,rejected:[],candidates:0,samples:0,results:[]};
+  launchAgeDays:cohort.launchAgeDays,ageSource:cohort.ageSource,windowsConsidered:windows.length,rejected:[],candidates:0,samples:0,results:[]};
  const epochs=cohort.members.map(m=>Date.parse(m.EPOCH)).filter(Number.isFinite);
  const newest=epochs.length?Math.max(...epochs):NaN;
  if(!Number.isFinite(newest)||now-newest>RULES.elementWindowDays*DAY){diagnostics.rejected.push({window:'all',reason:'Orbital elements outside the 14-day prediction window'});return {events:[],diagnostics};}
@@ -184,7 +186,7 @@ function detectTrains(cohort,site,windows,minimum,{now=Date.now()}={}){
    epoch:newest,rise:best.cluster.start,set:best.cluster.end,start:best.cluster.start,end:best.cluster.end,
    peak:{...peakSample,lit:true},orbitalPeak:{...peakSample,lit:true},entry:path[0],exit:path[path.length-1],path,
    duration:(b-a)/1000,likely:true,
-   train:{cohortId:cohort.id,launchDate:cohort.launchDate,ageDays:cohort.ageDays,cohortSize:recs.length,memberCount:cohort.memberCount,
+   train:{cohortId:cohort.id,launchDate:cohort.launchDate,ageSource:cohort.ageSource,launchAgeDays:cohort.launchAgeDays,cohortSize:recs.length,memberCount:cohort.memberCount,
     state:best.state,stale,source:cohort.source||'CelesTrak general catalog',
     visibleCount:best.count,medianSpacingDeg:Math.round(best.median*10)/10,spanDeg:Math.round(best.span*10)/10,
     maxGapDeg:Math.round(best.maxGap*10)/10,strongSeconds:(b-a)/1000,

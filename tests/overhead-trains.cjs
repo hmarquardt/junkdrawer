@@ -14,7 +14,7 @@ const windows=E.nights(site,now).map(n=>({start:n.start,end:n.end,day:n.day}));
 const windowsN=E.nights(siteN,now).map(n=>({start:n.start,end:n.end,day:n.day}));
 const freshEpoch=new Date(now-6*3600000).toISOString().replace('Z',''),staleEpoch=new Date(now-6*DAY).toISOString().replace('Z','');
 function mk(n,stepMA,raan=140,epoch=freshEpoch,prefix=197){const members=[];for(let i=0;i<n;i++){members.push({OBJECT_NAME:'STARLINK-'+(60000+i),OBJECT_ID:'2026-'+prefix+'-'+(100+i),NORAD_CAT_ID:60000+i,EPOCH:epoch,MEAN_MOTION:15.06,MEAN_MOTION_DOT:.00002,MEAN_MOTION_DDOT:0,ECCENTRICITY:.0001,INCLINATION:53,RA_OF_ASC_NODE:raan,ARG_OF_PERICENTER:0,MEAN_ANOMALY:(i*stepMA)%360,EPHEMERIS_TYPE:0,CLASSIFICATION_TYPE:'U',ELEMENT_SET_NO:999,REV_AT_EPOCH:100,BSTAR:0});}return members;}
-const cohortOf=(members,extra={})=>({id:'2026-197',name:'Starlink train 2026-197',launchDate:'2026-09-08',ageDays:.3,members,memberCount:members.length,source:'CelesTrak SupGP · SpaceX ephemeris',...extra});
+const cohortOf=(members,extra={})=>({id:'2026-197',name:'Starlink train 2026-197',launchDate:'2026-09-08',ageSource:'SATCAT launch date',launchAgeDays:.3,members,memberCount:members.length,source:'CelesTrak SupGP · SpaceX ephemeris',...extra});
 const weekWeather=(cloud=6,vis=25000,precip=0)=>({hourly:{time:Array.from({length:220},(_,i)=>Math.floor(now/3600000)*3600+i*3600-48*3600),cloud_cover:Array(220).fill(cloud),visibility:Array(220).fill(vis),precipitation:Array(220).fill(precip)}});
 const clear=weekWeather();
 const cases=[];const check=(name,fn)=>{fn();cases.push(name);};
@@ -24,7 +24,13 @@ check('1 fresh tightly grouped deployment',()=>{
  const e=firstEvent(mk(24,.05));
  assert.equal(e.train.state,'Fresh Train');assert.equal(e.train.visibleCount,24);
  assert.ok(e.train.medianSpacingDeg<=1.5&&e.train.spanDeg<=20);
- assert.ok(e.peak.el>70);assert.ok(e.score>=90);assert.equal(e.provisional,false);
+ assert.ok(e.peak.el>70);assert.ok(e.score>=85&&e.score<=97,'fresh clear train scores high without saturation');
+ assert.equal(e.provisional,false);
+ // Normalization: ideal base factors sum to exactly 100 with no clamp and no saturation.
+ const perfect=T.scoreTrain({state:'Fresh Train',visibleCount:30,cohortSize:30,medianSpacingDeg:.5,spanDeg:15,peakEl:80,sun:-18,strongSeconds:300},
+  {cloud_cover:0,visibility:25000,precipitation:0});
+ assert.equal(Object.values(perfect.factors).reduce((a,v)=>a+v,0),100);
+ assert.equal(perfect.score,100);
  assert.ok(e.train.dots.length<=14);assert.ok(e.path.length>=2);
  assert.ok(Number.isFinite(e.peak.lat)&&Number.isFinite(e.peak.lon));
 });
@@ -116,11 +122,12 @@ check('13 cohorts group by international designator, never by name alone',()=>{
  assert.equal(JSON.stringify(objects),before);
  assert.deepEqual(cohorts.map(c=>c.id),['2026-197','2026-198']);
  assert.ok(cohorts[0].members.length===10&&cohorts[1].members.length===9);
+ assert.equal(cohorts[0].ageSource,'SATCAT launch date');assert.ok(cohorts[0].launchAgeDays!==null);
  assert(skipped.some(s=>s.id==='2026-199'));
  const aged=T.identifyCohorts(mk(10,.05,140,freshEpoch,197),{now,launchDates:{'2026-197':'2026-08-01'}});
- assert.equal(aged.cohorts.length,0);assert(aged.skipped.some(s=>/Deployed/.test(s.reason)));
+ assert.equal(aged.cohorts.length,0);assert(aged.skipped.some(s=>/Launched ~38 days ago/.test(s.reason)));
  const noDate=T.identifyCohorts(mk(10,.05,140,freshEpoch,197),{now});
- assert.equal(noDate.cohorts.length,1);assert.equal(noDate.cohorts[0].ageDays,null);
+ assert.equal(noDate.cohorts.length,1);assert.equal(noDate.cohorts[0].launchAgeDays,null);assert.equal(noDate.cohorts[0].ageSource,'unknown');
 });
 /* 14 supplemental feed unavailable → general-catalog fallback */
 check('14 detection runs on general-catalog elements when SupGP is unavailable',()=>{
@@ -154,16 +161,15 @@ check('16 spectacular train outranks an ordinary ISS pass; a superb ISS pass is 
  // A superb ISS 96 pass narrowly beats the same train: no forced Starlink wins.
  const superb=pass(windows[0].start+7200000);
  const r2=W.rankWeeklyEvents({...empty,0:[fresh,superb]},windows,{now,complete:true,weatherSource:{at:now}});
- // 95-vs-96 is inside the documented tie tolerance: equivalent opportunities, no fabricated winner.
- assert.equal(r2.ties.length,2);
- assert.ok(r2.winner.significance.value>=superb.score+W.prominence(superb).points-2);
+ // After normalization a fresh clear train (~91) sits just below a superb ISS 96: no saturation, no forced winner.
+ assert.equal(r2.winner.pass.norad,'25544');assert.ok(r2.scoreGap>0&&r2.scoreGap<=8);
  // A weak hazy low train loses clearly to the same superb ISS pass.
  const r3=W.rankWeeklyEvents({...empty,0:[weak,superb]},windows,{now,complete:true,weatherSource:{at:now}});
  assert.equal(r3.winner.pass.norad,'25544');assert.ok(r3.scoreGap>20);
  // Weekly results expose trains through bestISS exclusion and best night.
  const r4=W.rankWeeklyEvents({...empty,0:[fresh]},windows,{now,complete:true,weatherSource:{at:now}});
  assert.equal(r4.bestISS,null);assert.equal(r4.bestNights[0].pass.train.state,'Fresh Train');
- assert.equal(r4.winner.classification.label,'Exceptional');
+ assert.equal(r4.winner.classification.label,'Excellent'); // selective: small-sample trains need score ≥ 95 for Exceptional
 });
 /* 17 night ownership across local midnight */
 check('17 every train is owned by the window containing it',()=>{

@@ -176,7 +176,7 @@ A collapsible "Weekly ranking diagnostics" `<details>` beside the existing diagn
 ### Data sources (all CelesTrak, no new commercial APIs)
 
 - Discovery: `gp.php?GROUP=last-30-days&FORMAT=json` (already fetched when Recent launches or trains are enabled). Starlink objects are grouped by their **international designator** (`OBJECT_ID`, e.g. `2026-197`) — objects from one launch share it; names alone are never used to group.
-- Launch dates: `satcat/records.php?INTDES=<designator>&FORMAT=json` (24 h cache) — deployment age is contextual only, never a scoring input.
+- Launch dates: `satcat/records.php?INTDES=<designator>&FORMAT=json` (24 h cache). CelesTrak provides a launch **date**, not a deployment timestamp, so cohort age is approximate (`Launched ~N days ago`; age source recorded as `SATCAT launch date`). Launch age is contextual only, never a scoring input. Cohorts without a known launch date are labeled `Recent Starlink launch`; no deployment timestamp is fabricated.
 - Elements: `NORAD/elements/supplemental/sup-gp.php?INTDES=<designator>&FORMAT=JSON` — CelesTrak SupGP derived from **SpaceX ephemerides** (DATA_SOURCE `SpaceX-E`), fitted forward from epoch. Fetched per cohort (2 h cache) and replaces general-catalog elements member-by-member; if unavailable, detection degrades gracefully to the general catalog and the event's element source says so.
 
 ### Detection (staged, in the worker)
@@ -193,7 +193,7 @@ Fresh Train: median spacing ≤ 1.5°, span ≤ 20°, ≥ 60 % of the cohort sim
 
 ### Train Observation Score
 
-Separate from the spacecraft score: visible count (25 max), coherence weight (Fresh 20 / Dispersing 14 / Weak 8), elevation (15), strong-window seconds (10), observer darkness (10), clouds (20) and visibility (5), then the same multiplicative weather penalty as `scorePass` ((1−cloud)^1.2 × visibility clamp × rain penalty). Unknown weather → provisional. Deployment age never scores directly.
+Separate from the spacecraft score, with base factors summing to **exactly 100** before weather multipliers (normalized in 2026.09.08.4; visible count was reduced 25 → 20 to remove saturation): visible count (20 max), coherence weight (Fresh 20 / Dispersing 14 / Weak 8), elevation (15), strong-window seconds (10), observer darkness (10), clouds (20) and visibility (5), then the same multiplicative weather penalty as `scorePass` ((1−cloud)^1.2 × visibility clamp × rain penalty) and a final 0–100 clamp. Unknown weather → provisional. Launch/deployment age never scores directly.
 
 ### Freshness policy
 
@@ -205,11 +205,11 @@ Element age > 3 days marks the event stale: score is capped at 70, the card read
 
 ### Diagnostics
 
-A "Starlink Train diagnostics" `<details>` dumps, as JSON: cohorts considered/skipped (with reasons), per-cohort source (SupGP vs general catalog), launch dates, element age, propagated samples, cluster candidates, rejection reasons per window, coherence metrics (visible count, span, median/max spacing), stale flags, discovery and calculation milliseconds.
+A "Starlink Train diagnostics" `<details>` dumps, as JSON: cohorts considered/skipped (with reasons), per-cohort source (SupGP vs general catalog), age provenance (`SATCAT launch date` / `unknown`), launch dates, approximate launch age, element age, propagated samples, cluster candidates, rejection reasons per window, coherence metrics (visible count, span, median/max spacing), stale flags, discovery and calculation milliseconds.
 
 ### Validation
 
-`tests/overhead-trains.cjs` — 19 deterministic scenarios using real SGP4 with synthetic cohorts: fresh, dispersing, dispersed, few visible, cloudy, missing weather, daylight rejection, low elevation, near-overhead, huge span, tiny visible count, stale elements (cap + weekly refusal), designator grouping + age skips + immutability, SupGP-unavailable fallback, stale train never Exceptional, train-vs-ISS ranking in both directions, midnight-crossing night ownership, two cohorts per week, and the separation primitive. A live run (September 8, 2026) confirmed the full pipeline over HTTP: 7 real cohorts discovered from `last-30-days`, SupGP + SATCAT fetched per cohort, all correctly age-gated (youngest 13 days), zero page errors, page responsive; no false train events were manufactured. `file://` boots disable Train Watch with a disclosed message because Chrome blocks workers there (documented fallback).
+`tests/overhead-trains.cjs` — 19 deterministic scenarios using real SGP4 with synthetic cohorts: fresh, dispersing, dispersed, few visible, cloudy, missing weather, daylight rejection, low elevation, near-overhead, huge span, tiny visible count, stale elements (cap + weekly refusal), designator grouping + age skips + immutability, SupGP-unavailable fallback, stale train never Exceptional, train-vs-ISS ranking in both directions, midnight-crossing night ownership, two cohorts per week, and the separation primitive. A live run (September 8, 2026) confirmed the full pipeline over HTTP: 7 real cohorts discovered from `last-30-days`, SupGP + SATCAT fetched per cohort, all correctly age-gated (youngest launched ~13 days ago), zero page errors, page responsive; no false train events were manufactured. After the 2026.09.08.4 normalization: fresh clear overhead train 91 (was 95), ideal no-cloud train 99 without clamping (was 100 via clamp), dispersing clear 85, weak hazy low train 3 — and the weekly layer keeps a superb ISS 96 ahead of a fresh train (significance 100 vs 95) while the train still beats an ordinary ISS pass comfortably. Exceptional classification for a small week now genuinely requires a ≥95 train score, so selective behavior improved. `file://` boots disable Train Watch with a disclosed message because Chrome blocks workers there (documented fallback).
 
 ## About tab
 
