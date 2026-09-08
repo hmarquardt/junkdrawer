@@ -6,7 +6,8 @@ Overhead is a static, local-first evening observing dashboard. Open [overhead.ht
 
 - `overhead.html`: responsive interface, location, weather, bounded persistence, deterministic briefing, timeline, polar sky chart, and optional map.
 - `overhead-engine.js`: pure OMM/TLE parsing, SGP4 sampling, horizon crossings, solar illumination, useful visible intervals, scoring, timezone conversion, and night windows.
-- `overhead-worker.js`: background pass calculations with incremental results and cancellation when the observing request changes.
+- `overhead-worker.js`: background pass and train calculations with incremental results and cancellation when the observing request changes.
+- `overhead-weekly.js`, `overhead-trains.js`: pure weekly interpretation (Best Thing This Week) and Starlink train detection/scoring layers; they consume scored passes and never edit orbital calculations.
 - `vendor/overhead/`: unmodified, pinned satellite.js 6.0.1 and SunCalc 1.9.0, with their MIT and BSD licenses. SunCalc's browser-global export is adapted in the worker host.
 - `tests/overhead-engine.cjs`, `tests/overhead.spec.js`: scientific regression checks and browser behavior tests.
 - `docs/overhead-validation.json`: results of the broader external ISS comparison.
@@ -168,13 +169,58 @@ A high-scoring week of similar passes is *not* exceptional (repetitive-score sce
 
 A collapsible "Weekly ranking diagnostics" `<details>` beside the existing diagnostics panel dumps, as JSON: coverage completeness, events considered, winner/runner-up/highest-quality/best-ISS (object, NORAD, night, quality, significance, classification, relative context), score and significance gaps, tie count, median quality, nights without worthwhile events, best event per night, horizon end, and an explicit note that the baseline is selected upcoming passes only — no historical rarity claim.
 
-## Known limitations
+## Starlink Train Watch
+
+`overhead-trains.js` (`OverheadTrains`) detects when a recent SpaceX launch cohort still forms a visually coherent train from the observer's location and presents it as a single grouped event shaped like a pass (`entry`/`peak`/`exit`/`path`), so it flows through the existing list, detail dialog, sky chart, map, timeline and the weekly Best Thing This Week ranking without a parallel system.
+
+### Data sources (all CelesTrak, no new commercial APIs)
+
+- Discovery: `gp.php?GROUP=last-30-days&FORMAT=json` (already fetched when Recent launches or trains are enabled). Starlink objects are grouped by their **international designator** (`OBJECT_ID`, e.g. `2026-197`) — objects from one launch share it; names alone are never used to group.
+- Launch dates: `satcat/records.php?INTDES=<designator>&FORMAT=json` (24 h cache) — deployment age is contextual only, never a scoring input.
+- Elements: `NORAD/elements/supplemental/sup-gp.php?INTDES=<designator>&FORMAT=JSON` — CelesTrak SupGP derived from **SpaceX ephemerides** (DATA_SOURCE `SpaceX-E`), fitted forward from epoch. Fetched per cohort (2 h cache) and replaces general-catalog elements member-by-member; if unavailable, detection degrades gracefully to the general catalog and the event's element source says so.
+
+### Detection (staged, in the worker)
+
+1. `identifyCohorts`: Starlink-named objects grouped by designator; cohorts need ≥ 8 members and (when the launch date is known) deployment age ≤ 10 days.
+2. Coarse scan: cheap look angles for every member at 60 s across each planning window (7 nights + now); keep samples that are above the minimum elevation, sunlit, and in observer darkness (Sun ≤ −6°).
+3. Clusters of ≥ 3 simultaneous members, contiguous within 120 s and ≥ 60 s long.
+4. Refine at 4 s: at every step, members are ordered along the train's direction of travel (leader ground-track heading) and the app measures visible count, apparent angular span, median spacing and max gap (great-circle separations in the observer's sky). The most coherent instant wins (most members, tightest median, smallest span, earliest).
+5. A strong viewing window keeps a strong simultaneous count around that instant; centroid geometry (entry → peak → exit, with ground coordinates for the map) spans the full coherent cluster.
+
+### States and thresholds
+
+Fresh Train: median spacing ≤ 1.5°, span ≤ 20°, ≥ 60 % of the cohort simultaneously visible. Dispersing Train: ≤ 5°, ≤ 45°, ≥ 40 %. Weak Train: ≤ 12°, ≤ 80°, ≥ 5 members. Otherwise Dispersed — never surfaced as a train event.
+
+### Train Observation Score
+
+Separate from the spacecraft score: visible count (25 max), coherence weight (Fresh 20 / Dispersing 14 / Weak 8), elevation (15), strong-window seconds (10), observer darkness (10), clouds (20) and visibility (5), then the same multiplicative weather penalty as `scorePass` ((1−cloud)^1.2 × visibility clamp × rain penalty). Unknown weather → provisional. Deployment age never scores directly.
+
+### Freshness policy
+
+Element age > 3 days marks the event stale: score is capped at 70, the card reads "elements may be stale," and the weekly layer refuses both `Exceptional` and `Potentially exceptional` for stale trains ("Potential train — orbital data may be stale" presentation). Elements outside the 14-day prediction window are rejected outright.
+
+### Weekly integration
+
+`OverheadWeekly.prominence` assigns train prominence: Fresh 4, Dispersing 3, Weak 2. Significance stays `score + prominence` — a fresh clear train (~95–100) outranks an ordinary ISS pass but a superb 96 ISS pass still ties/beats a 95 train inside the documented tie tolerance; nothing is forced. Weak low trains lose by wide margins.
+
+### Diagnostics
+
+A "Starlink Train diagnostics" `<details>` dumps, as JSON: cohorts considered/skipped (with reasons), per-cohort source (SupGP vs general catalog), launch dates, element age, propagated samples, cluster candidates, rejection reasons per window, coherence metrics (visible count, span, median/max spacing), stale flags, discovery and calculation milliseconds.
+
+### Validation
+
+`tests/overhead-trains.cjs` — 19 deterministic scenarios using real SGP4 with synthetic cohorts: fresh, dispersing, dispersed, few visible, cloudy, missing weather, daylight rejection, low elevation, near-overhead, huge span, tiny visible count, stale elements (cap + weekly refusal), designator grouping + age skips + immutability, SupGP-unavailable fallback, stale train never Exceptional, train-vs-ISS ranking in both directions, midnight-crossing night ownership, two cohorts per week, and the separation primitive. A live run (September 8, 2026) confirmed the full pipeline over HTTP: 7 real cohorts discovered from `last-30-days`, SupGP + SATCAT fetched per cohort, all correctly age-gated (youngest 13 days), zero page errors, page responsive; no false train events were manufactured. `file://` boots disable Train Watch with a disclosed message because Chrome blocks workers there (documented fallback).
+
+## About tab
+
+The ABOUT tab is a real app view alongside NOW / TONIGHT / NEXT 7 DAYS: article-style content (reusing the design system, both themes) covering what Overhead watches, what "visible" means, how the score works, Best-vs-Exceptional, Starlink Train Watch, location/privacy (exact external data flows), source attribution with links, implementation overview, accuracy limitations and the synchronized version string. Selecting it hides the dashboard without discarding calculations; `overhead.html#about` deep-links to it; arrow/Home/End keyboard navigation covers all four tabs. The frozen-baseline pixel-parity test now skips the toolbar (intentional ABOUT addition) and the footer region (masked freshness text), asserting < 0.1 % pixel difference below the toolbar.
+
 ## Known limitations
 
 1. A catalog brightness category does not guarantee naked-eye visibility. No modeled magnitude, spacecraft phase, tumbling, light pollution, horizon obstruction, observer elevation input, or empirical photometric calibration yet.
 2. Shadow geometry is a spherical approximation. First/last visible seconds and eclipse-limited peak directions can differ from other predictors. See the full validation above.
 3. The pass optimizer assumes a single elevation maximum in each short pass. Very long or unusual high-orbit imported passes are less well validated than the LEO MVP.
-4. Optional catalogs are deliberately capped. Recent-launch labels come from the source group; no launch time, train/cluster identification, or guaranteed Starlink-train claim is made.
+4. Optional catalogs are deliberately capped. Recent-launch labels come from the source group. Starlink train detection is limited to cohorts ≤ 10 days old with fresh elements; no Starlink-train claim is made beyond the measured geometry, and train predictions are the most sensitive to element age and post-deployment maneuvers.
 5. Hourly weather is a model forecast, not local sky measurement. Forecast availability and orbital freshness limit seven-day confidence. Weather condition, temperature and humidity are context; cloud, visibility and precipitation determine the weather component of the score.
 6. MapLibre requires WebGL and an optional CDN request. Its failure does not disable the sky chart. Touch panning requires an explicit toggle so casual page scrolling does not accidentally move the map.
 7. No installable PWA or service worker yet. Vendored calculation libraries and cached data improve resilience, but reopening the hosted page fully offline depends on normal browser caching.
@@ -186,7 +232,7 @@ Prioritize better observing confidence and notification reliability before addin
 
 - Calibrate brightness by known standard magnitude, range and phase; add horizon masks, site elevation, local light pollution, and atmospheric extinction.
 - Add a common event-provider interface so NOAA SWPC aurora forecasts, JPL Horizons ephemerides, comets, meteor-shower calendars, planetary observing quality, conjunctions and launch events can return provenance, uncertainty and observing windows without changing satellite propagation.
-- Add an explicit “Best event this week” comparison and unusually-interesting-event detection using geometry, rarity, brightness confidence and weather improvements. Treat possible recent-launch clusters as uncertain until launch membership and spacing support the claim.
+- Ship already includes the “Best Thing This Week” comparison and Starlink Train Watch; Phase 2 refinements here are calibrated brightness for trains and launch-cluster membership from launch-event feeds.
 - Add user-enabled notifications for unusually good passes, including rescheduling after refreshed elements/forecasts. Document browser background limits rather than promise alarms from a closed static tab.
 - Expand the already-shipped multiple saved sites with side-by-side forecasts, horizon profiles, import/export, and per-site preferences.
 - Add PWA installation and offline application-shell caching, with visible stale-data age and no offline tile hoarding. Keep all optional sources isolated so one failed provider cannot destabilize the satellite briefing.

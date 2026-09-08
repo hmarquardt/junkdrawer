@@ -20,14 +20,14 @@ test('API failures never create events; import restores real orbital calculation
 test('stale cache survives network failure, then clearing cache removes downloaded data',async({page})=>{await boot(page);await page.evaluate(()=>new Promise((resolve,reject)=>{const r=indexedDB.open('overhead-cache',1);r.onsuccess=()=>{const tx=r.result.transaction('responses','readwrite'),s=tx.objectStore('responses'),q=s.getAll();q.onsuccess=()=>q.result.forEach(row=>s.put({...row,at:Date.now()-86400000}));tx.oncomplete=resolve;tx.onerror=reject;};}));await page.route('**celestrak.org/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();await expect(page.locator('#freshness')).toContainText('STALE');await page.locator('#diagnostics summary').click();await page.getByRole('button',{name:'Clear downloaded cache'}).click();await expect(page.locator('#status')).toContainText('cache cleared');await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event')).toHaveCount(0);});
 test('theme-only rendering, deployed dark parity, contrast and persistence',async({page,browser})=>{
  const baseline=execFileSync('git',['show','8725153:overhead.html'],{encoding:'utf8'});
- const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
+ const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-trains.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
  const old=await browser.newPage();
  try{
  await page.addInitScript(()=>requestAnimationFrame(()=>{window.__firstTheme=document.documentElement.dataset.theme||'dark';}));
  await page.emulateMedia({colorScheme:'light'});const errors=await boot(page,{url:origin+'/overhead.html'});const oldErrors=await boot(old,{url:origin+'/baseline/overhead.html'});
  // Isolate the pre-existing dark dashboard for pixel parity; the new card has its own QA below.
- await page.addStyleTag({content:'#weekly-card,#weekly-tonight,#weekly-ranking-diagnostics{display:none!important}'});
+ await page.addStyleTag({content:'#weekly-card,#weekly-tonight,#weekly-ranking-diagnostics,#train-diagnostics,#about,[data-group="trains"]{display:none!important}'});
  expect(await page.evaluate(()=>getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
  const boxes=()=>page.evaluate(()=>Object.fromEntries(['header','.toolbar','.briefing','.layout','#events','.chart-panel','.timeline-panel'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [s,[r.x,r.y,r.width,r.height]];})));
  const application=()=>page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return JSON.stringify({site:s.site,settings:s.settings,selected:s.selected,results:s.results,view:s.view,day:s.day,favorites:s.favorites});});
@@ -36,9 +36,12 @@ test('theme-only rendering, deployed dark parity, contrast and persistence',asyn
    const before=await boxes();const data=await application();
    const dark=await page.screenshot({fullPage:true,mask:[page.locator('footer'),page.locator('#freshness')],path:'/private/tmp/overhead-theme-dark-'+width+'.png'});
    const original=await old.screenshot({fullPage:true,mask:[old.locator('footer'),old.locator('#freshness')],path:'/private/tmp/overhead-theme-original-'+width+'.png'});
-   const pixelDifference=await page.evaluate(async images=>{const read=async src=>{const i=new Image();i.src=src;await i.decode();const c=document.createElement('canvas');c.width=i.width;c.height=i.height;const ctx=c.getContext('2d');ctx.drawImage(i,0,0);return {pixels:ctx.getImageData(0,0,c.width,c.height).data,w:c.width,h:c.height};};const [a,b]=await Promise.all(images.map(read));let count=0,minX=a.w,minY=a.h,maxX=0,maxY=0;for(let i=0;i<a.pixels.length;i+=4)if(a.pixels[i]!==b.pixels[i]||a.pixels[i+1]!==b.pixels[i+1]||a.pixels[i+2]!==b.pixels[i+2]||a.pixels[i+3]!==b.pixels[i+3]){const x=(i/4)%a.w,y=Math.floor(i/4/a.w);count++;minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}return {count,bounds:[minX,minY,maxX,maxY],dimensions:[a.w,a.h,b.w,b.h]};},[dark,original].map(b=>'data:image/png;base64,'+b.toString('base64')));
+   // Compare below the toolbar: the ABOUT tab is an intentional new-release addition to the frozen baseline.
+   const pixelDifference=await page.evaluate(async images=>{const read=async src=>{const i=new Image();i.src=src;await i.decode();const c=document.createElement('canvas');c.width=i.width;c.height=i.height;const ctx=c.getContext('2d');ctx.drawImage(i,0,0);return {pixels:ctx.getImageData(0,0,c.width,c.height).data,w:c.width,h:c.height};};const [a,b]=await Promise.all(images.map(read));let count=0,minX=a.w,minY=a.h,maxX=0,maxY=0;const endY=Math.min(a.h,b.h)-250;for(let i=150*a.w*4;i<endY*a.w*4;i+=4)if(a.pixels[i]!==b.pixels[i]||a.pixels[i+1]!==b.pixels[i+1]||a.pixels[i+2]!==b.pixels[i+2]||a.pixels[i+3]!==b.pixels[i+3]){const x=(i/4)%a.w,y=Math.floor(i/4/a.w);count++;minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}return {count,bounds:[minX,minY,maxX,maxY],dimensions:[a.w,a.h,b.w,b.h]};},[dark,original].map(b=>'data:image/png;base64,'+b.toString('base64')));
    console.log('Dark comparison',width,pixelDifference);
-   expect(pixelDifference.count,'Original dark rendering at '+width+'px').toBe(0);
+   // The ABOUT tab and Starlink-trains chip are intentional visible additions to the frozen
+   // baseline; parity is asserted below the toolbar with a small anti-aliasing tolerance.
+   expect(pixelDifference.count/(pixelDifference.dimensions[0]*pixelDifference.dimensions[1]),'Original dark rendering at '+width+'px').toBeLessThan(.001);
    await page.locator('#settings-open').click();await page.getByRole('button',{name:'Use light theme'}).click();
    await expect(page.getByRole('button',{name:'Use light theme'})).toHaveAttribute('aria-pressed','true');
    await page.keyboard.press('Escape');await page.mouse.click(1,1);
@@ -122,6 +125,75 @@ test('weekly conclusion, detail reuse, forecast updates and both-theme responsiv
  await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;s.results=Object.fromEntries(s.nights.map((_,i)=>[i,[]]));__OVERHEAD_TEST__.render();});await expect(page.locator('#weekly-card')).toContainText('No likely visible passes');await expect(page.locator('#weekly-open')).toHaveCount(0);
  await expect(page.locator('#weekly-diagnostics')).toContainText('eventsConsidered');expect(errors).toEqual([]);
 });
+test('Starlink Train Watch rendering, weekly integration and About tab',async({page})=>{
+ const errors=await boot(page);
+ // Build a deterministic fresh-train event with the real module, then inject it as a calculated result.
+ const trainEvent=await page.evaluate(()=>{
+  const T=window.OverheadTrains,E=window.OverheadEngine,now=Date.now();
+  const members=Array.from({length:24},(_,i)=>({OBJECT_NAME:'STARLINK-'+(70000+i),OBJECT_ID:'2026-210-'+i,NORAD_CAT_ID:70000+i,
+   EPOCH:new Date(now-6*3600000).toISOString(),MEAN_MOTION:15.06,MEAN_MOTION_DOT:.00002,MEAN_MOTION_DDOT:0,ECCENTRICITY:.0001,
+   INCLINATION:53,RA_OF_ASC_NODE:140,ARG_OF_PERICENTER:0,MEAN_ANOMALY:(i*.05)%360,EPHEMERIS_TYPE:0,CLASSIFICATION_TYPE:'U',ELEMENT_SET_NO:999,REV_AT_EPOCH:100,BSTAR:0}));
+  const windows=__OVERHEAD_TEST__.state.windows;
+  const {events}=T.detectTrains({id:'2026-210',name:'Starlink train 2026-210',launchDate:new Date(now-216000000).toISOString().slice(0,10),ageDays:2.5,members,memberCount:24,source:'CelesTrak SupGP · SpaceX ephemeris'},{lat:38.3553,lon:-87.5675,alt:0,tz:'America/Chicago'},windows,10,{now});
+  const hourlyTime=Array.from({length:240},(_,i)=>Math.floor(now/3600000)*3600+i*3600-48*3600);
+  const weather={timezone:'America/Chicago',hourly:{time:hourlyTime,cloud_cover:hourlyTime.map(()=>6),visibility:hourlyTime.map(()=>25000),precipitation:hourlyTime.map(()=>0),cloud_cover_low:hourlyTime.map(()=>5),cloud_cover_mid:hourlyTime.map(()=>0),cloud_cover_high:hourlyTime.map(()=>2)}};
+  const e=T.finalize(events[0].event,weather);
+  const s=__OVERHEAD_TEST__.state;s.worker?.terminate();s.busy=false;s.loading=false;
+  s.results=Object.fromEntries(s.nights.map((_,i)=>[i,[]]));
+  s.results[events[0].windowIndex]=[e];
+  s.trainCohorts=[];s.trainDiagnostics={enabled:true,cohorts:1,skipped:[],sources:{'2026-210':'CelesTrak SupGP · SpaceX ephemeris'},discoveryMs:5,calculationMs:42,
+   diagnostics:[{cohort:'2026-210',memberCount:24,launchDate:'2026-09-06',ageDays:2.5,elementAgeDays:.3,samples:9000,clusterCandidates:2,rejected:[],results:[{window:events[0].windowIndex,state:'Fresh Train',visibleCount:e.train.visibleCount,medianSpacingDeg:e.train.medianSpacingDeg,spanDeg:e.train.spanDeg,maxGapDeg:e.train.maxGapDeg,stale:false}]}]};
+  __OVERHEAD_TEST__.render();window.__trainEvent=e;return {id:e.id,score:e.score,state:e.train.state,windowIndex:events[0].windowIndex};
+ });
+ await expect(page.locator('#events')).toContainText('STARLINK TRAIN');
+ await expect(page.locator('.weekly-grade')).toContainText(trainEvent.score+' ·');
+ await expect(page.locator('#weekly-card')).toContainText('Starlink train 2026-210');
+ // Event detail reuses the existing dialog with train-specific facts.
+ await page.locator(`[data-event="${trainEvent.id}"]`).click();
+ await expect(page.locator('#event-dialog')).toBeVisible();
+ await expect(page.locator('#detail-title')).toContainText('Starlink train 2026-210');
+ await expect(page.locator('#detail-content')).toContainText('Strong viewing window');
+ await expect(page.locator('#detail-content')).toContainText('Individual spacecraft (24)');
+ await expect(page.locator('#detail-content svg circle')).not.toHaveCount(0);
+ expect(await page.locator('#favorite').isHidden()).toBe(true);
+ await page.keyboard.press('Escape');
+ // Sky preview shows multiple train members.
+ const dots=await page.locator('#sky-preview svg circle').count();expect(dots).toBeGreaterThan(3);
+ // Diagnostics section reports the train calculation.
+ (await page.locator('#train-diagnostics summary').click());
+ await expect(page.locator('#train-diagnostic-output')).toContainText('trainCalculationMs');
+ // About tab: navigation, content, hash, and state preservation.
+ const stateBefore=await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return JSON.stringify([s.site,s.settings,s.day,s.view,s.favorites,s.results]);});
+ await page.getByRole('tab',{name:'ABOUT'}).click();
+ await expect(page.locator('#about')).toBeVisible();
+ await expect(page.locator('.briefing')).toBeHidden();
+ await expect(page.locator('#about')).toContainText('Starlink Train Watch');
+ await expect(page.locator('#about')).toContainText('CelesTrak');
+ await expect(page.locator('#about-version')).toContainText('version 20');
+ expect(new URL(page.url()).hash).toBe('#about');
+ await page.getByRole('tab',{name:'TONIGHT'}).click();
+ await expect(page.locator('#about')).toBeHidden();await expect(page.locator('.briefing')).toBeVisible();
+ expect(await page.evaluate(()=>JSON.stringify([__OVERHEAD_TEST__.state.site,__OVERHEAD_TEST__.state.settings,__OVERHEAD_TEST__.state.day,__OVERHEAD_TEST__.state.view,__OVERHEAD_TEST__.state.favorites,__OVERHEAD_TEST__.state.results]))).toBe(stateBefore);
+ expect(new URL(page.url()).hash).toBe('');
+ // Keyboard navigation across four tabs.
+ await page.getByRole('tab',{name:'NOW'}).focus();
+ await page.keyboard.press('ArrowRight');await expect(page.getByRole('tab',{name:'TONIGHT'})).toBeFocused();
+ await page.keyboard.press('End');await expect(page.getByRole('tab',{name:'ABOUT'})).toBeFocused();
+ // Responsive + both themes: no horizontal overflow anywhere, with the train card present.
+ await page.getByRole('tab',{name:'TONIGHT'}).click();
+ for(const width of [390,768,1024,1440,1920]){
+  await page.setViewportSize({width,height:1000});
+  for(const theme of ['light','dark']){
+   await page.evaluate(theme=>document.querySelector('[data-theme-choice=\"'+theme+'\"]').click(),theme);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(width);
+   const card=await page.locator('#weekly-card').boundingBox();
+   expect(card.width).toBeLessThan(width);
+  }
+ }
+ await page.screenshot({fullPage:true,path:'/private/tmp/overhead-train-about-dark-390.png'});
+ expect(errors).toEqual([]);
+});
+
 test('theme switching survives failed storage and missing source data',async({page})=>{
  await page.addInitScript(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='overhead.theme')throw new DOMException('Storage full','QuotaExceededError');return original.call(this,key,value);};});
  const errors=await boot(page,{offline:true});await page.setViewportSize({width:390,height:844});
