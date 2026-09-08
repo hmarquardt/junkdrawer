@@ -202,6 +202,7 @@ test('public footer freshness, staged train source fetching and cache capacity',
   s.sources={'weather:38.355,-87.568':{at:now-5*60000},'weather:51.5,-0.1':{at:now-90*60000},
    'orbits:stations':{at:now-120*60000},'orbits:visual':{at:now-130*60000},'orbits:last-30-days':{at:now-10*60000},
    'orbits:supgp:2026-197':{at:now-18*60000},'orbits:supgp:2026-196':{at:now-24*60000},'satcat:2026-197':{at:now-2*60000}};
+  for(const k of Object.keys(s.sources))s.activeSourceKeys.add(k); // all seeded sources are active here; satcat must still never surface
   __OVERHEAD_TEST__.render();
  });
  const text=await page.locator('#freshness').textContent();
@@ -276,6 +277,66 @@ test('public footer freshness, staged train source fetching and cache capacity',
   expect(sources.height).toBeLessThan(60); // no narrow vertical strip
  }
  await page.screenshot({fullPage:true,path:'/private/tmp/overhead-footer-1024.png'});
+});
+
+test('public source status uses only currently active sources',async({page})=>{
+ const errors=await boot(page);
+ // Historical telemetry left in state.sources by earlier sessions/locations/toggles.
+ await page.evaluate(()=>{
+  const s=__OVERHEAD_TEST__.state,now=Date.now();
+  Object.assign(s.sources,{
+   'weather:99.000,-99.000':{at:now-90*60000,stale:true}, // previous location, stale
+   'orbits:supgp:2026-999':{at:now-6*60000,stale:false},  // train toggle later turned off
+   'satcat:2026-999':{at:now-7*60000,stale:false}});
+  __OVERHEAD_TEST__.render();
+ });
+ const active=await page.evaluate(()=>[...__OVERHEAD_TEST__.state.activeSourceKeys].sort());
+ expect(active.some(k=>k.startsWith('weather:'))).toBe(true);
+ expect(active.some(k=>k==='orbits:last-30-days')).toBe(true); // Train Watch enabled by default
+ expect(active.includes('orbits:supgp:2026-999')).toBe(false);
+ // Footer: only active sources; no supplemental line, no stale warning from history.
+ let text=await page.locator('#freshness').textContent();
+ expect(text).not.toContain('Starlink supplemental');
+ expect(text).not.toMatch(/stale/i);
+ expect(text).toMatch(/Weather updated/);
+ // Status banner does not inherit the historical stale warning.
+ expect(await page.locator('#status').textContent()).not.toContain('Cached data is stale');
+ // Diagnostics keep the full historical telemetry AND expose the active set.
+ await page.locator('#diagnostics summary').click();
+ const diag=await page.locator('#diagnostic-output').textContent();
+ expect(diag).toContain('weather:99.000,-99.000');
+ expect(diag).toContain('orbits:supgp:2026-999');
+ expect(diag).toContain('"activeSourceKeys"');
+ // Activating the SupGP key (eligible cohort requests it) makes the line appear…
+ await page.evaluate(()=>{__OVERHEAD_TEST__.state.activeSourceKeys.add('orbits:supgp:2026-999');__OVERHEAD_TEST__.render();});
+ await expect(page.locator('#freshness')).toContainText('Starlink supplemental data updated');
+ // …and deactivating it (Train Watch disabled / cohorts age-gated) removes it again.
+ await page.evaluate(()=>{__OVERHEAD_TEST__.state.activeSourceKeys.delete('orbits:supgp:2026-999');__OVERHEAD_TEST__.render();});
+ await expect(page.locator('#freshness')).not.toContainText('Starlink supplemental');
+ // A STALE ACTIVE source does produce the compact warning.
+ await page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;const k=[...s.activeSourceKeys].find(k=>k.startsWith('weather:'));s.sources[k].stale=true;__OVERHEAD_TEST__.render();});
+ await expect(page.locator('#freshness')).toContainText('Weather: stale cached forecast');
+ await expect(page.locator('#status')).toContainText('Cached data is stale');
+ // New load generation rebuilds the active set: historical keys never leak back in.
+ await page.locator('#refresh').click();
+ await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy&&!__OVERHEAD_TEST__.state.loading,null,{timeout:60000});
+ const after=await page.evaluate(()=>({active:[...__OVERHEAD_TEST__.state.activeSourceKeys].sort(),fresh:__OVERHEAD_TEST__.engine.publicFreshness(Object.fromEntries([...__OVERHEAD_TEST__.state.activeSourceKeys].filter(k=>__OVERHEAD_TEST__.state.sources[k]).map(k=>[k,__OVERHEAD_TEST__.state.sources[k]])))}));
+ expect(after.active.some(k=>k.includes('99.000'))).toBe(false);
+ expect(after.active.some(k=>k.includes('2026-999'))).toBe(false);
+ expect(after.fresh).not.toContain('Starlink supplemental');
+ expect(await page.locator('#freshness')).not.toContainText('Starlink supplemental');
+ // Footer stays compact in both themes at phone and desktop widths.
+ for(const width of [390,1024]){
+  await page.setViewportSize({width,height:900});
+  for(const theme of ['light','dark']){
+   await page.evaluate(theme=>document.querySelector('[data-theme-choice="'+theme+'"]').click(),theme);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(width);
+   expect((await page.locator('footer.site-footer').boundingBox()).height).toBeLessThan(220);
+  }
+ }
+ await page.getByRole('tab',{name:'ABOUT'}).click();
+ await expect(page.locator('footer.site-footer')).toBeVisible();
+ expect(errors).toEqual([]);
 });
 
 test('theme switching survives failed storage and missing source data',async({page})=>{
