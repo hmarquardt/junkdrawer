@@ -20,7 +20,7 @@ test('API failures never create events; import restores real orbital calculation
 test('stale cache survives network failure, then clearing cache removes downloaded data',async({page})=>{await boot(page);await page.evaluate(()=>new Promise((resolve,reject)=>{const r=indexedDB.open('overhead-cache',1);r.onsuccess=()=>{const tx=r.result.transaction('responses','readwrite'),s=tx.objectStore('responses'),q=s.getAll();q.onsuccess=()=>q.result.forEach(row=>s.put({...row,at:Date.now()-86400000}));tx.oncomplete=resolve;tx.onerror=reject;};}));await page.route('**celestrak.org/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:{error:'Unavailable'}}));await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event').first()).toBeVisible();await expect(page.locator('#freshness')).toContainText(/stale cache/i);await page.locator('#diagnostics summary').click();await page.getByRole('button',{name:'Clear downloaded cache'}).click();await expect(page.locator('#status')).toContainText('cache cleared');await page.reload();await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy);await expect(page.locator('.event')).toHaveCount(0);});
 test('theme-only rendering, deployed dark parity, contrast and persistence',async({page,browser})=>{
  const baseline=execFileSync('git',['show','8725153:overhead.html'],{encoding:'utf8'});
- const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-trains.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
+ const server=http.createServer((req,res)=>{const raw=new URL(req.url,'http://local').pathname;const file=raw.replace(/^\/baseline/,'').slice(1);if(file==='overhead.html'&&raw.startsWith('/baseline/')){res.setHeader('Content-Type','text/html');res.end(baseline);return;}if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-trains.js','overhead-objects.js','overhead-worker.js','analytics-lite.js','vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');res.end(fs.readFileSync(path.resolve(file)));});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
  const old=await browser.newPage();
  try{
@@ -167,8 +167,11 @@ test('Starlink Train Watch rendering, weekly integration and About tab',async({p
  await page.getByRole('tab',{name:'ABOUT'}).click();
  await expect(page.locator('#about')).toBeVisible();
  await expect(page.locator('.briefing')).toBeHidden();
- await expect(page.locator('#about')).toContainText('Starlink Train Watch');
- await expect(page.locator('#about')).toContainText('CelesTrak');
+  await expect(page.locator('#about')).toContainText('Starlink Train Watch');
+  await expect(page.locator('#about')).toContainText('CelesTrak');
+  await expect(page.locator('#about')).toContainText('What are these satellites?');
+  await expect(page.locator('#about')).toContainText('Wikidata');
+  await expect(page.locator('#about')).toContainText('use only spacecraft identifiers');
  await expect(page.locator('#about-version')).toContainText('version 20');
  expect(new URL(page.url()).hash).toBe('#about');
  await page.getByRole('tab',{name:'TONIGHT'}).click();

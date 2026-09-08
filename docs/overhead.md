@@ -8,8 +8,9 @@ Overhead is a static, local-first evening observing dashboard. Open [overhead.ht
 - `overhead-engine.js`: pure OMM/TLE parsing, SGP4 sampling, horizon crossings, solar illumination, useful visible intervals, scoring, timezone conversion, and night windows.
 - `overhead-worker.js`: background pass and train calculations with incremental results and cancellation when the observing request changes.
 - `overhead-weekly.js`, `overhead-trains.js`: pure weekly interpretation (Best Thing This Week) and Starlink train detection/scoring layers; they consume scored passes and never edit orbital calculations.
+- `overhead-objects.js`: pure object-identity enrichment ("what is this object?") — deterministic identifier joins, CelesTrak SATCAT identity, Wikidata mission metadata, shared Starlink records and the on-demand enricher. It describes objects; it never touches passes, scores or rankings.
 - `vendor/overhead/`: unmodified, pinned satellite.js 6.0.1 and SunCalc 1.9.0, with their MIT and BSD licenses. SunCalc's browser-global export is adapted in the worker host.
-- `tests/overhead-engine.cjs`, `tests/overhead.spec.js`: scientific regression checks and browser behavior tests.
+- `tests/overhead-engine.cjs`, `tests/overhead-trains.cjs`, `tests/overhead-weekly.cjs`, `tests/overhead-objects.cjs`, `tests/overhead.spec.js`, `tests/overhead-objects.spec.js`: scientific regression checks, deterministic layer tests and browser behavior tests.
 - `docs/overhead-validation.json`: results of the broader external ISS comparison.
 
 The existing `index.html` remains the collection landing page; Overhead is registered in `junk-drawer.json`. Its storage ownership is registered in Storage Manager.
@@ -31,6 +32,8 @@ Manual coordinates, no-key place search, geolocation, and 12 saved sites are sup
 | Source | Use | Network behavior |
 | --- | --- | --- |
 | [CelesTrak GP data](https://celestrak.org/NORAD/documentation/gp-data-formats.php) | JSON OMM groups `stations`, `visual`, `last-30-days`, and optional `starlink`; OMM supports newer catalog IDs | Default stations and visual; optional catalogs only when selected. Four-hour cache; manual refresh available. |
+| [CelesTrak SATCAT](https://celestrak.org/satcat/) | Object identity for selected spacecraft: owner, object type, launch date and site, operational status, NORAD + COSPAR identifiers | Queried on demand by `CATNR` (or `INTDES`) for the weekly winner and opened events only; 21-day cache in a separate store. |
+| [Wikidata](https://www.wikidata.org/) (CC0 structured data) | Operator, mission category, short plain-English description and a Wikipedia/official source link | SPARQL query by NORAD ID (P377) — COSPAR (P247) as fallback — for the same on-demand objects; 21-day cache. Only spacecraft identifiers are sent. |
 | [Open-Meteo Forecast](https://open-meteo.com/en/docs) | Hourly total/low/mid/high cloud, visibility, precipitation, humidity, weather code, temperature, and observer timezone | Selected coordinates sent for forecast; timestamps requested as Unix seconds; 30-minute cache. |
 | [Open-Meteo Geocoding](https://open-meteo.com/en/docs/geocoding-api) | City/place names and IANA timezone | Explicit search only. |
 | [satellite.js](https://github.com/shashwatak/satellite-js) 6.0.1 | SGP4, Earth-fixed coordinates, observer look angles, solar vector | Vendored; no runtime CDN requirement. |
@@ -39,7 +42,7 @@ Manual coordinates, no-key place search, geolocation, and 12 saved sites are sup
 | [OpenStreetMap tiles](https://operations.osmfoundation.org/policies/tiles/) | Raster map basemap | Loaded on demand with visible attribution; no tile prefetch or persistent tile cache. |
 | Repository Analytics Lite | Required Junkdrawer page instrumentation | Existing local script and repository collection endpoint; this page is not tracking-free. |
 
-No commercial satellite-pass service or LLM is used. Free source availability and usage terms still apply; these endpoints are not a commercial service-level guarantee. Site coordinates go to the forecast provider, search text goes to the geocoder, and opening the map exposes tile requests to its provider.
+No commercial satellite-pass service or LLM is used. Free source availability and usage terms still apply; these endpoints are not a commercial service-level guarantee. Site coordinates go to the forecast provider, search text goes to the geocoder, and opening the map exposes tile requests to its provider. **Satellite identity lookups use only spacecraft identifiers (NORAD catalog number, international designator) — never the observing location.**
 
 ## Sighting score
 
@@ -81,11 +84,51 @@ All event instants are UTC milliseconds; selected-location IANA timezones are us
 
 ## Cache and failure behavior
 
-IndexedDB contains at most 32 response records, pruned to seven days on writes; an old record is never used beyond seven days. The capacity covers the Train Watch working set (weather, core catalogs, per-cohort SATCAT launch metadata and SupGP supplemental elements) without evicting still-fresh core feeds; it remains small and bounded and avoids the shared localStorage budget. Session memory is capped at the same 32 records. Malformed responses do not replace a valid cached copy. No large response goes to localStorage.
+IndexedDB contains at most 32 response records, pruned to seven days on writes; an old record is never used beyond seven days. Object metadata lives in a **separate** `overhead-object-meta` store: keyed by NORAD (COSPAR aliases join to it), at most 200 records, 21-day TTL, pruned on write. Mission identity changes rarely, so it is cached far longer than a forecast or an element set, and it can never evict — or be evicted by — the high-frequency orbit/weather working set. Metadata is fetched only for the Best Thing This Week winner, the selected event and opened dialogs; a page load therefore issues at most a handful of metadata requests, never hundreds. The capacity covers the Train Watch working set (weather, core catalogs, per-cohort SATCAT launch metadata and SupGP supplemental elements) without evicting still-fresh core feeds; it remains small and bounded and avoids the shared localStorage budget. Session memory is capped at the same 32 records. Malformed responses do not replace a valid cached copy. No large response goes to localStorage.
 
 Failed refreshes use an eligible cached response with a visible stale warning. If there is no orbital source, no satellite event is invented. Missing weather makes scores provisional. Quota/IndexedDB failure falls back to session memory. Cache clearing preserves preferences, favorites, and sites. There is no background polling of APIs. Entered/imported orbital records remain session-only and are not automatically refreshed.
 
 Elements more than 14 days from a prediction are rejected; elements older than three days produce a caution. Imported OMM arrays and two-/three-line TLE files are supported, with a 2 MB import limit. Refreshing source data does not erase imported records.
+
+## Object identity — “what is this object?”
+
+Overhead can say “Best Thing This Week: TERRA” without telling a normal user what Terra is. `overhead-objects.js` (`OverheadObjects`) answers that with two layers, both public and both keyed by deterministic identifiers.
+
+### Layers
+
+1. **CelesTrak SATCAT** (`satcat/records.php?CATNR=<norad>&FORMAT=json`, `INTDES=` when no NORAD is known) supplies structured identity: owner country, object type (payload / rocket body / debris), launch date, launch site, operational status, decay flag, apogee/perigee, NORAD and COSPAR identifiers. SATCAT has no human-readable mission description, and none is inferred from it.
+2. **Wikidata** (CC0 structured data, SPARQL) supplies operator (with `P1813` short names and an acronym rule, so “National Aeronautics and Space Administration” displays as “NASA”), mission category from `P31` instance-of types, the item description as a short plain-English summary, and an English Wikipedia article (or official website) for “Learn more ↗”.
+
+### Identifier matching
+
+Joins are deterministic: **NORAD → COSPAR → exact name**. A COSPAR-only request (imported element, train cohort) resolves through SATCAT to the NORAD record, which is then also stored under the COSPAR key as an alias, so `TERRA`, `NORAD 25994` and `COSPAR 1999-068A` are one cached object. Name matching is exact and last-resort only; no fuzzy matching, no phonetic guessing.
+
+### Presentation
+
+- **Event detail** reuses the existing dialog: an “About this object” block below the pass facts and above the score explanation — name, `operator · category`, optional description, `Launched … · site`, `NORAD … · COSPAR …`, and a “Learn more ↗” link.
+- **Best Thing This Week** gains only a compact one-line identity (for example *NASA Earth-observation satellite*). The encyclopedia stays in the dialog.
+- **Starlink** never triggers per-satellite lookups: all Starlink objects share one `starlink:object` record, and train events share `starlink:train` (“SpaceX · Recently launched Starlink group”). 300 objects produce zero metadata requests.
+- **Known objects** (ISS, Tiangong, Hubble) use a four-entry local record — deterministic and offline by design, not a hand-maintained catalog.
+- **States**: full (operator + category + description + IDs), partial (structured identity + category, no description), identity (catalog fields only, e.g. “Rocket body · NORAD 12345”), unknown (“No additional mission information is available”). The event is never hidden and no mission purpose is ever fabricated.
+
+### Failure and privacy
+
+Every lookup is wrapped: a failed or absent source yields an unknown record, never a broken dialog, never a raw HTTP error in the UI, and never a change to propagation, scoring, ranking, weather, maps or Train Watch. The technical failure is recorded in diagnostics (`objectMetadata.requests/failures/lastError`), alongside per-object provenance:
+
+```text
+Object metadata:
+NORAD: 25994
+Identity source: CelesTrak SATCAT
+Description source: Wikidata
+Cached: yes
+Fetched: 2026-09-08T12:00:00.000Z
+```
+
+Requests contain identifiers only. No coordinates, location name or timezone is ever sent to SATCAT or Wikidata.
+
+### Validation
+
+`node tests/overhead-objects.cjs` covers 11 deterministic scenarios with fixture payloads shaped like the real responses: Terra resolving by NORAD, SATCAT-only identity and partial states, Wikidata description resolution and stub rejection, source failure, compact weekly identity (including the offline known-object record), 301 Starlink objects with zero requests, the train record, unknown-object fallback, cache reuse across sessions plus COSPAR→NORAD aliasing and TTL expiry, URL privacy, and weekly ranking byte-identical under total metadata failure. `tests/overhead-objects.spec.js` adds browser coverage: weekly identity text, the About block in the existing dialog, shared Starlink/train records, IndexedDB-backed refetch prevention, failure tolerance with the event and ranking intact, long organization names wrapping without horizontal overflow at 390–1920 px in both themes, and metadata never blocking propagation, maps or weather. A live run resolved Terra end-to-end (CelesTrak SATCAT + Wikidata) and served the second lookup from cache.
 
 ## Accuracy validation — September 7, 2026
 
@@ -115,7 +158,7 @@ Operational guidance: arrive two minutes early. For equal visibility definitions
 
 `node tests/overhead-engine.cjs` passes with no external network or npm: 116 orbital passes across four sites, including 37 daylight passes, 48 shadowed peaks, 9 passes above 85°, and 22 between 10° and 15°. Assertions cover four external ISS cases, geometric rise/set, monotonic cloud penalties, missing weather, illumination on both sides of Earth, expired elements, local midnight, US and European daylight saving transitions, and polar summer windows.
 
-`npx playwright test tests/overhead.spec.js --reporter=line --workers=1` passes all three Chrome tests. The tests use fixed time and explicit source fixtures, separate from the live-source accuracy checks. They cover the seven-night selector, sky-chart details, favorites, settings recalculation, saved-site deduplication and deletion, Now, source failure without fabricated events, real-element import, stale cache reuse, and cache clearing.
+`npx playwright test tests/overhead.spec.js tests/overhead-objects.spec.js --reporter=line --workers=1` passes all Chrome tests. The tests use fixed time and explicit source fixtures, separate from the live-source accuracy checks. They cover the seven-night selector, sky-chart details, favorites, settings recalculation, saved-site deduplication and deletion, Now, source failure without fabricated events, real-element import, stale cache reuse, cache clearing, and object-identity enrichment (weekly identity, About this object, Starlink sharing, cache, failure tolerance, privacy and both-theme responsive QA).
 
 Live-source Chrome QA also loaded 176 objects and calculated roughly 2,400 passes over the eight windows in about 5.2 seconds on the development machine, with no application exceptions or reported source errors. The map loaded and displayed the selected track and observer. This is desktop performance evidence, not a physical-phone benchmark.
 
@@ -225,6 +268,7 @@ The ABOUT tab is a real app view alongside NOW / TONIGHT / NEXT 7 DAYS: article-
 6. MapLibre requires WebGL and an optional CDN request. Its failure does not disable the sky chart. Touch panning requires an explicit toggle so casual page scrolling does not accidentally move the map.
 7. No installable PWA or service worker yet. Vendored calculation libraries and cached data improve resilience, but reopening the hosted page fully offline depends on normal browser caching.
 8. No notification scheduling, calendar exports, planets, showers, aurora, comets, or launch feeds in this version. The app does not invent these events.
+9. Mission metadata covers objects that public sources describe. Satellites, rocket bodies and debris without a catalog description show only verified structured fields — or nothing at all. Operators and categories are display summaries of third-party data, not curated facts.
 
 ## Phase 2
 
