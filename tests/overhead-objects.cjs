@@ -125,7 +125,11 @@ const results = [];
       assert.equal(meta.operator, null);
       assert.equal(O.compactIdentity(meta), null);
       assert.match(meta.error, /CelesTrak SATCAT/);
-      assert.equal(enricher.stats.failures, 1); // one object failed, both sources tried
+      assert.equal(meta.warning, null);
+      assert.equal(enricher.stats.objectFailures, 1); // one object failed, both sources tried
+      assert.equal(enricher.stats.failures, 1); // compatibility alias for object failures
+      assert.equal(enricher.stats.sourceWarnings, 0);
+      assert.equal(enricher.stats.lastWarning, null);
       assert.equal(enricher.stats.requests, 2);
       // A second resolve must not hammer a dead source again in the same session.
       const again = await enricher.resolve(O.objectRequest(TERRA_PASS));
@@ -220,7 +224,7 @@ const results = [];
       assert.equal(restored.operator, 'NASA');
       assert.equal(second.calls.length, 0);
       assert.deepEqual(O.provenance(restored), {norad:'25994', cospar:'1999-068A', level:'full', identitySource:'CelesTrak SATCAT',
-        descriptionSource:'Wikidata', cached:true, fetchedAt:'2026-09-08T12:00:00.000Z', error:null});
+        descriptionSource:'Wikidata', cached:true, fetchedAt:'2026-09-08T12:00:00.000Z', error:null, warning:null});
       // Deterministic identifier join: an object known only by COSPAR (imported element,
       // train cohort) resolves to the same record and is cached under its NORAD key.
       const joinStore = memoryStore();
@@ -297,6 +301,77 @@ const results = [];
           {...other, peak:{...p, el:40}, orbitalPeak:{...p}, entry:{...p, el:10}, exit:{...p, el:10, az:90}, path:[{...p, el:10}, {...p}]}];
       })()));
       results.push('11 Metadata failure leaves weekly ranking, winner, classification and pass objects byte-identical');
+    },
+    async () => {
+      // 12. SATCAT success + Wikidata failure: verified identity survives as a source warning.
+      const source = fetcher([['satcat/records.php', TERRA_SATCAT], ['query.wikidata.org', Error('HTTP 503')]]);
+      const enricher = O.createEnricher({fetchJSON: source.fetch, store: memoryStore()});
+      const meta = await enricher.resolve(O.objectRequest(TERRA_PASS));
+      assert.equal(meta.level, 'identity');
+      assert.equal(meta.norad, '25994');
+      assert.equal(meta.cospar, '1999-068A');
+      assert.equal(meta.owner, 'United States');
+      assert.equal(meta.launchDate, '1999-12-18');
+      assert.equal(meta.identitySource, 'CelesTrak SATCAT');
+      assert.equal(meta.descriptionSource, null);
+      assert.equal(meta.description, null);
+      // Not an object failure: it is a partial-source warning, and diagnostics say so.
+      assert.equal(meta.error, null);
+      assert.equal(meta.warning, 'Wikidata: HTTP 503');
+      assert.equal(enricher.stats.objectFailures, 0);
+      assert.equal(enricher.stats.failures, 0);
+      assert.equal(enricher.stats.sourceWarnings, 1);
+      assert.equal(enricher.stats.lastError, null);
+      assert.equal(enricher.stats.lastWarning, 'Wikidata: HTTP 503');
+      assert.deepEqual(O.provenance(meta), {norad:'25994', cospar:'1999-068A', level:'identity', identitySource:'CelesTrak SATCAT',
+        descriptionSource:'none', cached:false, fetchedAt:new Date(meta.fetchedAt).toISOString(), error:null, warning:'Wikidata: HTTP 503'});
+      results.push('12 SATCAT success + Wikidata failure keeps verified identity, records a source warning (not an object failure)');
+    },
+    async () => {
+      // 13. SATCAT failure + Wikidata success: mission metadata still resolves, with a warning.
+      const source = fetcher([['satcat/records.php', Error('HTTP 500')], ['query.wikidata.org', TERRA_WIKIDATA]]);
+      const enricher = O.createEnricher({fetchJSON: source.fetch, store: memoryStore()});
+      const meta = await enricher.resolve(O.objectRequest(TERRA_PASS));
+      assert.equal(meta.level, 'full');
+      assert.equal(meta.operator, 'NASA');
+      assert.equal(meta.category, 'Earth observation');
+      assert.match(meta.description, /climate research satellite/);
+      assert.equal(meta.norad, '25994'); // joined from the Wikidata record
+      assert.equal(meta.cospar, '1999-068A');
+      assert.equal(meta.error, null);
+      assert.equal(meta.warning, 'CelesTrak SATCAT: HTTP 500');
+      assert.equal(enricher.stats.objectFailures, 0);
+      assert.equal(enricher.stats.sourceWarnings, 1);
+      assert.equal(enricher.stats.lastWarning, 'CelesTrak SATCAT: HTTP 500');
+      results.push('13 SATCAT failure + Wikidata success still resolves the mission, warning recorded for diagnostics only');
+    },
+    async () => {
+      // 14. Both sources failing stays an object failure; a cached partial record keeps its warning.
+      const both = fetcher([['satcat/records.php', Error('HTTP 500')], ['query.wikidata.org', Error('HTTP 503')]]);
+      const failing = O.createEnricher({fetchJSON: both.fetch, store: memoryStore()});
+      const failed = await failing.resolve(O.objectRequest(TERRA_PASS));
+      assert.equal(failed.level, 'unknown');
+      assert.equal(failed.warning, null);
+      assert.match(failed.error, /CelesTrak SATCAT.*Wikidata/);
+      assert.equal(failing.stats.objectFailures, 1);
+      assert.equal(failing.stats.sourceWarnings, 0);
+      // Cached partial metadata: the warning travels with the record, no refetch, no new warning.
+      const store = memoryStore();
+      const partial = fetcher([['satcat/records.php', TERRA_SATCAT], ['query.wikidata.org', Error('HTTP 503')]]);
+      const first = O.createEnricher({fetchJSON: partial.fetch, store, now: () => Date.parse('2026-09-08T12:00Z')});
+      const stored = await first.resolve(O.objectRequest(TERRA_PASS));
+      assert.equal(stored.warning, 'Wikidata: HTTP 503');
+      const offline = fetcher([]);
+      const second = O.createEnricher({fetchJSON: offline.fetch, store, now: () => Date.parse('2026-09-09T12:00Z')});
+      const restored = await second.resolve(O.objectRequest(TERRA_PASS));
+      assert.equal(restored.cached, true);
+      assert.equal(restored.level, 'identity');
+      assert.equal(restored.warning, 'Wikidata: HTTP 503');
+      assert.equal(second.stats.sourceWarnings, 0);
+      assert.equal(second.stats.objectFailures, 0);
+      assert.equal(offline.calls.length, 0);
+      assert.equal(O.provenance(restored).warning, 'Wikidata: HTTP 503');
+      results.push('14 Total failure remains an object failure; cached partial metadata preserves warning provenance');
     }
   ]) await run();
   console.log('PASS ' + results.length + ' object-metadata scenarios:\n' + results.join('\n'));

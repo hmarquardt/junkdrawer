@@ -108,27 +108,57 @@ Joins are deterministic: **NORAD → COSPAR → exact name**. A COSPAR-only requ
 - **Event detail** reuses the existing dialog: an “About this object” block below the pass facts and above the score explanation — name, `operator · category`, optional description, `Launched … · site`, `NORAD … · COSPAR …`, and a “Learn more ↗” link.
 - **Best Thing This Week** gains only a compact one-line identity (for example *NASA Earth-observation satellite*). The encyclopedia stays in the dialog.
 - **Starlink** never triggers per-satellite lookups: all Starlink objects share one `starlink:object` record, and train events share `starlink:train` (“SpaceX · Recently launched Starlink group”). 300 objects produce zero metadata requests.
-- **Known objects** (ISS, Tiangong, Hubble) use a four-entry local record — deterministic and offline by design, not a hand-maintained catalog.
+- **Known objects** (ISS, Tiangong, Hubble) use a three-entry local record — deterministic and offline by design, not a hand-maintained catalog.
 - **States**: full (operator + category + description + IDs), partial (structured identity + category, no description), identity (catalog fields only, e.g. “Rocket body · NORAD 12345”), unknown (“No additional mission information is available”). The event is never hidden and no mission purpose is ever fabricated.
 
 ### Failure and privacy
 
-Every lookup is wrapped: a failed or absent source yields an unknown record, never a broken dialog, never a raw HTTP error in the UI, and never a change to propagation, scoring, ranking, weather, maps or Train Watch. The technical failure is recorded in diagnostics (`objectMetadata.requests/failures/lastError`), alongside per-object provenance:
+Every lookup is wrapped: a failed or absent source yields an unknown record, never a broken dialog, never a raw HTTP error in the UI, and never a change to propagation, scoring, ranking, weather, maps or Train Watch.
+
+Two outcomes are recorded separately in diagnostics (`objectMetadata`):
+
+- `objectFailures` — **no** source produced usable metadata for an object (also exposed as the compatibility alias `failures`), with `lastError`.
+- `sourceWarnings` — a source failed but another produced usable metadata, so the object is still enriched; the per-object `warning` travels with the record (including when it is served from cache) and `lastWarning` repeats the newest one. Partial warnings are diagnostics-only: the About-this-object block shows the verified information normally.
 
 ```text
 Object metadata:
 NORAD: 25994
 Identity source: CelesTrak SATCAT
-Description source: Wikidata
-Cached: yes
-Fetched: 2026-09-08T12:00:00.000Z
+Description source: none
+Cached: no
+Warning: Wikidata: HTTP 503
 ```
+
+Per-object provenance echoes the same field:
+
+```json
+{
+  "norad": "25994",
+  "level": "identity",
+  "identitySource": "CelesTrak SATCAT",
+  "descriptionSource": "none",
+  "cached": false,
+  "error": null,
+  "warning": "Wikidata: HTTP 503"
+}
+```
+
+### The metadata module itself is optional
+
+`overhead-objects.js` is **not** part of the fatal startup dependency set (only satellite.js, SunCalc and `overhead-engine.js` are). If it is missing or fails to initialize, `window.OverheadObjects` is null, `metadataAvailable` is false, and every metadata path becomes a harmless no-op: no metadata IndexedDB helper, no enricher, no lookups, no rendering. Propagation, weather, weekly ranking, Train Watch, maps, sky paths and event dialogs behave exactly as if the feature did not exist, and diagnostics report it in plain language:
+
+```text
+Metadata enrichment unavailable.
+Pass predictions are unaffected.
+```
+
+No script error, stack trace or raw load failure is shown to the user.
 
 Requests contain identifiers only. No coordinates, location name or timezone is ever sent to SATCAT or Wikidata.
 
 ### Validation
 
-`node tests/overhead-objects.cjs` covers 11 deterministic scenarios with fixture payloads shaped like the real responses: Terra resolving by NORAD, SATCAT-only identity and partial states, Wikidata description resolution and stub rejection, source failure, compact weekly identity (including the offline known-object record), 301 Starlink objects with zero requests, the train record, unknown-object fallback, cache reuse across sessions plus COSPAR→NORAD aliasing and TTL expiry, URL privacy, and weekly ranking byte-identical under total metadata failure. `tests/overhead-objects.spec.js` adds browser coverage: weekly identity text, the About block in the existing dialog, shared Starlink/train records, IndexedDB-backed refetch prevention, failure tolerance with the event and ranking intact, long organization names wrapping without horizontal overflow at 390–1920 px in both themes, and metadata never blocking propagation, maps or weather. A live run resolved Terra end-to-end (CelesTrak SATCAT + Wikidata) and served the second lookup from cache.
+`node tests/overhead-objects.cjs` covers 14 deterministic scenarios with fixture payloads shaped like the real responses: Terra resolving by NORAD, SATCAT-only identity and partial states, Wikidata description resolution and stub rejection, source failure, compact weekly identity (including the offline known-object record), 301 Starlink objects with zero requests, the train record, unknown-object fallback, cache reuse across sessions plus COSPAR→NORAD aliasing and TTL expiry, URL privacy, and weekly ranking byte-identical under total metadata failure, plus the source-warning / object-failure split (SATCAT-only, Wikidata-only, both failing, and warning provenance preserved through the cache). `tests/overhead-objects.spec.js` adds browser coverage: weekly identity text, the About block in the existing dialog, shared Starlink/train records, IndexedDB-backed refetch prevention, failure tolerance with the event and ranking intact, long organization names wrapping without horizontal overflow at 390–1920 px in both themes, metadata never blocking propagation, maps or weather, partial-source failure that keeps verified identity with no public error, and a run with `overhead-objects.js` served as 404 — the app still calculates passes, ranks the week, opens dialogs and reports "Metadata enrichment unavailable" in diagnostics with zero uncaught exceptions. A live run resolved Terra end-to-end (CelesTrak SATCAT + Wikidata) and served the second lookup from cache.
 
 ## Accuracy validation — September 7, 2026
 

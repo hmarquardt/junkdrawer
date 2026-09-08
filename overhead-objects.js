@@ -11,8 +11,8 @@
   'use strict';
   const DAY = 86400000;
   const RULES = Object.freeze({ttlDays:21,maxRecords:200,maxDescription:340});
-  /* Tiny built-in map for objects every user recognizes. Local, deterministic, no network.
-     Deliberately four entries: this is not a hand-maintained catalog. */
+     /* Tiny built-in map for objects every user recognizes. Local, deterministic, no network.
+        Deliberately three entries (ISS, Tiangong, Hubble): not a hand-maintained catalog. */
   const KNOWN = Object.freeze({
     '25544':{name:'International Space Station',operator:'International partnership',category:'Human spaceflight',cospar:'1998-067A',launchDate:'1998-11-20',
       description:'Continuously crewed research laboratory in low Earth orbit, flown with NASA, Roscosmos, ESA, JAXA and CSA. Usually the brightest thing overhead.',
@@ -257,7 +257,7 @@
       link, linkLabel:link ? (mission && mission.article ? 'Wikipedia' : 'Official site') : null,
       level, sources, identitySource:identity ? 'CelesTrak SATCAT' : known ? 'Overhead known-object record' : null,
       descriptionSource:description ? (known ? 'Overhead known-object record' : 'Wikidata') : null,
-      cached:false, fetchedAt:at, error:null};
+      cached:false, fetchedAt:at, error:null, warning:null};
   }
   function compactIdentity(meta) {
     if (!meta || meta.level === 'unknown') return null;
@@ -271,13 +271,14 @@
     if (!meta) return null;
     return {norad:meta.norad || null, cospar:meta.cospar || null, level:meta.level,
       identitySource:meta.identitySource || 'none', descriptionSource:meta.descriptionSource || 'none',
-      cached:!!meta.cached, fetchedAt:meta.fetchedAt ? new Date(meta.fetchedAt).toISOString() : null, error:meta.error || null};
+      cached:!!meta.cached, fetchedAt:meta.fetchedAt ? new Date(meta.fetchedAt).toISOString() : null,
+      error:meta.error || null, warning:meta.warning || null};
   }
   function unknownMeta(request, at = Date.now()) {
     return {key:cacheKey(request), norad:clean(request && request.norad) || null, cospar:normalizeCospar(request && request.cospar) || null,
       name:titleCaseName(request && request.name) || null, operator:null, owner:null, category:UNKNOWN, categoryLabel:null, description:null,
       launchDate:null, launchSite:null, status:null, objectType:null, apogee:null, perigee:null, link:null, linkLabel:null,
-      level:'unknown', sources:[], identitySource:null, descriptionSource:null, cached:false, fetchedAt:at, error:null};
+      level:'unknown', sources:[], identitySource:null, descriptionSource:null, cached:false, fetchedAt:at, error:null, warning:null};
   }
   /* On-demand enricher. Never throws; failures return an "unknown" record so the event,
      the weekly ranking and every other feature stay untouched. */
@@ -286,7 +287,14 @@
     const now = options.now || (() => Date.now());
     const ttl = options.ttl || RULES.ttlDays * DAY;
     const memory = new Map(), pending = new Map(), negative = new Map();
-    const stats = {requests:0, failures:0, lastError:null, cached:0};
+    /* Two different outcomes are recorded separately:
+       objectFailures — no source produced usable metadata for the object (error is shown in
+         diagnostics and stored on the record);
+       sourceWarnings — a source failed but another produced usable metadata, so the object
+         is enriched with a warning (never a public error).
+       `failures` remains as a compatibility alias for `objectFailures`. */
+    const stats = {requests:0, objectFailures:0, sourceWarnings:0, lastError:null, lastWarning:null, cached:0,
+      get failures() { return this.objectFailures; }};
     const usable = record => !!record && Number.isFinite(record.at) && now() - record.at < ttl && !!record.data;
     async function load(key, depth = 0) {
       if (memory.has(key)) return memory.get(key);
@@ -306,12 +314,12 @@
       try { await store.put(record); } catch {}
     }
     async function fetchMeta(request, key) {
-      let identity = null, mission = null, error = null;
+      let identity = null, mission = null; const failed = [];
       const satcat = satcatURL(request);
       if (satcat) {
         stats.requests++;
         try { identity = identityFromSatcat(selectSatcat(await fetchJSON(satcat), request)); }
-        catch (e) { error = 'CelesTrak SATCAT: ' + (e && e.message ? e.message : 'unavailable'); }
+        catch (e) { failed.push('CelesTrak SATCAT: ' + (e && e.message ? e.message : 'unavailable')); }
       }
       const joined = {norad:clean(request.norad) || (identity && identity.norad) || null,
         cospar:normalizeCospar(request.cospar) || (identity && identity.cospar) || null};
@@ -325,17 +333,22 @@
             if (fallbackURL && fallbackURL !== sparql) { stats.requests++; mission = missionFromWikidata(await fetchJSON(fallbackURL), joined); }
           }
         } catch (e) {
-          const message = 'Wikidata: ' + (e && e.message ? e.message : 'unavailable');
-          error = error ? error + ' · ' + message : message;
+          failed.push('Wikidata: ' + (e && e.message ? e.message : 'unavailable'));
         }
       }
       if (!identity && !mission) {
-        stats.failures++; stats.lastError = error || 'No metadata source returned a record';
+        // Object failure: nothing usable from any source.
+        stats.objectFailures++; stats.lastError = failed.join(' · ') || 'No metadata source returned a record';
         const unknown = {...unknownMeta({...request, ...joined}, now()), key, error:stats.lastError};
         negative.set(key, unknown);
         return unknown;
       }
       const meta = combine({request:{...request, ...joined}, identity, mission, at:now()});
+      if (failed.length) {
+        // Partial enrichment: verified data is kept and the failure is recorded for diagnostics.
+        meta.warning = failed.join(' · ');
+        stats.sourceWarnings += failed.length; stats.lastWarning = meta.warning;
+      }
       // Store under the canonical (NORAD) key; remember the key the caller asked under so
       // TERRA, NORAD 25994 and COSPAR 1999-068A all resolve to the same cached record.
       const canonical = meta.key || key;
@@ -356,7 +369,7 @@
       if (negative.has(key)) return negative.get(key);
       if (pending.has(key)) return pending.get(key);
       const task = fetchMeta(request, key).then(meta => { pending.delete(key); return meta; },
-        error => { pending.delete(key); stats.failures++; stats.lastError = error && error.message ? error.message : 'Metadata lookup failed';
+        error => { pending.delete(key); stats.objectFailures++; stats.lastError = error && error.message ? error.message : 'Metadata lookup failed';
           const unknown = {...unknownMeta(request, now()), key, error:stats.lastError}; negative.set(key, unknown); return unknown; });
       pending.set(key, task);
       return task;

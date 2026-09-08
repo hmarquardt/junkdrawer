@@ -1,6 +1,7 @@
 const {test,expect}=require('@playwright/test');
 const path=require('path');
-const {execFileSync}=require('child_process');
+const fs=require('fs');
+const http=require('http');
 test.use({channel:'chrome'});
 test.setTimeout(120000);
 const now=Date.parse('2026-09-07T18:00Z');
@@ -199,4 +200,103 @@ test('object metadata never blocks orbital calculation, maps, trains or weather'
   expect(diag).toContain('objectMetadata');
   expect(await page.evaluate(()=>__OVERHEAD_TEST__.state.weekly.winner.pass.norad)).toBe('42424');
   expect(errors).toEqual([]);
+});
+
+test('partial metadata-source failure keeps verified identity and stays out of the public UI',async({page})=>{
+  const errors=await boot(page);
+  // SATCAT answers; Wikidata is down. Verified identity must survive, with a diagnostics-only warning.
+  await page.route('**/satcat/records.php*',r=>r.fulfill({json:TERRA_SATCAT}));
+  await page.route('**query.wikidata.org/**',r=>r.fulfill({status:503,body:'unavailable'}));
+  const {pass}=require('./overhead-weekly.cjs');
+  const seed=pass(now+3600000);
+  await page.evaluate(seed=>{
+    const s=__OVERHEAD_TEST__.state;s.worker?.terminate();s.busy=false;s.loading=false;
+    const t=s.nights[1].start+3600000,delta=t-seed.start;const p=structuredClone(seed);
+    Object.assign(p,{id:'obj-1',name:'TERRA',norad:'25994',score:96,start:t,end:t+342000,rise:t-60000,set:t+400000});
+    for(const k of ['entry','exit','peak','orbitalPeak'])p[k].t+=delta;p.path.forEach(x=>x.t+=delta);
+    s.results=Object.fromEntries(s.nights.map((_,i)=>[i,[]]));s.results[1]=[p];__OVERHEAD_TEST__.render();
+  },seed);
+  await page.locator('#weekly-open').click();
+  const about=page.locator('#object-about');
+  await expect(about).toContainText('ABOUT THIS OBJECT');
+  await expect(about).toContainText('Terra');
+  await expect(about).toContainText('Launched Dec 18, 1999');
+  await expect(about).toContainText('NORAD 25994 · COSPAR 1999-068A');
+  // No public error: no HTTP status, no stack, no "unavailable" wording for a partial failure.
+  await expect(about).not.toContainText(/HTTP|503|unavailable|undefined/);
+  await expect(page.locator('#status')).not.toContainText(/503|Wikidata/);
+  await page.keyboard.press('Escape');
+  const stats=await page.evaluate(()=>{const s=__OVERHEAD_TEST__.objectEnricher.stats;
+    return {requests:s.requests,objectFailures:s.objectFailures,failures:s.failures,sourceWarnings:s.sourceWarnings,
+      lastError:s.lastError,lastWarning:s.lastWarning,meta:[...__OVERHEAD_TEST__.objectMeta.values()].map(m=>({level:m.level,warning:m.warning,error:m.error}))};});
+  expect(stats.objectFailures).toBe(0);
+  expect(stats.failures).toBe(0);
+  expect(stats.sourceWarnings).toBeGreaterThan(0);
+  expect(stats.lastError).toBe(null);
+  expect(stats.lastWarning).toMatch(/Wikidata/);
+  expect(stats.meta.some(m=>m.level==='identity'&&m.warning&&/Wikidata/.test(m.warning)&&m.error===null)).toBe(true);
+  await page.locator('#diagnostics summary').click();
+  const diag=await page.locator('#diagnostic-output').textContent();
+  expect(diag).toContain('"sourceWarnings"');
+  expect(diag).toContain('"lastWarning": "Wikidata');
+  expect(diag).toContain('"objectFailures": 0');
+  expect(errors).toEqual([]);
+});
+
+test('metadata module unavailable leaves Overhead fully functional',async({page,browser})=>{
+  // Serve the real app but make overhead-objects.js disappear (404), as a failed load would.
+  const server=http.createServer((req,res)=>{
+    const file=new URL(req.url,'http://local').pathname.slice(1);
+    if(file==='overhead-objects.js'){res.writeHead(404);res.end('not found');return;}
+    if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-trains.js','overhead-worker.js','analytics-lite.js',
+      'vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}
+    res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');
+    res.end(fs.readFileSync(path.resolve(file)));
+  });
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  try{
+    const errors=[];page.on('pageerror',e=>errors.push('pageerror: '+e.message));
+    page.on('console',m=>{if(m.type()==='error'&&!/Failed to load resource|overhead-objects\.js/.test(m.text()))errors.push(m.text());});
+    await page.clock.setFixedTime(new Date(now));
+    await page.route('**/api/analytics/**',r=>r.fulfill({status:204,body:''}));
+    await page.route('**celestrak.org/**',r=>r.fulfill({json:[iss]}));
+    await page.route('**api.open-meteo.com/**',r=>r.fulfill({json:{timezone:'America/Chicago',hourly}}));
+    await page.goto('http://127.0.0.1:'+server.address().port+'/overhead.html');
+    await page.waitForFunction(()=>window.__OVERHEAD_TEST__&&!__OVERHEAD_TEST__.state.busy,null,{timeout:60000});
+    // The module is genuinely absent, and the app says so only in diagnostics.
+    expect(await page.evaluate(()=>window.OverheadObjects)).toBe(undefined);
+    expect(await page.evaluate(()=>__OVERHEAD_TEST__.metadataAvailable)).toBe(false);
+    // Orbital calculation, weather, weekly ranking and Train Watch all work.
+    expect(await page.evaluate(()=>__OVERHEAD_TEST__.state.poolCount)).toBeGreaterThan(0);
+    await expect(page.locator('.event').first()).toBeVisible();
+    await expect(page.locator('#night-score')).not.toHaveText('—');
+    expect(await page.evaluate(()=>!!__OVERHEAD_TEST__.state.weekly.winner)).toBe(true);
+    expect(await page.evaluate(()=>Array.isArray(__OVERHEAD_TEST__.state.trainCohorts))).toBe(true);
+    await expect(page.locator('#conditions')).not.toBeEmpty();
+    // Weekly card and event dialog work, with no About-this-object content.
+    await expect(page.locator('#weekly-open')).toBeVisible();
+    await expect(page.locator('#weekly-identity')).toBeHidden();
+    await page.locator('#weekly-open').click();
+    await expect(page.locator('#event-dialog')).toBeVisible();
+    await expect(page.locator('#detail-title')).not.toBeEmpty();
+    await expect(page.locator('#detail-content svg')).toBeVisible();
+    await expect(page.locator('#detail-content')).toContainText('Why this score');
+    await expect(page.locator('#object-about')).toBeHidden();
+    await expect(page.locator('#object-about')).toBeEmpty();
+    await page.keyboard.press('Escape');
+    // Navigation and the other views still render.
+    await page.getByRole('tab',{name:'NEXT 7 DAYS'}).click();
+    await expect(page.locator('#week button')).toHaveCount(7);
+    await page.getByRole('tab',{name:'ABOUT'}).click();
+    await expect(page.locator('#about')).toBeVisible();
+    await page.getByRole('tab',{name:'TONIGHT',exact:true}).click();
+    // Diagnostics report the optional feature as unavailable, in plain language.
+    await page.locator('#diagnostics summary').click();
+    const diag=await page.locator('#diagnostic-output').textContent();
+    expect(diag).toContain('Metadata enrichment unavailable');
+    expect(diag).toContain('Pass predictions are unaffected');
+    expect(diag).toContain('"available": false');
+    expect(diag).not.toMatch(/stack|undefined is not|Cannot read/i);
+    expect(errors).toEqual([]);
+  }finally{await new Promise(r=>server.close(r));}
 });
