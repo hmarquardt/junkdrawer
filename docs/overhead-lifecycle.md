@@ -1,5 +1,7 @@
 # Overhead lifecycle hardening — 2026.09.08.9
 
+**Follow-up, .10:** subsequent field observation and a full live-source UI trace reproduced the missing presentation mechanism: score-zero ISS ranked 136th, excluded by the six-row limit. See [the presentation repair and exact weather audit](overhead-awareness.md). The original .9 investigation below is preserved as history; no malformed timing was needed to reproduce the UI failure.
+
 ## Field report: what is and is not reproduced
 
 **The exact reason the field user's 8:17 PM event disappeared at about 8:00 PM is not established.** No original browser timing snapshot, selected settings, observer state or clock reading was supplied. This release fixes demonstrable lifecycle weaknesses; it does not claim proof of the field incident's cause.
