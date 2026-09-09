@@ -248,7 +248,7 @@ test('metadata module unavailable leaves Overhead fully functional',async({page,
   const server=http.createServer((req,res)=>{
     const file=new URL(req.url,'http://local').pathname.slice(1);
     if(file==='overhead-objects.js'){res.writeHead(404);res.end('not found');return;}
-    if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-trains.js','overhead-worker.js','analytics-lite.js',
+    if(!['overhead.html','overhead-engine.js','overhead-weekly.js','overhead-lifecycle.js','overhead-trains.js','overhead-worker.js','analytics-lite.js',
       'vendor/overhead/satellite-6.0.1.min.js','vendor/overhead/suncalc-1.9.0.js'].includes(file)){res.writeHead(404);res.end();return;}
     res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'application/javascript');
     res.end(fs.readFileSync(path.resolve(file)));

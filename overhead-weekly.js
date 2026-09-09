@@ -2,6 +2,7 @@
 (function(root){
 'use strict';
 const HOUR=3600000;
+const lifecycle=(root.OverheadLifecycle||(typeof require==='function'?require('./overhead-lifecycle.js'):null)).eventLifecycle;
 const RULES=Object.freeze({qualityBand:5,tieSignificance:2,tieQuality:3,worthwhile:60,exceptional:90,excellent:75,freshHours:6,confidentLeadHours:72});
 function prominence(p){
  if(p.train){const s=p.train.state;
@@ -48,7 +49,7 @@ function calculateEventSignificance(p,relative){
 function findComparableEvents(event,entries){return entries.filter(e=>e.pass.id!==event.pass.id&&e.pass.start>event.pass.start&&e.pass.score>=event.pass.score-3&&e.pass.peak.el>=event.pass.peak.el-15&&e.pass.duration>=event.pass.duration*.7&&e.classification.confidence===event.classification.confidence).sort((a,b)=>a.pass.start-b.pass.start);}
 function rankWeeklyEvents(results,windows,options={}){
  const ctx={now:Date.now(),complete:false,...options},seen=new Set(),pool=[];
- windows.slice(0,7).forEach((night,index)=>{for(const p of results[index]||[]){if(seen.has(p.id)||!p.likely||p.end<=ctx.now||p.start<night.start||p.start>=night.end||p.peak.sun> -6||!p.peak.lit||!Number.isFinite(p.score))continue;seen.add(p.id);pool.push({pass:p,night:index});}});
+ windows.slice(0,7).forEach((night,index)=>{for(const p of results[index]||[]){if(seen.has(p.id)||!p.likely||!lifecycle(p,ctx.now).recommendationEligible||p.start<night.start||p.start>=night.end||p.peak.sun> -6||!p.peak.lit||!Number.isFinite(p.score))continue;seen.add(p.id);pool.push({pass:p,night:index});}});
  const center=median(pool.map(e=>e.pass.score)),byObject=new Map();
  for(const e of pool){const key=String(e.pass.norad);if(!byObject.has(key))byObject.set(key,[]);byObject.get(key).push(e.pass);}
  for(const values of byObject.values())values.sort((a,b)=>b.score-a.score);

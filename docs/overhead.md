@@ -1,5 +1,7 @@
 # Overhead
 
+Lifecycle release **2026.09.08.9** adds shared recommendation/feed expiry, a ten-minute detail grace period and timing-invariant diagnostics. See [the reproduction evidence, limits of root-cause attribution, exact boundary tests and live-source smoke](overhead-lifecycle.md). The field-reported 8:17 → 8:00 discrepancy is not confirmed from the available original state; this is tested lifecycle hardening, not a claim of proven incident attribution.
+
 Overhead is a static, local-first evening observing dashboard. Open [overhead.html](../overhead.html) on the Junkdrawer site. No build, npm installation, backend, account, or API key is needed. Opening the file directly also works, with a cooperative main-thread fallback when the browser disallows workers on `file://`.
 
 ## Files and architecture
