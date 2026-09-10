@@ -1,8 +1,12 @@
 const { test, expect } = require('@playwright/test');
 const path = require('path');
+const fs = require('fs');
 const url = `file://${path.resolve(process.cwd(), 'fixed-income-desk.html')}`;
 test.use({channel:'chrome'});
 async function open(page) {
+ await page.addInitScript(()=>{try{if(!localStorage.getItem('fixed-income-desk.tab'))localStorage.setItem('fixed-income-desk.tab','foundations')}catch{}});
+ await page.route('**/interest-rates/pages/xml?**',r=>r.fulfill({contentType:'application/xml',headers:{'access-control-allow-origin':'*'},body:fs.readFileSync(path.join(__dirname,'fixtures/fixed-income',r.request().url().includes('real_yield')?'treasury-real.xml':'treasury-nominal.xml'),'utf8')}));
+ await page.route('https://markets.newyorkfed.org/api/**',r=>r.fulfill({contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:fs.readFileSync(path.join(__dirname,'fixtures/fixed-income/nyfed.json'),'utf8')}));
  const errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
@@ -87,7 +91,7 @@ test('keyboard tabs, search, filtered cross-links, copy and preferences',async({
  await page.keyboard.press('End');
  await expect(page.locator('#tab-sources')).toBeFocused();
  await page.keyboard.press('Home');
- await expect(page.locator('#tab-foundations')).toBeFocused();
+ await expect(page.locator('#tab-markets')).toBeFocused();
  await page.keyboard.press('/');
  await expect(page.locator('#global-search')).toBeFocused();
  await page.locator('#global-search').fill('DV01');
