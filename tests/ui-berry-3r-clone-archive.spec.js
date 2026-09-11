@@ -129,6 +129,25 @@ test('OpenRouter HTTP failure is visible with safe provider detail, fails the ac
  expect(errors.filter(e=>!/Failed to load resource/.test(e))).toEqual([]);
 });
 
+test('provider 400 body, provider name and request shape are visible in diagnostics without secrets or image payloads',async({page})=>{
+ const errors=await open(page);await load(page,sanitized);
+ await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,s=T.state;T.settings.apiKey='test-key-400';T.settings.chime=false;s.models=[{id:'openai/gpt-6-astra',name:'GPT-6 Astra',architecture:{input_modalities:['text','image'],output_modalities:['text']}}];T.renderModels()});
+ await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{message:'Provider returned error',code:400,metadata:{provider_name:'OpenAI',raw:JSON.stringify({error:{message:'Unsupported parameter: temperature',type:'invalid_request_error',code:'unsupported_parameter'}})}}})}));
+ await page.locator('[data-view=admin]').click();await page.locator('#orModel').selectOption('openai/gpt-6-astra');await page.locator('[data-view=evaluate]').click();
+ await page.locator('#generate').click();
+ await expect(page.locator('#notice')).toContainText('OpenRouter request failed: HTTP 400');
+ await expect(page.locator('#notice')).toContainText('Provider returned error');
+ await expect(page.locator('#notice')).toContainText('provider: OpenAI');
+ const out=await page.evaluate(()=>({debug:__BERRY3VISUAL_TEST__.buildDebugReport(),status:document.querySelector('#analysisStatus').textContent}));
+ const pass=out.debug.passes[0];
+ expect(pass.httpStatus).toBe(400);expect(pass.providerError).toBe('Provider returned error');expect(pass.providerName).toBe('OpenAI');expect(pass.providerCode).toBe(400);expect(pass.providerBody).toContain('Unsupported parameter: temperature');
+ expect(pass.requestShape).toMatchObject({temperature:'OMITTED',top_p:'OMITTED',logprobs:'OMITTED',response_format:'json_object'});
+ expect(out.status).toContain('Analyze failed');
+ expect(JSON.stringify(out.debug)).not.toContain('test-key-400');
+ expect(JSON.stringify(out.debug)).not.toContain('data:image');
+ expect(errors.filter(e=>!/Failed to load resource/.test(e))).toEqual([]);
+});
+
 test('completion chime preference can disable the success sound without affecting analysis',async({page})=>{
  const errors=await open(page);await load(page,sanitized);await configureArchiveMock(page);
  await page.evaluate(()=>{__BERRY3VISUAL_TEST__.settings.chime=false});

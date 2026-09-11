@@ -136,6 +136,94 @@ test('provider-grouped vision selector excludes text-only and retains saved sele
   await expect(page.locator('#orModel')).toHaveValue('provider/vision');
 });
 
+test('model request capabilities omit unsupported sampling parameters for known reasoning models', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__; T.settings.temperature = 0.25;
+    const ids = ['openai/gpt-6-astra', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna', 'openai/gpt-4.1-mini', 'acme/custom-vision'];
+    return Object.fromEntries(ids.map(id => { const body = T.modelRequestBody(id, [{ role: 'user', content: 'x' }]); return [id, { caps: T.modelRequestCapabilities(id), keys: Object.keys(body), body }]; }));
+  });
+  for (const id of ['openai/gpt-6-astra', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna']) {
+    expect(out[id].caps.temperature).toBe(false);
+    for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) expect(out[id].keys).not.toContain(key);
+    expect(out[id].body.response_format).toEqual({ type: 'json_object' });
+    expect(out[id].body.messages).toHaveLength(1);
+  }
+  for (const id of ['openai/gpt-4.1-mini', 'acme/custom-vision']) {
+    expect(out[id].caps.temperature).toBe(true);
+    expect(out[id].keys).toContain('temperature');
+    expect(out[id].body.temperature).toBe(0.25);
+  }
+  expect(out['openai/gpt-6-astra'].caps.samplingNote).toContain('not supported');
+});
+
+test('Admin disables temperature for Astra, preserves the stored value, and restores it for supporting models', async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__; T.settings.temperature = 0.25;
+    T.state.models = [
+      { id: 'openai/gpt-6-astra', name: 'GPT-6 Astra', architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } },
+      { id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 Mini', architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } }
+    ];
+    T.renderModels();
+  });
+  await page.locator('[data-view=admin]').click();
+  await page.locator('#orModel').selectOption('openai/gpt-6-astra');
+  await expect(page.locator('#temperature')).toBeDisabled();
+  await expect(page.locator('#temperature')).toHaveValue('0.25');
+  await expect(page.locator('#temperatureNote')).toContainText('Sampling temperature is not supported by GPT-6 Astra and will not be sent.');
+  expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.settings.temperature)).toBe(0.25);
+  await page.locator('#orModel').selectOption('openai/gpt-4.1-mini');
+  await expect(page.locator('#temperature')).toBeEnabled();
+  await expect(page.locator('#temperature')).toHaveValue('0.25');
+  await expect(page.locator('#temperatureNote')).toBeHidden();
+});
+
+test('Astra requests omit sampling parameters on every pass while keeping vision parts and structured output', async ({ page }) => {
+  const errors = await open(page, true);
+  await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__, s = T.state;
+    T.settings.apiKey = 'test-key-astra'; T.settings.chime = false;
+    s.models = [{ id: 'openai/gpt-6-astra', name: 'GPT-6 Astra', architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } }];
+    T.renderModels();
+    window.__sample = structuredClone(s.draft); window.__features = structuredClone(s.features);
+  });
+  await page.locator('[data-view=admin]').click();
+  await page.locator('#orModel').selectOption('openai/gpt-6-astra');
+  await page.locator('[data-view=evaluate]').click();
+  const bodies = [];
+  await page.route('**openrouter.ai/api/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON(); bodies.push(body);
+    if ('temperature' in body || 'top_p' in body || 'top_logprobs' in body || 'logprobs' in body) {
+      return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Provider returned error', code: 400, metadata: { provider_name: 'OpenAI', raw: JSON.stringify({ error: { message: 'Unsupported parameter: temperature', type: 'invalid_request_error', code: 'unsupported_parameter' } }) } } }) });
+    }
+    const instruction = body.messages[0].content.split('\nPASS: ')[1];
+    let response;
+    if (instruction.startsWith('Observe images')) response = { features: await page.evaluate(() => window.__features) };
+    else if (instruction.startsWith('Adversarial QA')) {
+      const result = await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__, result = structuredClone(window.__sample); for (const d of T.DIMS) for (const c of result[d].claims) c.evidenceIds = d === 'functionality' ? [...T.retainedBehavior().A, ...T.retainedBehavior().B].map(f => f.id) : d === 'fidelity' ? T.state.features.map(f => f.id) : [...T.state.features.map(f => f.id), ...T.retainedBehavior().A.map(f => f.id), ...T.retainedBehavior().B.map(f => f.id)]; return result });
+      response = { result, issues: [], checked: { referenceFeatures: true, behaviorNotInferred: true, lensIsolation: true, tieConsistency: true, allClaimsEvidenced: true, overallTradeoff: true, wordCounts: true } };
+    } else response = await page.evaluate(() => window.__sample);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) });
+  });
+  await page.locator('#generate').click();
+  await expect(page.locator('#notice')).toContainText('Analysis complete');
+  expect(bodies).toHaveLength(3);
+  for (const body of bodies) {
+    expect(body.model).toBe('openai/gpt-6-astra');
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) expect(key in body).toBe(false);
+  }
+  expect(bodies[0].messages[1].content.filter(p => p.type === 'image_url')).toHaveLength(5);
+  expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.settings.temperature)).toBe(0.25);
+  const debug = await page.evaluate(() => __BERRY3VISUAL_TEST__.buildDebugReport());
+  expect(debug.passes[0].requestShape.temperature).toBe('OMITTED');
+  expect(debug.passes[0].requestShape.contentParts).toContain('5 images');
+  expect(JSON.stringify(debug)).not.toContain('test-key-astra');
+  expect(JSON.stringify(debug)).not.toContain('data:image');
+  expect(errors).toEqual([]);
+});
+
 test('source and screenshots never normalize into confirmed behavior; channels stay separate', async ({ page }) => {
   await open(page, true);
   const out = await page.evaluate(() => {
