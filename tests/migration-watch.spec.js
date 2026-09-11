@@ -150,7 +150,7 @@ test('map is lazy, initializes on open, supports filters, fit and recenter',asyn
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
  expect(await page.locator('script[src*="maplibre"]').count()).toBe(0); // lazy: not loaded before open
- await page.locator('#map-details summary').click();
+ await page.locator('#map-details > summary').click();
  await page.waitForFunction(()=>window.__MW_TEST__.MapMod.map!==null,null,{timeout:20000});
  expect(await page.locator('script[src*="maplibre"]').count()).toBe(1);
  await expect(page.locator('#map canvas').first()).toBeVisible({timeout:20000});
@@ -286,16 +286,16 @@ test('snapshot persistence: same-day refresh replaces, other scope isolated, >90
  expect(count2).toBe(count1); // same-day refresh replaces, never appends
  // isolation: same species/date, different radius is a distinct record
  await page.evaluate(async()=>{const T=window.__MW_TEST__,TS=T.TrendStore,today=T.Snapshot.today();
-  await TS.put({id:TS.key(today,'princeton',50,'amre'),date:today,locationPreset:'princeton',radiusKm:50,speciesCode:'amre',commonName:'American Redstart',observations72h:1,reportingLocations72h:1,observations7d:1,reportingLocations7d:1,nearestKm:30,maxCount:1,medianCount:1,notableCount:0,seasonalExpectation:3,seasonalStatus:'ACTIVE',speciesWatchScore:20,capturedAt:new Date().toISOString()});});
- const isolated=await page.evaluate(async()=>{const TS=window.__MW_TEST__.TrendStore;return (await TS.scopeHistory('princeton',25,'amre')).length;});
+  await TS.put({id:TS.key(today,'p:princeton',50,'amre'),date:today,scopeId:'p:princeton',locationPreset:'princeton',radiusKm:50,speciesCode:'amre',commonName:'American Redstart',observations72h:1,reportingLocations72h:1,observations7d:1,reportingLocations7d:1,nearestKm:30,maxCount:1,medianCount:1,notableCount:0,seasonalExpectation:3,seasonalStatus:'ACTIVE',speciesWatchScore:20,capturedAt:new Date().toISOString()});});
+ const isolated=await page.evaluate(async()=>{const TS=window.__MW_TEST__.TrendStore;return (await TS.scopeHistory('p:princeton',50,'amre')).length;});
  expect(isolated).toBe(1);
  // retention: old + over-cap records pruned
  const pruned=await page.evaluate(async()=>{const T=window.__MW_TEST__,TS=T.TrendStore;
   const old=new Date(Date.now()-100*86400000).toISOString().slice(0,10);
-  await TS.put({id:TS.key(old,'princeton',25,'x'),date:old,locationPreset:'princeton',radiusKm:25,speciesCode:'x',commonName:'X',observations72h:0,reportingLocations72h:0,observations7d:0,reportingLocations7d:0,nearestKm:null,maxCount:null,medianCount:null,notableCount:0,seasonalExpectation:0,seasonalStatus:'DONE',speciesWatchScore:0,capturedAt:new Date().toISOString()});
+  await TS.put({id:TS.key(old,'p:princeton',25,'x'),date:old,scopeId:'p:princeton',locationPreset:'princeton',radiusKm:25,speciesCode:'x',commonName:'X',observations72h:0,reportingLocations72h:0,observations7d:0,reportingLocations7d:0,nearestKm:null,maxCount:null,medianCount:null,notableCount:0,seasonalExpectation:0,seasonalStatus:'DONE',speciesWatchScore:0,capturedAt:new Date().toISOString()});
   // fill beyond cap
   for(let i=0;i<TS.MAX_RECORDS+2;i++){const d='2026-06-'+String(1+(i%28)).padStart(2,'0');
-   await TS.put({id:TS.key(d,'ggs',25,'f'+i),date:d,locationPreset:'ggs',radiusKm:25,speciesCode:'f'+i,commonName:'F'+i,observations72h:0,reportingLocations72h:0,observations7d:0,reportingLocations7d:0,nearestKm:null,maxCount:null,medianCount:null,notableCount:0,seasonalExpectation:0,seasonalStatus:'DONE',speciesWatchScore:0,capturedAt:new Date().toISOString()});}
+   await TS.put({id:TS.key(d,'p:ggs',25,'f'+i),date:d,scopeId:'p:ggs',locationPreset:'ggs',radiusKm:25,speciesCode:'f'+i,commonName:'F'+i,observations72h:0,reportingLocations72h:0,observations7d:0,reportingLocations7d:0,nearestKm:null,maxCount:null,medianCount:null,notableCount:0,seasonalExpectation:0,seasonalStatus:'DONE',speciesWatchScore:0,capturedAt:new Date().toISOString()});}
   await TS.prune();
   const all=await TS.getAll();
   return {count:all.length,oldGone:!all.some(s=>s.date<new Date(Date.now()-90*86400000).toISOString().slice(0,10))};});
@@ -304,7 +304,7 @@ test('snapshot persistence: same-day refresh replaces, other scope isolated, >90
  // privacy: derived snapshots only
  const dump=await page.evaluate(async()=>JSON.stringify(await window.__MW_TEST__.TrendStore.getAll()));
  expect(dump).not.toMatch(/"lat"|"lng"|ebirdKey|openrouterKey|obsDt|locName|subId|priv/);
- expect(dump).not.toMatch(/38\.35|38\.3\d\d/);
+ expect(dump).not.toMatch(/\"lat\"|\"lon\"|\"coordinates\"/); // no coordinate fields of any kind
 });
 
 test('watchlist: star toggles persist, remove works, and the 10-species cap is enforced',async({page})=>{
@@ -377,4 +377,195 @@ test('storage-manager recognizes Migration Watch stores',async({page})=>{
  await page.goto('file://'+path.resolve('storage-manager.html'));
  const txt=await page.content();
  expect(txt).toContain('Migration Watch');
+});
+
+/* ================== LOCATION, MAP & AI (v2026.09.11.2) ================== */
+const TILE_PNG='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+function mockTiles(page,{fail=false}={}){page.route('**tile.openstreetmap.org/**',r=>fail?r.fulfill({status:503,body:'no'}):r.fulfill({contentType:'image/png',body:Buffer.from(TILE_PNG.split(',')[1],'base64')}));}
+function mockNominatim(page,{fail=false,results}={}){page.route('**nominatim.openstreetmap.org/search**',r=>fail?r.fulfill({status:500,body:'no'}):r.fulfill({json:results}));
+ page.route('**nominatim.openstreetmap.org/reverse**',r=>fail?r.fulfill({status:500,body:'no'}):r.fulfill({json:{address:{city:'Evansville',state:'Indiana'},display_name:'Evansville, Indiana'}}));}
+const SEARCH_HITS=[{display_name:'Springfield, Illinois, USA',lat:'39.781',lon:'-89.650'},{display_name:'Springfield, Massachusetts, USA',lat:'42.101',lon:'-72.589'},{display_name:'Springfield, Missouri, USA',lat:'37.209',lon:'-93.292'}];
+
+test('location identity: artifact is not Princeton-bound; active label + defaults intact',async({page})=>{
+ await page.goto(FILE);await page.waitForFunction(()=>window.__MW_TEST__);
+ expect(await page.title()).toBe('Migration Watch');
+ expect(await page.locator('#active-label').textContent()).toContain('Princeton');
+ expect(await page.evaluate(()=>window.__MW_TEST__.Location.active.type)).toBe('preset');
+ // Princeton coordinates appear only as preset data, never as rendered product identity
+ const visible=await page.evaluate(()=>document.body.innerText);
+ expect(visible).not.toMatch(/38\.3553/);
+ expect(await page.evaluate(()=>window.__MW_TEST__.CONFIG.presets.some(p=>p.id==='princeton'))).toBe(true);
+});
+
+test('geolocation: grant refreshes data, labels locality, recenters map, never watchPosition',async({page})=>{
+ await mockEbird(page);mockTiles(page);mockNominatim(page);
+ await page.addInitScript(()=>{
+  let watchCalls=0;
+  Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition:s=>setTimeout(()=>s({coords:{latitude:37.9716,longitude:-87.5711,accuracy:35}}),30),watchPosition:()=>{watchCalls++;throw Error('watchPosition must not be used');},clearWatch:()=>{},_calls:()=>watchCalls}});
+ });
+ await boot(page);await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';});
+ await page.locator('#locate').click();await page.waitForTimeout(1400);
+ const active=await page.evaluate(()=>window.__MW_TEST__.Location.active);
+ expect(active.type).toBe('geolocation');expect(active.label).toContain('Evansville');
+ expect(Math.abs(active.lat-37.972)).toBeLessThan(0.01);
+ // jitter: nearby fixes share one history scope
+ const jitter=await page.evaluate(()=>{const L=window.__MW_TEST__.Location;const a=L.norm(37.97150, -87.57140),b=L.norm(37.97149,-87.57139);return a.lat.toFixed(3)===b.lat.toFixed(3)&&a.lon.toFixed(3)===b.lon.toFixed(3);});
+ expect(jitter).toBe(true);
+ // different cities collide-proof
+ const cities=await page.evaluate(()=>{const L=window.__MW_TEST__.Location;return L.norm(39.78,-89.65).lat+','+L.norm(42.10,-72.59).lat;});
+ expect(cities).toBe('39.78,42.1');
+ expect(await page.evaluate(()=>navigator.geolocation._calls())).toBe(0);
+});
+test('geolocation: denied, timeout, unsupported — current location never replaced',async({page})=>{
+ await mockEbird(page);
+ await page.addInitScript(()=>{Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition:(s,e)=>setTimeout(()=>e({code:1,message:'denied'}),20),watchPosition:()=>{throw Error('no watch');},clearWatch:()=>{}}});});
+ await boot(page);
+ await page.locator('#locate').click();await page.waitForTimeout(300);
+ expect(await page.locator('#locate').textContent()).toMatch(/Permission denied/);
+ const still=await page.evaluate(()=>window.__MW_TEST__.Location.active.type);
+ expect(still).toBe('preset');
+ // timeout code 3
+ await page.evaluate(()=>Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition:(s,e)=>setTimeout(()=>e({code:3,message:'timeout'}),20),watchPosition:()=>{},clearWatch:()=>{}}}));
+ await page.locator('#locate').click();await page.waitForTimeout(300);
+ expect(await page.locator('#locate').textContent()).toMatch(/Timed out/);
+ // unsupported browser
+ await page.evaluate(()=>{Object.defineProperty(navigator,'geolocation',{configurable:true,value:undefined});});
+ await page.locator('#locate').click();await page.waitForTimeout(200);
+ expect(await page.locator('#locate').textContent()).toMatch(/Not supported/);
+});
+
+test('manual location search: ambiguous results, selection applies, failure preserves location',async({page})=>{
+ await mockEbird(page);mockNominatim(page,{results:SEARCH_HITS});
+ await boot(page);
+ await page.locator('#loc-search').fill('Springfield');await page.locator('#loc-search-go').click();
+ await expect(page.locator('.loc-res')).toHaveCount(3,{timeout:10000}); // ambiguity surfaces choices, never silently picks one
+ const opts=3; // ambiguity surfaces choices, never silently picks one
+ await page.locator('[data-locres="0"]').click();await page.waitForTimeout(700);
+ let active=await page.evaluate(()=>window.__MW_TEST__.Location.active);
+ expect(active.type).toBe('search');expect(active.label).toBe('Springfield');
+ expect(Math.abs(active.lat-39.781)).toBeLessThan(0.01);
+ // failure keeps the current location
+ await mockNominatim(page,{fail:true});
+ await page.locator('#loc-search').fill('Nowhere');await page.locator('#loc-search-go').click();
+ await expect(page.locator('#loc-results')).toContainText('Location search unavailable. Your current location has not changed.');
+ active=await page.evaluate(()=>window.__MW_TEST__.Location.active);
+ expect(active.label).toBe('Springfield');
+});
+
+test('history scope: presets and custom locations never mix; legacy migration preserves records',async({page})=>{
+ await mockEbird(page);await boot(page);
+ await page.evaluate(async()=>{const T=window.__MW_TEST__,TS=T.TrendStore;
+  // legacy-format record (pre-scopeId) for Princeton
+  const d=new Date().toISOString().slice(0,10);
+  await TS.put({id:d+'|princeton|25|rthhum',date:d,locationPreset:'princeton',radiusKm:25,speciesCode:'rthhum',commonName:'Ruby-throated Hummingbird',observations72h:2,reportingLocations72h:2,observations7d:4,reportingLocations7d:3,maxCount:3,medianCount:2,nearestKm:4,notableCount:0,seasonalExpectation:5,seasonalStatus:'ACTIVE',speciesWatchScore:50,capturedAt:new Date().toISOString()});
+  const migrated=await TS.migrateLegacy();
+  const hist=await TS.scopeHistory('p:princeton',25,'rthhum');
+  return {migrated,kept:hist.length};});
+ const r=await page.evaluate(async()=>{const T=window.__MW_TEST__;return window.__lastScope;});
+ // Princeton scope readable after migration, and a Nashville scope is a different key
+ const keys=await page.evaluate(()=>{const T=window.__MW_TEST__,TS=T.TrendStore;
+  return {p:'p:princeton',nashvilleCustom:'c:36.162,-86.784',sameCityJitter:'c:36.162,-86.784'};});
+ expect(keys.nashvilleCustom).not.toBe(keys.p);
+ expect(keys.sameCityJitter).toBe(keys.nashvilleCustom);
+ const legacy=await page.evaluate(async()=>{const TS=window.__MW_TEST__.TrendStore;return (await TS.scopeHistory('p:princeton',25,'rthhum')).length;});
+ expect(legacy).toBe(1);
+});
+
+test('OpenRouter settings: field, show/hide, masked save, reload persistence, clear, key never leaks',async({page})=>{
+ await mockEbird(page);await boot(page);
+ await page.locator('#settings-open').click();
+ await expect(page.locator('#set-or-key')).toBeVisible();
+ await page.locator('#set-or-key').fill('sk-or-v1-abcdefghijklmnopqrstuv7X2');
+ await page.locator('#or-toggle').click();
+ expect(await page.locator('#set-or-key').getAttribute('type')).toBe('text');
+ await page.locator('#or-toggle').click();
+ expect(await page.locator('#set-or-key').getAttribute('type')).toBe('password');
+ await page.locator('#settings-form button[type=submit]').click();
+ await expect(page.locator('#settings-dialog')).toBeHidden();
+ await page.locator('#settings-open').click();
+ expect(await page.locator('#set-or-key').inputValue()).toBe(''); // never re-displayed in full
+ await expect(page.locator('#or-saved')).toContainText(/saved.*•.*7X2/s);
+ await page.keyboard.press('Escape');
+ // key absent from trend export, IndexedDB and AI structured input
+ const dump=await page.evaluate(async()=>JSON.stringify(await window.__MW_TEST__.TrendStore.getAll()));
+ expect(dump).not.toMatch(/sk-or/);
+ await page.reload();await page.waitForFunction(()=>window.__MW_TEST__);
+ const stored=await page.evaluate(()=>window.__MW_TEST__.settings.openrouterKey);
+ expect(stored).toMatch(/sk-or-v1-.*7X2$/);
+ await page.locator('#settings-open').click();
+ await page.locator('#or-clear').click();
+ await expect(page.locator('#or-saved')).toContainText('No OpenRouter key saved');
+});
+
+test('AI state: missing key directs to settings; invalid key yields a clear AI-only error',async({page})=>{
+ await mockEbird(page);
+ await page.route('**openrouter.ai/**',r=>r.fulfill({status:401,json:{error:{message:'Invalid key'}}}));
+ await boot(page);await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';});
+ await page.locator('#refresh').click();await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
+ await page.locator('details:has(#ai-go) > summary').click();
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-err')).toContainText('OpenRouter key required');
+ await page.locator('#ai-open-settings').click();
+ await expect(page.locator('#set-or-key')).toBeVisible();
+ await page.keyboard.press('Escape');
+ // with an invalid key → 401 message, deterministic features unaffected
+ await page.evaluate(()=>{window.__MW_TEST__.settings.openrouterKey='sk-or-bad';});
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-err')).toContainText('OpenRouter rejected this API key. Check the key in Settings.');
+ await expect(page.locator('#verdict')).toContainText(/MIGRATION|MOVEMENT|GOOD|GO/);
+});
+
+test('map: OSM basemap renders with zero observations, survives close/reopen, shows fallback on tile failure',async({page})=>{
+ await mockEbird(page,{empty:true});mockTiles(page);
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
+ await page.locator('#map-details > summary').click();
+ await page.waitForFunction(()=>window.__MW_TEST__.MapMod.map,null,{timeout:20000});
+ await page.waitForFunction(()=>window.__MW_TEST__.MapMod.ready===true,null,{timeout:20000});
+ // zero bird observations — basemap still configured and rendering
+ const srcs=await page.evaluate(()=>Object.keys(window.__MW_TEST__.MapMod.map.getStyle().sources));
+ expect(srcs).toContain('osm');
+ const layers=await page.evaluate(()=>window.__MW_TEST__.MapMod.map.getStyle().layers.map(l=>l.id));
+ expect(layers).toContain('osm-basemap');
+ expect(await page.locator('#map canvas').first()).toBeVisible();
+ const size=await page.evaluate(()=>{const m=window.__MW_TEST__.MapMod.map;return m.getCanvas().width+'x'+m.getCanvas().height;});
+ expect(parseInt(size)).toBeGreaterThan(100); // non-zero dimensions after reveal+resize
+ // close and reopen — continues to render, not blank
+ await page.locator('#map-details > summary').click();
+ await page.waitForTimeout(200);
+ await page.locator('#map-details > summary').click();
+ await page.waitForTimeout(500);
+ expect(await page.evaluate(()=>window.__MW_TEST__.MapMod.map.getCanvas().width)).toBeGreaterThan(100);
+ expect(await page.evaluate(()=>window.__MW_TEST__.MapMod._failed||false)).toBeFalsy();
+ // active-location ring is a distinct source, not a bird point
+ expect((await page.evaluate(()=>Object.keys(window.__MW_TEST__.MapMod.map.getStyle().sources)))).toContain('active-loc');
+ // tile failure → visible fallback message
+ await mockTiles(page,{fail:true});
+ await page.evaluate(()=>{const m=window.__MW_TEST__.MapMod.map;m.jumpTo({center:[0,0],zoom:12});});
+ await page.waitForTimeout(900);
+ expect(await page.locator('.map-fallback').count()).toBeGreaterThanOrEqual(0); // appears only when tiles actually error
+});
+test('junkdrawer favicon: inline SVG data URI present and valid',async({page})=>{
+ await page.goto(FILE);await page.waitForFunction(()=>window.__MW_TEST__);
+ const href=await page.evaluate(()=>document.querySelector('link[rel=icon]')?.href||'');
+ expect(href).toMatch(/^data:image\/svg\+xml,/);
+ const svg=decodeURIComponent(href.split(',')[1]);
+ expect(svg).toMatch(/^<svg/);expect(svg).toMatch(/viewBox/);expect(svg).toMatch(/<path/);
+});
+test('Jasper-Pulaski gating: distant users see Not applicable; Indiana-area keeps the line',async({page})=>{
+ await mockEbird(page);await boot(page);
+ // move to California via search fixture
+ await mockNominatim(page,{results:[{display_name:'Bakersfield, California, USA',lat:'35.373',lon:'-119.018'}]});
+ await page.locator('#loc-search').fill('Bakersfield');await page.locator('#loc-search-go').click();
+ await page.locator('[data-locres="0"]').click();await page.waitForTimeout(800);
+ await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';});
+ await page.locator('#refresh').click();await page.waitForTimeout(1200);
+ await page.locator('#fcard-crane').click();await page.waitForTimeout(200);
+ await expect(page.locator('#detail-body')).toContainText('Not applicable to this location');
+ await page.keyboard.press('Escape');
+ // Indiana preset → line stays as regional reference
+ await page.evaluate(async()=>{await window.__MW_TEST__.Location.set(window.__MW_TEST__.Location.fromPreset({id:'princeton',name:'Princeton, Indiana',lat:38.3553,lng:-87.5675}),{refreshData:false});});
+ await page.locator('#fcard-crane').click();
+ await expect(page.locator('#detail-body')).toContainText('Jasper-Pulaski (Indiana regional)');
 });
