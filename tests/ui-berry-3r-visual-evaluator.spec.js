@@ -455,7 +455,11 @@ test('unsupported evidence IDs block ready even if model QA says pass; repair is
   await page.locator('#generate').click(); await expect(page.locator('#notice')).toContainText('unresolved QA');
   expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.validateAll().issues.join(' '))).toContain('unsupported claim');
   expect(await page.evaluate(() => window.__calls.length)).toBe(5);
-  await expect(page.locator('#copyAll')).toBeDisabled();
+  await expect(page.locator('#copyAll')).toBeEnabled();
+  await page.evaluate(() => { window.__copied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async t => window.__copied.push(t) } }); });
+  page.once('dialog', d => d.accept());
+  await page.locator('#copyAll').click();
+  expect(await page.evaluate(() => window.__copied.length)).toBe(1);
 });
 
 test('manual edits survive rerun, evidence changes invalidate stale claims', async ({ page }) => {
@@ -476,8 +480,10 @@ test('malformed model output and absent behavior are both visible, never silent'
   expect(await page.evaluate(() => document.querySelector('#generate').getAttribute('aria-busy'))).toBe('false');
   await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__; T.state.task.candidates.A.behaviorEvidence = []; T.setRenderStatus('A', 'unknown'); T.state.final.functionalityOption = ''; T.state.final.functionalityReason = ''; T.state.final.overallOption = ''; T.state.final.overallReason = ''; T.state.dirty = {}; });
   await mockPipeline(page);
-  await page.locator('#generate').click(); await expect(page.locator('#notice')).toContainText('Reference Fidelity complete');
-  await expect(page.locator('#notice')).toContainText('Add confirmed behavior observations');
+  await expect(page.locator('#generate')).toBeDisabled();
+  await expect(page.locator('#generate')).toHaveText('ADD BEHAVIOR TO GENERATE ALL');
+  await page.locator('#visualOnly').click(); await expect(page.locator('#notice')).toContainText('Fidelity analysis complete');
+  await expect(page.locator('#notice')).toContainText('pending verified behavior');
   await expect(page.locator('[data-final=fidelityReason]')).not.toHaveValue('');
   await expect(page.locator('[data-final=functionalityReason]')).toHaveValue('');
   await expect(page.locator('[data-final=overallReason]')).toHaveValue('');
@@ -514,7 +520,8 @@ test('edits during verification cannot be marked verified by an older response',
   await page.locator('[data-final=fidelityReason]').fill('An edit made while verification was running.');
   await page.evaluate(() => window.__releaseVerification());
   await expect(page.locator('#notice')).toContainText('Answers changed during verification');
-  await expect(page.locator('#copyAll')).toBeDisabled();
+  expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.validateAll().valid)).toBe(false);
+  await expect(page.locator('#copyAll')).toBeEnabled();
 });
 
 test('native OpenRouter client sends image parts and retains usage telemetry without secrets', async ({ page }) => {
@@ -555,4 +562,234 @@ test('cancel stops the pipeline and releases evidence editing', async ({ page })
   await expect(page.locator('#notice')).toContainText('cancelled');
   await expect(page.locator('#generate')).toBeEnabled();
   expect(await page.locator('#visualPanel').evaluate(e => e.inert)).toBe(false);
+});
+
+test('outcome contradiction flags only global winner claims, not local subfeature comparisons', async ({ page }) => {
+  await open(page, true);
+  const pad = 'The reference image also shows a gray lower region and three small toolbar controls, and this comparative description adds concrete detail about the panels and their surrounding areas for both candidates.';
+  const local = 'Website A is better because Website B better reproduces the emblem while Website A is closer in spacing, although Website B has the closer headline scale. ' + pad;
+  expect((await check(page, 'fidelity', 'A is better', local)).issues.join(' ')).not.toContain('contradiction');
+  const global = 'Website A is better because Website A preserves the reference panels. Website B is better. ' + pad;
+  expect((await check(page, 'fidelity', 'A is better', global)).issues.join(' ')).toContain('contradiction');
+  const globalB = 'Website B is better because Website B preserves the reference panels. Website A wins overall. ' + pad;
+  expect((await check(page, 'fidelity', 'B is better', globalB)).issues.join(' ')).toContain('contradiction');
+});
+
+test('Overall trade-off accepts semantic equivalents without magic keywords', async ({ page }) => {
+  await open(page, true);
+  const pad = 'Website A and Website B both show the reference gray editor region under a dark preview, and this sentence adds concrete detail about the panels and their surrounding areas so both candidates are described.';
+  const cases = [
+    ['A is better', 'Website A is better because its interaction advantage outweighs visual drift: Website A works reliably while Website B has dead controls, even though the reference palette matches Website B. ' + pad],
+    ['A is better', 'Website A is better because closer reproduction does not compensate for dead controls; the reference image favors Website B on the heading, but Website A loads and responds. ' + pad],
+    ['Both are good', 'Website A and Website B are tied as good options because both behave similarly, so fidelity decides: the reference gray editor region matches Website A while Website B changes the lower panel. ' + pad],
+    ['A is better', 'Website A is better because the fidelity difference is small while the functionality difference is substantial, and Website B fails to respond where Website A works. ' + pad]
+  ];
+  for (const [option, reason] of cases) expect((await check(page, 'overall', option, reason)).issues.join(' ')).not.toContain('weigh reference fidelity');
+  const noTrade = 'Website A is better because the reference panels match Website A while Website B changes the heading color. Website A also works and Website B loads. ' + pad;
+  expect((await check(page, 'overall', 'A is better', noTrade)).issues.join(' ')).toContain('weigh reference fidelity');
+});
+
+test('internal reconstruction language is stripped from generated submission prose and flagged if reintroduced', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__;
+    return {
+      unit: T.sanitizeFinalProse('Website A is better because it preserves the reference palette; font fallbacks limit exact typography comparisons. Website B changes the heading color.'),
+      dropped: T.sanitizeFinalProse('Typography differences deserve caution because font fallback may alter wrapping.'),
+      clean: T.sanitizeFinalProse('Website A is better because it preserves the reference panels while Website B changes them.'),
+      integrated: T.finalFrom({ functionality: { option: 'A is better', reason: 'Website A is better because the reference toolbar responds; reconstruction warnings reduce certainty about the lower region across both candidates.' }, fidelity: { option: 'A is better', reason: 'Website A is better because it preserves the reference panels; font fallbacks limit exact typography comparisons. Website B changes them.' }, overall: { option: 'A is better', reason: 'Website A is better because it preserves the reference panels while Website B changes them, and Website A also responds where Website B is unresponsive.' } }),
+      flagged: T.validateDimension('fidelity', 'A is better', 'Website A is better because it preserves the reference panels while Website B changes them, though reconstruction warnings reduce certainty about the lower region and the surrounding details of both pages here.').issues
+    };
+  });
+  expect(out.unit).toContain('preserves the reference palette');
+  expect(out.unit).not.toMatch(/font fallbacks/i);
+  expect(out.dropped).toBe('');
+  expect(out.clean).not.toMatch(/reconstruction|font fallback/i);
+  expect(out.integrated.fidelityReason).toContain('preserves the reference panels');
+  expect(out.integrated.fidelityReason).not.toMatch(/font fallback/i);
+  expect(out.integrated.functionalityReason).not.toMatch(/reconstruction/i);
+  expect(out.flagged.join(' ')).toContain('internal reconstruction/mechanism');
+});
+
+test('feature ledger carries importance, match quality, local winner and magnitude; advisory reports close and strong calls', async ({ page }) => {
+  await open(page, true);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__, s = T.state, ids = ['R', 'A', 'B'].map(k => k === 'R' ? s.task.referenceImages[0].id : s.task.candidates[k].images[0].id);
+    const normalized = T.normalizeFeatures([{ feature: 'Hero', reference: 'Reference hero', A: 'A hero', B: 'B hero', importance: 4, matchA: 5, matchB: 1, magnitude: 'major', imageIds: ids, confidence: 'high' }])[0];
+    s.features = [
+      { id: 'visual-1', feature: 'Hero', location: 'Top', importance: 3, matchA: 4, matchB: 3, localWinner: 'A', magnitude: 'moderate', reference: 'Reference hero', A: 'A hero', B: 'B hero', imageIds: ids, confidence: 'high', manual: false },
+      { id: 'visual-2', feature: 'Footer', location: 'Bottom', importance: 2, matchA: 2, matchB: 4, localWinner: 'B', magnitude: 'major', reference: 'Reference footer', A: 'A footer', B: 'B footer', imageIds: ids, confidence: 'high', manual: false }
+    ];
+    const close = T.fidelityAdvisory();
+    s.features.push({ id: 'visual-3', feature: 'Panel', location: 'Mid', importance: 5, matchA: 2, matchB: 5, localWinner: 'B', magnitude: 'major', reference: 'Reference panel', A: 'A panel', B: 'B panel', imageIds: ids, confidence: 'high', manual: false });
+    return { normalized, close, strong: T.fidelityAdvisory() };
+  });
+  expect(out.normalized).toMatchObject({ importance: 4, matchA: 5, matchB: 1, localWinner: 'A', magnitude: 'major' });
+  expect(out.close.close).toBe(true);
+  expect(out.strong.verdict).toBe('B');
+  expect(out.strong.close).toBe(false);
+  const shown = await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__, s = T.state, ids = ['R', 'A', 'B'].map(k => k === 'R' ? s.task.referenceImages[0].id : s.task.candidates[k].images[0].id);
+    s.features = [
+      { id: 'visual-1', feature: 'Hero', location: 'Top', importance: 3, matchA: 4, matchB: 3, localWinner: 'A', magnitude: 'moderate', reference: 'Reference hero', A: 'A hero', B: 'B hero', imageIds: ids, confidence: 'high', manual: false },
+      { id: 'visual-2', feature: 'Footer', location: 'Bottom', importance: 2, matchA: 2, matchB: 4, localWinner: 'B', magnitude: 'major', reference: 'Reference footer', A: 'A footer', B: 'B footer', imageIds: ids, confidence: 'high', manual: false }
+    ];
+    T.renderAll();
+    return document.querySelector('#reconstructionStatus').textContent;
+  });
+  expect(shown).toContain('Close fidelity call');
+});
+
+test('decision synthesis consumes the enriched ledger and carries the sparse-task functionality instructions', async ({ page }) => {
+  await open(page, true); await mockPipeline(page);
+  await page.locator('#generate').click(); await expect(page.locator('#notice')).toContainText('Analysis complete');
+  const calls = await page.evaluate(() => window.__calls);
+  const payload = JSON.parse(calls[1].messages[1].content);
+  expect(payload.advisory).toBeTruthy();
+  expect(payload.visualEvidence.length).toBeGreaterThan(0);
+  expect(payload.visualEvidence.every(f => 'localWinner' in f && 'magnitude' in f && 'importance' in f)).toBe(true);
+  expect(calls[0].messages[0].content).toContain('sparse interface is not a functionality failure');
+  expect(calls[0].messages[0].content).toContain('Few controls is not a functionality failure');
+});
+
+test('one transient provider retry uses an identical payload and records both attempts; 400 never retries', async ({ page }) => {
+  const errors = await open(page, true);
+  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__, s = T.state; T.settings.apiKey = 'test-key'; T.settings.chime = false; s.models = [{ id: T.settings.model, architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } }]; window.__sample = structuredClone(s.draft); window.__features = structuredClone(s.features); });
+  const bodies = []; let first = true;
+  await page.route('**openrouter.ai/api/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON(); bodies.push(body);
+    if (first) { first = false; return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Provider returned error', code: 502 } }) }); }
+    const instruction = body.messages[0].content.split('\nPASS: ')[1];
+    let response;
+    if (instruction.startsWith('Observe images')) response = { features: await page.evaluate(() => window.__features) };
+    else if (instruction.startsWith('Adversarial QA')) {
+      const result = await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__, result = structuredClone(window.__sample); for (const d of T.DIMS) for (const c of result[d].claims) c.evidenceIds = d === 'functionality' ? [...T.retainedBehavior().A, ...T.retainedBehavior().B].map(f => f.id) : d === 'fidelity' ? T.state.features.map(f => f.id) : [...T.state.features.map(f => f.id), ...T.retainedBehavior().A.map(f => f.id), ...T.retainedBehavior().B.map(f => f.id)]; return result });
+      response = { result, issues: [], checked: { referenceFeatures: true, behaviorNotInferred: true, lensIsolation: true, tieConsistency: true, allClaimsEvidenced: true, overallTradeoff: true, wordCounts: true } };
+    } else response = await page.evaluate(() => window.__sample);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ provider: 'OpenAI', choices: [{ message: { content: JSON.stringify(response) } }], usage: { prompt_tokens: 1 } }) });
+  });
+  await page.locator('#generate').click();
+  await expect(page.locator('#notice')).toContainText('Analysis complete');
+  expect(bodies).toHaveLength(4);
+  expect(JSON.stringify(bodies[0])).toBe(JSON.stringify(bodies[1]));
+  const passes = await page.evaluate(() => __BERRY3VISUAL_TEST__.state.passes.map(p => ({ stage: p.stage, attempt: p.attempt, status: p.status, retryReason: p.retryReason || null, httpStatus: p.httpStatus })));
+  expect(passes[0]).toMatchObject({ stage: 'visual observation', attempt: 1, status: 'retrying', retryReason: 'HTTP 502', httpStatus: 502 });
+  expect(passes[1]).toMatchObject({ stage: 'visual observation', attempt: 2, status: 'done', httpStatus: 200 });
+  expect(errors.filter(e => !/Failed to load resource/.test(e))).toEqual([]);
+});
+
+test('a deterministic 400 response is not retried', async ({ page }) => {
+  const errors = await open(page, true);
+  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__, s = T.state; T.settings.apiKey = 'test-key'; T.settings.chime = false; s.models = [{ id: T.settings.model, architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } }]; });
+  await page.route('**openrouter.ai/api/v1/chat/completions', r => r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Provider returned error', code: 400 } }) }));
+  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__; T.generate(); });
+  await expect(page.locator('#notice')).toContainText('HTTP 400');
+  const passes = await page.evaluate(() => __BERRY3VISUAL_TEST__.state.passes.map(p => ({ attempt: p.attempt, status: p.status })));
+  expect(passes).toEqual([{ attempt: 1, status: 'failed' }]);
+  expect(errors.filter(e => !/Failed to load resource/.test(e))).toEqual([]);
+});
+
+test('per-field copy controls work independently of QA and keep focus', async ({ page }) => {
+  const errors = await open(page, true);
+  await page.evaluate(() => { window.__copied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async t => window.__copied.push(t) } }); });
+  await page.locator('[data-copyopt=functionality]').click();
+  await expect(page.locator('[data-copyopt=functionality]')).toHaveText('Copied ✓');
+  await page.locator('[data-copyreason=functionality]').click();
+  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__; T.state.final.functionalityReason = 'Short invalid text.'; T.renderSubmission(); });
+  await page.locator('[data-copyreason=functionality]').click();
+  const copied = await page.evaluate(() => window.__copied);
+  expect(copied[0]).toBe('B is better');
+  expect(copied[1]).toContain('Settings button opened the settings dialog');
+  expect(copied[2]).toBe('Short invalid text.');
+  const focused = await page.evaluate(() => document.activeElement?.dataset?.copyreason || document.activeElement?.getAttribute('data-copyreason'));
+  expect(focused).toBe('functionality');
+  expect(errors).toEqual([]);
+});
+
+test('full Analyze stays disabled until both candidates have confirmed live behavior; fidelity-only stays available', async ({ page }) => {
+  await open(page, true);
+  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__; ['A', 'B'].forEach(k => { T.state.task.candidates[k].behaviorEvidence = []; T.setRenderStatus(k, 'unknown'); }); });
+  await expect(page.locator('#generate')).toBeDisabled();
+  await expect(page.locator('#generate')).toHaveText('ADD BEHAVIOR TO GENERATE ALL');
+  await expect(page.locator('#generateHint')).toContainText('confirmed live behavior check');
+  await expect(page.locator('#visualOnly')).toBeEnabled();
+  for (const k of ['A', 'B']) {
+    await page.locator(`[data-quicktext="${k}"]`).fill('Resolution toggle changed state');
+    await page.locator(`[data-quickresult="${k}"]`).selectOption('Works');
+    await page.locator(`[data-quickadd="${k}"]`).click();
+  }
+  const facts = await page.evaluate(() => __BERRY3VISUAL_TEST__.retainedBehavior());
+  expect(facts.A[0]).toMatchObject({ source: 'human-live-check', confidence: 'confirmed', status: 'passed', control: 'Resolution toggle changed state' });
+  await expect(page.locator('#generate')).toBeEnabled();
+  await expect(page.locator('#generate')).toHaveText('ANALYZE & GENERATE');
+});
+
+test('no-meaningful-controls confirmation warns from source hints, can be dismissed, and counts only when explicitly confirmed', async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__, s = T.state; s.task.candidates.A.interactiveHints = { buttons: 3, inputs: 0, textareas: 1, selects: 0, links: 0, total: 4 }; T.renderAll(); });
+  let message = '';
+  page.once('dialog', d => { message = d.message(); d.dismiss(); });
+  await page.evaluate(() => { const el = document.querySelector('[data-nocontrols=A]'); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(message).toContain('3 buttons and 1 textarea');
+  expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.state.task.candidates.A.noInteractiveControls)).toBe(false);
+  page.once('dialog', d => d.accept());
+  await page.evaluate(() => { const el = document.querySelector('[data-nocontrols=A]'); el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); });
+  const out = await page.evaluate(() => ({ flag: __BERRY3VISUAL_TEST__.state.task.candidates.A.noInteractiveControls, facts: __BERRY3VISUAL_TEST__.retainedBehavior().A }));
+  expect(out.flag).toBe(true);
+  expect(out.facts).toHaveLength(1);
+  expect(out.facts[0]).toMatchObject({ source: 'human-live-check', confidence: 'confirmed', noControls: true });
+});
+
+test('confirmed partial live checks satisfy the behavior gate while remaining distinguishable from pass and fail', async ({ page }) => {
+  const errors = await open(page, true);
+  await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__, s = T.state;
+    T.settings.apiKey = 'test-key'; T.settings.chime = false;
+    s.models = [{ id: T.settings.model, architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } }];
+    window.__sample = structuredClone(s.draft); window.__payloads = []; window.__system = '';
+    T.setAiTransport(async (stage, messages) => {
+      if (stage === 'decision synthesis') { window.__system = messages[0].content; window.__payloads.push(JSON.parse(messages[1].content)); }
+      if (stage === 'visual observation') return { features: structuredClone(T.state.features) };
+      const result = structuredClone(window.__sample);
+      for (const d of T.DIMS) for (const c of result[d].claims) c.evidenceIds = d === 'functionality' ? [...T.retainedBehavior().A, ...T.retainedBehavior().B].map(f => f.id) : d === 'fidelity' ? T.state.features.map(f => f.id) : [...T.state.features.map(f => f.id), ...T.retainedBehavior().A.map(f => f.id), ...T.retainedBehavior().B.map(f => f.id)];
+      if (stage === 'adversarial QA') return { result, issues: [], checked: { referenceFeatures: true, behaviorNotInferred: true, lensIsolation: true, tieConsistency: true, allClaimsEvidenced: true, overallTradeoff: true, wordCounts: true } };
+      return result;
+    });
+  });
+  const combos = [['partial', 'pass'], ['partial', 'fail'], ['partial', 'partial'], ['fail', 'partial']];
+  const canonical = s => s === 'pass' ? 'passed' : s === 'fail' ? 'failed' : s;
+  for (let i = 0; i < combos.length; i++) {
+    const [statusA, statusB] = combos[i];
+    const gate = await page.evaluate(({ statusA, statusB }) => {
+      const T = __BERRY3VISUAL_TEST__, s = T.state;
+      s.task.candidates.A.behaviorEvidence = T.normalizeBehavior({ A: [{ observation: 'Toggle tested live', status: statusA, source: 'human-live-check', confidence: 'confirmed' }] }).A;
+      s.task.candidates.B.behaviorEvidence = T.normalizeBehavior({ B: [{ observation: 'Toggle tested live', status: statusB, source: 'human-live-check', confidence: 'confirmed' }] }).B;
+      T.changed();
+      return { can: T.canAnalyzeBehavior(), full: T.canSynthesizeFullEvaluation(), retained: T.retainedBehavior() };
+    }, { statusA, statusB });
+    expect(gate.can).toBe(true); expect(gate.full).toBe(true);
+    expect(gate.retained.A[0]).toMatchObject({ status: canonical(statusA), confidence: 'confirmed', source: 'human-live-check' });
+    expect(gate.retained.B[0]).toMatchObject({ status: canonical(statusB), confidence: 'confirmed', source: 'human-live-check' });
+    await page.locator('#generate').click();
+    await page.waitForFunction(n => window.__payloads.length > n, i);
+    await expect.poll(() => page.evaluate(() => __BERRY3VISUAL_TEST__.state.busy)).toBe(false);
+    await expect(page.locator('#notice')).toContainText('Analysis complete');
+  }
+  const out = await page.evaluate(() => ({ payloads: window.__payloads, system: window.__system, final: __BERRY3VISUAL_TEST__.state.final }));
+  expect(out.payloads).toHaveLength(4);
+  const statuses = out.payloads.map(p => [p.behaviorEvidence.A[0].status, p.behaviorEvidence.B[0].status]);
+  expect(statuses).toEqual(combos.map(([a, b]) => [canonical(a), canonical(b)]));
+  expect(out.payloads[0].behaviorEvidence.A[0].status).toBe('partial');
+  expect(out.payloads[0].behaviorEvidence.B[0].status).toBe('passed');
+  expect(out.system).toContain('weigh passed over partial over failed');
+  for (const d of ['functionality', 'fidelity', 'overall']) { expect(out.final[d + 'Reason']).toBeTruthy(); expect(out.final[d + 'Option']).toBeTruthy(); }
+  const denials = await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__, s = T.state;
+    T.setRenderStatus('A', 'unknown'); T.setRenderStatus('B', 'unknown');
+    s.task.candidates.A.behaviorEvidence = T.normalizeBehavior({ A: [{ observation: 'Button exists in source', status: 'passed', source: 'source-code', confidence: 'confirmed' }] }).A;
+    s.task.candidates.B.behaviorEvidence = T.normalizeBehavior({ B: [{ observation: 'Button exists in source', status: 'passed', source: 'source-code', confidence: 'confirmed' }] }).B;
+    return { can: T.canAnalyzeBehavior(), a: T.retainedBehavior().A, b: T.retainedBehavior().B };
+  });
+  expect(denials.can).toBe(false); expect(denials.a).toEqual([]); expect(denials.b).toEqual([]);
+  expect(errors).toEqual([]);
 });

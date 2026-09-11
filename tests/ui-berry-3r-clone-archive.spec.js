@@ -68,7 +68,7 @@ test('source, account breadcrumbs, raw archive and image payloads never enter hi
 
 test('fidelity-only analysis is available with zero behavioral facts, full synthesis stays gated',async({page})=>{
  const errors=await open(page);await load(page,sanitized);await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,s=T.state;T.settings.apiKey='test-key';s.models=[{id:T.settings.model,architecture:{input_modalities:['text','image'],output_modalities:['text']}}];window.__visualCalls=[];T.setAiTransport(async(stage,messages)=>{window.__visualCalls.push({stage,messages});if(stage==='visual observation')return{features:[{feature:'Saved panels',location:'Main region',importance:'core',reference:'The reference contains a dark blue rectangular field.',A:'Dark blue background and rectangular panel.',B:'Purple background and rectangular panel.',imageIds:[s.task.referenceImages[0].id,s.task.candidates.A.images[0].id,s.task.candidates.B.images[0].id],confidence:'high'}]};if(stage==='fidelity QA')return{issues:[],referenceFeatures:true,lensIsolation:true,allClaimsEvidenced:true};const reason='Website A is better because the reference image has a dark blue background, which Website A preserves around the main rectangular panel. Website B replaces that large background field with purple, changing a prominent part of the supplied image. The matching background gives Website A the closer visible resemblance despite differences in panel proportions.';return{fidelity:{option:'A is better',reason,claims:reason.split(/(?<=[.])\s+/).map(text=>({text,evidenceIds:s.features.map(f=>f.id)}))}}})});
-  await page.locator('#visualOnly').click();await expect(page.locator('#notice')).toContainText('Fidelity analysis complete');await expect(page.locator('[data-final=fidelityReason]')).not.toHaveValue('');await expect(page.locator('[data-final=functionalityReason]')).toHaveValue('');await expect(page.locator('[data-final=overallReason]')).toHaveValue('');const calls=await page.evaluate(()=>window.__visualCalls);expect(calls.map(c=>c.stage)).toEqual(['visual observation','fidelity synthesis','fidelity QA']);expect(calls[0].messages[1].content.filter(p=>p.type==='image_url')).toHaveLength(3);expect(JSON.stringify(calls)).toContain('reconstruction');await page.locator('#generate').click();await expect(page.locator('#notice')).toContainText('Add confirmed behavior observations');await expect(page.locator('[data-final=functionalityReason]')).toHaveValue('');await expect(page.locator('[data-final=overallReason]')).toHaveValue('');expect(errors).toEqual([]);
+  await page.locator('#visualOnly').click();await expect(page.locator('#notice')).toContainText('Fidelity analysis complete');await expect(page.locator('[data-final=fidelityReason]')).not.toHaveValue('');await expect(page.locator('[data-final=functionalityReason]')).toHaveValue('');await expect(page.locator('[data-final=overallReason]')).toHaveValue('');const calls=await page.evaluate(()=>window.__visualCalls);expect(calls.map(c=>c.stage)).toEqual(['visual observation','fidelity synthesis','fidelity QA']);expect(calls[0].messages[1].content.filter(p=>p.type==='image_url')).toHaveLength(3);expect(JSON.stringify(calls)).toContain('reconstruction');const gate=await page.evaluate(()=>({disabled:document.querySelector('#generate').disabled,label:document.querySelector('#generate').textContent,hintHidden:document.querySelector('#generateHint').hidden,hint:document.querySelector('#generateHint').textContent}));expect(gate.disabled).toBe(true);expect(gate.label).toBe('ADD BEHAVIOR TO GENERATE ALL');expect(gate.hintHidden).toBe(false);expect(gate.hint).toContain('confirmed live behavior check');await expect(page.locator('[data-final=functionalityReason]')).toHaveValue('');await expect(page.locator('[data-final=overallReason]')).toHaveValue('');expect(errors).toEqual([]);
 });
 
 test('future browser observation injection remains separate from snapshot rendering',async({page})=>{
@@ -81,16 +81,16 @@ test('Analyze with zero confirmed behavior runs fidelity-only: immediate busy UI
  const errors=await open(page);await load(page,sanitized);await configureArchiveMock(page);
  const capability=await page.evaluate(()=>({visuals:__BERRY3VISUAL_TEST__.canAnalyzeVisuals(),behavior:__BERRY3VISUAL_TEST__.canAnalyzeBehavior(),full:__BERRY3VISUAL_TEST__.canSynthesizeFullEvaluation()}));
  expect(capability).toEqual({visuals:true,behavior:false,full:false});
- const sync=await page.evaluate(()=>{document.querySelector('#generate').click();const btn=document.querySelector('#generate');return{busy:__BERRY3VISUAL_TEST__.state.busy,disabled:btn.disabled,label:btn.textContent,aria:btn.getAttribute('aria-busy'),active:[...document.querySelectorAll('#pipeline .pipe.active')].map(e=>e.textContent),status:document.querySelector('#analysisStatus').textContent,gate:document.querySelectorAll('.gate').length,audio:window.__audioContexts}});
+ const sync=await page.evaluate(()=>{document.querySelector('#visualOnly').click();const btn=document.querySelector('#generate');return{busy:__BERRY3VISUAL_TEST__.state.busy,disabled:btn.disabled,label:btn.textContent,aria:btn.getAttribute('aria-busy'),active:[...document.querySelectorAll('#pipeline .pipe.active')].map(e=>e.textContent),status:document.querySelector('#analysisStatus').textContent,gate:document.querySelectorAll('#submission .gate').length,audio:window.__audioContexts}});
  expect(sync.busy).toBe(true);expect(sync.disabled).toBe(true);expect(sync.label).toBe('ANALYZING…');expect(sync.aria).toBe('true');expect(sync.active).toEqual(['Prepare Images']);expect(sync.status).toContain('Preparing Reference/Website A/Website B images');expect(sync.gate).toBe(2);expect(sync.audio).toBe(1);
- await expect(page.locator('#notice')).toContainText('Reference Fidelity complete');
- await expect(page.locator('#notice')).toContainText('Add confirmed behavior observations for Website A and Website B');
- const out=await page.evaluate(()=>({passes:__BERRY3VISUAL_TEST__.state.passes.map(p=>p.stage),visualAnalysis:!!__BERRY3VISUAL_TEST__.state.visualAnalysis,fidelity:__BERRY3VISUAL_TEST__.state.final.fidelityReason,functionality:__BERRY3VISUAL_TEST__.state.final.functionalityReason,overall:__BERRY3VISUAL_TEST__.state.final.overallReason,busy:__BERRY3VISUAL_TEST__.state.busy,disabled:document.querySelector('#generate').disabled,aria:document.querySelector('#generate').getAttribute('aria-busy'),label:document.querySelector('#generate').textContent,done:[...document.querySelectorAll('#pipeline .pipe.done')].map(e=>e.textContent),fail:document.querySelectorAll('#pipeline .pipe.fail').length,chimes:window.__chimeNotes,status:document.querySelector('#analysisStatus').textContent,gates:[...document.querySelectorAll('.gate')].map(e=>e.textContent)}));
+ await expect(page.locator('#notice')).toContainText('Fidelity analysis complete');
+ await expect(page.locator('#notice')).toContainText('Functionality and Overall remain pending verified behavior');
+ const out=await page.evaluate(()=>({passes:__BERRY3VISUAL_TEST__.state.passes.map(p=>p.stage),visualAnalysis:!!__BERRY3VISUAL_TEST__.state.visualAnalysis,fidelity:__BERRY3VISUAL_TEST__.state.final.fidelityReason,functionality:__BERRY3VISUAL_TEST__.state.final.functionalityReason,overall:__BERRY3VISUAL_TEST__.state.final.overallReason,busy:__BERRY3VISUAL_TEST__.state.busy,disabled:document.querySelector('#generate').disabled,aria:document.querySelector('#generate').getAttribute('aria-busy'),label:document.querySelector('#generate').textContent,done:[...document.querySelectorAll('#pipeline .pipe.done')].map(e=>e.textContent),fail:document.querySelectorAll('#pipeline .pipe.fail').length,chimes:window.__chimeNotes,status:document.querySelector('#analysisStatus').textContent,gates:[...document.querySelectorAll('#submission .gate')].map(e=>e.textContent)}));
  expect(out.passes).toEqual(['visual observation','fidelity synthesis','fidelity QA']);
  expect(out.visualAnalysis).toBe(true);expect(out.fidelity).toContain('Website A is better');expect(out.functionality).toBe('');expect(out.overall).toBe('');
- expect(out.busy).toBe(false);expect(out.disabled).toBe(false);expect(out.aria).toBe('false');expect(out.label).toBe('ANALYZE & GENERATE');
+ expect(out.busy).toBe(false);expect(out.disabled).toBe(true);expect(out.aria).toBe('false');expect(out.label).toBe('ADD BEHAVIOR TO GENERATE ALL');
  expect(out.done).toEqual(['Prepare Images','Visual Evidence','Fidelity Decision','QA']);expect(out.fail).toBe(0);
- expect(out.gates).toEqual(['WAITING FOR BEHAVIOR EVIDENCE','WAITING FOR BEHAVIOR EVIDENCE']);expect(out.status).toContain('Reference Fidelity complete');
+ expect(out.gates).toEqual(['WAITING FOR LIVE BEHAVIOR CHECK','WAITING FOR LIVE BEHAVIOR CHECK']);expect(out.status).toContain('Reference Fidelity complete');
  expect(out.chimes).toBeGreaterThan(0);
  expect(errors).toEqual([]);
 });
@@ -115,13 +115,13 @@ test('OpenRouter HTTP failure is visible with safe provider detail, fails the ac
  const errors=await open(page);await load(page,sanitized);
  await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,s=T.state;T.settings.apiKey='test-key';T.settings.chime=true;s.models=[{id:T.settings.model,name:'Mock Vision',architecture:{input_modalities:['text','image'],output_modalities:['text']}}];window.__chimeNotes=0;const orig=AudioContext.prototype.createOscillator;AudioContext.prototype.createOscillator=function(){window.__chimeNotes++;return orig.call(this)}});
  await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({status:401,contentType:'application/json',body:JSON.stringify({error:{message:'No auth credentials found'}})}));
- const sync=await page.evaluate(()=>{document.querySelector('#generate').click();return{busy:__BERRY3VISUAL_TEST__.state.busy,label:document.querySelector('#generate').textContent,aria:document.querySelector('#generate').getAttribute('aria-busy')}});
+ const sync=await page.evaluate(()=>{document.querySelector('#visualOnly').click();return{busy:__BERRY3VISUAL_TEST__.state.busy,label:document.querySelector('#generate').textContent,aria:document.querySelector('#generate').getAttribute('aria-busy')}});
  expect(sync).toEqual({busy:true,label:'ANALYZING…',aria:'true'});
  await expect(page.locator('#notice')).toContainText('OpenRouter request failed: HTTP 401');
  await expect(page.locator('#notice')).toContainText('No auth credentials found');
- await expect(page.locator('#analysisStatus')).toContainText('Analyze failed');
+ await expect(page.locator('#analysisStatus')).toContainText('Fidelity analysis failed');
  const out=await page.evaluate(()=>({busy:__BERRY3VISUAL_TEST__.state.busy,disabled:document.querySelector('#generate').disabled,aria:document.querySelector('#generate').getAttribute('aria-busy'),label:document.querySelector('#generate').textContent,failed:[...document.querySelectorAll('#pipeline .pipe.fail')].map(e=>e.textContent),passes:__BERRY3VISUAL_TEST__.state.passes.map(p=>({stage:p.stage,status:p.status,httpStatus:p.httpStatus,providerError:p.providerError,imageCount:p.imageCount,finished:!!p.finishedAt})),chimes:window.__chimeNotes,debug:__BERRY3VISUAL_TEST__.buildDebugReport(),visualAnalysis:__BERRY3VISUAL_TEST__.state.visualAnalysis}));
- expect(out.busy).toBe(false);expect(out.disabled).toBe(false);expect(out.aria).toBe('false');expect(out.label).toBe('ANALYZE & GENERATE');
+ expect(out.busy).toBe(false);expect(out.disabled).toBe(true);expect(out.aria).toBe('false');expect(out.label).toBe('ADD BEHAVIOR TO GENERATE ALL');
  expect(out.failed).toEqual(['Visual Evidence']);expect(out.visualAnalysis).toBe(null);
  expect(out.passes).toEqual([{stage:'visual observation',status:'failed',httpStatus:401,providerError:'No auth credentials found',imageCount:3,finished:true}]);
  expect(out.chimes).toBe(0);
@@ -134,7 +134,7 @@ test('provider 400 body, provider name and request shape are visible in diagnost
  await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,s=T.state;T.settings.apiKey='test-key-400';T.settings.chime=false;s.models=[{id:'openai/gpt-6-astra',name:'GPT-6 Astra',architecture:{input_modalities:['text','image'],output_modalities:['text']}}];T.renderModels()});
  await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{message:'Provider returned error',code:400,metadata:{provider_name:'OpenAI',raw:JSON.stringify({error:{message:'Unsupported parameter: temperature',type:'invalid_request_error',code:'unsupported_parameter'}})}}})}));
  await page.locator('[data-view=admin]').click();await page.locator('#orModel').selectOption('openai/gpt-6-astra');await page.locator('[data-view=evaluate]').click();
- await page.locator('#generate').click();
+ await page.locator('#visualOnly').click();
  await expect(page.locator('#notice')).toContainText('OpenRouter request failed: HTTP 400');
  await expect(page.locator('#notice')).toContainText('Provider returned error');
  await expect(page.locator('#notice')).toContainText('provider: OpenAI');
@@ -143,7 +143,7 @@ test('provider 400 body, provider name and request shape are visible in diagnost
  expect(pass.httpStatus).toBe(400);expect(pass.providerError).toBe('Provider returned error');expect(pass.providerName).toBe('OpenAI');expect(pass.providerCode).toBe(400);expect(pass.providerBody).toContain('Unsupported parameter: temperature');
  expect(pass.requestShape).toMatchObject({temperature:'OMITTED',top_p:'OMITTED',logprobs:'OMITTED',response_format:'json_object'});
  expect(pass.requestShape.provider).toBe('only: openai, allow_fallbacks: false');
- expect(out.status).toContain('Analyze failed');
+ expect(out.status).toContain('Fidelity analysis failed');
  expect(JSON.stringify(out.debug)).not.toContain('test-key-400');
  expect(JSON.stringify(out.debug)).not.toContain('data:image');
  expect(errors.filter(e=>!/Failed to load resource/.test(e))).toEqual([]);
@@ -152,8 +152,8 @@ test('provider 400 body, provider name and request shape are visible in diagnost
 test('completion chime preference can disable the success sound without affecting analysis',async({page})=>{
  const errors=await open(page);await load(page,sanitized);await configureArchiveMock(page);
  await page.evaluate(()=>{__BERRY3VISUAL_TEST__.settings.chime=false});
- await page.locator('#generate').click();
- await expect(page.locator('#notice')).toContainText('Reference Fidelity complete');
+ await page.locator('#visualOnly').click();
+ await expect(page.locator('#notice')).toContainText('Fidelity analysis complete');
  expect(await page.evaluate(()=>window.__chimeNotes)).toBe(0);
  expect(await page.evaluate(()=>__BERRY3VISUAL_TEST__.state.final.fidelityReason)).toBeTruthy();
  expect(errors).toEqual([]);
@@ -165,5 +165,66 @@ test('candidate snapshot scripts cannot execute and the reconstruction sandbox n
  expect(out.hasScript).toBe(false);expect(out.hasHandler).toBe(false);expect(out.hasJsUrl).toBe(false);expect(out.xss).toBe(0);
  expect(out.sandboxes).toEqual(['allow-same-origin']);expect(out.sandboxes[0]).not.toContain('allow-scripts');
  expect(out.blobSize).toBeGreaterThan(1000);expect(out.width).toBe(320);expect(out.height).toBe(200);
+ expect(errors).toEqual([]);
+});
+
+const fixture0137=path.resolve('tests/fixtures/berry-visual/clone-0137-sanitized.mhtml');
+
+test('sparse 0137 fixture parses, reconstructs, exposes controls, and explains the live-behavior workflow',async({page})=>{
+ const errors=await open(page);
+ await page.locator('#archiveFile').setInputFiles(fixture0137);
+ await expect(page.locator('#notice')).toContainText('Archive visual reconstruction complete',{timeout:60000});
+ const out=await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,t=T.state.task;return{type:t.taskType,id:t.taskId,display:t.metadata.displayId,ref:t.referenceImages.map(i=>({w:i.width,h:i.height})),candidates:Object.fromEntries(['A','B'].map(k=>{const c=t.candidates[k];return[k,{url:c.url,origin:c.snapshotOrigin,hints:c.interactiveHints,noControls:c.noInteractiveControls,images:c.images.map(i=>({w:i.width,h:i.height,src:i.source,size:i.blob.size})),behavior:c.behaviorEvidence,render:c.renderStatus}]}))}});
+ expect(out.type).toBe('clone');expect(out.id).toBe('72e2577b-e47b-4f60-a276-7171c338d847');expect(out.display).toBe('0137');
+ expect(out.ref).toEqual([{w:960,h:600}]);
+ expect(out.candidates.A.url).toContain('3p7gkcd66cvomzv');expect(out.candidates.B.url).toContain('dma3c2fbi3asxm6');
+ expect(out.candidates.A.origin).toBe(out.candidates.A.url);expect(out.candidates.B.origin).toBe(out.candidates.B.url);
+ for(const k of ['A','B']){expect(out.candidates[k].hints).toMatchObject({buttons:3,textareas:1});expect(out.candidates[k].noControls).toBe(false);expect(out.candidates[k].behavior).toEqual([]);expect(out.candidates[k].render).toBe('unknown');expect(out.candidates[k].images[0]).toMatchObject({w:960,h:600,src:'mhtml:reconstructed'});expect(out.candidates[k].images[0].size).toBeGreaterThan(1000)}
+ await expect(page.locator('#openFeather')).toBeEnabled();await expect(page.locator('#openFeather')).toHaveText('OPEN ORIGINAL FEATHER TASK ↗');
+ await expect(page.getByText('Open Website A')).toHaveCount(0);await expect(page.getByText('Open Website B')).toHaveCount(0);
+ await expect(page.locator('[data-quicktext=A]')).toBeVisible();await expect(page.locator('[data-quicktext=B]')).toBeVisible();
+ await expect(page.locator('#behaviorStatus')).toContainText('Website A: not checked');
+ await expect(page.locator('#generate')).toBeDisabled();await expect(page.locator('#generate')).toHaveText('ADD BEHAVIOR TO GENERATE ALL');
+ await expect(page.locator('#visualOnly')).toBeEnabled();
+ const debug=await page.evaluate(()=>__BERRY3VISUAL_TEST__.buildDebugReport());
+ expect(debug.snapshotOrigins.A).toContain('3p7gkcd66cvomzv');expect(debug.snapshotOrigins.B).toContain('dma3c2fbi3asxm6');expect(debug.interactiveHints.A.buttons).toBe(3);
+ expect(errors).toEqual([]);
+});
+
+test('0137-style: full Analyze without confirmed behavior produces fidelity only, then full synthesis after live checks',async({page})=>{
+ const errors=await open(page);
+ await page.evaluate(async()=>{await __BERRY3VISUAL_TEST__.loadDemo();window.__sample=structuredClone(__BERRY3VISUAL_TEST__.state.draft)});
+ await load(page,fixture0137);
+ await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,s=T.state;T.settings.apiKey='test-key';T.settings.chime=false;s.models=[{id:T.settings.model,name:'Mock Vision',architecture:{input_modalities:['text','image'],output_modalities:['text']}}];window.__stages=[];const ids=['R','A','B'].map(k=>k==='R'?s.task.referenceImages[0].id:s.task.candidates[k].images[0].id);const reason='The reference places a gray editor region beneath a mostly black preview with three small controls; Website A preserves that arrangement, while Website B changes the lower panel and the toolbar spacing across the capture. Website A also keeps the toolbar position, whereas Website B shifts the controls and lightens the lower region noticeably.';T.setAiTransport(async(stage,messages)=>{window.__stages.push(stage);if(stage==='visual observation')return{features:[{feature:'Preview and editor',location:'Full page',importance:5,matchA:5,matchB:3,localWinner:'A',magnitude:'major',reference:'Black preview over a gray editor region with three controls.',A:'Same arrangement.',B:'Lower panel changed.',imageIds:ids,confidence:'high'}]};if(stage==='fidelity synthesis')return{fidelity:{option:'A is better',reason,claims:reason.split(/(?<=[.])\s+/).map(text=>({text,evidenceIds:s.features.map(f=>f.id)}))}};if(stage==='fidelity QA')return{issues:[],allClaimsEvidenced:true,referenceFeatures:true,lensIsolation:true};if(stage==='adversarial QA'){const result=structuredClone(window.__sample);for(const d of T.DIMS)for(const c of result[d].claims)c.evidenceIds=d==='functionality'?[...T.retainedBehavior().A,...T.retainedBehavior().B].map(f=>f.id):d==='fidelity'?s.features.map(f=>f.id):[...s.features.map(f=>f.id),...T.retainedBehavior().A.map(f=>f.id),...T.retainedBehavior().B.map(f=>f.id)];return{result,issues:[],checked:{referenceFeatures:true,behaviorNotInferred:true,lensIsolation:true,tieConsistency:true,allClaimsEvidenced:true,overallTradeoff:true,wordCounts:true}}}return structuredClone(window.__sample)})});
+ await page.evaluate(()=>{window.__copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async t=>window.__copied.push(t)}})});
+ await page.evaluate(()=>{__BERRY3VISUAL_TEST__.generate()});
+ await expect(page.locator('#notice')).toContainText('Reference Fidelity complete');
+ const gate=await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,v=T.validateAll();return{fidelity:!!T.state.final.fidelityReason,functionalityOption:T.state.final.functionalityOption,functionality:T.state.final.functionalityReason,overall:T.state.final.overallReason,draft:T.state.draft,verification:T.state.verification,unsupported:v.issues.filter(i=>/unsupported claim|wrong-channel/.test(i)),stages:window.__stages,disabled:document.querySelector('#generate').disabled}});
+ expect(gate.fidelity).toBe(true);expect(gate.functionality).toBe('');expect(gate.functionalityOption).toBe('');expect(gate.overall).toBe('');
+ expect(gate.draft).toBe(null);expect(gate.verification).toBe(null);expect(gate.unsupported).toEqual([]);expect(gate.stages).toEqual(['visual observation','fidelity synthesis','fidelity QA']);expect(gate.disabled).toBe(true);
+ await page.locator('[data-copyreason=fidelity]').click();
+ expect(await page.evaluate(()=>window.__copied[0])).toContain('Website A');
+ await expect(page.locator('#generate')).toBeDisabled();
+ for(const k of ['A','B']){await page.locator(`[data-quicktext="${k}"]`).fill('Resolution toggle changed state');await page.locator(`[data-quickresult="${k}"]`).selectOption('Works');await page.locator(`[data-quickadd="${k}"]`).click()}
+ await expect(page.locator('#generate')).toBeEnabled();
+ await page.locator('#generate').click();
+ await expect(page.locator('#notice')).toContainText('Analysis complete');
+ const full=await page.evaluate(()=>({stages:window.__stages,final:__BERRY3VISUAL_TEST__.state.final,verificationIssues:__BERRY3VISUAL_TEST__.state.verification.issues}));
+ expect(full.stages).toEqual(['visual observation','fidelity synthesis','fidelity QA','visual observation','decision synthesis','adversarial QA']);
+ for(const d of ['functionality','fidelity','overall']){expect(['A is better','B is better','Both are good','Both are bad']).toContain(full.final[d+'Option']);expect(full.final[d+'Reason']).toBeTruthy()}
+ expect(full.verificationIssues).toEqual([]);
+ expect(errors).toEqual([]);
+});
+
+test('fidelity anchoring failure is repaired once from the existing ledger without changing the option',async({page})=>{
+ const errors=await open(page);await load(page,sanitized);
+ await page.evaluate(()=>{const T=__BERRY3VISUAL_TEST__,s=T.state;T.settings.apiKey='test-key';T.settings.chime=false;s.models=[{id:T.settings.model,name:'Mock Vision',architecture:{input_modalities:['text','image'],output_modalities:['text']}}];window.__repairCalls=0;const unanchored='Website A is better because the dark preview area and the gray editor region are closer on Website A, while the lower panel differs on Website B and the toolbar spacing is tighter on Website A across the whole capture.';const repaired='The reference places a gray editor region beneath a mostly black preview with three small controls; Website A preserves that arrangement, while Website B changes the lower panel and the toolbar spacing across the capture.';const ids=['R','A','B'].map(k=>k==='R'?s.task.referenceImages[0].id:s.task.candidates[k].images[0].id);T.setAiTransport(async(stage,messages)=>{if(stage==='visual observation')return{features:[{feature:'Preview and editor',location:'Full page',importance:5,matchA:5,matchB:3,localWinner:'A',magnitude:'major',reference:'Black preview over a gray editor region with three controls.',A:'Same arrangement.',B:'Lower panel changed.',imageIds:ids,confidence:'high'}]};if(stage==='fidelity QA')return{issues:[],referenceFeatures:true,lensIsolation:true,allClaimsEvidenced:true};if(stage==='fidelity anchoring repair'){window.__repairCalls++;return{fidelity:{option:'A is better',reason:repaired,claims:repaired.split(/(?<=[.])\s+/).map(text=>({text,evidenceIds:s.features.map(f=>f.id)}))}}};return{fidelity:{option:'A is better',reason:unanchored,claims:unanchored.split(/(?<=[.])\s+/).map(text=>({text,evidenceIds:s.features.map(f=>f.id)}))}}})});
+ await page.locator('#visualOnly').click();
+ await expect(page.locator('#notice')).toContainText('Fidelity analysis complete');
+ const out=await page.evaluate(()=>({repairCalls:window.__repairCalls,repaired:__BERRY3VISUAL_TEST__.state.visualAnalysis.repaired,option:__BERRY3VISUAL_TEST__.state.final.fidelityOption,reason:__BERRY3VISUAL_TEST__.state.final.fidelityReason,issues:__BERRY3VISUAL_TEST__.state.visualAnalysis.issues,passes:__BERRY3VISUAL_TEST__.state.passes.map(p=>p.stage)}));
+ expect(out.repairCalls).toBe(1);expect(out.repaired).toBe(true);expect(out.option).toBe('A is better');
+ expect(out.reason).toContain('reference');expect(out.reason).toContain('Website A');expect(out.reason).toContain('Website B');
+ expect(out.issues.join(' ')).not.toContain('Reference anchoring');
+ expect(out.passes).toEqual(['visual observation','fidelity synthesis','fidelity anchoring repair','fidelity QA']);
  expect(errors).toEqual([]);
 });
