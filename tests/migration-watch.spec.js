@@ -32,7 +32,7 @@ const CRANE=[obs('sancra','Sandhill Crane','Antigone canadensis','C1','Goose Pon
  obs('sancra','Sandhill Crane','Antigone canadensis','C2','North fields',38.60,-87.40,34,4000)];
 async function mockEbird(page,{key='GOODKEY',failRecent=false,failAll=false,empty=false,large=false}={}){
  await page.route('**api.ebird.org/**',r=>{
-  const u=r.request().url();const k=r.request().headers()['x-ebirdapi'];
+  const u=r.request().url();const k=r.request().headers()['x-ebirdapitoken'];
   if(failAll)return r.fulfill({status:503,body:'unavailable'});
   if(!k||k!==key)return r.fulfill({status:401,body:'Invalid API key'});
   if(failRecent&&u.includes('/recent?'))return r.fulfill({status:500,body:'boom'});
@@ -568,4 +568,102 @@ test('Jasper-Pulaski gating: distant users see Not applicable; Indiana-area keep
  await page.evaluate(async()=>{await window.__MW_TEST__.Location.set(window.__MW_TEST__.Location.fromPreset({id:'princeton',name:'Princeton, Indiana',lat:38.3553,lng:-87.5675}),{refreshData:false});});
  await page.locator('#fcard-crane').click();
  await expect(page.locator('#detail-body')).toContainText('Jasper-Pulaski (Indiana regional)');
+});
+
+/* ================ v2026.09.11.3: eBird contract, disabled sources, first-run, About ================ */
+const FILE3='file://'+path.resolve('migration-watch.html');
+test('eBird contract: corrected geo endpoints, URLSearchParams, key stays a header, never in a URL',async({page})=>{
+ const hits=[];
+ await page.route('**api.ebird.org/**',r=>{hits.push({url:r.request().url(),hdr:r.request().headers()['x-ebirdapitoken']||null});
+  const u=r.request().url();
+  if(u.includes('notable'))return r.fulfill({json:NOTABLE});
+  if(u.includes('rthhum'))return r.fulfill({json:HUM});
+  if(u.includes('sancra'))return r.fulfill({json:CRANE});
+  if(u.includes('/recent?'))return r.fulfill({json:RECENT});
+  return r.fulfill({json:[]});});
+ await page.route(/birdcast\.info|journeynorth\.org|in\.gov/,r=>{throw new Error('disabled source made a request: '+r.request().url());});
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'SECRETKEY123'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ expect(hits.length).toBe(4);
+ for(const h of hits){
+  expect(h.url).toMatch(/^https:\/\/api\.ebird\.org\/v2\/data\/obs\/geo\/recent(\/(notable|rthhum|sancra))?\?/);
+  expect(h.url).not.toMatch(/obs\/38\./); // regression guard: old {lat},{lng} region-path form
+  expect(h.url).not.toContain('SECRETKEY123');
+  expect(h.hdr).toBe('SECRETKEY123'); // X-eBirdApiToken header forwarded
+ }
+ const u=new URL(hits[0].url);
+ expect(u.searchParams.get('dist')).toBe('25');
+ expect(Number(u.searchParams.get('lat'))).toBeLessThanOrEqual(90);
+ expect(u.pathname).toBe('/v2/data/obs/geo/recent');
+ // clamping: 50km max dist, back<=30
+ const c=await page.evaluate(()=>{const E=window.__MW_TEST__;
+  return {r:E.CONFIG};});
+ expect(c.r.transportMode).toBe('direct');
+});
+
+test('disabled sources make zero requests and show honest not-configured states',async({page})=>{
+ const blocked=[];
+ await page.route('**api.ebird.org/**',r=>r.fulfill({json:[]}));
+ await page.route(/birdcast\.info|journeynorth\.org|in\.gov/,r=>{blocked.push(r.request().url());return r.fulfill({json:{}});});
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await page.waitForTimeout(1200);
+ expect(blocked).toEqual([]);
+ const srcs=await page.evaluate(()=>({b:__MW_TEST__.state.sources.birdcast,j:__MW_TEST__.state.sources.jnorth,c:__MW_TEST__.state.sources.crane}));
+ expect(srcs.b.status).toBe('unconfigured');
+ expect(srcs.j.status).toBe('unconfigured');
+ expect(srcs.c.status).toBe('unconfigured');
+});
+
+test('first-run callout: shown without key, key link present, Settings shortcut focuses field, Learn More opens About; hidden with key',async({page})=>{
+ await mockEbird(page);
+ await boot(page);
+ await expect(page.locator('#first-run')).toBeVisible();
+ const link=page.locator('#first-run a[href*="ebird.org"]');
+ await expect(link).toHaveCount(1);
+ expect(await link.getAttribute('rel')).toContain('noopener');
+ await page.locator('#first-run-settings').click();
+ await expect(page.locator('#settings-dialog')).toBeVisible();
+ await expect(page.locator('#set-key')).toBeFocused();
+ await page.keyboard.press('Escape');
+ await page.locator('#first-run-learn').click();
+ await expect(page.locator('#about')).toBeVisible();
+ // with key: callout disappears
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await page.goto(FILE3);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await expect(page.locator('#first-run')).toBeHidden();
+});
+
+test('About: getting started, key explanation, OBSERVED/MODELED/INFERRED, one-shot locate, relay disclosure, optional AI, source status',async({page})=>{
+ await mockEbird(page);
+ await boot(page);
+ await page.locator('#about').scrollIntoViewIfNeeded();
+ const about=page.locator('#about');
+ await expect(about).toContainText('What is Migration Watch?');
+ await expect(about).toContainText('Get started');
+ await expect(about).toContainText('free personal key');
+ await expect(about).toContainText('web relay');
+ await expect(about).toContainText('one-time location check');
+ await expect(about).toContainText('OBSERVED');
+ await expect(about).toContainText('MODELED');
+ await expect(about).toContainText('INFERRED');
+ await expect(about).toContainText('not a guarantee');
+ await expect(about).toContainText('does not need AI');
+ await expect(about.locator('a[href="https://openrouter.ai/keys"]')).toHaveCount(1);
+ await expect(about.locator('a[href*="ebird.org/api/keygen"]').first()).toHaveCount(1);
+ // Open eBird Settings shortcut focuses the eBird field
+ await page.locator('#about-ebird-settings').click();
+ await expect(page.locator('#set-key')).toBeFocused();
+ await page.keyboard.press('Escape');
+ // source status mirrors dashboard state
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await page.goto(FILE3);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await expect(page.locator('#about-ebird')).toHaveText('Connected');
+ // no horizontal overflow at 390px
+ await page.setViewportSize({width:390,height:900});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
 });
