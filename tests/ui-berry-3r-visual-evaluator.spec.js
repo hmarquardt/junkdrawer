@@ -63,7 +63,7 @@ test('file pickers, reference replace, capture naming, reorder and remove', asyn
   await page.locator('[data-imagefile=R]').setInputFiles(file);
   await page.locator('[data-imagefile=A]').setInputFiles([file, { ...file, name: 'another.png' }]);
   expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.state.task.referenceImages.map(i => [i.width, i.height]))).toEqual([[64, 32]]);
-  expect(await page.locator('[data-role=A] .capture').count()).toBe(4);
+  await expect(page.locator('[data-role=A] .capture')).toHaveCount(4);
   const input = page.locator('[data-name="A:3"]'); await input.fill('Custom end'); await input.dispatchEvent('change');
   await page.locator('[data-move="A:3:-1"]').click();
   expect(await page.locator('[data-name="A:2"]').inputValue()).toBe('Custom end');
@@ -247,6 +247,7 @@ async function mockPipeline(page, unsupported = false) {
     T.setAiTransport(async (stage, messages) => {
       window.__calls.push({ stage, messages });
       if (stage === 'visual observation') return { features: oldFeatures };
+      if (stage === 'fidelity QA') return { issues: [], allClaimsEvidenced: true, referenceFeatures: true, lensIsolation: true };
       const result = structuredClone(sample);
       for (const d of T.DIMS) for (const c of result[d].claims) c.evidenceIds = d === 'functionality' ? [...T.retainedBehavior().A, ...T.retainedBehavior().B].map(f => f.id) : d === 'fidelity' ? s.features.map(f => f.id) : [...s.features.map(f => f.id), ...T.retainedBehavior().A.map(f => f.id), ...T.retainedBehavior().B.map(f => f.id)];
       if (unsupported) result.fidelity.claims[0].evidenceIds = ['invented-feature'];
@@ -284,13 +285,20 @@ test('manual edits survive rerun, evidence changes invalidate stale claims', asy
   expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.validateAll().issues.join(' '))).toContain('Evidence changed');
 });
 
-test('malformed model output and insufficient behavioral evidence fail visibly', async ({ page }) => {
+test('malformed model output and absent behavior are both visible, never silent', async ({ page }) => {
   const errors = await open(page, true);
   await mockPipeline(page);
   await page.evaluate(() => __BERRY3VISUAL_TEST__.setAiTransport(async () => ({ invalid: true })));
   await page.locator('#generate').click(); await expect(page.locator('#notice')).toContainText('features array');
-  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__; T.state.task.candidates.A.behaviorEvidence = []; T.setRenderStatus('A', 'unknown'); });
-  await page.locator('#generate').click(); await expect(page.locator('#notice')).toContainText('Insufficient behavioral evidence');
+  expect(await page.evaluate(() => __BERRY3VISUAL_TEST__.state.busy)).toBe(false);
+  expect(await page.evaluate(() => document.querySelector('#generate').getAttribute('aria-busy'))).toBe('false');
+  await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__; T.state.task.candidates.A.behaviorEvidence = []; T.setRenderStatus('A', 'unknown'); T.state.final.functionalityOption = ''; T.state.final.functionalityReason = ''; T.state.final.overallOption = ''; T.state.final.overallReason = ''; T.state.dirty = {}; });
+  await mockPipeline(page);
+  await page.locator('#generate').click(); await expect(page.locator('#notice')).toContainText('Reference Fidelity complete');
+  await expect(page.locator('#notice')).toContainText('Add confirmed behavior observations');
+  await expect(page.locator('[data-final=fidelityReason]')).not.toHaveValue('');
+  await expect(page.locator('[data-final=functionalityReason]')).toHaveValue('');
+  await expect(page.locator('[data-final=overallReason]')).toHaveValue('');
   expect(errors).toEqual([]);
 });
 
