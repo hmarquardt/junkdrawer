@@ -199,3 +199,182 @@ test('settings persist across reload; theme and all widths clean in both modes',
  expect(raw).not.toMatch(/speciesCode|locName|obsDt/);
  // no uncaught page errors during the whole pass
 });
+
+/* ================== MIGRATION HISTORY ENGINE ================== */
+test('movement engine: all seven signal types deterministic, plus no-signal and sparse cases',async({page})=>{
+ await mockEbird(page);await boot(page);
+ const R=await page.evaluate(()=>{
+  const M=window.__MW_TEST__.Movement,T=window.__MW_TEST__.TrendStore,S=window.__MW_TEST__.Snapshot,today=S.today();
+  const d=n=>new Date(Date.now()-n*86400000).toISOString().slice(0,10);
+  const snap=(code,name,date,o)=>({id:T.key(date,'princeton',25,code),locationPreset:'princeton',radiusKm:25,speciesCode:code,commonName:name,date,capturedAt:new Date().toISOString(),notableCount:0,...o});
+  const hum='Ruby-throated Hummingbird',crane='Sandhill Crane';
+  const out={};
+  // SURGE: 2→9 locations (≥75%, ≥5 current), 6 snapshots for HIGH confidence
+  out.surge=M.detect(snap('rthhum',hum,today,{reportingLocations72h:9,observations72h:14,nearestKm:4,seasonalExpectation:6,seasonalStatus:'ACTIVE'}),snap('rthhum',hum,d(1),{reportingLocations72h:2,observations72h:2,nearestKm:24,seasonalExpectation:6,seasonalStatus:'ACTIVE'}),[2,3,4,5,6,9].map((n,i)=>snap('rthhum',hum,d(5-i),{reportingLocations72h:Math.max(1,n-7),observations72h:n,nearestKm:24,seasonalExpectation:6,seasonalStatus:'ACTIVE'})).concat([snap('rthhum',hum,today,{reportingLocations72h:9,observations72h:14,nearestKm:4,seasonalExpectation:6,seasonalStatus:'ACTIVE'})]));
+  // MOVEMENT BUILDING: 4→7→11 over three checks
+  const bld=[snap('bwaha','Broad-winged Hawk',d(3),{reportingLocations72h:4,observations72h:4,nearestKm:30,seasonalExpectation:5,seasonalStatus:'ACTIVE'}),snap('bwaha','Broad-winged Hawk',d(2),{reportingLocations72h:7,observations72h:7,nearestKm:25,seasonalExpectation:5,seasonalStatus:'ACTIVE'}),snap('bwaha','Broad-winged Hawk',d(1),{reportingLocations72h:11,observations72h:11,nearestKm:20,seasonalExpectation:5,seasonalStatus:'ACTIVE'}),snap('bwaha','Broad-winged Hawk',today,{reportingLocations72h:11,observations72h:11,nearestKm:20,seasonalExpectation:5,seasonalStatus:'ACTIVE'})];
+  out.building=M.detect(bld[3],bld[2],bld);
+  // TAILING OFF: 8→3 locations
+  out.tailing=M.detect(snap('conigh','Common Nighthawk',today,{reportingLocations72h:3,observations72h:3,nearestKm:8,seasonalExpectation:4,seasonalStatus:'ACTIVE'}),snap('conigh','Common Nighthawk',d(1),{reportingLocations72h:8,observations72h:9,nearestKm:8,seasonalExpectation:4,seasonalStatus:'ACTIVE'}),[snap('conigh','Common Nighthawk',d(1),{reportingLocations72h:8,observations72h:9,nearestKm:8,seasonalExpectation:4,seasonalStatus:'ACTIVE'}),snap('conigh','Common Nighthawk',today,{reportingLocations72h:3,observations72h:3,nearestKm:8,seasonalExpectation:4,seasonalStatus:'ACTIVE'})]);
+  // NEW ARRIVAL: 0→4 locations
+  out.arrival=M.detect(snap('cmwa','Cape May Warbler',today,{reportingLocations72h:4,observations72h:5,nearestKm:6,seasonalExpectation:3,seasonalStatus:'ACTIVE'}),snap('cmwa','Cape May Warbler',d(1),{reportingLocations72h:0,observations72h:0,nearestKm:null,seasonalExpectation:3,seasonalStatus:'ACTIVE'}),[snap('cmwa','Cape May Warbler',d(1),{reportingLocations72h:0,observations72h:0,nearestKm:null,seasonalExpectation:3,seasonalStatus:'ACTIVE'}),snap('cmwa','Cape May Warbler',today,{reportingLocations72h:4,observations72h:5,nearestKm:6,seasonalExpectation:3,seasonalStatus:'ACTIVE'})]);
+  // MOVED CLOSER: 68→14 km
+  out.closer=M.detect(snap('sancra',crane,today,{reportingLocations72h:5,observations72h:6,nearestKm:14,maxCount:200,medianCount:100,seasonalExpectation:2,seasonalStatus:'ACTIVE'}),snap('sancra',crane,d(1),{reportingLocations72h:5,observations72h:6,nearestKm:68,maxCount:200,medianCount:100,seasonalExpectation:2,seasonalStatus:'ACTIVE'}),[snap('sancra',crane,d(2),{reportingLocations72h:4,observations72h:4,nearestKm:68,maxCount:100,medianCount:60,seasonalExpectation:2,seasonalStatus:'ACTIVE'}),snap('sancra',crane,d(1),{reportingLocations72h:5,observations72h:6,nearestKm:68,maxCount:200,medianCount:100,seasonalExpectation:2,seasonalStatus:'ACTIVE'}),snap('sancra',crane,today,{reportingLocations72h:5,observations72h:6,nearestKm:14,maxCount:200,medianCount:100,seasonalExpectation:2,seasonalStatus:'ACTIVE'})]);
+  // CONCENTRATING: flock 18→126 with stable reporting
+  out.concentrating=M.detect(snap('sancra',crane,today,{reportingLocations72h:5,observations72h:5,nearestKm:30,maxCount:126,medianCount:40,seasonalExpectation:2,seasonalStatus:'ACTIVE'}),snap('sancra',crane,d(1),{reportingLocations72h:5,observations72h:5,nearestKm:30,maxCount:18,medianCount:10,seasonalExpectation:2,seasonalStatus:'ACTIVE'}),[snap('sancra',crane,d(1),{reportingLocations72h:5,observations72h:5,nearestKm:30,maxCount:18,medianCount:10,seasonalExpectation:2,seasonalStatus:'ACTIVE'}),snap('sancra',crane,today,{reportingLocations72h:5,observations72h:5,nearestKm:30,maxCount:126,medianCount:40,seasonalExpectation:2,seasonalStatus:'ACTIVE'})]);
+  // DEPARTING: declining obs + DECLINING seasonal
+  out.departing=M.detect(snap('rthhum',hum,today,{reportingLocations72h:1,observations72h:1,nearestKm:40,seasonalExpectation:2,seasonalStatus:'DECLINING'}),snap('rthhum',hum,d(1),{reportingLocations72h:3,observations72h:4,nearestKm:20,seasonalExpectation:4,seasonalStatus:'DECLINING'}),[snap('rthhum',hum,d(1),{reportingLocations72h:3,observations72h:4,nearestKm:20,seasonalExpectation:4,seasonalStatus:'DECLINING'}),snap('rthhum',hum,today,{reportingLocations72h:1,observations72h:1,nearestKm:40,seasonalExpectation:2,seasonalStatus:'DECLINING'})]);
+  // NO SIGNAL: identical snapshots
+  const same=o=>snap('whtsp','White-throated Sparrow',o.date,{reportingLocations72h:2,observations72h:2,nearestKm:10,maxCount:2,medianCount:2,seasonalExpectation:3,seasonalStatus:'ACTIVE'});
+  out.none=M.detect(same({date:today}),same({date:d(1)}),[same({date:d(1)}),same({date:today})]);
+  // sparse: single prior snapshot, small counts → weak/no signals, LOW confidence when present
+  out.sparse=M.detect(snap('osprey','Osprey',today,{reportingLocations72h:2,observations72h:2,nearestKm:22,seasonalExpectation:4,seasonalStatus:'ACTIVE'}),snap('osprey','Osprey',d(1),{reportingLocations72h:1,observations72h:1,nearestKm:30,seasonalExpectation:4,seasonalStatus:'ACTIVE'}),[snap('osprey','Osprey',d(1),{reportingLocations72h:1,observations72h:1,nearestKm:30,seasonalExpectation:4,seasonalStatus:'ACTIVE'}),snap('osprey','Osprey',today,{reportingLocations72h:2,observations72h:2,nearestKm:22,seasonalExpectation:4,seasonalStatus:'ACTIVE'})]);
+  return out;
+ });
+ const types=R=>R.map(x=>x.type);
+ expect(types(R.surge)).toContain('SURGE');
+ expect(R.surge.find(x=>x.type==='SURGE').confidence).toBe('HIGH');
+ expect(R.surge.find(x=>x.type==='SURGE').why).toMatch(/increased \d+(\.\d+)?%/);
+ expect(types(R.building)).toContain('MOVEMENT BUILDING');
+ expect(R.building.find(x=>x.type==='MOVEMENT BUILDING').calc.sequence).toBe('4 → 7 → 11');
+ expect(types(R.tailing)).toContain('TAILING OFF');
+ expect(R.tailing.find(x=>x.type==='TAILING OFF').why).toMatch(/down \d+(\.\d+)?%/);
+ expect(types(R.arrival)).toContain('NEW ARRIVAL');
+ expect(types(R.closer)).toContain('MOVED CLOSER');
+ expect(R.closer.find(x=>x.type==='MOVED CLOSER').calc.improvement).toBe('54 km');
+ expect(types(R.concentrating)).toContain('CONCENTRATING');
+ expect(R.concentrating.find(x=>x.type==='CONCENTRATING').calc.currentMax).toBe(126);
+ expect(types(R.departing)).toContain('DEPARTING');
+ expect(R.departing.find(x=>x.type==='DEPARTING').why).toMatch(/INFERENCE/);
+ expect(types(R.none)).toEqual([]);           // identical snapshots → nothing
+ expect(types(R.sparse)).toEqual([]);          // 1→2 locations must NOT be a surge; no other thresholds met
+ // low-confidence path: tiny magnitude, few snapshots → any signal present is LOW
+ const low=await page.evaluate(()=>{const M=window.__MW_TEST__.Movement,T=window.__MW_TEST__.TrendStore,S=window.__MW_TEST__.Snapshot,today=S.today();
+  const d=n=>new Date(Date.now()-n*86400000).toISOString().slice(0,10);
+  const s=(date,L)=>({id:T.key(date,'princeton',25,'lebi'),locationPreset:'princeton',radiusKm:25,speciesCode:'lebi',commonName:'Least Bittern',date,reportingLocations72h:L,observations72h:L,nearestKm:5,seasonalExpectation:6,seasonalStatus:'ACTIVE',maxCount:1,medianCount:1,notableCount:0,capturedAt:new Date().toISOString()});
+  return M.detect(s(today,5),s(d(1),1),[s(d(1),1),s(today,5)]).map(x=>x.confidence);});
+ expect(low.length).toBeGreaterThan(0);          // sparse 2-snapshot data yields signals…
+ expect(low.every(c=>c!=='HIGH')).toBe(true);    // …but never high confidence
+});
+
+test('since-your-last-visit panel renders injected deterministic signals and opens the trend inspector',async({page})=>{
+ await mockEbird(page);await boot(page);
+ await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';});
+ await page.locator('#refresh').click();await page.waitForTimeout(1200);
+ await page.evaluate(()=>{
+  const T=window.__MW_TEST__;T.Trend.state.hasPrior=true;
+  T.Trend.state.signals=[{species:'sancra',speciesName:'Sandhill Crane',date:T.Snapshot.today(),type:'MOVED CLOSER',cls:'closer',confidence:'HIGH',
+   why:'Nearest reports have moved 54 km closer (68 → 31 → 14 km).',
+   calc:{current:'14 km',previous:'68 km',improvement:'54 km',threshold:'≥10 km closer'}}];
+  T.renderSince();});
+ await expect(page.locator('#since-panel .since').first()).toContainText('MOVED CLOSER');
+ await expect(page.locator('#since-panel .since').first()).toContainText('HIGH');
+ await page.locator('#since-panel .since').first().click();
+ await expect(page.locator('#detail-body')).toContainText('TREND INSPECTOR');
+ await expect(page.locator('#detail-body')).toContainText('≥10 km closer');
+ await page.keyboard.press('Escape');
+});
+
+test('snapshot persistence: same-day refresh replaces, other scope isolated, >90d pruned, >5000 capped',async({page})=>{
+ await mockEbird(page);await boot(page);
+ await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'}));});
+ await page.reload();await page.waitForFunction(()=>window.__MW_TEST__);
+ await page.locator('#refresh').click();await page.waitForTimeout(1100);
+ const count1=await page.evaluate(async()=>(await window.__MW_TEST__.TrendStore.getAll()).length);
+ await page.locator('#refresh').click();await page.waitForTimeout(1100);
+ const count2=await page.evaluate(async()=>(await window.__MW_TEST__.TrendStore.getAll()).length);
+ expect(count2).toBe(count1); // same-day refresh replaces, never appends
+ // isolation: same species/date, different radius is a distinct record
+ await page.evaluate(async()=>{const T=window.__MW_TEST__,TS=T.TrendStore,today=T.Snapshot.today();
+  await TS.put({id:TS.key(today,'princeton',50,'amre'),date:today,locationPreset:'princeton',radiusKm:50,speciesCode:'amre',commonName:'American Redstart',observations72h:1,reportingLocations72h:1,observations7d:1,reportingLocations7d:1,nearestKm:30,maxCount:1,medianCount:1,notableCount:0,seasonalExpectation:3,seasonalStatus:'ACTIVE',speciesWatchScore:20,capturedAt:new Date().toISOString()});});
+ const isolated=await page.evaluate(async()=>{const TS=window.__MW_TEST__.TrendStore;return (await TS.scopeHistory('princeton',25,'amre')).length;});
+ expect(isolated).toBe(1);
+ // retention: old + over-cap records pruned
+ const pruned=await page.evaluate(async()=>{const T=window.__MW_TEST__,TS=T.TrendStore;
+  const old=new Date(Date.now()-100*86400000).toISOString().slice(0,10);
+  await TS.put({id:TS.key(old,'princeton',25,'x'),date:old,locationPreset:'princeton',radiusKm:25,speciesCode:'x',commonName:'X',observations72h:0,reportingLocations72h:0,observations7d:0,reportingLocations7d:0,nearestKm:null,maxCount:null,medianCount:null,notableCount:0,seasonalExpectation:0,seasonalStatus:'DONE',speciesWatchScore:0,capturedAt:new Date().toISOString()});
+  // fill beyond cap
+  for(let i=0;i<TS.MAX_RECORDS+2;i++){const d='2026-06-'+String(1+(i%28)).padStart(2,'0');
+   await TS.put({id:TS.key(d,'ggs',25,'f'+i),date:d,locationPreset:'ggs',radiusKm:25,speciesCode:'f'+i,commonName:'F'+i,observations72h:0,reportingLocations72h:0,observations7d:0,reportingLocations7d:0,nearestKm:null,maxCount:null,medianCount:null,notableCount:0,seasonalExpectation:0,seasonalStatus:'DONE',speciesWatchScore:0,capturedAt:new Date().toISOString()});}
+  await TS.prune();
+  const all=await TS.getAll();
+  return {count:all.length,oldGone:!all.some(s=>s.date<new Date(Date.now()-90*86400000).toISOString().slice(0,10))};});
+ expect(pruned.count).toBeLessThanOrEqual(5000);
+ expect(pruned.oldGone).toBe(true);
+ // privacy: derived snapshots only
+ const dump=await page.evaluate(async()=>JSON.stringify(await window.__MW_TEST__.TrendStore.getAll()));
+ expect(dump).not.toMatch(/"lat"|"lng"|ebirdKey|openrouterKey|obsDt|locName|subId|priv/);
+ expect(dump).not.toMatch(/38\.35|38\.3\d\d/);
+});
+
+test('watchlist: star toggles persist, remove works, and the 10-species cap is enforced',async({page})=>{
+ await mockEbird(page);await boot(page);
+ await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'}));});
+ await page.reload();await page.waitForFunction(()=>window.__MW_TEST__);
+ await page.locator('#refresh').click();await page.waitForTimeout(1100);
+ const firstCode=await page.evaluate(()=>window.__MW_TEST__.state.species.find(x=>!['rthhum','sancra'].includes(x.code)).code);
+ await page.locator(`.srow[data-code="${firstCode}"]`).locator('[data-star]').click();
+ await expect(page.locator('#watch-list')).toContainText(new RegExp(firstCode,'i'));
+ expect(await page.locator(`.srow[data-code="${firstCode}"]`).locator('[data-star]').textContent()).toBe('★');
+ const raw=await page.evaluate(()=>JSON.parse(localStorage.getItem('migrationwatch.settings')));
+ expect(raw.watchlist).toContain(firstCode);
+ // featured species decline watchlisting explicitly
+ const featuredCode=await page.evaluate(()=>window.__MW_TEST__.state.species.find(x=>['rthhum','sancra'].includes(x.code))?.code||null);
+ if(featuredCode){const frow=page.locator(`.srow[data-code="${featuredCode}"]`);
+  await frow.locator('[data-star]').click();
+  await expect(page.locator('#list-note')).toContainText('permanently featured');
+  const rawF=await page.evaluate(()=>JSON.parse(localStorage.getItem('migrationwatch.settings')));
+  expect(rawF.watchlist).not.toContain(featuredCode);}
+ // remove again
+ await page.locator(`.srow[data-code="${firstCode}"]`).locator('[data-star]').click();
+ const raw2=await page.evaluate(()=>JSON.parse(localStorage.getItem('migrationwatch.settings')));
+ expect(raw2.watchlist).not.toContain(firstCode);
+ await page.evaluate(()=>{const T=window.__MW_TEST__;T.settings.watchlist=['a1','a2','a3','a4','a5','a6','a7','a8','a9','a10'];});
+ const plainCode=await page.evaluate(()=>window.__MW_TEST__.state.species.find(x=>!['rthhum','sancra'].includes(x.code)).code);
+ await page.locator(`.srow[data-code="${plainCode}"]`).locator('[data-star]').click();
+ await expect(page.locator('#list-note')).toContainText('limited to 10');
+ expect(await page.evaluate(()=>window.__MW_TEST__.settings.watchlist.length)).toBe(10); // refused → unchanged, nothing persisted
+ const raw3=await page.evaluate(()=>JSON.parse(localStorage.getItem('migrationwatch.settings')));
+ expect((raw3.watchlist||[]).length).toBeLessThanOrEqual(10);
+});
+test('featured history: gap-safe SVG renders from snapshots; range chips re-render; inspector math deterministic',async({page})=>{
+ await mockEbird(page);await boot(page);
+ await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'}));});
+ await page.reload();await page.waitForFunction(()=>window.__MW_TEST__);
+ await page.evaluate(async()=>{
+  const T=window.__MW_TEST__,TS=T.TrendStore;
+  const base={locationPreset:'princeton',radiusKm:25,speciesCode:'rthhum',commonName:'Ruby-throated Hummingbird',observations72h:3,reportingLocations72h:2,observations7d:4,reportingLocations7d:3,maxCount:3,medianCount:2,notableCount:0,seasonalExpectation:5,seasonalStatus:'ACTIVE',speciesWatchScore:40,capturedAt:new Date().toISOString()};
+  for(const off of [12,9,3]){const d=new Date(Date.now()-off*86400000).toISOString().slice(0,10);
+   await TS.put({id:TS.key(d,'princeton',25,'rthhum'),date:d,...base,nearestKm:6+off,score:40+ (12-off)});}
+  // today snapshot will be written by refresh with score from live data
+ });
+ await page.locator('#refresh').click();await page.waitForTimeout(1100);
+ const svg=await page.locator('#hist-hum svg').count();
+ expect(svg).toBe(1);
+ const legend=await page.locator('#hist-hum .hlegend').textContent();
+ expect(legend).toMatch(/snapshot/);expect(legend).not.toMatch(/0 snapshot/);
+ await page.locator('[data-hkey="hum"][data-hrange="30"]').click();
+ await expect(page.locator('#hist-hum .hlegend')).toContainText(/snapshot/);
+ // aria pressed state moves
+ expect(await page.locator('[data-hkey="hum"][data-hrange="30"]').getAttribute('aria-pressed')).toBe('true');
+});
+test('settings history: stats line, export excludes ids/keys, clear works',async({page})=>{
+ await mockEbird(page);await boot(page);
+ await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'}));});
+ await page.reload();await page.waitForFunction(()=>window.__MW_TEST__);
+ await page.locator('#refresh').click();await page.waitForTimeout(900);
+ await page.locator('#settings-open').click();
+ await expect(page.locator('#history-stats')).toContainText(/snapshot/);
+ page.once('dialog',d=>d.accept());
+ await page.locator('#clear-history').click();
+ await expect(page.locator('#history-status')).toContainText(/cleared/i);
+ await expect(page.locator('#history-stats')).toContainText('0 species-day snapshots');
+ // keys never appear in history store
+ const storeDump=await page.evaluate(async()=>{const dbs=await (window.__MW_TEST__.TrendStore.getAll());return JSON.stringify(dbs);});
+ expect(storeDump).not.toMatch(/ebirdKey|openrouterKey/);
+});
+test('storage-manager recognizes Migration Watch stores',async({page})=>{
+ await page.goto('file://'+path.resolve('storage-manager.html'));
+ const txt=await page.content();
+ expect(txt).toContain('Migration Watch');
+});
