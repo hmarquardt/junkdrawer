@@ -662,8 +662,160 @@ test('About: getting started, key explanation, OBSERVED/MODELED/INFERRED, one-sh
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await page.goto(FILE3);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
- await expect(page.locator('#about-ebird')).toHaveText('Connected');
+ await expect(page.locator('#about-ebird')).toHaveText('Live · direct connection');
  // no horizontal overflow at 390px
  await page.setViewportSize({width:390,height:900});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
+});
+
+/* ================ v2026.09.11.4: map All-means-all, OR model selector, narration states ================ */
+const ORDINARY=[
+ {speciesCode:'amerob',comName:'American Robin',sciName:'Turdus migratorius',locId:'L123',locName:'Example Hotspot',obsDt:'2026-09-11 08:20',howMany:4,lat:38.31,lng:-87.71,obsValid:true,obsReviewed:false},
+ {speciesCode:'blujay',comName:'Blue Jay',sciName:'Cyanocitta cristata',locId:'L124',locName:'Park',obsDt:'2026-09-11 09:05',howMany:2,lat:38.40,lng:-87.60,obsValid:true,obsReviewed:false},
+ {speciesCode:'norcar',comName:'Northern Cardinal',sciName:'Cardinalis cardinalis',locId:'L125',locName:'Hedge',obsDt:'2026-09-11 07:40',howMany:1,lat:0,lng:0,obsValid:true,obsReviewed:false}, // 0,0 numerically valid
+ {speciesCode:'rthhum',comName:'Ruby-throated Hummingbird',sciName:'Archilochus colubris',locId:'L126',locName:'Yard',obsDt:'2026-09-11 12:00',howMany:1,lat:38.36,lng:-87.56,obsValid:true,obsReviewed:false},
+ {speciesCode:'sancra',comName:'Sandhill Crane',sciName:'Antigone canadensis',locId:'L127',locName:'Fields',obsDt:'2026-09-10 18:30',howMany:900,lat:38.5,lng:-87.4,obsValid:true,obsReviewed:false},
+ {speciesCode:'cmwa',comName:'Cape May Warbler',sciName:'Setophaga tigrina',locId:'L128',locName:'Woods',obsDt:'2026-09-11 10:10',howMany:1,lat:38.33,lng:-87.66,obsValid:true,obsReviewed:true}, // reviewed→notable flag set by app? notable comes from notable endpoint; keep as ordinary
+ {speciesCode:'nocoord',comName:'Private-location species',sciName:'Secretus sp.',locId:'L129',locName:'Private',obsDt:'2026-09-11 11:00',lat:null,lng:null,obsValid:true,obsReviewed:false}];
+function mockORModels(page,models,status=200){
+ return page.route('**openrouter.ai/api/v1/models',r=>{
+  if(status!==200)return r.fulfill({status,json:{error:{message:'bad key'}}});
+  return r.fulfill({json:{data:models}});});
+}
+const OR_MODELS=[{id:'anthropic/claude-sonnet-4.6',name:'Claude Sonnet 4.6'},{id:'openai/gpt-4.1-mini',name:'GPT-4.1 Mini'},{id:'openai/gpt-5',name:'GPT-5'},{id:'google/gemini-2.5-pro',name:'Gemini 2.5 Pro'}];
+
+test('map: All means all — ordinary species appear; numeric coord validation; per-filter counts',async({page})=>{
+ await page.route('**api.ebird.org/**',r=>{const u=r.request().url();
+  if(u.includes('notable'))return r.fulfill({json:[]});
+  if(u.includes('rthhum'))return r.fulfill({json:ORDINARY.filter(o=>o.speciesCode==='rthhum')});
+  if(u.includes('sancra'))return r.fulfill({json:ORDINARY.filter(o=>o.speciesCode==='sancra')});
+  if(u.includes('/recent?'))return r.fulfill({json:ORDINARY});
+  return r.fulfill({json:[]});});
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ // features contract directly (no MapLibre needed)
+ const f=await page.evaluate(()=>window.__MW_TEST__.MapMod.features());
+ // All: 6 mappable of 7 (private-location species has null coords and is excluded); cardinal at 0,0 included
+ expect(f.length).toBe(6);
+ const names=f.map(x=>x.properties.name);
+ expect(names).toContain('American Robin');
+ expect(names).toContain('Blue Jay');
+ expect(names).toContain('Northern Cardinal'); // 0,0 must be accepted
+ expect(names).toContain('Ruby-throated Hummingbird');
+ expect(names).toContain('Sandhill Crane');
+ // hum/crane/notable/selected filters
+ await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('hum');});
+ expect((await page.evaluate(()=>window.__MW_TEST__.MapMod.features())).map(x=>x.properties.name)).toEqual(['Ruby-throated Hummingbird']);
+ await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('crane');});
+ expect((await page.evaluate(()=>window.__MW_TEST__.MapMod.features())).map(x=>x.properties.name)).toEqual(['Sandhill Crane']);
+ await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('notable');});
+ expect((await page.evaluate(()=>window.__MW_TEST__.MapMod.features()))).toEqual([]);
+ await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('selected');});
+ expect((await page.evaluate(()=>window.__MW_TEST__.MapMod.features()))).toEqual([]);
+ // status line content
+ await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('all');});
+ const st=await page.evaluate(()=>window.__MW_TEST__.MapMod.mapStatusLine());
+ expect(st).toMatch(/6 sightings mapped · 1 without coordinates/);
+ await page.evaluate(()=>{window.__MW_TEST__.MapMod.setFilter('hum');});
+ expect(await page.evaluate(()=>window.__MW_TEST__.MapMod.mapStatusLine())).toMatch(/1 hummingbird sightings mapped/);
+});
+
+test('model selector: no key → no /models request, fallback default; with key → grouped catalog, saved model survives reload and missing-model case',async({page})=>{
+ let modelsRequested=0;
+ await mockEbird(page);
+ await page.route('**openrouter.ai/**',r=>{modelsRequested++;return r.fulfill({json:{data:OR_MODELS}});});
+ // No key: boot must not request /models
+ await boot(page);
+ await page.waitForTimeout(800);
+ expect(modelsRequested).toBe(0);
+ await page.locator('#settings-open').click();
+ expect(await page.locator('#set-or-model').inputValue()).toBe('openai/gpt-4.1-mini');
+ expect(await page.locator('#or-model-status').textContent()).toMatch(/key/i);
+ await page.keyboard.press('Escape');
+ // Save a key + saved model not present in catalog → (saved) fallback option + warning
+ // one-shot seed: a guard flag prevents the reload below from clobbering the persisted model selection
+ await page.addInitScript(()=>{const K='migrationwatch.seeded.mwtest';
+  if(!localStorage.getItem(K)){localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',openrouterKey:'sk-or-v1-SAVED',openrouterModel:'moonshot/kimi-k2'}));localStorage.setItem(K,'1');}});
+ await page.goto(FILE3);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ // per the openrouter-model-selector skill: exactly one catalog fetch on boot with a saved key is expected
+ await expect.poll(()=>modelsRequested,{timeout:10000}).toBeGreaterThanOrEqual(1);
+ const afterBoot=modelsRequested;
+ const sel=page.locator('#set-or-model');
+ await expect(sel).toHaveValue('moonshot/kimi-k2');
+ await expect(sel.locator('option[value="moonshot/kimi-k2"]')).toHaveCount(1);
+ await expect(page.locator('#or-model-status')).toContainText('not currently listed');
+ // optgroups per provider + friendly names
+ expect(await sel.locator('optgroup').count()).toBe(3); // anthropic, openai, google — the saved moonshot fallback is a top-level option
+ expect(await sel.locator('option[value="anthropic/claude-sonnet-4.6"]').count()).toBe(1);
+ // change model → persisted (dialog must be open to interact)
+ await page.locator('#settings-open').click();
+ await expect(sel).toBeVisible();
+ await sel.selectOption('anthropic/claude-sonnet-4.6');
+ expect(await page.evaluate(()=>__MW_TEST__.settings.openrouterModel)).toBe('anthropic/claude-sonnet-4.6');
+ await page.reload();
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await page.locator('#settings-open').click();
+ await expect(page.locator('#set-or-model')).toHaveValue('anthropic/claude-sonnet-4.6');
+ // Refresh models performs exactly one request and does not duplicate options
+ const before=modelsRequested;
+ await page.locator('#or-refresh-models').click();
+ await expect.poll(()=>modelsRequested,{timeout:10000}).toBeGreaterThan(afterBoot+1);
+ await page.waitForTimeout(300);
+ expect(await sel.locator('option[value="anthropic/claude-sonnet-4.6"]').count()).toBe(1);
+ // model-list failure keeps saved option and does not crash
+ await page.route('**openrouter.ai/api/v1/models',r=>r.abort());
+ await page.locator('#or-refresh-models').click();
+ await expect(page.locator('#or-model-status')).toContainText('failed to load');
+ await expect(sel).toHaveValue('anthropic/claude-sonnet-4.6');
+});
+
+test('AI narration: exact model + headers sent, coordinates/key never in payload, mapped success, mapped errors, busy-guard',async({page})=>{
+ let narrateRequests=[];
+ await mockEbird(page);
+ await page.route('**openrouter.ai/**',r=>{
+  if(r.request().url().includes('/models'))return r.fulfill({json:{data:OR_MODELS}});
+  narrateRequests.push({model:r.request().postDataJSON().model,auth:!!r.request().headers()['authorization'],ref:!!r.request().headers()['http-referer'],title:r.request().headers()['x-title'],body:r.request().postData()});
+  return r.fulfill({json:{choices:[{message:{content:'Hummingbird movement is building near your area.'}}]}});});
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',openrouterKey:'sk-or-v1-TEST',openrouterModel:'anthropic/claude-sonnet-4.6'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await page.evaluate(()=>{document.querySelector('details:has(#ai-go)').open=true;});
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-out')).toHaveText('Hummingbird movement is building near your area.',{timeout:10000});
+ expect(narrateRequests.length).toBe(1);
+ const rq=narrateRequests[0];
+ expect(rq.model).toBe('anthropic/claude-sonnet-4.6');
+ expect(rq.auth).toBe(true);expect(rq.ref).toBe(true);expect(rq.title).toBe('Migration Watch');
+ expect(rq.body).not.toMatch(/"lat"|"lon"|38\.35|GOODKEY/); // coordinates + eBird key never sent
+ // busy-guard: second click during a slow narration triggers only one extra request total
+ await page.route('**openrouter.ai/api/v1/chat/completions',async r=>{
+  await new Promise(res=>setTimeout(res,1200));
+  narrateRequests.push({});return r.fulfill({json:{choices:[{message:{content:'ok'}}]}});});
+ await page.locator('#ai-go').click();
+ await page.locator('#ai-go').click().catch(()=>{}); // should be disabled while busy
+ // while busy the button is disabled and cannot fire another request; a synthetic click on a
+ // disabled button is inert. Playwright's queued click auto-waits for re-enable, which is a
+ // legitimate second narration — so exactly one blocked attempt, three total requests.
+ expect(await page.evaluate(()=>{const b=document.getElementById('ai-go');b.click();return b.disabled;})).toBe(true);
+ await page.waitForTimeout(1600);
+ expect(await page.locator('#ai-go').isDisabled()).toBe(false);
+ expect(narrateRequests.length).toBe(3);
+ // mapped error states
+ const cases=[[401,'rejected this API key'],[402,'enough credits'],[404,'no longer available'],[429,'rate limiting']];
+ await page.evaluate(()=>{document.querySelector('details:has(#ai-go)').open=true;});
+ for(const [status,fragment] of cases){
+  await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({status,json:{error:{message:'provider said'}}}));
+  await page.locator('#ai-go').click();
+  await expect(page.locator('#ai-err')).toContainText(fragment,{timeout:5000});
+ }
+ // malformed response
+ await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({json:{weird:true}}));
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-out')).toHaveText('(empty response)',{timeout:5000});
+ // structured content array is normalized, not [object Object]
+ await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({json:{choices:[{message:{content:[{type:'text',text:'Part one '},{type:'text',text:'part two'}]}}]}}));
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-out')).toHaveText('Part one part two',{timeout:5000});
 });
