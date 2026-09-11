@@ -141,7 +141,7 @@ test('model request capabilities omit unsupported sampling parameters for known 
   const out = await page.evaluate(() => {
     const T = __BERRY3VISUAL_TEST__; T.settings.temperature = 0.25;
     const ids = ['openai/gpt-6-astra', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna', 'openai/gpt-4.1-mini', 'acme/custom-vision'];
-    return Object.fromEntries(ids.map(id => { const body = T.modelRequestBody(id, [{ role: 'user', content: 'x' }]); return [id, { caps: T.modelRequestCapabilities(id), keys: Object.keys(body), body }]; }));
+    return Object.fromEntries(ids.map(id => { const body = T.modelRequestBody(id, [{ role: 'user', content: 'x' }]); const u = body.messages.find(m => m.role === 'user'); return [id, { caps: T.modelRequestCapabilities(id), keys: Object.keys(body), body, user: typeof u.content === 'string' ? u.content : u.content.filter(p => p.type === 'text').map(p => p.text).join('\n') }]; }));
   });
   for (const id of ['openai/gpt-6-astra', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna']) {
     expect(out[id].caps.temperature).toBe(false);
@@ -149,7 +149,8 @@ test('model request capabilities omit unsupported sampling parameters for known 
     for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) expect(out[id].keys).not.toContain(key);
     expect(out[id].body.response_format).toEqual({ type: 'json_object' });
     expect(out[id].body.provider).toEqual({ only: ['openai'], allow_fallbacks: false });
-    expect(out[id].body.messages).toHaveLength(1);
+    expect(out[id].body.messages.length).toBeGreaterThan(0);
+    expect(/json/.test(out[id].user)).toBe(true);
   }
   for (const id of ['openai/gpt-4.1-mini', 'acme/custom-vision']) {
     expect(out[id].caps.temperature).toBe(true);
@@ -159,6 +160,89 @@ test('model request capabilities omit unsupported sampling parameters for known 
     expect('provider' in out[id].body).toBe(false);
   }
   expect(out['openai/gpt-6-astra'].caps.samplingNote).toContain('not supported');
+});
+
+test('JSON-mode directive lands in user input through the common builder and is idempotent', async ({ page }) => {
+  await open(page);
+  const out = await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__;
+    const userText = m => typeof m.content === 'string' ? m.content : m.content.filter(p => p.type === 'text').map(p => p.text).join('\n');
+    const sysOnly = T.modelRequestBody('openai/gpt-4.1-mini', [{ role: 'system', content: 'Return JSON only.' }, { role: 'user', content: '{}' }]);
+    const already = T.modelRequestBody('openai/gpt-4.1-mini', [{ role: 'system', content: 'You are a judge.' }, { role: 'user', content: 'Compare. Return only a single valid json object.' }]);
+    const multimodal = T.modelRequestBody('openai/gpt-4.1-mini', [{ role: 'system', content: 'sys' }, { role: 'user', content: [{ type: 'text', text: 'Observe.' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] }]);
+    const mUser = multimodal.messages.find(m => m.role === 'user');
+    return {
+      sysOnlyUser: userText(sysOnly.messages.find(m => m.role === 'user')),
+      sysOnlySystem: sysOnly.messages.find(m => m.role === 'system').content,
+      alreadyUser: userText(already.messages.find(m => m.role === 'user')),
+      alreadyCount: (userText(already.messages.find(m => m.role === 'user')).match(/json/g) || []).length,
+      multimodalUser: userText(mUser),
+      multimodalImages: mUser.content.filter(p => p.type === 'image_url').length,
+      userObjectsFrozen: Object.isFrozen(already.messages.find(m => m.role === 'user'))
+    };
+  });
+  expect(out.sysOnlySystem).toContain('JSON');
+  expect(/json/.test(out.sysOnlyUser)).toBe(true);
+  expect(out.sysOnlyUser).toContain('Return only a single valid json object.');
+  expect(out.alreadyUser).toBe('Compare. Return only a single valid json object.');
+  expect(out.alreadyCount).toBe(1);
+  expect(/json/.test(out.multimodalUser)).toBe(true);
+  expect(out.multimodalImages).toBe(1);
+});
+
+test('native-OpenAI-like JSON-mode guard passes every pass through the common directive', async ({ page }) => {
+  const errors = await open(page, true);
+  await page.evaluate(() => {
+    const T = __BERRY3VISUAL_TEST__, s = T.state;
+    T.settings.apiKey = 'test-key-json'; T.settings.chime = false;
+    s.models = [{ id: 'openai/gpt-6-astra', name: 'GPT-6 Astra', architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] } }];
+    T.renderModels();
+    window.__sample = structuredClone(s.draft); window.__features = structuredClone(s.features); window.__qaRounds = 0;
+  });
+  await page.locator('[data-view=admin]').click();
+  await page.locator('#orModel').selectOption('openai/gpt-6-astra');
+  await page.locator('[data-view=evaluate]').click();
+  const bodies = [];
+  const userTextOf = body => { const u = body.messages.find(m => m.role === 'user'); return typeof u?.content === 'string' ? u.content : (Array.isArray(u?.content) ? u.content.filter(p => p.type === 'text').map(p => p.text).join('\n') : ''); };
+  await page.route('**openrouter.ai/api/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON(); bodies.push(body);
+    if (body.response_format?.type === 'json_object' && !/json/.test(userTextOf(body))) {
+      return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Provider returned error', code: 400, metadata: { provider_name: 'OpenAI', raw: JSON.stringify({ error: { message: "Response input messages must contain the word 'json' in some form to use 'text.format' of type 'json_object'.", type: 'invalid_request_error', param: 'input', code: null } }) } } }) });
+    }
+    if (!body.provider || body.provider.only?.join(',') !== 'openai' || body.provider.allow_fallbacks !== false) {
+      return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Provider returned error', code: 400, metadata: { provider_name: 'Azure' } } }) });
+    }
+    const instruction = body.messages[0].content.split('\nPASS: ')[1] || '';
+    let response;
+    if (instruction.startsWith('Observe images')) response = { features: await page.evaluate(() => window.__features) };
+    else if (instruction.startsWith('Adversarial visual-only QA')) response = { issues: [], allClaimsEvidenced: true, referenceFeatures: true, lensIsolation: true };
+    else if (instruction.startsWith('Generate ONLY Reference Fidelity')) response = await page.evaluate(() => structuredClone(window.__sample));
+    else if (instruction.startsWith('Adversarial QA')) {
+      const round = await page.evaluate(() => ++window.__qaRounds);
+      const result = await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__, result = structuredClone(window.__sample); for (const d of T.DIMS) for (const c of result[d].claims) c.evidenceIds = d === 'functionality' ? [...T.retainedBehavior().A, ...T.retainedBehavior().B].map(f => f.id) : d === 'fidelity' ? T.state.features.map(f => f.id) : [...T.state.features.map(f => f.id), ...T.retainedBehavior().A.map(f => f.id), ...T.retainedBehavior().B.map(f => f.id)]; return result });
+      response = { result, issues: round === 1 ? ['Force one bounded repair round.'] : [], checked: { referenceFeatures: true, behaviorNotInferred: true, lensIsolation: true, tieConsistency: true, allClaimsEvidenced: true, overallTradeoff: true, wordCounts: true } };
+    } else response = await page.evaluate(() => structuredClone(window.__sample));
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ provider: 'OpenAI', choices: [{ message: { content: JSON.stringify(response) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) });
+  });
+  await page.locator('#visualOnly').click();
+  await expect(page.locator('#notice')).toContainText('Fidelity analysis complete');
+  await page.locator('#generate').click();
+  await expect(page.locator('#notice')).toContainText('Analysis complete');
+  const instructionOf = body => body.messages[0].content.split('\nPASS: ')[1] || '';
+  expect(bodies.some(b => instructionOf(b).startsWith('Observe images'))).toBe(true);
+  expect(bodies.some(b => instructionOf(b).startsWith('Generate ONLY Reference Fidelity'))).toBe(true);
+  expect(bodies.some(b => instructionOf(b).startsWith('Adversarial visual-only QA'))).toBe(true);
+  expect(bodies.some(b => instructionOf(b).startsWith('Using ONLY retained evidence') && !/Repair only identified issues/.test(instructionOf(b)))).toBe(true);
+  expect(bodies.some(b => instructionOf(b).startsWith('Adversarial QA'))).toBe(true);
+  expect(bodies.some(b => /Repair only identified issues/.test(instructionOf(b)))).toBe(true);
+  for (const body of bodies) {
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(/json/.test(userTextOf(body))).toBe(true);
+    expect(body.provider).toEqual({ only: ['openai'], allow_fallbacks: false });
+    for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) expect(key in body).toBe(false);
+  }
+  expect(bodies[0].messages[1].content.filter(p => p.type === 'image_url')).toHaveLength(5);
+  expect(errors).toEqual([]);
 });
 
 test('Admin disables temperature for Astra, preserves the stored value, and restores it for supporting models', async ({ page }) => {
