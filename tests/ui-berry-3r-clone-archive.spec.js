@@ -142,6 +142,7 @@ test('provider 400 body, provider name and request shape are visible in diagnost
  const pass=out.debug.passes[0];
  expect(pass.httpStatus).toBe(400);expect(pass.providerError).toBe('Provider returned error');expect(pass.providerName).toBe('OpenAI');expect(pass.providerCode).toBe(400);expect(pass.providerBody).toContain('Unsupported parameter: temperature');
  expect(pass.requestShape).toMatchObject({temperature:'OMITTED',top_p:'OMITTED',logprobs:'OMITTED',response_format:'json_object'});
+ expect(pass.requestShape.provider).toBe('only: openai, allow_fallbacks: false');
  expect(out.status).toContain('Analyze failed');
  expect(JSON.stringify(out.debug)).not.toContain('test-key-400');
  expect(JSON.stringify(out.debug)).not.toContain('data:image');

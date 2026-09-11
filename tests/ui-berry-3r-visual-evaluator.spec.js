@@ -145,14 +145,18 @@ test('model request capabilities omit unsupported sampling parameters for known 
   });
   for (const id of ['openai/gpt-6-astra', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna']) {
     expect(out[id].caps.temperature).toBe(false);
+    expect(out[id].caps.nativeProvider).toBe(true);
     for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) expect(out[id].keys).not.toContain(key);
     expect(out[id].body.response_format).toEqual({ type: 'json_object' });
+    expect(out[id].body.provider).toEqual({ only: ['openai'], allow_fallbacks: false });
     expect(out[id].body.messages).toHaveLength(1);
   }
   for (const id of ['openai/gpt-4.1-mini', 'acme/custom-vision']) {
     expect(out[id].caps.temperature).toBe(true);
+    expect(out[id].caps.nativeProvider).toBe(false);
     expect(out[id].keys).toContain('temperature');
     expect(out[id].body.temperature).toBe(0.25);
+    expect('provider' in out[id].body).toBe(false);
   }
   expect(out['openai/gpt-6-astra'].caps.samplingNote).toContain('not supported');
 });
@@ -197,6 +201,9 @@ test('Astra requests omit sampling parameters on every pass while keeping vision
     if ('temperature' in body || 'top_p' in body || 'top_logprobs' in body || 'logprobs' in body) {
       return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Provider returned error', code: 400, metadata: { provider_name: 'OpenAI', raw: JSON.stringify({ error: { message: 'Unsupported parameter: temperature', type: 'invalid_request_error', code: 'unsupported_parameter' } }) } } }) });
     }
+    if (!body.provider || body.provider.only?.join(',') !== 'openai' || body.provider.allow_fallbacks !== false) {
+      return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Provider returned error', code: 400, metadata: { provider_name: 'Azure', raw: JSON.stringify({ error: { message: 'Azure routing was not pinned' } }) } } }) });
+    }
     const instruction = body.messages[0].content.split('\nPASS: ')[1];
     let response;
     if (instruction.startsWith('Observe images')) response = { features: await page.evaluate(() => window.__features) };
@@ -204,7 +211,7 @@ test('Astra requests omit sampling parameters on every pass while keeping vision
       const result = await page.evaluate(() => { const T = __BERRY3VISUAL_TEST__, result = structuredClone(window.__sample); for (const d of T.DIMS) for (const c of result[d].claims) c.evidenceIds = d === 'functionality' ? [...T.retainedBehavior().A, ...T.retainedBehavior().B].map(f => f.id) : d === 'fidelity' ? T.state.features.map(f => f.id) : [...T.state.features.map(f => f.id), ...T.retainedBehavior().A.map(f => f.id), ...T.retainedBehavior().B.map(f => f.id)]; return result });
       response = { result, issues: [], checked: { referenceFeatures: true, behaviorNotInferred: true, lensIsolation: true, tieConsistency: true, allClaimsEvidenced: true, overallTradeoff: true, wordCounts: true } };
     } else response = await page.evaluate(() => window.__sample);
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) });
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ provider: 'OpenAI', choices: [{ message: { content: JSON.stringify(response) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) });
   });
   await page.locator('#generate').click();
   await expect(page.locator('#notice')).toContainText('Analysis complete');
@@ -212,6 +219,7 @@ test('Astra requests omit sampling parameters on every pass while keeping vision
   for (const body of bodies) {
     expect(body.model).toBe('openai/gpt-6-astra');
     expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.provider).toEqual({ only: ['openai'], allow_fallbacks: false });
     for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) expect(key in body).toBe(false);
   }
   expect(bodies[0].messages[1].content.filter(p => p.type === 'image_url')).toHaveLength(5);
@@ -219,6 +227,8 @@ test('Astra requests omit sampling parameters on every pass while keeping vision
   const debug = await page.evaluate(() => __BERRY3VISUAL_TEST__.buildDebugReport());
   expect(debug.passes[0].requestShape.temperature).toBe('OMITTED');
   expect(debug.passes[0].requestShape.contentParts).toContain('5 images');
+  expect(debug.passes[0].requestShape.provider).toBe('only: openai, allow_fallbacks: false');
+  expect(debug.passes.map(p => p.provider)).toEqual(['OpenAI', 'OpenAI', 'OpenAI']);
   expect(JSON.stringify(debug)).not.toContain('test-key-astra');
   expect(JSON.stringify(debug)).not.toContain('data:image');
   expect(errors).toEqual([]);
