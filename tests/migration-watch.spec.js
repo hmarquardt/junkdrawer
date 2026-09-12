@@ -819,3 +819,146 @@ test('AI narration: exact model + headers sent, coordinates/key never in payload
  await page.locator('#ai-go').click();
  await expect(page.locator('#ai-out')).toHaveText('Part one part two',{timeout:5000});
 });
+
+/* ================ v2026.09.11.5: Where Should I Go? — deterministic destination ranking ================ */
+test('destinations: fresh evidence beats reputation; distance tradeoff by time budget; access preferences rank correctly',async({page})=>{
+ await boot(page);
+ const T=await page.evaluate(()=>({WSG:window.__MW_TEST__.WSG,S:window.__MW_TEST__.scoreDestination,Seasonal:window.__MW_TEST__.Seasonal}));
+ const result=await page.evaluate(()=>{
+  const T=window.__MW_TEST__,now=Date.now(),H=3600000;
+  const mk=id=>({id,name:id,lat:38.5,lng:-87.3,type:'wildlife-area',evidenceRadiusKm:8,origin:'curated',
+   locId:null,locName:id,locPrivate:false,habitats:['wetland','marsh','agricultural'],strengths:[],
+   bestTimes:['morning','evening'],access:{verified:true,roadCruise:'HIGH',walkingLevel:'low',notes:'x'},
+   sourceNotes:['test'],verifiedAt:'2026-09-11'});
+  const A=mk('famous-empty'); // famous, excellent habitat, no recent reports
+  const B=mk('modest-active'); // modest, fresh target reports this morning
+  B.lat=38.52;B.lng=-87.32;
+  // inject observations: A gets nothing recent; B gets 6 fresh reports incl. crane
+  const obsB=[];for(let i=0;i<6;i++)obsB.push({code:'sancra',name:'Sandhill Crane',locId:'B'+i,loc:'B'+i,lat:38.52+(i%3)*.005,lng:-87.32+(i%2)*.005,ts:now-2*H,howMany:40+i,notable:false,priv:false});
+  window.__MW_TEST__.state.observations=obsB;
+  const eA=T.destEvidence(A,now),eB=T.destEvidence(B,now);
+  const rA=T.scoreDestination(A,{...eA,obs:[]},now),rB=T.scoreDestination(B,eB,now);
+  return {aScore:rA.score,bScore:rB.score,aConf:rA.confidence,bConf:rB.confidence};
+ });
+ // Fresh evidence beats reputation
+ expect(result.bScore).toBeGreaterThan(result.aScore);
+ expect(result.bConf).toBe('MEDIUM');
+ // Distance tradeoff under 30-min budget: strong site 5km away beats slightly-better site 40km away
+ const dist=await page.evaluate(()=>{
+  const T=window.__MW_TEST__,now=Date.now();
+  const mk=(id,lat,lng,score)=>({id,name:id,lat,lng,type:'wildlife-area',evidenceRadiusKm:8,origin:'curated',
+   locId:null,locName:id,locPrivate:false,habitats:['wetland'],strengths:[],bestTimes:['morning'],
+   access:{verified:true,roadCruise:'HIGH',walkingLevel:'low',notes:'x'},sourceNotes:['t'],verifiedAt:'x'});
+  const near=mk('near',38.36,-87.57),far=mk('far',38.36,-87.06); // ~46km apart
+  const mkObs=(lat,lng,n)=>Array.from({length:n},(_,i)=>({code:'sancra',name:'Sandhill Crane',locId:'x'+lat+i,loc:'x',lat:lat+.001*i,lng:lng,ts:now-1*3600000,howMany:30,notable:false,priv:false}));
+  const obs=[...mkObs(38.36,-87.57,5),...mkObs(38.36,-87.06,6)]; // far slightly stronger evidence
+  window.__MW_TEST__.state.observations=obs;
+  // simulate user near -87.57 (default princeton); set wsg time to 30m
+  document.getElementById('wsg-time').value='30m';
+  const eN=T.destEvidence(near,now),eF=T.destEvidence(far,now);
+  const rN=T.scoreDestination(near,eN,now),rF=T.scoreDestination(far,eF,now);
+  document.getElementById('wsg-time').value='half';
+  const hN=T.scoreDestination(near,eN,now),hF=T.scoreDestination(far,eF,now);
+  return {n30:rN.score,f30:rF.score,nHalf:hN.score,fHalf:hF.score};
+ });
+ // 30-min budget: near strong site wins despite slightly weaker evidence
+ expect(dist.n30).toBeGreaterThanOrEqual(dist.f30);
+ // Half day: distance penalty weakens — the far site's deficit shrinks
+ expect(dist.n30-dist.f30).toBeGreaterThanOrEqual(dist.nHalf-dist.fHalf);
+ // Minimal walking vs any access
+ const acc=await page.evaluate(()=>{
+  const T=window.__MW_TEST__,now=Date.now();
+  const mk=(id,cruise,walk)=>({id,name:id,lat:38.5,lng:-87.3,type:'wildlife-area',evidenceRadiusKm:5,origin:'curated',
+   locId:null,locName:id,locPrivate:false,habitats:['wetland'],strengths:[],bestTimes:[],
+   access:{verified:true,roadCruise:cruise,walkingLevel:walk,notes:'x'},sourceNotes:['t'],verifiedAt:'x'});
+  const road=mk('road','HIGH','low'),hike=mk('hike','LOW','high');
+  const obs=Array.from({length:4},(_,i)=>({code:'amre',name:'American Redstart',locId:'q'+i,loc:'q',lat:38.5+.001*i,lng:-87.3,ts:now-3600000,howMany:2,notable:false,priv:false}));
+  window.__MW_TEST__.state.observations=obs;
+  const eR=T.destEvidence(road,now),eH=T.destEvidence(hike,now);
+  document.getElementById('wsg-access').value='minimal';
+  const rMin={road:T.scoreDestination(road,eR,now).score,hike:T.scoreDestination(hike,eH,now).score};
+  document.getElementById('wsg-access').value='any';
+  const rAny={road:T.scoreDestination(road,eR,now).score,hike:T.scoreDestination(hike,eH,now).score};
+  return {minGap:rMin.road-rMin.hike,anyGap:rAny.road-rAny.hike};
+ });
+ // minimal walking: road-cruise site clearly outranks hiking site
+ expect(acc.minGap).toBeGreaterThan(acc.anyGap);
+});
+
+test('destinations: target changes ranking; private locations never become destinations; dynamic-only areas work; no-evidence honesty',async({page})=>{
+ await boot(page);
+ // Private-location safety + dynamic-only + target switching (pure computation)
+ const r=await page.evaluate(()=>{
+  const T=window.__MW_TEST__,now=Date.now(),H=3600000;
+  const obs=[
+   // private residence with hummingbirds — contributes regionally, must never be a destination
+   {code:'rthhum',name:'Ruby-throated Hummingbird',locId:'P1',loc:'Private Residence',lat:38.2,lng:-87.8,ts:now-2*H,howMany:3,notable:false,priv:true},
+   // public hotspot with hummingbirds
+   {code:'rthhum',name:'Ruby-throated Hummingbird',locId:'H1',loc:'City Park',lat:38.37,lng:-87.55,ts:now-3*H,howMany:2,notable:false,priv:false},
+   {code:'rthhum',name:'Ruby-throated Hummingbird',locId:'H1',loc:'City Park',lat:38.37,lng:-87.55,ts:now-5*H,howMany:1,notable:false,priv:false},
+   // public hotspot with cranes far away
+   {code:'sancra',name:'Sandhill Crane',locId:'C1',loc:'Crane Fields',lat:38.6,lng:-87.2,ts:now-4*H,howMany:120,notable:false,priv:false},
+  ];
+  window.__MW_TEST__.state.observations=obs;
+  const cands=T.buildDestinations();
+  const privateListed=cands.some(d=>d.locId==='P1');
+  const dynamicPresent=cands.some(d=>d.origin==='dynamic'&&d.locId==='H1');
+  // crane target vs hum target materially change top destination
+  document.getElementById('wsg-target').value='hum';
+  const humRank=T.rankDestinations();
+  document.getElementById('wsg-target').value='crane';
+  const craneRank=T.rankDestinations();
+  document.getElementById('wsg-target').value='migration';
+  const craneFields=craneRank.find(r=>r.d.locId==='C1'),humCraneScore=humRank.find(r=>r.d.locId==='C1');
+ const parkHum=humRank.find(r=>r.d.locId==='H1'),parkCrane=craneRank.find(r=>r.d.locId==='H1');
+  // no-evidence honesty
+  window.__MW_TEST__.state.observations=[];
+  const none=T.rankDestinations().filter(x=>x.ev.total>0&&x.score>=50);
+  return {privateListed,dynamicPresent,humTopName:humRank[0].d.name,craneFieldsScore:craneFields.score,humCraneScore:humCraneScore.score,parkHumScore:parkHum?parkHum.score:null,parkCraneScore:parkCrane?parkCrane.score:null,strongCount:none.length};
+ });
+ expect(r.privateListed).toBe(false); // private never a destination
+ expect(r.dynamicPresent).toBe(true); // dynamic eBird locations generated
+ // target materially changes ranking: each hotspot scores higher under its own target
+ expect(r.craneFieldsScore).toBeGreaterThan(r.humCraneScore);
+ const parkDiff=r.parkHumScore-r.parkCraneScore;
+ expect(parkDiff).toBeGreaterThan(0); // City Park benefits from hum target
+ // no-evidence: no strong destination fabricated
+ expect(r.strongCount).toBe(0);
+});
+
+test('Where Should I Go UI: renders primary card, reasons, alternatives, why-view, honors controls',async({page})=>{
+ await mockEbird(page);
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ const wsg=page.locator('#wsg-out');
+ await expect(wsg).toBeVisible();
+ const primary=wsg.locator('.dest-primary');
+ await expect(primary).toBeVisible();
+ await expect(primary).toContainText(/BEST BET NOW|WORTH THE DRIVE|BEST FOR YOUR TARGET|WORTH A LOOK|QUICK LOCAL LOOK/);
+ await expect(primary).toContainText('confidence');
+ await expect(primary.locator('a[href*="google.com/maps/dir"]').first()).toBeVisible();
+ await expect(primary).toContainText('Access information:');
+ // alternatives exist (fixtures produce multiple eBird locations)
+ expect(await wsg.locator('.dest-alt').count()).toBeGreaterThan(0);
+ // why-view: opens detail with score breakdown
+ await primary.locator('[data-destwhy]').click();
+ await expect(page.locator('#detail')).toBeVisible();
+ await expect(page.locator('#detail-body')).toContainText('Destination Score');
+ await expect(page.locator('#detail-body')).toContainText('Current bird evidence');
+ await expect(page.locator('#detail-body')).toContainText('INFERRED');
+ await page.keyboard.press('Escape');
+ // target switch recomputes without network (route counter)
+ let ebirdCalls=0;await page.route('**api.ebird.org/**',r=>{ebirdCalls++;r.continue();});
+ const before=ebirdCalls;
+ await page.locator('#wsg-target').selectOption('crane');
+ await expect(page.locator('#wsg-target')).toHaveValue('crane');
+ expect(ebirdCalls).toBe(before); // no new network request
+ // time switch recomputes
+ await page.locator('#wsg-time').selectOption('30m');
+ await expect(page.locator('#wsg-time')).toHaveValue('30m');
+ // star toggling works (favorite ring)
+ const star=wsg.locator('.dest-star').first();
+ await star.click();
+ expect(await page.evaluate(()=>window.__MW_TEST__.settings.destFavorites.length)).toBeGreaterThan(0);
+});
