@@ -258,9 +258,9 @@ footer.site{border-top:1px solid var(--line);margin-top:30px;padding-top:18px;pa
 <p class="privacy" id="list-note"></p>
 </section>
 <section aria-label="Watchlist">
-<h2>My watchlist</h2>
+<h2>My Watchlist</h2>
 <div class="list" id="watch-list"></div>
-<p class="privacy">Star any species in the ranked list (up to 10). Hummingbird and Crane stay featured permanently.</p>
+<p class="privacy">Watch species you care about to track their movement over time and use them as a target when planning trips. Choose up to ten.</p>
 </section>
 <p class="privacy"><button class="chip" style="min-height:36px" data-open-featured-settings>⚙ Customize Featured Species</button></p>
 </section>
@@ -357,6 +357,8 @@ footer.site{border-top:1px solid var(--line);margin-top:30px;padding-top:18px;pa
 <p>Migration Watch can compare nearby birding locations using today's recent sightings, migration trends, distance and the kind of outing you want. Recommendations are estimates based on recent reports and published site information — public access should always be verified before visiting, and bird sightings are never guaranteed. Some recommended locations come from eBird reporting activity alone; those may not have verified parking or access details.</p>
 <h3>Featured species are configurable</h3>
 <p>Migration Watch starts with Ruby-throated Hummingbirds and Sandhill Cranes as featured species, but you can replace or add species you care about — up to four featured species on the main dashboard. Use Settings → Featured Species, or the ☆ Feature action on any species. Species-specific extras (feeder tips for hummingbirds, crane flock context) stay attached to those species; everything else gets a clean generic card.</p>
+<h3>Featured vs Watchlist</h3>
+<p><b>Featured species</b> are the birds you want prominently displayed on Home. <b>Watchlist species</b> are birds you want Migration Watch to follow over time and include in watchlist-based trip planning. A species can be both. Remove any featured species at any time — defaults are only a starting point.</p>
 <h3>Hummingbirds</h3>
 <p>Migration Watch tracks Ruby-throated Hummingbirds, the primary eastern species, using recent nearby observations plus seasonal timing to indicate whether movement appears early, building, peak, declining, late, or done. Keeping feeders up during migration does not prevent hummingbirds from migrating.</p>
 <h3>Sandhill Cranes</h3>
@@ -384,8 +386,8 @@ footer.site{border-top:1px solid var(--line);margin-top:30px;padding-top:18px;pa
 <footer class="site">
 <div>CALCULATED HERE. OBSERVED OUT THERE.</div>
 <div>Data: <a href="https://ebird.org/">eBird</a> · Migration intensity: <a href="https://birdcast.info/">BirdCast</a> (when reachable) · Historical windows are MODELED</div>
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.11.7" bump="Update this version whenever this file changes in a commit." -->
-<div>&copy; 2026 Hank Marquardt · Migration Watch · version 2026.09.11.7</div>
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.12.2" bump="Update this version whenever this file changes in a commit." -->
+<div>&copy; 2026 Hank Marquardt · Migration Watch · version 2026.09.12.2</div>
 </footer>
 <div id="detail" role="dialog" aria-modal="true" aria-labelledby="detail-name" hidden>
 <div class="scrim" data-close></div>
@@ -400,7 +402,7 @@ footer.site{border-top:1px solid var(--line);margin-top:30px;padding-top:18px;pa
 <p class="privacy">Migration Watch connects directly from your browser to eBird; your key is sent to eBird only when sightings are requested. Your key is stored only in this browser, is not committed with the page, is not stored in migration history, and is never sent to OpenRouter, Analytics, or included in exports.</p>
 <label>Refresh interval <select id="set-interval"><option value="0" selected>Manual only</option><option value="15">Every 15 min</option><option value="30">Every 30 min</option><option value="60">Every 60 min</option></select></label>
 <div class="grid" id="featured-manage" style="border-top:1px solid var(--line);padding-top:10px">
-<div class="eyebrow" style="color:var(--muted)">FEATURED SPECIES · 2–4</div>
+<div class="eyebrow" style="color:var(--muted)">FEATURED SPECIES · UP TO 4</div>
 <div id="fs-list" class="grid" style="gap:4px;margin:6px 0"></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
 <select id="fs-add" style="max-width:280px"></select>
@@ -473,7 +475,7 @@ const CONFIG={
  timeouts:{ebird:15000,openrouter:25000},
  openrouterDefault:'openai/gpt-4.1-mini',
  weights:{activity:.25,trend:.20,seasonal:.20,concentration:.15,proximity:.10,conditions:.10},
- version:'2026.09.11.7'};
+ version:'2026.09.12.2'};
 /* ============ STORAGE (tiny; settings only, < 5 KB) ============ */
 const store={
  key:'migrationwatch.settings',
@@ -515,7 +517,8 @@ async function corsFetch(url,{timeout=15000,headers={},useFallbacks=true}={}){
  throw Object.assign(new Error('CORS relay failed: '+(lastError&&lastError.message||'network error')),{lastError});
 }
 /* ============ STATE (live data stays in memory only) ============ */
-const settings=Object.assign({preset:'princeton',radius:25,appearance:'dark',interval:0,ebirdKey:'',openrouterKey:'',openrouterModel:CONFIG.openrouterDefault,watchlist:[],featuredSpecies:['rthhum','sancra'],personalDests:[],destFavorites:[],destAvoid:[],activeLocation:null,corsProxy:'https://corsproxy.io/?url='},store.read());
+const settings=Object.assign({preset:'princeton',radius:25,appearance:'dark',interval:0,ebirdKey:'',openrouterKey:'',openrouterModel:CONFIG.openrouterDefault,watchlist:[],featuredSpecies:null,personalDests:[],destFavorites:[],destAvoid:[],activeLocation:null,corsProxy:'https://corsproxy.io/?url='},store.read());
+if(!Array.isArray(settings.featuredSpecies))settings.featuredSpecies=['rthhum','sancra']; // missing property → defaults; saved [] stays []
 const state={loading:false,refreshed:null,observations:[],notable:[],species:[],crane:null,birdcast:null,jnorth:null,
  sources:{ebird:{status:'idle',note:'Key required'},birdcast:{status:'unconfigured',note:'Not currently connected'},crane:{status:'unconfigured',note:'Manual · Indiana DNR weekly count, not automated'},jnorth:{status:'unconfigured',note:'Not currently connected'}},
  activeSourceKeys:new Set(),selected:null,goLooking:null,timer:null,error:null};
@@ -892,7 +895,7 @@ const WSG={
   if(t==='hum')return[CONFIG.SPECIES.hummingbird];
   if(t==='crane')return[CONFIG.SPECIES.crane];
   if(t==='selected')return state.selected?[state.selected.code]:[];
-  if(t==='watchlist')return['rthhum','sancra',...(settings.watchlist||[])];
+  if(t==='watchlist')return[...new Set(settings.watchlist||[])]; // My Watchlist means exactly My Watchlist
   return null;},
 };
 /* Build candidates: curated catalog ∪ dynamic eBird reporting locations (public only). */
@@ -1022,6 +1025,7 @@ const Calendar={
   for(const code of(settings.watchlist||[])){const sp=state.species.find(x=>x.code===code);push(code,sp&&sp.name);}
   for(const sp of state.species.slice(0,60))push(sp.code,sp.name);
   sel.innerHTML=opts.map(o=>`<option value="${esc(o.code)}">${esc(o.name)}</option>`).join('');
+  if(!opts.length){sel.innerHTML='<option value="">—</option>';$('cal-wrap').innerHTML='<p class="privacy">No species available yet — add featured or watchlist species, or refresh observations.</p>';const m=$('cal-meta');if(m)m.textContent='';return;}
   // Selection: dedicated state wins; fall back only if that species is no longer in options.
   let code=state.calendarSpeciesCode&&opts.some(o=>o.code===state.calendarSpeciesCode)?state.calendarSpeciesCode:opts[0].code;
   sel.value=code;state.calendarSpeciesCode=code;
@@ -1300,6 +1304,9 @@ function renderWSG(){
  const out=$('wsg-out');if(!out)return;
  const target=$('wsg-target').value;
  if(target==='selected'&&!state.selected){out.innerHTML='<div class="dest-quiet">Select a species first.</div>';$('wsg-search-note').textContent='';return;}
+ if(target==='watchlist'&&!(settings.watchlist||[]).length){
+  out.innerHTML='<div class="dest-quiet"><strong>Your watchlist is empty.</strong><br>Add species from the Species tab first — watched birds become your trip targets.</div>';
+  $('wsg-search-note').textContent='';return;}
  if(!state.observations.length){out.innerHTML='<div class="dest-quiet"><strong>No strong destination right now.</strong><br>No recent eBird observations are available for this area. Refresh sightings to look for birding options.</div>';$('wsg-search-note').textContent='';return;}
  const ranked=rankDestinations();
  const strong=ranked.filter(r=>r.score>=50&&r.ev.total>0);
@@ -1449,10 +1456,16 @@ function featuredMeta(code){ // name/sci from live data, fallback to built-in me
  return builtin?{name:builtin.name,sci:builtin.sci}:{name:code,sci:''};}
 function renderFeatured(){
  const codes=[...new Set(settings.featuredSpecies||[])].slice(0,4);
+ if(!codes.length){
+  $('featured').innerHTML='<div class="panel" style="border-left:3px solid var(--lime)"><div class="eyebrow">FEATURED SPECIES</div>'+
+   '<p style="margin:8px 0"><strong>No featured species selected.</strong> Choose up to four birds you want to follow prominently on Home.</p>'+
+   '<button class="chip" style="min-height:38px" data-open-featured-settings>Choose Featured Species</button></div>';
+  return;}
  $('featured').innerHTML=codes.map(code=>{
   const meta=featuredMeta(code);
   const sp=state.species.find(s=>s.code===code)||null;
   const st=sp?sp.seasonalStatus:Seasonal.status(code,now());
+  const watching=(settings.watchlist||[]).includes(code);
   const rows=sp?sp.rows:[],last=rows[0];
   const d72=sp?sp.recent72.length:0,d7=sp?sp.last7.length:0;
   const enh=FEATURE_ENHANCERS[code]?FEATURE_ENHANCERS[code](sp,d7):'';
@@ -1465,7 +1478,7 @@ function renderFeatured(){
    <div>Historical weekly expectation: <strong>${Math.round((sp?sp.seasonal:Seasonal.at(code,now()))*100)}% <span class="badge modeled">MODELED</span></strong></div></div>
    ${enh?`<div class="fgrid" style="border-top:1px dashed var(--line);padding-top:8px">${enh}</div>`:''}`;
   return `<div class="fcard" id="fcard-${esc(code)}" data-code="${esc(code)}" role="button" tabindex="0" aria-label="Open ${esc(meta.name)} details">
-   <h3><span>${esc(meta.name)}<br><span class="sci">${esc(meta.sci)}</span></span><span class="statuspill">${st}</span></h3>
+   <h3><span>${esc(meta.name)}<br><span class="sci">${esc(meta.sci)}</span></span><span style="display:flex;flex-direction:column;gap:4px;align-items:flex-end"><span class="statuspill">${st}</span>${watching?'<span class="badge observed" title="On your watchlist">★ Watching</span>':''}</span></h3>
    ${rows.length?sparkline(rows):'<p class="privacy" style="padding:0">No recent reports in radius — tracking starts when reports appear.</p>'}
    <div class="fgrid" style="margin-top:6px"><div>Watch score: <strong>${sp?sp.score:'—'} / 100</strong></div></div>${body}
    <div class="hgrid" style="margin-top:10px"><span class="eyebrow" style="letter-spacing:.08em">History</span>${['14','30','90'].map(d=>`<button class="hchip" data-hrange="${d}" data-hkey="${esc(code)}" aria-pressed="${d==='14'}">${d}d</button>`).join('')}</div>
@@ -1487,7 +1500,7 @@ function renderList(){
  const shown=state.species.slice(0,15);
  $('species-list').innerHTML=shown.length?shown.map((sp,i)=>
   `<div class="srow ${state.selected&&state.selected.code===sp.code?'sel':''}" role="button" tabindex="0" data-code="${esc(sp.code)}" aria-label="Open ${esc(sp.name)} details">
-   <span class="rank mono">#${i+1}<button class="star" data-star="${esc(sp.code)}" aria-pressed="${(settings.watchlist||[]).includes(sp.code)}" aria-label="Toggle watch for ${esc(sp.name)}">${(settings.featuredSpecies||[]).includes(sp.code)?'<span title="Featured species" style="color:var(--amber)">★</span>':((settings.watchlist||[]).includes(sp.code)?'★':'☆')}</button></span>
+   <span class="rank mono">#${i+1}<button class="star" data-star="${esc(sp.code)}" aria-pressed="${(settings.watchlist||[]).includes(sp.code)}" aria-label="${(settings.watchlist||[]).includes(sp.code)?'Remove '+esc(sp.name)+' from watchlist':'Add '+esc(sp.name)+' to watchlist'}" title="${(settings.watchlist||[]).includes(sp.code)?'★ Watching — remove from watchlist':'☆ Watch — add to watchlist'}">${(settings.watchlist||[]).includes(sp.code)?'★ Watching':'☆ Watch'}</button></span>
    <span><h4>${esc(sp.name)}</h4><div class="sub">${esc(sp.sci)} · ${sp.locations} location${sp.locations===1?'':'s'}${sp.nearest?' · '+sp.nearest.d+' km':''}</div><div class="tag">${esc(sp.seasonalStatus)} · ${Math.round(sp.seasonal*100)}% modeled ${(settings.featuredSpecies||[]).includes(sp.code)?'':'<button class="chip" style="min-height:26px;padding:0 8px" data-feature="'+esc(sp.code)+'" aria-label="Feature '+esc(sp.name)+'">☆ Feature</button>'}</div></span>
    <span class="num">${sp.score}<small>/ 100</small></span>
    <span class="num">${sp.recent72.length}<small>72 h</small></span>
@@ -1743,12 +1756,14 @@ function renderSince(){
 function renderWatchlist(){
  const el=$('watch-list');
  const list=(settings.watchlist||[]).slice(0,10);
- if(!list.length){el.innerHTML='<div class="panel">No watched species yet. Tap ☆ Watch on any ranked migrant to follow its movement.</div>';return;}
+ const note=$('watch-note');
+ if(note)note.textContent='Watch species you care about to track their movement over time and use them as a target when planning trips.';
+ if(!list.length){el.innerHTML='<div class="panel"><strong>No species on your watchlist yet.</strong><br>Choose ☆ Watch beside any species you want Migration Watch to follow more closely.</div>';return;}
  el.innerHTML=list.map(code=>{
   const sp=state.species.find(s=>s.code===code);
   const sig=Trend.signalFor(code);
-  if(!sp)return `<div class="wrow"><span><h4>${esc(code)}</h4><div class="sub">No recent reports in radius</div></span><span>—</span><span>—</span><span>—</span><button class="star" data-star="${esc(code)}" aria-label="Remove from watchlist" aria-pressed="true">★</button></div>`;
-  return `<div class="wrow"><span><h4>${esc(sp.name)}</h4><div class="sub">${esc(sp.seasonalStatus)} · ${sp.recent72.length} in 72 h · ${sp.nearest?sp.nearest.d+' km':'no reports'}</div>${sig?`<div class="sig">${SIGNAL_EMOJI[sig.type]||''} ${esc(sig.type)}</div>`:''}</span><span class="num">${sp.score}</span><span>${sparkMini(sp)}</span><span class="num">${sp.recent72.length}</span><button class="star" data-star="${esc(code)}" aria-label="Remove ${esc(sp.name)} from watchlist" aria-pressed="true">★</button></div>`;
+  if(!sp)return `<div class="wrow"><span><h4>${esc(code)}</h4><div class="sub">No recent reports in radius</div></span><span>—</span><span>—</span><span>—</span><button class="star" data-star="${esc(code)}" aria-label="Remove ${esc(code)} from watchlist" title="Remove from watchlist" aria-pressed="true">★ Watching</button></div>`;
+  return `<div class="wrow"><span><h4>${esc(sp.name)}</h4><div class="sub">${esc(sp.seasonalStatus)} · ${sp.recent72.length} in 72 h · ${sp.nearest?sp.nearest.d+' km':'no reports'}</div>${sig?`<div class="sig">${SIGNAL_EMOJI[sig.type]||''} ${esc(sig.type)}</div>`:''}</span><span class="num">${sp.score}</span><span>${sparkMini(sp)}</span><span class="num">${sp.recent72.length}</span><button class="star" data-star="${esc(code)}" aria-label="Remove ${esc(sp.name)} from watchlist" title="Remove from watchlist" aria-pressed="true">★ Watching</button></div>`;
  }).join('');
 }
 function sparkMini(sp){
@@ -1818,18 +1833,19 @@ function featuredAvailable(){ // chooser pool: reported species first, then watc
 function renderFeaturedSettings(){
  const list=$('fs-list');if(!list)return;
  const codes=[...new Set(settings.featuredSpecies||[])];
- list.innerHTML=codes.map((code,i)=>{const meta=featuredMeta(code);
+ list.innerHTML=codes.length?codes.map((code,i)=>{const meta=featuredMeta(code);
   return `<div style="display:flex;gap:6px;align-items:center"><span class="mono" style="color:var(--muted);min-width:14px">${i+1}.</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta.name)}</span>
+   <button type="button" class="chip" style="min-height:30px;padding:2px 8px" data-fschange="${i}" aria-label="Change slot ${i+1}">Change</button>
    <button type="button" class="chip" style="min-height:30px;padding:2px 8px" data-fsdown="${i}" ${i===codes.length-1?'disabled':''} aria-label="Move ${esc(meta.name)} down">↓</button>
    <button type="button" class="chip" style="min-height:30px;padding:2px 8px" data-fsup="${i}" ${i===0?'disabled':''} aria-label="Move ${esc(meta.name)} up">↑</button>
-   <button type="button" class="chip" style="min-height:30px;padding:2px 8px" data-fsdel="${i}" ${codes.length<=2?'disabled':''} aria-label="Remove ${esc(meta.name)}">Remove</button></div>`;}).join('');
+   <button type="button" class="chip" style="min-height:30px;padding:2px 8px" data-fsdel="${i}" aria-label="Remove ${esc(meta.name)}">Remove</button></div>`;}).join(''):
+  '<p class="privacy" style="padding:0">No featured species selected. Featured species appear prominently on Home — choose up to four.</p>';
  const avail=featuredAvailable().filter(o=>!codes.includes(o.code));
  $('fs-add').innerHTML=avail.length?avail.map(o=>`<option value="${esc(o.code)}">${esc(o.name)}</option>`).join(''):'<option value="">No additional species in current data</option>';
  $('fs-add').disabled=!avail.length;$('fs-add-go').disabled=!avail.length;
 }
 function setFeatured(codes,note){
- const uniq=[...new Set(codes)].slice(0,4);
- if(uniq.length<2){if(note)$('fs-status').textContent='Minimum is 2 featured species.';return false;}
+ const uniq=[...new Set(codes)].slice(0,4); // 0–4; the user owns this choice
  settings.featuredSpecies=uniq;persist();
  state.destRanked=null; // destinations/MapMod read featured-dependent state
  renderAll();
@@ -2022,7 +2038,7 @@ function initTabs(){
 /* ============ EVENTS & BOOT ============ */
 function persist(){return store.write({preset:settings.preset,radius:settings.radius,appearance:settings.appearance,
  interval:settings.interval,ebirdKey:settings.ebirdKey,openrouterKey:settings.openrouterKey,
- openrouterModel:settings.openrouterModel,watchlist:settings.watchlist||[],featuredSpecies:(settings.featuredSpecies&&settings.featuredSpecies.length>=2?settings.featuredSpecies.slice(0,4):['rthhum','sancra']),personalDests:settings.personalDests||[],
+ openrouterModel:settings.openrouterModel,watchlist:settings.watchlist||[],featuredSpecies:Array.isArray(settings.featuredSpecies)?settings.featuredSpecies.slice(0,4):['rthhum','sancra'],personalDests:settings.personalDests||[],
  destFavorites:(settings.destFavorites||[]).slice(0,30),destAvoid:(settings.destAvoid||[]).slice(0,30),corsProxy:settings.corsProxy,
  activeLocation:settings.activeLocation?{id:settings.activeLocation.id,type:settings.activeLocation.type,label:settings.activeLocation.label,lat:settings.activeLocation.lat,lon:settings.activeLocation.lon}:null});}
 function setupTimer(){if(state.timer)clearInterval(state.timer);
@@ -2139,9 +2155,7 @@ function boot(){
  });
  function toggleWatch(code){
   const wl=new Set(settings.watchlist||[]);
-  const featured=settings.featuredSpecies||[];
-  if(featured.includes(code)){$('list-note').textContent='Featured species stay on the dashboard; use ⚙ Customize above to change them.';return;}
-  if(wl.has(code))wl.delete(code);
+  if(wl.has(code))wl.delete(code); // featured and watchlist are independent — a species can be both
   else{if(wl.size>=10){$('list-note').textContent='Watchlist is limited to 10 additional species. Remove one before adding more.';return;}wl.add(code);}
   settings.watchlist=[...wl];persist();renderAll();
  }
@@ -2183,17 +2197,28 @@ function boot(){
  $('species-list').addEventListener('keydown',e=>{const r=e.target.closest('.srow[data-code]');if(r&&(e.key==='Enter'||e.key===' ')){e.preventDefault();const sp=state.species.find(x=>x.code===r.dataset.code);if(sp)openDetail(sp);}});
  // featured-species editor events
  $('fs-list').addEventListener('click',e=>{
-  const up=e.target.closest('[data-fsup]'),down=e.target.closest('[data-fsdown]'),del=e.target.closest('[data-fsdel]');
+  const up=e.target.closest('[data-fsup]'),down=e.target.closest('[data-fsdown]'),del=e.target.closest('[data-fsdel]'),chg=e.target.closest('[data-fschange]');
   const cur=[...(settings.featuredSpecies||[])];
   if(up){const i=+up.dataset.fsup;[cur[i-1],cur[i]]=[cur[i],cur[i-1]];setFeatured(cur);}
   else if(down){const i=+down.dataset.fsdown;[cur[i+1],cur[i]]=[cur[i],cur[i+1]];setFeatured(cur);}
-  else if(del){cur.splice(+del.dataset.fsdel,1);if(!setFeatured(cur))renderFeaturedSettings();}
+  else if(del){cur.splice(+del.dataset.fsdel,1);setFeatured(cur);} // always works; zero featured is valid
+  else if(chg){const i=+chg.dataset.fschange;const avail=featuredAvailable().filter(o=>!cur.includes(o.code));
+   const host=$('fs-change-'+i)||null;
+   // inline per-slot selector
+   const row=chg.closest('div');const old=row.querySelector('.fs-slot-select');
+   if(old){old.remove();return;}
+   const selWrap=document.createElement('div');selWrap.className='fs-slot-select';
+   selWrap.innerHTML=avail.length?`<select style="min-height:34px;max-width:240px">${avail.map(o=>`<option value="${esc(o.code)}">${esc(o.name)}</option>`).join('')}</select><button type="button" class="chip" style="min-height:34px;padding:2px 8px" data-fsconfirm="${i}">Replace</button>`:'<span class="privacy" style="padding:0">No other species available in current data.</span>';
+   row.after(selWrap);
+   selWrap.addEventListener('click',ev=>{const conf=ev.target.closest('[data-fsconfirm]');
+    if(!conf)return;cur[i]=selWrap.querySelector('select').value;setFeatured(cur,'Slot '+(i+1)+' updated.');});
+   return;} // keep the inline selector alive — skip the list rebuild
   else return;renderFeaturedSettings();});
  $('fs-add-go').onclick=()=>{const v=$('fs-add').value;if(!v)return;
   if((settings.featuredSpecies||[]).includes(v)){$('fs-status').textContent='Already featured.';return;}
-  if(settings.featuredSpecies.length>=4){$('fs-status').textContent='Maximum is 4 featured species. Remove one first.';return;}
+  if(settings.featuredSpecies.length>=4){$('fs-status').textContent='Maximum 4 featured species. Remove one first.';return;}
   setFeatured([...(settings.featuredSpecies||[]),v],'Added.');renderFeaturedSettings();};
- $('fs-restore').onclick=()=>{setFeatured(['rthhum','sancra'],'Defaults restored.');renderFeaturedSettings();};
+ $('fs-restore').onclick=()=>{setFeatured(['rthhum','sancra'],'Restored the default featured species.');renderFeaturedSettings();};
  function renderHistoryStats(){
   const el=$('history-stats');
   TrendStore.stats().then(st=>{
@@ -2225,7 +2250,7 @@ function boot(){
  setupTimer();
 }
 window.TabsShowForTest=id=>Tabs.show(id);
-window.__MW_TEST__={state,settings,CONFIG,Normalize,Trends,Scoring,Seasonal,findSurprises,refresh,renderAll,Calendar,MapMod,TrendStore,Movement,Snapshot,Trend,renderSince,renderWatchlist,renderFeaturedHistory,Location,DEST_CATALOG,WSG,buildDestinations,destEvidence,scoreDestination,rankDestinations,destLabel,destReasons,renderWSG,destWhyHTML,featureSpecies,setFeatured,renderFeaturedSettings};
+window.__MW_TEST__={state,settings,CONFIG,Normalize,Trends,Scoring,Seasonal,findSurprises,refresh,renderAll,Calendar,MapMod,TrendStore,Movement,Snapshot,Trend,renderSince,renderWatchlist,renderFeaturedHistory,Location,DEST_CATALOG,WSG,buildDestinations,destEvidence,scoreDestination,rankDestinations,destLabel,destReasons,renderWSG,destWhyHTML,featureSpecies,setFeatured,renderFeaturedSettings,persist};
 
 
 boot();
