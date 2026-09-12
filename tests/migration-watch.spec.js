@@ -783,7 +783,7 @@ test('AI narration: exact model + headers sent, coordinates/key never in payload
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
  await page.evaluate(()=>{document.querySelector('details:has(#ai-go)').open=true;});
  await page.locator('#ai-go').click();
- await expect(page.locator('#ai-out')).toHaveText('Hummingbird movement is building near your area.',{timeout:10000});
+ await expect(page.locator('#ai-brief')).toContainText('Hummingbird movement is building near your area.',{timeout:10000});
  expect(narrateRequests.length).toBe(1);
  const rq=narrateRequests[0];
  expect(rq.model).toBe('anthropic/claude-sonnet-4.6');
@@ -817,7 +817,7 @@ test('AI narration: exact model + headers sent, coordinates/key never in payload
  // structured content array is normalized, not [object Object]
  await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({json:{choices:[{message:{content:[{type:'text',text:'Part one '},{type:'text',text:'part two'}]}}]}}));
  await page.locator('#ai-go').click();
- await expect(page.locator('#ai-out')).toHaveText('Part one part two',{timeout:5000});
+ await expect(page.locator('#ai-brief')).toContainText('Part one part two',{timeout:5000});
 });
 
 /* ================ v2026.09.11.5: Where Should I Go? — deterministic destination ranking ================ */
@@ -961,4 +961,65 @@ test('Where Should I Go UI: renders primary card, reasons, alternatives, why-vie
  const star=wsg.locator('.dest-star').first();
  await star.click();
  expect(await page.evaluate(()=>window.__MW_TEST__.settings.destFavorites.length)).toBeGreaterThan(0);
+});
+
+/* ================ v2026.09.11.6: AI narration presentation ================ */
+test('AI presentation: result card, collapsed JSON, safe markdown, escaping, copy, failure keeps brief',async({page})=>{
+ let narrations=0;
+ await mockEbird(page);
+ await page.route('**openrouter.ai/api/v1/models',r=>r.fulfill({json:{data:OR_MODELS}}));
+ await page.route('**openrouter.ai/api/v1/chat/completions',r=>{narrations++;
+  return r.fulfill({json:{choices:[{message:{content:'**Worth going out today.** Migration is building near *Princeton*.\n- Sandhill Cranes at 3 locations\n- Feeders active'}}]}});});
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',openrouterKey:'sk-or-v1-TEST',openrouterModel:'anthropic/claude-sonnet-4.6'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await page.evaluate(()=>{document.querySelector('details:has(#ai-go)').open=true;});
+ // 1. JSON disclosure collapsed by default, empty before narrate
+ expect(await page.locator('#ai-data-disclosure').getAttribute('open')).toBeNull();
+ await expect(page.locator('#ai-brief')).toBeHidden();
+ // 2. narrate → card visible with safe-rendered markdown
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-card')).toBeVisible({timeout:10000});
+ const briefHTML=await page.locator('#ai-brief').innerHTML();
+ expect(briefHTML).toContain('<strong>Worth going out today.</strong>');
+ expect(briefHTML).toContain('<em>Princeton</em>');
+ expect(briefHTML).toContain('<ul>');
+ expect(await page.locator('#ai-brief').textContent()).not.toContain('**'); // no literal tokens
+ // 3. disclosure still collapsed after success; opening it reveals exact payload (no coords/keys)
+ expect(await page.locator('#ai-data-disclosure').getAttribute('open')).toBeNull();
+ await page.locator('#ai-data-disclosure summary').click();
+ const payloadText=await page.locator('#ai-input').textContent();
+ expect(payloadText).toContain('topSpecies');
+ expect(payloadText).not.toMatch(/38\.35|"lat"|GOODKEY|sk-or-v1-TEST/);
+ // 4. generated-with shows model; button says Narrate again
+ await expect(page.locator('#ai-genwith')).toContainText('Claude Sonnet 4.6');
+ await expect(page.locator('#ai-go')).toHaveText('Narrate again');
+ // 5. failure: previous brief survives, error shown separately
+ await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({status:503,json:{error:{message:'temp'}}}));
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-err')).toContainText(/could not|failed/i,{timeout:10000});
+ await expect(page.locator('#ai-card')).toBeVisible();
+ await expect(page.locator('#ai-brief')).toContainText('Worth going out today');
+ // 6. arbitrary HTML/script from model is escaped
+ await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({json:{choices:[{message:{content:'**<script>alert(1)</script>** and <img src=x onerror=alert(1)>'}}]}}));
+ await page.locator('#ai-go').click();
+ await expect(page.locator('#ai-brief')).toContainText('alert(1)');
+ const html2=await page.locator('#ai-brief').innerHTML();
+ expect(html2).not.toContain('<script>');
+ expect(html2).not.toContain('<img');
+ expect(html2).toContain('&lt;script&gt;');
+ // 7. duplicate clicks while busy: exactly one in-flight request
+ let slowCount=0;await page.route('**openrouter.ai/api/v1/chat/completions',async r=>{slowCount++;await new Promise(res=>setTimeout(res,900));
+  return r.fulfill({json:{choices:[{message:{content:'Slow brief.'}}]}});});
+ await page.locator('#ai-go').click();
+ await page.waitForTimeout(150);
+ expect(await page.locator('#ai-go').isDisabled()).toBe(true);
+ await expect(page.locator('#ai-go')).toHaveAttribute('disabled');
+ const mid=slowCount;
+ await page.evaluate(()=>document.getElementById('ai-go').click()); // disabled → inert
+ expect(slowCount).toBe(mid);
+ await page.waitForTimeout(1100);
+ expect(await page.locator('#ai-go').isDisabled()).toBe(false);
+ // 8. copy button present
+ await expect(page.locator('#ai-copy')).toBeVisible();
 });
