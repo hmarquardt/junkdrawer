@@ -126,15 +126,18 @@ test('malformed rules degrade the access subsystem without breaking habitat', as
 
 test('missing public-land asset leaves static habitat and map fallback intact', async ({ page }) => {
   const errors = await open(page);
-  await page.route('**/data/fruiting-forecast/public-lands.parquet', r => r.fulfill({ status: 503, body: 'offline' }));
+  let blockedTiles = 0;
+  await page.route('**/data/fruiting-forecast/pl/*.parquet', r => { blockedTiles++; return r.fulfill({ status: 503, body: 'offline' }); });
   const result = await page.evaluate(async () => {
     const t = window.__FRUITING_FORECAST_TEST__;
     const evidence = await t.HabitatProvider.fetch(t.zonePoints(38.3553, -87.5675, 25, 'standard'), { lat: 38.3553, lon: -87.5675 }, 25, new AbortController().signal, true);
-    return { center: evidence.center.available, properties: evidence._properties.length, error: evidence._rules.error };
+    return { center: evidence.center.available, properties: evidence._properties.length, errors: t.getState().logs.filter(row => row.message.startsWith('PL tile ')).map(row => row.data.error) };
   });
   expect(result.center).toBe(true);
   expect(result.properties).toBe(0);
-  expect(result.error).toContain('HTTP 503');
+  expect(blockedTiles).toBeGreaterThan(0);
+  expect(result.errors).toHaveLength(blockedTiles);
+  expect(result.errors.every(message => message.includes('HTTP 503'))).toBe(true);
   await expect(page.locator('#emptyState')).toBeVisible();
   expect(errors).toEqual([]);
 });

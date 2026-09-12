@@ -260,3 +260,32 @@ Added 2026-08-31. OpenRouter is an explicitly invoked interpretation and researc
 - The UI labels all output as AI interpretation of deterministic data and shows deterministic opportunity separately from supporting/neutral/conflicting/insufficient online evidence.
 
 OpenRouter's server-tool APIs are currently beta and may change. Relevant primary documentation: [models schema](https://openrouter.ai/docs/guides/overview/models), [server tools](https://openrouter.ai/docs/guides/features/server-tools/overview), [web search](https://openrouter.ai/docs/guides/features/server-tools/web-search), [web fetch](https://openrouter.ai/docs/guides/features/server-tools/web-fetch), and [usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting).
+
+## About field guide (2026-09-12)
+
+The Forecast / About tablist switches between retained DOM panels in the single-file app. Native buttons support arrow keys, Home/End, focus and selection semantics. Returning to Forecast preserves analysis identity, selected species/sector/property, map layers, detail DOM and per-view scroll; Leaflet receives `invalidateSize({pan:false})` after becoming visible. No route or scoring change is involved.
+
+About follows the app's light/dark/system theme tokens with an editorial introduction, three field questions, capability matrix, four progressive-enhancement modes, HTML/CSS architecture flow, score/scope explanations, independent map overlays, expandable failure cases, manifest coverage, browser storage/privacy and identification safety. The table stacks its labeled cells at mobile widths.
+
+### Status sources and progressive enhancement
+
+- `aboutCapabilityStatus()` reads the loaded analysis's zones, observation availability, GIS metadata and candidate fallback counts. It does not use current-session property/access counters to describe an archived analysis. Weather availability means normalized weather exists; habitat availability means sampled habitat exists, not complete tile or field coverage.
+- AI configuration comes from `orSettings()` without exposing the key. Configuration is not a connection or web-tool-support test. Persistence comes from `state.gis.persistenceMode`; IndexedDB reflects an open database, not a successful future write. Overlay switches describe visibility independently of evidence availability.
+- `aboutManifestCounts()` counts actual resource descriptors (nested habitat or legacy URL, public-land and access descriptors), reports regional assets separately and reads the loaded dataset version. Opening About loads only the existing manifest via `gisManifest(false)` if needed; it does not initialize DuckDB or query weather/AI. Counts describe declared publication, not a live HTTP audit. The current checked-in manifest declares **40 habitat / 21 public-land / 13 access-point tiles**, version **2026.09.01**, over the Ohio/Tennessee Valley region. Broad CONUS addressing is not national full-data coverage.
+- The guide renders on entering About, analysis rendering, diagnostics updates and closing settings. It adds no persistent storage or second scoring model.
+- Basic mode retains weather/season/available observations. GIS adds sampled habitat; public-land/rule evidence adds property Huntability; access points independently add starts. AI remains optional interpretation. Missing components are omitted, never assigned a neutral 50. The score formula remains `round(biology * huntability / 100)`; property cards use best-property species, details use selected species. Best-overall, selected-sector and named-property scopes are explained separately.
+
+Status language distinguishes available, partial, unavailable in the loaded analysis, disabled overlays, not configured, not checked, and no reports/data found. Zero observation reports are successful evidence, distinct from failed observation requests. For GIS/property/access evidence, retained records cannot always distinguish empty coverage from download failures; About explicitly reports that uncertainty rather than diagnosing an outage. Available does not mean fresh or independently verified.
+
+### Implementation limits communicated in About
+
+These qualifications supersede stronger offline/general fallback claims earlier in this document:
+
+- A failed/malformed collecting-rule request currently skips property loading because the two share a try block. An absent/unmatched rule instead resolves to `UNKNOWN_VERIFY`.
+- OPFS opening and table creation are attempted after DuckDB initializes. Failure falls back to transient DuckDB with IndexedDB byte caching. However, the current coverage manager queries registered Parquet buffers and does not fully populate/re-query persistent evidence tables. OPFS opened is **not** proof of durable, complete offline GIS reuse. Engine assets and tiles may need downloading again.
+- An unavailable IndexedDB connection allows session computation; later cache/history write errors can interrupt a run. A failed GIS cache write can prevent tile use. About does not promise all storage failures are harmless.
+- If Leaflet fails, the existing sector-button map fallback works. If only OSM tiles fail, Leaflet may have a blank background; results and details remain usable. Archived property geometry may be absent while compact property details remain retained.
+
+Playwright coverage in `tests/fruiting-forecast-about.spec.js` checks navigation/state identity, keyboard controls, safety/dependency copy, current versus archived evidence counts, key secrecy/configuration, missing/partial GIS, zero observations, disabled overlays, changing manifests, 82/70 score scope, and light/dark/system mobile layouts at 390 × 844.
+
+Validation: all 54 distinct Fruiting Forecast Playwright tests passed (53 in the standard run, plus the separately enabled live Princeton check), including 10 About tests. Desktop and 390 × 844 light-mode screenshots were reviewed; light/dark/system mobile overflow checks passed. Inline scripts parse and the deploy-convention audit reports no errors or warnings. The public-land outage regression mock now intercepts current `pl/*.parquet` tiles and verifies their recorded HTTP 503 failures.
