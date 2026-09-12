@@ -51,8 +51,8 @@ test('initial page with no API key renders honestly and stays usable',async({pag
  await mockEbird(page);await boot(page);
  await expect(page.locator('#verdict')).toHaveText('AWAITING eBIRD KEY');
  await expect(page.locator('#reco')).toContainText('no simulated numbers');
- await expect(page.locator('#fcard-hum')).toBeVisible();
- await expect(page.locator('#fcard-crane')).toContainText('Historical baseline unavailable');
+ await expect(page.locator('#fcard-rthhum')).toBeVisible();
+ await expect(page.locator('#fcard-sancra')).toContainText('Historical baseline unavailable');
  await expect(page.locator('#species-list')).toContainText('No observations');
 });
 test('key entry, refresh, featured cards, ranking and deterministic score',async({page})=>{
@@ -64,10 +64,10 @@ test('key entry, refresh, featured cards, ranking and deterministic score',async
  await page.locator('#settings-form button[type=submit]').click();
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
  await expect(page.locator('#verdict')).toContainText(/MIGRATION|MOVEMENT/);
- await expect(page.locator('#fcard-hum')).toContainText('Ruby-throated Hummingbird');
- await expect(page.locator('#fcard-hum')).toContainText('Keep feeders active');
- await expect(page.locator('#fcard-crane')).toContainText('Sandhill Crane');
- await expect(page.locator('#fcard-crane')).toContainText('Worth a regional trip');
+ await expect(page.locator('#fcard-rthhum')).toContainText('Ruby-throated Hummingbird');
+ await expect(page.locator('#fcard-rthhum')).toContainText('Keep feeders active');
+ await expect(page.locator('#fcard-sancra')).toContainText('Sandhill Crane');
+ await expect(page.locator('#fcard-sancra')).toContainText('Worth a regional trip');
  await expect(page.locator('.srow')).toHaveCount(15);
  const s=await page.evaluate(()=>{const T=window.__MW_TEST__;
   const sp={recent72:[1,2,3,4,5,6],rate:2.0,seasonal:.8,maxCount:900,nearest:{d:5},locations:5};
@@ -322,7 +322,7 @@ test('watchlist: star toggles persist, remove works, and the 10-species cap is e
  const featuredCode=await page.evaluate(()=>window.__MW_TEST__.state.species.find(x=>['rthhum','sancra'].includes(x.code))?.code||null);
  if(featuredCode){const frow=page.locator(`.srow[data-code="${featuredCode}"]`);
   await frow.locator('[data-star]').click();
-  await expect(page.locator('#list-note')).toContainText('permanently featured');
+  await expect(page.locator('#list-note')).toContainText('Featured species stay on the dashboard');
   const rawF=await page.evaluate(()=>JSON.parse(localStorage.getItem('migrationwatch.settings')));
   expect(rawF.watchlist).not.toContain(featuredCode);}
  // remove again
@@ -349,14 +349,14 @@ test('featured history: gap-safe SVG renders from snapshots; range chips re-rend
   // today snapshot will be written by refresh with score from live data
  });
  await page.locator('#refresh').click();await page.waitForTimeout(1100);
- const svg=await page.locator('#hist-hum svg').count();
+ const svg=await page.locator('#hist-rthhum svg').count();
  expect(svg).toBe(1);
- const legend=await page.locator('#hist-hum .hlegend').textContent();
+ const legend=await page.locator('#hist-rthhum .hlegend').textContent();
  expect(legend).toMatch(/snapshot/);expect(legend).not.toMatch(/0 snapshot/);
- await page.locator('[data-hkey="hum"][data-hrange="30"]').click();
- await expect(page.locator('#hist-hum .hlegend')).toContainText(/snapshot/);
+ await page.locator('[data-hkey="rthhum"][data-hrange="30"]').click();
+ await expect(page.locator('#hist-rthhum .hlegend')).toContainText(/snapshot/);
  // aria pressed state moves
- expect(await page.locator('[data-hkey="hum"][data-hrange="30"]').getAttribute('aria-pressed')).toBe('true');
+ expect(await page.locator('[data-hkey="rthhum"][data-hrange="30"]').getAttribute('aria-pressed')).toBe('true');
 });
 test('settings history: stats line, export excludes ids/keys, clear works',async({page})=>{
  await mockEbird(page);await boot(page);
@@ -561,12 +561,12 @@ test('Jasper-Pulaski gating: distant users see Not applicable; Indiana-area keep
  await page.locator('[data-locres="0"]').click();await page.waitForTimeout(800);
  await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';});
  await page.locator('#refresh').click();await page.waitForTimeout(1200);
- await page.locator('#fcard-crane').click();await page.waitForTimeout(200);
+ await page.locator('#fcard-sancra').click();await page.waitForTimeout(200);
  await expect(page.locator('#detail-body')).toContainText('Not applicable to this location');
  await page.keyboard.press('Escape');
  // Indiana preset → line stays as regional reference
  await page.evaluate(async()=>{await window.__MW_TEST__.Location.set(window.__MW_TEST__.Location.fromPreset({id:'princeton',name:'Princeton, Indiana',lat:38.3553,lng:-87.5675}),{refreshData:false});});
- await page.locator('#fcard-crane').click();
+ await page.locator('#fcard-sancra').click();
  await expect(page.locator('#detail-body')).toContainText('Jasper-Pulaski (Indiana regional)');
 });
 
@@ -1022,4 +1022,132 @@ test('AI presentation: result card, collapsed JSON, safe markdown, escaping, cop
  expect(await page.locator('#ai-go').isDisabled()).toBe(false);
  // 8. copy button present
  await expect(page.locator('#ai-copy')).toBeVisible();
+});
+
+/* ================ v2026.09.11.7: configurable featured species + calendar repair ================ */
+test('calendar: dropdown selection persists through renderAll, refresh, and detail opens; selected row emphasized',async({page})=>{
+ await mockEbird(page);
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await page.evaluate(()=>{document.querySelector('details:has(#cal-species)').open=true;});
+ const sel=page.locator('#cal-species');
+ // start: default featured species
+ await expect(sel).toHaveValue('rthhum');
+ // change to Sandhill Crane
+ await sel.selectOption('sancra');
+ await expect(sel).toHaveValue('sancra');
+ // selected row label changed + emphasized (bold, accent bar)
+ await expect(page.locator('#cal-wrap')).toContainText('Sandhill Crane');
+ // curve changed: selected row now uses crane curve (compare rendered band pattern implicitly via meta caption)
+ await expect(page.locator('#cal-meta')).toContainText('species seasonal model');
+ // renderAll() must NOT reset it
+ await page.evaluate(()=>window.__MW_TEST__.renderAll());
+ await expect(sel).toHaveValue('sancra');
+ // open another species detail (state.selected changes)
+ await page.evaluate(()=>{const T=window.__MW_TEST__;const sp=T.state.species.find(s=>s.code!=='sancra'&&s.code!=='rthhum');if(sp)T.state.selected=sp;});
+ await expect(sel).toHaveValue('sancra');
+ // refresh observations (state.selected stays but must not matter)
+ await page.locator('#refresh').click();
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await expect(sel).toHaveValue('sancra');
+ await expect(page.locator('#cal-wrap')).toContainText('Sandhill Crane');
+ // calendar options built from featured+watchlist+reported, featured first
+ const firstOpt=await sel.locator('option').first().getAttribute('value');
+ expect(['rthhum','sancra']).toContain(firstOpt);
+});
+
+test('calendar: same-category species share proxy curve with honest labeling; label not truncated',async({page})=>{
+ await mockEbird(page);
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await page.evaluate(()=>{document.querySelector('details:has(#cal-species)').open=true;});
+ const sel=page.locator('#cal-species');
+ const warblers=await page.evaluate(()=>window.__MW_TEST__.state.species.filter(s=>window.__MW_TEST__.Seasonal.catFor(s.code)==='warbler').map(s=>s.code));
+ test.skip(warblers.length<2,'need two same-category species in fixture');
+ await sel.selectOption(warblers[0]);
+ await expect(page.locator('#cal-meta')).toContainText('warbler seasonal proxy');
+ const label0=await page.locator('#cal-wrap').textContent();
+ await sel.selectOption(warblers[1]);
+ await expect(page.locator('#cal-meta')).toContainText(warblers[1]?'warbler seasonal proxy':'proxy');
+ // label shows readable name, not 7-char truncation (textContent concatenates without space)
+ const txt=await page.locator('#cal-wrap').textContent();
+ expect(txt).toContain('AmericanRedstart');
+ expect(txt).not.toContain('Americn ');
+ // geographic honesty
+ await expect(page.locator('#cal-meta')).toContainText(/MODELED seasonal windows · /);
+});
+
+test('featured species: defaults, replace with pelican, reload persistence, enhancers, restore, min/max enforcement',async({page})=>{
+ await mockEbird(page);
+ await page.addInitScript(()=>{const K='migrationwatch.seeded.f7';if(!localStorage.getItem(K)){
+  localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',featuredSpecies:['awwpe','sancra']}));localStorage.setItem(K,'1');}});
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ // pelican replaced hummingbird: generic card (no feeder line), crane enhancer intact
+ await expect(page.locator('#fcard-awwpe')).toBeVisible();
+ await expect(page.locator('#fcard-awwpe')).toContainText(/No recent reports in radius|Watch score/);
+ await expect(page.locator('#fcard-sancra')).toContainText('Jasper-Pulaski');
+ // no hummingbird card
+ await expect(page.locator('#fcard-rthhum')).toHaveCount(0);
+ // settings editor reflects config
+ await page.locator('#settings-open').click();
+ await expect(page.locator('#fs-list')).toContainText('awwpe'); // raw code fallback when species absent from local data
+ // add to reach max via editor → 4th added, 5th refused
+ await page.evaluate(()=>{window.__MW_TEST__.setFeatured(['awwpe','sancra','osprey','nobun']);});
+ await expect(page.locator('#fs-list')).toContainText('Osprey');
+ // max 4: a 5-species attempt is truncated to 4 and never stores more
+ await page.evaluate(()=>{window.__MW_TEST__.setFeatured(['awwpe','sancra','osprey','nobun','rthhum']);});
+ expect(await page.evaluate(()=>window.__MW_TEST__.settings.featuredSpecies.length)).toBe(4);
+ expect(await page.evaluate(()=>window.__MW_TEST__.settings.featuredSpecies.includes('rthhum'))).toBe(false);
+ // min 2 enforced
+ // min 2: a 1-species attempt is refused, previous config intact
+ await page.evaluate(()=>{const ok=window.__MW_TEST__.setFeatured(['awwpe']);window.__MW_TEST__.state._minOk=ok===false;});
+ expect(await page.evaluate(()=>window.__MW_TEST__.state._minOk)).toBe(true);
+ expect(await page.evaluate(()=>window.__MW_TEST__.settings.featuredSpecies.length)).toBe(4);
+ // reload preserves choice
+ await page.reload();
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ await expect(page.locator('#fcard-awwpe')).toBeVisible();
+ // reorder persists
+ await page.locator('#settings-open').click();
+ await page.locator('[data-fsdown="0"]').click();
+ expect(await page.evaluate(()=>window.__MW_TEST__.settings.featuredSpecies[0])).toBe('sancra');
+ // restore defaults
+ await page.locator('#fs-restore').click();
+ await expect(page.locator('#fcard-rthhum')).toBeVisible();
+ await expect(page.locator('#fcard-sancra')).toBeVisible();
+});
+
+test('featured fetch: dedicated 30-day calls follow configured species codes exactly',async({page})=>{
+ const speciesCalls=[];
+ await page.route('**api.ebird.org/**',r=>{const u=r.request().url();
+  const m=u.match(/\/recent\/([a-z]+)\?/);
+  if(m)speciesCalls.push(m[1]);
+  if(u.includes('notable'))return r.fulfill({json:[]});
+  if(u.includes('/recent?'))return r.fulfill({json:RECENT});
+  return r.fulfill({json:[]});});
+ await page.route(/birdcast\.info|journeynorth\.org|in\.gov/,r=>r.fulfill({json:{}}));
+ await page.addInitScript(()=>{const K='migrationwatch.seeded.f7b';if(!localStorage.getItem(K)){
+  localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',featuredSpecies:['awwpe','osprey']}));localStorage.setItem(K,'1');}});
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ expect(speciesCalls).toEqual(expect.arrayContaining(['awwpe','osprey']));
+ expect(speciesCalls).not.toContain('rthhum');
+ expect(speciesCalls).not.toContain('sancra');
+});
+
+test('map semantic filters are independent of featured configuration',async({page})=>{
+ await mockEbird(page);
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',featuredSpecies:['awwpe','osprey']})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ const humFeat=await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('hum');return M.features().map(f=>f.properties.name);});
+ // fixture includes hummingbird reports (HUM) → hum filter still means rthhum
+ expect(humFeat.length).toBeGreaterThan(0);
+ expect(humFeat.every(n=>/Hummingbird/i.test(n))).toBe(true);
+ const craneFeat=await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('crane');return M.features().map(f=>f.properties.name);});
+ expect(craneFeat.length).toBeGreaterThan(0);
+ expect(craneFeat.every(n=>/Crane/i.test(n))).toBe(true);
 });
