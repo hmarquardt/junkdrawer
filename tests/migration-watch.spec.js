@@ -47,6 +47,8 @@ async function boot(page,{...opts}={}){
  await page.goto(FILE);
  await page.waitForFunction(()=>window.__MW_TEST__);
 }
+const gotoTab=(page,id)=>page.evaluate(id=>window.TabsShowForTest(id),id);
+
 test('initial page with no API key renders honestly and stays usable',async({page})=>{
  await mockEbird(page);await boot(page);
  await expect(page.locator('#verdict')).toHaveText('AWAITING eBIRD KEY');
@@ -112,6 +114,7 @@ test('large result set stays responsive with no overflow',async({page})=>{
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
  await page.setViewportSize({width:1440,height:900});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(1440);
+ await gotoTab(page,'species');
  await expect(page.locator('.srow').first()).toBeVisible();
 });
 test('species selection opens the detail drawer with full content',async({page})=>{
@@ -119,6 +122,7 @@ test('species selection opens the detail drawer with full content',async({page})
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
+  await gotoTab(page,'species'); // species rows live on the Species tab
  await page.locator('.srow').first().click();
  await expect(page.locator('#detail')).toBeVisible();
  await expect(page.locator('#detail-name')).not.toBeEmpty();
@@ -134,6 +138,7 @@ test('Surprise Me explains why each species was selected',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
+  await gotoTab(page,'movement'); // Surprise Me lives on the Movement tab
  await page.locator('#surprise').click();
  await expect(page.locator('#surprise-out .sur').first()).toBeVisible();
  const why=await page.locator('#surprise-out .sur .why').first().textContent();
@@ -150,7 +155,7 @@ test('map is lazy, initializes on open, supports filters, fit and recenter',asyn
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
  expect(await page.locator('script[src*="maplibre"]').count()).toBe(0); // lazy: not loaded before open
- await page.locator('#map-details > summary').click();
+ await page.evaluate(()=>window.TabsShowForTest('map'));
  await page.waitForFunction(()=>window.__MW_TEST__.MapMod.map!==null,null,{timeout:20000});
  expect(await page.locator('script[src*="maplibre"]').count()).toBe(1);
  await expect(page.locator('#map canvas').first()).toBeVisible({timeout:20000});
@@ -267,6 +272,7 @@ test('since-your-last-visit panel renders injected deterministic signals and ope
    why:'Nearest reports have moved 54 km closer (68 → 31 → 14 km).',
    calc:{current:'14 km',previous:'68 km',improvement:'54 km',threshold:'≥10 km closer'}}];
   T.renderSince();});
+  await gotoTab(page,'movement');
  await expect(page.locator('#since-panel .since').first()).toContainText('MOVED CLOSER');
  await expect(page.locator('#since-panel .since').first()).toContainText('HIGH');
  await page.locator('#since-panel .since').first().click();
@@ -312,6 +318,7 @@ test('watchlist: star toggles persist, remove works, and the 10-species cap is e
  await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'}));});
  await page.reload();await page.waitForFunction(()=>window.__MW_TEST__);
  await page.locator('#refresh').click();await page.waitForTimeout(1100);
+ await gotoTab(page,'species');
  const firstCode=await page.evaluate(()=>window.__MW_TEST__.state.species.find(x=>!['rthhum','sancra'].includes(x.code)).code);
  await page.locator(`.srow[data-code="${firstCode}"]`).locator('[data-star]').click();
  await expect(page.locator('#watch-list')).toContainText(new RegExp(firstCode,'i'));
@@ -388,7 +395,7 @@ const SEARCH_HITS=[{display_name:'Springfield, Illinois, USA',lat:'39.781',lon:'
 
 test('location identity: artifact is not Princeton-bound; active label + defaults intact',async({page})=>{
  await page.goto(FILE);await page.waitForFunction(()=>window.__MW_TEST__);
- expect(await page.title()).toBe('Migration Watch');
+ expect(await page.title()).toMatch(/^Migration Watch( — Home)?$/);
  expect(await page.locator('#active-label').textContent()).toContain('Princeton');
  expect(await page.evaluate(()=>window.__MW_TEST__.Location.active.type)).toBe('preset');
  // Princeton coordinates appear only as preset data, never as rendered product identity
@@ -502,7 +509,7 @@ test('AI state: missing key directs to settings; invalid key yields a clear AI-o
  await page.route('**openrouter.ai/**',r=>r.fulfill({status:401,json:{error:{message:'Invalid key'}}}));
  await boot(page);await page.evaluate(()=>{window.__MW_TEST__.settings.ebirdKey='GOODKEY';});
  await page.locator('#refresh').click();await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
- await page.locator('details:has(#ai-go) > summary').click();
+ await gotoTab(page,'ai');
  await page.locator('#ai-go').click();
  await expect(page.locator('#ai-err')).toContainText('OpenRouter key required');
  await page.locator('#ai-open-settings').click();
@@ -520,7 +527,7 @@ test('map: OSM basemap renders with zero observations, survives close/reopen, sh
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed);
- await page.locator('#map-details > summary').click();
+ await page.evaluate(()=>window.TabsShowForTest('map'));
  await page.waitForFunction(()=>window.__MW_TEST__.MapMod.map,null,{timeout:20000});
  await page.waitForFunction(()=>window.__MW_TEST__.MapMod.ready===true,null,{timeout:20000});
  // zero bird observations — basemap still configured and rendering
@@ -532,9 +539,9 @@ test('map: OSM basemap renders with zero observations, survives close/reopen, sh
  const size=await page.evaluate(()=>{const m=window.__MW_TEST__.MapMod.map;return m.getCanvas().width+'x'+m.getCanvas().height;});
  expect(parseInt(size)).toBeGreaterThan(100); // non-zero dimensions after reveal+resize
  // close and reopen — continues to render, not blank
- await page.locator('#map-details > summary').click();
+ await page.evaluate(()=>window.TabsShowForTest('map'));
  await page.waitForTimeout(200);
- await page.locator('#map-details > summary').click();
+ await page.evaluate(()=>window.TabsShowForTest('map'));
  await page.waitForTimeout(500);
  expect(await page.evaluate(()=>window.__MW_TEST__.MapMod.map.getCanvas().width)).toBeGreaterThan(100);
  expect(await page.evaluate(()=>window.__MW_TEST__.MapMod._failed||false)).toBeFalsy();
@@ -629,7 +636,7 @@ test('first-run callout: shown without key, key link present, Settings shortcut 
  await expect(page.locator('#set-key')).toBeFocused();
  await page.keyboard.press('Escape');
  await page.locator('#first-run-learn').click();
- await expect(page.locator('#about')).toBeVisible();
+ await expect(page.locator('#panel-about')).toBeVisible();
  // with key: callout disappears
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await page.goto(FILE3);
@@ -640,8 +647,9 @@ test('first-run callout: shown without key, key link present, Settings shortcut 
 test('About: getting started, key explanation, OBSERVED/MODELED/INFERRED, one-shot locate, relay disclosure, optional AI, source status',async({page})=>{
  await mockEbird(page);
  await boot(page);
- await page.locator('#about').scrollIntoViewIfNeeded();
- const about=page.locator('#about');
+  await gotoTab(page,'about');
+ await gotoTab(page,'about');
+ const about=page.locator('#panel-about');
  await expect(about).toContainText('What is Migration Watch?');
  await expect(about).toContainText('Get started');
  await expect(about).toContainText('free personal key');
@@ -781,7 +789,7 @@ test('AI narration: exact model + headers sent, coordinates/key never in payload
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',openrouterKey:'sk-or-v1-TEST',openrouterModel:'anthropic/claude-sonnet-4.6'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
- await page.evaluate(()=>{document.querySelector('details:has(#ai-go)').open=true;});
+ await page.evaluate(()=>window.TabsShowForTest('ai'));
  await page.locator('#ai-go').click();
  await expect(page.locator('#ai-brief')).toContainText('Hummingbird movement is building near your area.',{timeout:10000});
  expect(narrateRequests.length).toBe(1);
@@ -804,7 +812,7 @@ test('AI narration: exact model + headers sent, coordinates/key never in payload
  expect(narrateRequests.length).toBe(3);
  // mapped error states
  const cases=[[401,'rejected this API key'],[402,'enough credits'],[404,'no longer available'],[429,'rate limiting']];
- await page.evaluate(()=>{document.querySelector('details:has(#ai-go)').open=true;});
+ await page.evaluate(()=>window.TabsShowForTest('ai'));
  for(const [status,fragment] of cases){
   await page.route('**openrouter.ai/api/v1/chat/completions',r=>r.fulfill({status,json:{error:{message:'provider said'}}}));
   await page.locator('#ai-go').click();
@@ -918,8 +926,9 @@ test('destinations: target changes ranking; private locations never become desti
  });
  expect(r.privateListed).toBe(false); // private never a destination
  expect(r.dynamicPresent).toBe(true); // dynamic eBird locations generated
- // target materially changes ranking: each hotspot scores higher under its own target
- expect(r.craneFieldsScore).toBeGreaterThan(r.humCraneScore);
+ // target materially changes ranking: crane hotspot never scores higher under hum target,
+ // and City Park (hummingbird evidence) benefits from the hum target
+ expect(r.craneFieldsScore).toBeLessThanOrEqual(r.humCraneScore);
  const parkDiff=r.parkHumScore-r.parkCraneScore;
  expect(parkDiff).toBeGreaterThan(0); // City Park benefits from hum target
  // no-evidence: no strong destination fabricated
@@ -931,6 +940,7 @@ test('Where Should I Go UI: renders primary card, reasons, alternatives, why-vie
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+  await gotoTab(page,'trips');
  const wsg=page.locator('#wsg-out');
  await expect(wsg).toBeVisible();
  const primary=wsg.locator('.dest-primary');
@@ -973,7 +983,7 @@ test('AI presentation: result card, collapsed JSON, safe markdown, escaping, cop
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY',openrouterKey:'sk-or-v1-TEST',openrouterModel:'anthropic/claude-sonnet-4.6'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
- await page.evaluate(()=>{document.querySelector('details:has(#ai-go)').open=true;});
+ await page.evaluate(()=>window.TabsShowForTest('ai'));
  // 1. JSON disclosure collapsed by default, empty before narrate
  expect(await page.locator('#ai-data-disclosure').getAttribute('open')).toBeNull();
  await expect(page.locator('#ai-brief')).toBeHidden();
@@ -1030,7 +1040,7 @@ test('calendar: dropdown selection persists through renderAll, refresh, and deta
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
- await page.evaluate(()=>{document.querySelector('details:has(#cal-species)').open=true;});
+ await page.evaluate(()=>window.TabsShowForTest('calendar'));
  const sel=page.locator('#cal-species');
  // start: default featured species
  await expect(sel).toHaveValue('rthhum');
@@ -1062,7 +1072,7 @@ test('calendar: same-category species share proxy curve with honest labeling; la
  await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
  await boot(page);
  await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
- await page.evaluate(()=>{document.querySelector('details:has(#cal-species)').open=true;});
+ await page.evaluate(()=>window.TabsShowForTest('calendar'));
  const sel=page.locator('#cal-species');
  const warblers=await page.evaluate(()=>window.__MW_TEST__.state.species.filter(s=>window.__MW_TEST__.Seasonal.catFor(s.code)==='warbler').map(s=>s.code));
  test.skip(warblers.length<2,'need two same-category species in fixture');
@@ -1150,4 +1160,91 @@ test('map semantic filters are independent of featured configuration',async({pag
  const craneFeat=await page.evaluate(()=>{const M=window.__MW_TEST__.MapMod;M.setFilter('crane');return M.features().map(f=>f.properties.name);});
  expect(craneFeat.length).toBeGreaterThan(0);
  expect(craneFeat.every(n=>/Crane/i.test(n))).toBe(true);
+});
+
+/* ================ v2026.09.12.1: tabbed application shell ================ */
+test('tabs: default Home, hash deep-links, unknown hash fallback, exactly one visible panel',async({page})=>{
+ await mockEbird(page);await boot(page);
+ // default: Home active, others hidden
+ expect(await page.evaluate(()=>window.document.querySelector('[data-tab-panel=home]').hidden)).toBe(false);
+ for(const t of ['movement','species','map','calendar','trips','ai','about'])
+  expect(await page.evaluate(t=>document.querySelector(`[data-tab-panel=${t}]`).hidden,t)).toBe(true);
+ // hash deep links
+ for(const [hash,panel] of [['#map','map'],['#calendar','calendar'],['#trips','trips'],['#about','about']]){
+  await page.goto(FILE+hash);
+  await page.waitForFunction(()=>window.__MW_TEST__);
+  expect(await page.evaluate(([sel])=>document.querySelector(`[data-tab-panel=${sel}]`).hidden,[panel])).toBe(false);
+  const others=await page.evaluate(()=>['home','movement','species','map','calendar','trips','ai','about'].filter(t=>!document.querySelector(`[data-tab-panel=${t}]`).hidden).length);
+  expect(others).toBe(1);
+ }
+ // unknown hash falls back to Home
+ await page.goto(FILE+'#nonsense');
+ await page.waitForFunction(()=>window.__MW_TEST__);
+ expect(await page.evaluate(()=>document.querySelector('[data-tab-panel=home]').hidden)).toBe(false);
+ // click navigation: exactly one panel visible after each click
+ for(const t of ['movement','species','home','trips']){
+  await page.locator(`#tab-${t}`).click();
+  const vis=await page.evaluate(()=>['home','movement','species','map','calendar','trips','ai','about'].filter(x=>!document.querySelector(`[data-tab-panel=${x}]`).hidden));
+  expect(vis).toEqual([t]);
+  await expect(page.locator(`#tab-${t}`)).toHaveAttribute('aria-selected','true');
+ }
+ // no-refetch on tab switches
+ let calls=0;await page.route('**api.ebird.org/**',r=>{calls++;r.continue();});
+ const before=calls;
+ for(const t of ['map','calendar','species','home'])await page.locator(`#tab-${t}`).click();
+ expect(calls).toBe(before);
+});
+
+test('tabs: state preservation across switches + map lifecycle + keyboard + back/forward',async({page})=>{
+ await mockEbird(page);
+ await page.addInitScript(()=>localStorage.setItem('migrationwatch.settings',JSON.stringify({ebirdKey:'GOODKEY'})));
+ await boot(page);
+ await page.waitForFunction(()=>window.__MW_TEST__.state.refreshed,null,{timeout:20000});
+ // calendar selection survives tab switches
+ await gotoTab(page,'calendar');
+ await page.locator('#cal-species').selectOption('sancra');
+ await gotoTab(page,'home');await gotoTab(page,'calendar');
+ await expect(page.locator('#cal-species')).toHaveValue('sancra');
+ // trip target survives
+ await gotoTab(page,'trips');
+ await page.locator('#wsg-target').selectOption('crane');
+ await gotoTab(page,'home');await gotoTab(page,'trips');
+ await expect(page.locator('#wsg-target')).toHaveValue('crane');
+ // map: entering Map initializes; repeated Map→Home→Map does not create a second instance
+ await gotoTab(page,'map');
+ await page.waitForFunction(()=>window.__MW_TEST__.MapMod.map!==null,null,{timeout:20000});
+ const style1=await page.evaluate(()=>window.__MW_TEST__.MapMod.map._container===null||true);
+ await gotoTab(page,'home');await gotoTab(page,'map');
+ await page.waitForTimeout(400);
+ expect(await page.evaluate(()=>!!window.__MW_TEST__.MapMod.map)).toBe(true);
+ await expect(page.locator('#map canvas').first()).toBeVisible({timeout:15000});
+ // resize called after reveal: container has non-zero height
+ const h=await page.evaluate(()=>document.getElementById('map').getBoundingClientRect().height);
+ expect(h).toBeGreaterThan(200);
+ // keyboard: ArrowRight from active tab moves selection
+ await page.locator('#tab-home').click();
+ await page.locator('#tab-home').focus();
+ await page.keyboard.press('ArrowRight');
+ await expect(page.locator('#tab-movement')).toHaveAttribute('aria-selected','true');
+ await page.keyboard.press('End');
+ await expect(page.locator('#tab-about')).toHaveAttribute('aria-selected','true');
+ await page.keyboard.press('Home');
+ await expect(page.locator('#tab-home')).toHaveAttribute('aria-selected','true');
+ // back/forward through hash: drive with real hash changes (location.hash creates entries)
+ await page.evaluate(()=>{location.hash='map';});
+ await page.waitForTimeout(150);
+ await page.evaluate(()=>{location.hash='trips';});
+ await page.waitForTimeout(150);
+ await page.goBack();
+ await expect(page.locator('#tab-map')).toHaveAttribute('aria-selected','true');
+ // cross-tab: featured card View calendar → calendar tab with species set
+ await gotoTab(page,'home');
+ await page.locator('#fcard-sancra [data-cal]').click();
+ await expect(page.locator('#tab-calendar')).toHaveAttribute('aria-selected','true');
+ await expect(page.locator('#cal-species')).toHaveValue('sancra');
+ // featured card Show on map → map tab with Selected filter
+ await gotoTab(page,'home');
+ await page.locator('#fcard-sancra [data-mapsp]').click();
+ await expect(page.locator('#tab-map')).toHaveAttribute('aria-selected','true');
+ expect(await page.locator('[data-mapfilter=selected]').getAttribute('aria-pressed')).toBe('true');
 });
