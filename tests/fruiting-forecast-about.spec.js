@@ -134,7 +134,7 @@ test('manifest counts are derived from descriptors and handle partial resource p
   const errors=await setup(page);
   await page.evaluate(m => window.__FRUITING_FORECAST_TEST__.getState().gis.manifest=m, manifest); await about(page);
   const coverage=page.locator('#aboutCoverageStatus');
-  for(const [label,count] of [['Published habitat tiles',40],['Public-land tiles',21],['Access-point tiles',13]]) await expect(coverage.locator('dl > div').filter({hasText:label})).toContainText(String(count));
+  for(const [label,count] of [['Published habitat tiles',40],['Public-land tiles',17],['Access-point tiles',13]]) await expect(coverage.locator('dl > div').filter({hasText:label})).toContainText(String(count));
   await expect(coverage).toContainText('2026.09.01');
   await page.getByRole('tab',{name:'Forecast',exact:true}).click();
   await page.evaluate(() => window.__FRUITING_FORECAST_TEST__.getState().gis.manifest={datasetVersion:'fixture-v2',tiles:[{habitat:{url:'one.parquet'}},{id:'address-only'},{url:'legacy.parquet',publicLands:{url:'land.parquet'}}]});

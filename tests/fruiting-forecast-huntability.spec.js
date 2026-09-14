@@ -110,16 +110,17 @@ test('real static property geometry and authoritative rule metadata load', async
   expect(errors).toEqual([]);
 });
 
-test('malformed rules degrade the access subsystem without breaking habitat', async ({ page }) => {
+test('malformed rules retain geometry and leave collecting permission unverified', async ({ page }) => {
   const errors = await open(page);
   await page.route('**/data/fruiting-forecast/public-land-rules.json**', r => r.fulfill({ status: 200, contentType: 'application/json', body: '{"schemaVersion":1,"rules":[{"bad":true}]}' }));
   const result = await page.evaluate(async () => {
     const t = window.__FRUITING_FORECAST_TEST__;
     const evidence = await t.HabitatProvider.fetch(t.zonePoints(38.3553, -87.5675, 25, 'standard'), { lat: 38.3553, lon: -87.5675 }, 25, new AbortController().signal, true);
-    return { center: evidence.center.available, properties: evidence._properties.length, error: evidence._rules.error };
+    return { center: evidence.center.available, properties: evidence._properties.length, unknown: evidence._properties.every(p=>p.rule.collectingStatus==='UNKNOWN_VERIFY'), error: evidence._rules.error };
   });
   expect(result.center).toBe(true);
-  expect(result.properties).toBe(0);
+  expect(result.properties).toBeGreaterThan(0);
+  expect(result.unknown).toBe(true);
   expect(result.error).toContain('malformed');
   expect(errors).toEqual([]);
 });

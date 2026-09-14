@@ -289,3 +289,11 @@ These qualifications supersede stronger offline/general fallback claims earlier 
 Playwright coverage in `tests/fruiting-forecast-about.spec.js` checks navigation/state identity, keyboard controls, safety/dependency copy, current versus archived evidence counts, key secrecy/configuration, missing/partial GIS, zero observations, disabled overlays, changing manifests, 82/70 score scope, and light/dark/system mobile layouts at 390 × 844.
 
 Validation: all 54 distinct Fruiting Forecast Playwright tests passed (53 in the standard run, plus the separately enabled live Princeton check), including 10 About tests. Desktop and 390 × 844 light-mode screenshots were reviewed; light/dark/system mobile overflow checks passed. Inline scripts parse and the deploy-convention audit reports no errors or warnings. The public-land outage regression mock now intercepts current `pl/*.parquet` tiles and verifies their recorded HTTP 503 failures.
+
+## CONUS architecture checkpoint (2026-09-14)
+
+The authoritative expansion handoff is [fruiting-forecast-conus-expansion.md](fruiting-forecast-conus-expansion.md). It supersedes older claims here about universal Midwest biology, URL-counted coverage, rule-file failures hiding geometry, and OPFS metadata proving durable tile import.
+
+FF-1.5.0 separates stable taxon identity from regional scoring parameters. EPA Level III polygons select a profile; the original seven models remain provisional Central/Eastern Hardwood models, also provisionally reused in Appalachian/Ozark geography. Southern Rockies gets a source-traced Boletus rubriceps season/elevation model. Other geographic profiles are identified but unsupported, not scored zero or assigned Indiana species.
+
+Schema-v4 per-layer status excludes unverified empty placeholders. Populated publication is 40 habitat, 17 public-land and 13 access-point tiles, conservatively PARTIAL. IndexedDB bytes are keyed by identity, version and checksum; cache errors no longer discard downloaded bytes. Valid geometry remains with UNKNOWN_VERIFY when rule loading fails. The new build subcommand provides atomic incremental normalized-tile publication; raw bulk adapters are pending.

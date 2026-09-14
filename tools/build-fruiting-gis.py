@@ -103,10 +103,14 @@ def pad_tile_features(bbox: tuple[float, float, float, float], cache_dir: Path) 
              "spatialRel": "esriSpatialRelIntersects",
              "outFields": "Pub_Access,BndryName,Unit_Nm,MngNm_Desc,Category", "returnGeometry": "true",
              "maxAllowableOffset": 0.00025, "resultOffset": offset, "resultRecordCount": 2000}
-        j = requests.get(PADUS, params=p, timeout=90).json()
+        response = requests.get(PADUS, params=p, timeout=90)
+        response.raise_for_status()
+        j = response.json()
+        if "error" in j or "features" not in j:
+            raise ValueError(f"PAD-US query failed: {j.get('error', 'missing features')}")
         fs = j.get("features") or []
         feats.extend(fs)
-        if len(fs) < 2000 or offset > 20000:
+        if not j.get("exceededTransferLimit") and len(fs) < 2000:
             break
         offset += 2000
     path.write_text(json.dumps(feats))
@@ -886,4 +890,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "build":
+        from fruiting_tile_publish import main as publish
+        publish(ROOT)
+    else:
+        main()
