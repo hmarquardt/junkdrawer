@@ -1,10 +1,11 @@
 """Incremental publication of normalized bulk-source tiles (no network calls).
 
 Adapters must provide one normalized Parquet and a provenance sidecar per tile:
-<source-dir>/<habitat|pl|ap>/<tile>.parquet[.json]. Sidecar requires datasetVersion,
+<source-dir>/<habitat|pl|ap|fire>/<tile>.parquet[.json]. Sidecar requires datasetVersion,
 sourceUrl, status AVAILABLE/PARTIAL/VERIFIED_EMPTY. Empty data is never inferred
 from a missing file or a failed query. This is the bulk ingestion boundary, not
-an adapter claiming to read raw NLCD/PAD-US/SSURGO formats.
+an adapter claiming to read raw NLCD/PAD-US/SSURGO/MTBS formats; the raw adapters
+live in tools/fruiting_bulk_adapters.py.
 """
 import argparse
 import hashlib
@@ -18,8 +19,9 @@ import duckdb
 
 LAYERS = {'habitat': ('habitat', 'cells', {'lat','lon','forest','canopy','elevation_ft'}),
           'public-land': ('pl', 'properties', {'property_id','geometry_json','min_lon','min_lat','max_lon','max_lat'}),
-          'access': ('ap', 'points', {'access_id','property_id','lat','lon'})}
-KEYS = {'habitat':'habitat','public-land':'publicLands','access':'accessPoints'}
+          'access': ('ap', 'points', {'access_id','property_id','lat','lon'}),
+          'fire': ('fire', 'perimeters', {'perimeter_id','fire_year','geometry_json','min_lon','min_lat','max_lon','max_lat'})}
+KEYS = {'habitat':'habitat','public-land':'publicLands','access':'accessPoints','fire':'fireHistory'}
 
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,6 +40,29 @@ def tiles_for_bbox(box):
     if not (-125<=w<e<=-66 and 24<=s<n<=50):
         raise ValueError('Expected a valid CONUS west south east north bbox')
     return [f'n{lat:02d}_w{abs(lon):03d}' for lat in range(math.floor(s), math.ceil(n)) for lon in range(math.floor(w),math.ceil(e))]
+
+def summary_of(tiles):
+    """Recomputed on every checkpoint so About/diagnostics never show stale counts."""
+    out = {'tileCount': len(tiles), 'layers': {}}
+    for layer in LAYERS:
+        stat = {'populated': 0, 'verifiedEmpty': 0, 'unbuilt': 0, 'failed': 0, 'bytes': 0, 'rows': 0}
+        key, count_key = KEYS[layer], LAYERS[layer][1]
+        for tile in tiles:
+            asset = tile.get(key) or {}
+            status = asset.get('status')
+            if status in {'AVAILABLE', 'PARTIAL'} and asset.get('url'):
+                stat['populated'] += 1
+                stat['bytes'] += asset.get('bytes') or 0
+                stat['rows'] += asset.get(count_key) or 0
+            elif status == 'VERIFIED_EMPTY':
+                stat['verifiedEmpty'] += 1
+            elif status == 'FAILED':
+                stat['failed'] += 1
+            else:
+                stat['unbuilt'] += 1
+        out['layers'][layer] = stat
+    return out
+
 
 def main(root):
     p=argparse.ArgumentParser(description=__doc__)
@@ -111,6 +136,8 @@ def main(root):
                 finally:
                     manifest['schemaVersion']=4
                     manifest['tiles']=[entries[k] for k in sorted(entries)]
+                    manifest['summary']={**(manifest.get('summary') or {}), **summary_of(manifest['tiles'])}
+                    manifest.setdefault('tileSchema',{})['subdirs']={layer: LAYERS[layer][0]+'/' for layer in LAYERS}
                     # Deterministic release identifier; no wall-clock bytes in output.
                     manifest['datasetVersion']='content-'+hashlib.sha256(json.dumps(manifest['tiles'],sort_keys=True).encode()).hexdigest()[:16]
                     atomic_json(path,manifest)

@@ -894,5 +894,9 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "build":
         from fruiting_tile_publish import main as publish
         publish(ROOT)
+    elif len(sys.argv) > 1 and sys.argv[1] == "bulk":
+        from fruiting_bulk_adapters import main as bulk
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        bulk()
     else:
         main()

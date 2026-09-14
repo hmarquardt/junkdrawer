@@ -134,8 +134,10 @@ test('manifest counts are derived from descriptors and handle partial resource p
   const errors=await setup(page);
   await page.evaluate(m => window.__FRUITING_FORECAST_TEST__.getState().gis.manifest=m, manifest); await about(page);
   const coverage=page.locator('#aboutCoverageStatus');
-  for(const [label,count] of [['Published habitat tiles',40],['Public-land tiles',17],['Access-point tiles',13]]) await expect(coverage.locator('dl > div').filter({hasText:label})).toContainText(String(count));
-  await expect(coverage).toContainText('2026.09.01');
+  const vendor = require('../data/fruiting-forecast/manifest.json');
+  const counts = vendor.summary.layers;
+  for(const [label,count] of [['Published habitat tiles',counts.habitat.populated],['Public-land tiles',counts['public-land'].populated],['Access-point tiles',counts.access.populated]]) await expect(coverage.locator('dl > div').filter({hasText:label})).toContainText(String(count));
+  await expect(coverage).toContainText(vendor.datasetVersion);
   await page.getByRole('tab',{name:'Forecast',exact:true}).click();
   await page.evaluate(() => window.__FRUITING_FORECAST_TEST__.getState().gis.manifest={datasetVersion:'fixture-v2',tiles:[{habitat:{url:'one.parquet'}},{id:'address-only'},{url:'legacy.parquet',publicLands:{url:'land.parquet'}}]});
   await about(page);
@@ -183,7 +185,7 @@ test('hosted About loads only manifest metadata and reuses it without starting G
   });
   await page.goto('http://fruiting.test/fruiting-forecast.html',{waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__);
-  await about(page); await expect(page.locator('#aboutCoverageStatus')).toContainText('2026.09.01');
+  await about(page); await expect(page.locator('#aboutCoverageStatus')).toContainText(manifest.datasetVersion);
   await page.getByRole('tab',{name:'Forecast',exact:true}).click(); await about(page);
   expect(requests.filter(x=>x.endsWith('/manifest.json'))).toHaveLength(1);
   expect(requests.some(x=>x.endsWith('.parquet'))).toBe(false);
