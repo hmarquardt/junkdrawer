@@ -38,24 +38,33 @@ COLORADO_TILES = ('n37_w106', 'n37_w107', 'n37_w108', 'n38_w106', 'n38_w107', 'n
                   'n39_w106', 'n39_w107', 'n39_w108', 'n40_w106', 'n40_w107')
 # The northern New Mexico extension: Taos/Carson NF, Pecos/Santa Fe NF, Santa Fe/Sandia.
 NEW_MEXICO_TILES = ('n36_w107', 'n36_w106', 'n35_w106')
-# Pacific Northwest Maritime bounded Oregon release, derived from the pinned EPA
-# Level III geometry by tools/fruiting_pnw_release.py (core >= 50% PNW share, halo
-# 25-50% four-connected to the selection, Oregon share >= 25%): Coast Range,
+# Pacific Northwest Maritime bounded release, derived from the pinned EPA Level III
+# geometry by tools/fruiting_pnw_release.py (core >= 50% PNW share, halo 25-50%
+# four-connected to the selection, state share >= 25%). Oregon: Coast Range,
 # western Cascades, Willamette/foothill transitions, Mt Hood boundary, southern
-# Cascades/coast edge. The two revision-6 canaries are part of the same set.
-PNW_TILES = ('n42_w123', 'n42_w125', 'n43_w123', 'n43_w124', 'n43_w125', 'n44_w122',
-             'n44_w123', 'n44_w124', 'n45_w122', 'n45_w123', 'n45_w124')
-# Ocean-heavy southern coast tile: real land exists but MTBS has no perimeter.
-PNW_OCEAN_TILES = ('n43_w125',)
+# Cascades/coast. Washington: Olympics, Puget lowlands, western Cascades, lower
+# Columbia (the two shared tiles), northwest Washington, Cascade-transition halos.
+PNW_OREGON_TILES = ('n42_w123', 'n42_w125', 'n43_w123', 'n43_w124', 'n43_w125', 'n44_w122',
+                    'n44_w123', 'n44_w124', 'n45_w122', 'n45_w123', 'n45_w124')
+PNW_WASHINGTON_TILES = ('n45_w122', 'n45_w123', 'n46_w122', 'n46_w123', 'n46_w124',
+                        'n47_w122', 'n47_w123', 'n47_w124', 'n47_w125', 'n48_w123')
+PNW_TILES = tuple(sorted(set(PNW_OREGON_TILES) | set(PNW_WASHINGTON_TILES)))
+# Real land exists but the pinned MTBS service returns no mapped >=1000-acre
+# perimeter for these wet westside/ocean tiles: an explicit verified empty.
+PNW_OCEAN_TILES = ('n43_w125', 'n46_w123', 'n46_w124', 'n47_w123', 'n47_w125', 'n48_w123')
 # The bounded Southern Rockies release (Colorado + northern New Mexico).
 RELEASE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES))
 # Every tile whose habitat declares all components AVAILABLE.
 ACCESS_TILES = tuple(sorted(('n39_w106', 'n40_w106') + PNW_TILES))
 AVAILABLE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES + PNW_TILES))
+# Tiles whose access evidence composes more than one prepared OSM state.
+PNW_SHARED_STATE_TILES = ('n45_w122', 'n45_w123', 'n46_w123', 'n46_w124')
 # Minimum real soil evidence observed per PNW tile (land share varies with ocean).
 PNW_TILE_MIN_SOIL = {'n42_w123': 200, 'n42_w125': 100, 'n43_w123': 200, 'n43_w124': 200,
                      'n43_w125': 100, 'n44_w122': 200, 'n44_w123': 200, 'n44_w124': 200,
-                     'n45_w122': 100, 'n45_w123': 200, 'n45_w124': 200}
+                     'n45_w122': 100, 'n45_w123': 200, 'n45_w124': 200,
+                     'n46_w122': 100, 'n46_w123': 200, 'n46_w124': 100, 'n47_w122': 200,
+                     'n47_w123': 200, 'n47_w124': 200, 'n47_w125': 100, 'n48_w123': 200}
 
 
 class AdapterContracts(unittest.TestCase):
@@ -791,7 +800,7 @@ class PublishedColoradoTiles(unittest.TestCase):
             self.assertEqual(sum(stat[key] for key in ('populated', 'verifiedEmpty', 'unbuilt', 'failed')), tile_count, layer)
             # Only the ocean-heavy PNW coast tile declares an explicit verified
             # empty (no mapped MTBS perimeter); every other layer has none.
-            self.assertEqual(stat['verifiedEmpty'], 1 if layer == 'fire' else 0, layer)
+            self.assertEqual(stat['verifiedEmpty'], len(PNW_OCEAN_TILES) if layer == 'fire' else 0, layer)
         self.assertGreaterEqual(summary['habitat']['available'], len(AVAILABLE_TILES))
         self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], len(AVAILABLE_TILES))
         self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], len(AVAILABLE_TILES))
@@ -909,7 +918,7 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
         self.assertGreaterEqual(self.manifest['summary']['states'].get('NM', 0), len(NEW_MEXICO_TILES))
         self.assertGreaterEqual(self.manifest['summary']['states'].get('CO', 0), len(COLORADO_TILES))
         self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('southernRockies'), len(RELEASE_TILES))
-        self.assertGreaterEqual(self.manifest['summary']['states'].get('OR', 0), len(PNW_TILES))
+        self.assertGreaterEqual(self.manifest['summary']['states'].get('OR', 0), len(PNW_OREGON_TILES))
         self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('pnw'), len(PNW_TILES))
 
 
@@ -1042,22 +1051,30 @@ class PacificNorthwestRelease(unittest.TestCase):
             self.assertGreater(tile['accessPoints']['points'], 0, tile_id)
 
     def test_pnw_release_is_derived_from_pinned_epa_geometry(self):
-        """The published PNW footprint must equal the reproducible derivation."""
-        shares = pnw_release.shares_for_tiles('OR')
-        derived, eligible = pnw_release.select_tiles(shares)
+        """Both state footprints must equal the reproducible derivation."""
+        or_derived, or_eligible = pnw_release.select_tiles(pnw_release.shares_for_tiles('OR'))
+        wa_derived, wa_eligible = pnw_release.select_tiles(pnw_release.shares_for_tiles('WA'))
         published_pnw = sorted(
             tile_id for tile_id in PNW_TILES
             if self.tiles[tile_id]['publicLands'].get('status') in {'AVAILABLE', 'VERIFIED_EMPTY'})
-        self.assertEqual(published_pnw, sorted(derived))
-        self.assertEqual({t: eligible[t]['role'] for t in derived},
+        self.assertEqual(published_pnw, sorted(set(or_derived) | set(wa_derived)))
+        self.assertEqual(sorted(or_derived), sorted(PNW_OREGON_TILES),
+                         'the Oregon footprint must not drift after generalization')
+        self.assertEqual(sorted(wa_derived), sorted(PNW_WASHINGTON_TILES))
+        self.assertEqual({t: or_eligible[t]['role'] for t in or_derived},
                          {'n42_w123': 'core', 'n42_w125': 'halo', 'n43_w123': 'core', 'n43_w124': 'core',
                           'n43_w125': 'halo', 'n44_w122': 'halo', 'n44_w123': 'core', 'n44_w124': 'core',
                           'n45_w122': 'halo', 'n45_w123': 'core', 'n45_w124': 'core'})
-        # Every published PNW tile is Oregon-predominant; no Washington tile exists.
+        self.assertEqual({t: wa_eligible[t]['role'] for t in wa_derived},
+                         {'n45_w122': 'halo', 'n45_w123': 'core', 'n46_w122': 'core', 'n46_w123': 'core',
+                          'n46_w124': 'core', 'n47_w122': 'halo', 'n47_w123': 'core', 'n47_w124': 'core',
+                          'n47_w125': 'halo', 'n48_w123': 'halo'})
+        # Every published PNW tile is state-predominant; no Canada-border tile exists.
         for tile_id in PNW_TILES:
-            self.assertGreaterEqual(eligible[tile_id]['stateSharePct'], 25.0, tile_id)
-            self.assertGreaterEqual(eligible[tile_id]['pnwSharePct'], 25.0, tile_id)
-        self.assertFalse(any(tile_id.startswith('n46_') for tile_id in self.tiles if tile_id in AVAILABLE_TILES))
+            shares = (or_eligible if tile_id in PNW_OREGON_TILES else wa_eligible)[tile_id]
+            self.assertGreaterEqual(shares['stateSharePct'], 25.0, tile_id)
+            self.assertGreaterEqual(shares['pnwSharePct'], 25.0, tile_id)
+        self.assertNotIn('n49_w123', self.tiles, 'no tile north of the 49th parallel is published')
 
     def test_pnw_cross_tile_access_identity_survives_regional_scale(self):
         paths = [str(DATA / self.tiles[t]['accessPoints']['url']) for t in PNW_TILES]
@@ -1076,11 +1093,15 @@ class PacificNorthwestRelease(unittest.TestCase):
     def test_oregon_soil_is_state_scoped_and_current(self):
         for tile_id in PNW_TILES:
             habitat = self.tiles[tile_id]['habitat']
-            soil = next(source for source in habitat['sources'] if source['id'] == 'ssurgo_sda')
-            self.assertEqual(soil['state'], 'OR', tile_id)
-            self.assertEqual(soil['inclusion'], 'requested', tile_id)
-            self.assertIn(':OR@', habitat['datasetVersion'])
-            self.assertTrue(str(soil.get('surveyVintage', '')).startswith('202'), tile_id)
+            states = {source['state'] for source in habitat['sources'] if source['id'] == 'ssurgo_sda'}
+            primary = 'WA' if tile_id in PNW_WASHINGTON_TILES else 'OR'
+            self.assertIn(primary, states, tile_id)
+            self.assertIn('requested', {source['inclusion'] for source in habitat['sources'] if source['id'] == 'ssurgo_sda'}, tile_id)
+            # Multi-state soil versions order states freely; the primary state
+            # must appear as a composed ssurgo-sda token either way.
+            self.assertRegex(habitat['datasetVersion'], r'ssurgo-sda-[0-9-]+:' + primary + r'[+@]')
+            for source in (s for s in habitat['sources'] if s['id'] == 'ssurgo_sda'):
+                self.assertTrue(str(source.get('surveyVintage', '')).startswith('202'), tile_id)
             row = self.con.execute(f"""SELECT count(*), count(drainage_class), count(awc_25_cm)
                 FROM read_parquet('{self.habitat_path(tile_id)}')""").fetchone()
             self.assertEqual(row[0], 400, tile_id)
@@ -1089,6 +1110,16 @@ class PacificNorthwestRelease(unittest.TestCase):
             floor = 200 if PNW_TILE_MIN_SOIL[tile_id] >= 200 else 100
             self.assertGreater(row[1], floor, f'{tile_id} soil coverage is implausibly sparse')
             self.assertGreater(row[2], floor, tile_id)
+
+    def test_shared_boundary_tiles_carry_cross_state_soil(self):
+        """Columbia-river tiles were rebuilt with both prepared soil states so
+        Washington-side cells resolve Washington evidence (point-level MUKEY)."""
+        for tile_id in ('n45_w122', 'n45_w123'):
+            states = {source['state'] for source in self.tiles[tile_id]['habitat']['sources']
+                      if source['id'] == 'ssurgo_sda'}
+            self.assertEqual(states, {'OR', 'WA'}, tile_id)
+            self.assertIn(':OR+', self.tiles[tile_id]['habitat']['datasetVersion'], tile_id)
+            self.assertIn(':WA@', self.tiles[tile_id]['habitat']['datasetVersion'], tile_id)
 
     def test_pnw_host_evidence_uses_the_new_hemlock_signal(self):
         columns, records = None, None
@@ -1109,18 +1140,14 @@ class PacificNorthwestRelease(unittest.TestCase):
         cascade_high = max(record['elevation_ft'] for record in cascade)
         self.assertGreater(cascade_high, coast_high)
 
-    def test_manifest_declares_the_pnw_profile_and_state(self):
+    def test_manifest_declares_the_pnw_profile_and_states(self):
         summary = self.manifest['summary']
         self.assertEqual(summary['ecologicalProfiles'].get('pnw'), len(PNW_TILES))
-        self.assertGreaterEqual(summary['states'].get('OR', 0), len(PNW_TILES))
-        # No Washington tile is published. Washington appears only through the
-        # documented approximate addressing dimension: the n45_* Columbia-river
-        # tile bboxes genuinely intersect Washington boundary bounding boxes.
-        self.assertIsInstance(summary['states'].get('WA'), int)
-        for tile_id in self.tiles:
-            if tile_id not in summary['publishedTiles']:
-                continue
-            self.assertFalse(tile_id.startswith('n46_'), tile_id)
+        # Both production states are covered; bbox-based state counts legitimately
+        # exceed tile counts because shared-boundary tiles intersect both states'
+        # boundary bounding boxes.
+        self.assertGreaterEqual(summary['states'].get('OR', 0), len(PNW_OREGON_TILES))
+        self.assertGreaterEqual(summary['states'].get('WA', 0), len(PNW_WASHINGTON_TILES))
         self.assertEqual(sorted(summary['coverageTiles']), sorted(AVAILABLE_TILES))
 
     def test_legacy_tiles_lack_the_hemlock_column(self):

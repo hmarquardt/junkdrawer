@@ -32,7 +32,7 @@ from fruiting_bulk_adapters import (_sha256, load_cache_manifest, save_cache_man
                                    tile_bbox, write_parquet)
 
 VERSION = 'osm-access-v1'
-STATES = {'CO': 'colorado', 'OR': 'oregon', 'NM': 'new-mexico'}
+STATES = {'CO': 'colorado', 'OR': 'oregon', 'NM': 'new-mexico', 'WA': 'washington'}
 ATTRIBUTION = '© OpenStreetMap contributors'
 LICENSE = 'https://www.openstreetmap.org/copyright'
 TAGS = ('name operator access motor_vehicle vehicle foot bicycle surface smoothness tracktype '
@@ -152,7 +152,7 @@ def prepare(cache, state, refresh=False, snapshot='latest', local_pbf=None):
         raise ValueError('Expected supported state and latest or YYMMDD snapshot')
     key = 'osm_access:' + state
     old = load_cache_manifest(cache)['sources'].get(key)
-    if old and not refresh:
+    if old and old.get('status') == 'READY' and not refresh:
         validate_ready(cache, old)
         return {**old, 'reused': True}
     url = f'https://download.geofabrik.de/north-america/us/{STATES[state]}-{snapshot}.osm.pbf'
@@ -288,10 +288,14 @@ def normalize(candidate, roads, properties, project, source_version):
                   # stays evidence even when a place is named "School Canyon".
                   or bool(re.search(r'\b(?:school|college|university|campus|academy)\b', text))
                   or bool(re.search(r'\b(?:parent|student|staff|customer|office)\s+parking\b', tags.get('name', ''), re.I))
+                  # Washington-scale audit: transit/ferry park-and-ride lots are
+                  # transportation facilities, not forest access (Trimet needs
+                  # its own word; other agencies carry "transit").
+                  or bool(re.search(r"park(?:ing)?\s*['&+-]?\s*(?:and|&)\s*ride\b|\bp\s*[&+]r\b|transit\s+(?:center|station|mall)|commuter\s+(?:parking|lot)|\bferr(?:y|ies)\b|\btransit\b|\btrimet\b", text))
                   or any(re.search(r'\b(?:school|college|university|campus)\b', a['property_name'] or '', re.I)
                          for a in associations))
     if irrelevant:
-        grade, reasons = 'REJECTED', ['Structured, institutional or non-recreation parking']
+        grade, reasons = 'REJECTED', ['Structured, institutional, transit or non-recreation parking']
     elif blocked:
         grade, reasons = 'RESTRICTED', blocked
     elif not associations:
@@ -395,6 +399,22 @@ def read_local(path, bbox):
     return result
 
 
+def representative_point(candidate):
+    """Display/association location: the node coordinate, or a point on a mapped
+    area. Used for the single-tile assignment so an edge-crossing polygon is
+    published exactly once with its full geometry."""
+    geometry = candidate['geometry'] if isinstance(candidate, dict) else candidate
+    shape_geom = shape(geometry)
+    return shape_geom if shape_geom.geom_type == 'Point' else shape_geom.representative_point()
+
+
+def in_tile(candidate, bbox):
+    """Half-open tile membership [west, east) x [south, north): a feature on an
+    integer-degree edge belongs to exactly one tile, never two."""
+    point = representative_point(candidate)
+    return bbox[0] <= point.x < bbox[2] and bbox[1] <= point.y < bbox[3]
+
+
 def build(cache, states, tile_id, out, root=Path(__file__).resolve().parents[1]):
     started = time.monotonic()
     manifest = json.loads((root / 'data/fruiting-forecast/manifest.json').read_text())
@@ -423,7 +443,7 @@ def build(cache, states, tile_id, out, root=Path(__file__).resolve().parents[1])
         entry = load_cache_manifest(cache)['sources'].get('osm_access:' + state.upper())
         folder = validate_ready(cache, entry)
         sources.append({k: v for k, v in entry.items() if k not in {'files', 'directory'}})
-        candidates.update({r['id']: r for r in read_local(folder / 'candidates.parquet', bbox)})
+        candidates.update({r['id']: r for r in read_local(folder / 'candidates.parquet', bbox) if in_tile(r, bbox)})
         roads.update({r['id']: r for r in read_local(folder / 'roads.parquet', halo)})
     index = RoadIndex(list(roads.values()), project)
     source_version = VERSION + ':' + ':'.join(s['sha256'][:16] for s in sources)

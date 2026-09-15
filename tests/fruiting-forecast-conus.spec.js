@@ -316,13 +316,16 @@ test.beforeAll(async()=>{
 test.afterAll(()=>{if(artifactServer)artifactServer.kill()});
 const COLORADO_TILES=['n37_w106','n37_w107','n37_w108','n38_w106','n38_w107','n38_w108','n39_w106','n39_w107','n39_w108','n40_w106','n40_w107'];
 const NEW_MEXICO_TILES=['n36_w107','n36_w106','n35_w106'];
-// Bounded Oregon PNW production release, derived from pinned EPA Level III
-// geometry by tools/fruiting_pnw_release.py (core >= 50% PNW share, halo
-// 25-50% four-connected, Oregon share >= 25%): Coast Range, western Cascades,
-// Willamette/foothills, Mt Hood boundary, southern Cascades/coast.
-const PNW_TILES=['n42_w123','n42_w125','n43_w123','n43_w124','n43_w125','n44_w122','n44_w123','n44_w124','n45_w122','n45_w123','n45_w124'];
-// Ocean-heavy southern coast tile: real land, no mapped MTBS perimeter.
-const PNW_OCEAN_TILES=['n43_w125'];
+// Bounded PNW production release, derived from pinned EPA Level III geometry by
+// tools/fruiting_pnw_release.py (core >= 50% PNW share, halo 25-50% four-connected,
+// state share >= 25%). Oregon: Coast Range, western Cascades, Willamette/foothills,
+// Mt Hood boundary, southern Cascades/coast. Washington: Olympics, Puget lowlands,
+// western Cascades, lower Columbia (two shared tiles), northwest Washington.
+const PNW_OREGON_TILES=['n42_w123','n42_w125','n43_w123','n43_w124','n43_w125','n44_w122','n44_w123','n44_w124','n45_w122','n45_w123','n45_w124'];
+const PNW_WASHINGTON_TILES=['n45_w122','n45_w123','n46_w122','n46_w123','n46_w124','n47_w122','n47_w123','n47_w124','n47_w125','n48_w123'];
+const PNW_TILES=[...new Set([...PNW_OREGON_TILES,...PNW_WASHINGTON_TILES])];
+// Wet westside/ocean tiles where the pinned MTBS service maps no >=1000-acre fire.
+const PNW_OCEAN_TILES=['n43_w125','n46_w123','n46_w124','n47_w123','n47_w125','n48_w123'];
 const ACCESS_TILES=['n39_w106','n40_w106',...PNW_TILES];
 const RELEASE_TILES=[...NEW_MEXICO_TILES,...COLORADO_TILES,...PNW_TILES].sort();
 test('bounded Southern Rockies release declares complete habitat with real soil and matching digests',async({page})=>{
@@ -401,25 +404,26 @@ test('release summary derives bounded PNW production coverage without conflating
   await page.route('https://tile.openstreetmap.org/**',r=>r.abort());
   await page.goto(`http://127.0.0.1:${artifactPort}/fruiting-forecast.html`,{waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__);
-  const result=await page.evaluate(async()=>{
+  const result=await page.evaluate(async(PNW_TILES)=>{
     const t=window.__FRUITING_FORECAST_TEST__;
     const manifest=await t.gisManifest(true);
     const s=manifest.summary;
     return {coverageTiles:s.coverageTiles,publishedTiles:s.publishedTiles,profiles:s.ecologicalProfiles,states:s.states,
       habitat:s.layers.habitat,access:s.layers.access,fire:s.layers.fire,publicLand:s.layers['public-land'],
-      pnwTiles:(manifest.tiles||[]).filter(x=>['n42_w123','n42_w125','n43_w123','n43_w124','n43_w125','n44_w122','n44_w123','n44_w124','n45_w122','n45_w123','n45_w124'].includes(x.id))
+      pnwTiles:(manifest.tiles||[]).filter(x=>PNW_TILES.includes(x.id))
         .map(x=>({id:x.id,habitat:x.habitat.status,pl:x.publicLands.status,fire:x.fireHistory.status,access:x.accessPoints.status,cells:x.habitat.cells,components:x.habitat.components}))};
-  });
-  // Derived dimensions, not hand-maintained numbers: 25 complete release tiles,
-  // 11 of them the bounded Oregon PNW production release.
-  expect(result.coverageTiles.length).toBe(25);
-  expect(result.profiles.pnw).toBe(11);
-  expect(result.states.OR).toBeGreaterThanOrEqual(11);
-  expect(result.habitat.available).toBe(25);
-  expect(result.publicLand.available).toBe(25);
-  expect(result.access.available).toBe(13); // 11 PNW + the two Colorado access canaries
-  expect(result.fire.verifiedEmpty).toBe(1); // ocean-heavy n43_w125 declares it explicitly
-  expect(result.fire.available).toBe(24);
+  }, PNW_TILES);
+  // Derived dimensions, not hand-maintained numbers: 33 complete release tiles
+  // (14 Southern Rockies + 19 PNW across Oregon and Washington).
+  expect(result.coverageTiles.length).toBe(33);
+  expect(result.profiles.pnw).toBe(19);
+  expect(result.states.OR).toBeGreaterThanOrEqual(14);
+  expect(result.states.WA).toBeGreaterThanOrEqual(11);
+  expect(result.habitat.available).toBe(33);
+  expect(result.publicLand.available).toBe(33);
+  expect(result.access.available).toBe(21); // 19 PNW + the two Colorado access canaries
+  expect(result.fire.verifiedEmpty).toBe(6); // wet westside/ocean tiles declare it explicitly
+  expect(result.fire.available).toBe(27);
   for(const tile of result.pnwTiles){
     expect(tile.habitat).toBe('AVAILABLE');
     expect(tile.cells).toBe(400);
@@ -428,7 +432,8 @@ test('release summary derives bounded PNW production coverage without conflating
     expect(tile.access).toBe('AVAILABLE');
     expect(['AVAILABLE','VERIFIED_EMPTY']).toContain(tile.fire);
   }
-  expect(result.pnwTiles.filter(t=>t.fire==='VERIFIED_EMPTY').map(t=>t.id)).toEqual(['n43_w125']);
+  expect(result.pnwTiles.filter(t=>t.fire==='VERIFIED_EMPTY').map(t=>t.id).sort())
+    .toEqual([...PNW_OCEAN_TILES].sort());
   expect(errors).toEqual([]);
 });
 test('both western tiles and a legacy eastern tile load together in DuckDB-Wasm',async({page})=>{

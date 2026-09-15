@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded Oregon PNW regional release: derive tiles from the pinned EPA Level III
+"""Bounded PNW regional release: derive tiles for a state from the pinned EPA Level III
 geometry, plan the build from real published measurements, and orchestrate the
 existing prepare/build/publish pipeline deterministically.
 
-uv run tools/fruiting_pnw_release.py plan  --state OR [--source-cache DIR] [--access-cache DIR]
-uv run tools/fruiting_pnw_release.py run   --state OR [--source-cache DIR] [--access-cache DIR]
+uv run tools/fruiting_pnw_release.py plan  --state OR|WA [--source-cache DIR] [--access-cache DIR]
+uv run tools/fruiting_pnw_release.py run   --state OR|WA [--access-states OR,WA] [--source-cache DIR] [--access-cache DIR]
     [--out DIR] [--resume] [--only TID[,TID...]] [--dry-run]
 
 Tile selection is reproducible from repository data (ecoregions.json, states.json):
@@ -12,12 +12,20 @@ a tile is CORE when at least CORE_PCT percent of its area is Pacific Northwest
 Maritime ecology (EPA codes 1/2/3/4); a tile between HALO_PCT and CORE_PCT is a
 HALO only when it is four-connected to the selected set, so search radii near the
 release edge load real neighboring evidence instead of ending abruptly. Candidates
-must be predominantly Oregon (state share >= STATE_SHARE of tile area) because
-this pass is the Oregon release; Washington and California tiles are excluded by
-the same rule. No rectangle and no hand-maintained list.
+must be predominantly inside the selected state (state share >= STATE_SHARE of tile
+area), so each state's release stays administrative-bounded while the ecological
+selection itself is state-independent. The same derivation produced the Oregon
+release and produces Washington; no rectangle and no hand-maintained list.
+
+Tiles near a shared boundary (e.g. the Columbia River) can contain meaningful land
+in more than one prepared OSM state; per tile, access evidence is composed from
+exactly the prepared states whose geometry intersects the tile (deduplicated by
+stable OSM identity), and soil already composes per point by exact MUKEY state
+membership. No parallel Washington architecture.
 """
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -38,8 +46,6 @@ CORE_PCT = 50.0
 HALO_PCT = 25.0
 STATE_SHARE = 25.0
 PROFILE_CODES = {'pnw': ('1', '2', '3', '4')}
-SEARCH_LAT = range(40, 48)
-SEARCH_LON = range(-127, -114)
 METRIC_CRS = 'EPSG:5070'
 
 
@@ -77,11 +83,28 @@ def tile_id_of(lat, lon):
     return f'n{lat:02d}_w{abs(lon):03d}'
 
 
-def shares_for_tiles(state_code='OR', latitudes=SEARCH_LAT, longitudes=SEARCH_LON,
+def _search_window(state_geometry):
+    """Candidate 1-degree tiles around the state: state bounds expanded by one
+    tile in every direction, so shared-boundary tiles stay candidates."""
+    west, south, east, north = state_geometry.bounds
+    latitudes = range(max(24, math.floor(south) - 1), min(50, math.ceil(north) + 1) + 1)
+    longitudes = range(math.floor(west) - 1, math.ceil(east) + 1)
+    if any(value < 24 for value in latitudes) or any(value >= 0 for value in longitudes):
+        raise SystemExit('Only CONUS (north/west) tile addressing is supported')
+    return latitudes, longitudes
+
+
+def shares_for_tiles(state_code='OR', latitudes=None, longitudes=None,
                      profile_groups=None):
-    """Per-tile PNW/state/adjacent-profile area shares in an equal-area CRS."""
+    """Per-tile PNW/state/adjacent-profile area shares in an equal-area CRS.
+
+    The candidate window is derived from the pinned state geometry, so the same
+    contract generalizes to any state without a hardcoded grid.
+    """
     from fruiting_tile_publish import ECO_PROFILE_GROUPS
     pnw_parts, _, state_geometry = _load_geometries(state_code)
+    if latitudes is None or longitudes is None:
+        latitudes, longitudes = _search_window(state_geometry)
     eco = json.loads((DATA / 'ecoregions.json').read_text())
     others = {}
     for feature in eco['features']:
@@ -199,7 +222,7 @@ def build_plan(state_code='OR', source_cache=None, access_cache=None, core_pct=C
     if source_cache:
         plan['sourceCache'] = _cache_status(Path(source_cache), tiles)
     if access_cache:
-        plan['accessCache'] = _access_status(Path(access_cache))
+        plan['accessCache'] = _access_status(Path(access_cache), state_code)
     return plan
 
 
@@ -219,11 +242,12 @@ def _cache_status(cache, tiles):
     }
 
 
-def _access_status(cache):
+def _access_status(cache, state_code='OR'):
     from fruiting_bulk_adapters import load_cache_manifest
-    entry = load_cache_manifest(cache).get('sources', {}).get('osm_access:OR')
+    entry = load_cache_manifest(cache).get('sources', {}).get('osm_access:' + state_code)
     if not entry:
-        return {'path': str(cache), 'ready': False, 'note': 'run tools/fruiting_osm_access.py prepare --state OR'}
+        return {'path': str(cache), 'ready': False,
+                'note': f'run tools/fruiting_osm_access.py prepare --state {state_code}'}
     return {'path': str(cache), 'ready': entry.get('status') == 'READY',
             'sourceUrl': entry.get('sourceUrl'), 'extractTimestamp': entry.get('extractTimestamp'),
             'sha256': entry.get('sha256'), 'bytes': entry.get('bytes')}
@@ -245,15 +269,30 @@ def _save_journal(path, journal):
     os.replace(tmp, path)
 
 
+def _access_states_for_tile(tile_id, prepared_states, tolerance=0.01):
+    """Prepared OSM states whose geometry reaches the tile: boundary tiles merge
+    evidence from every state they actually contain (deduplicated by stable OSM
+    identity downstream), interior tiles stay single-state."""
+    from fruiting_bulk_adapters import tile_bbox
+    needed = []
+    for code in prepared_states:
+        _, _, geometry = _load_geometries(code)
+        if geometry.intersects(box(tile_bbox(tile_id)[0] - tolerance, tile_bbox(tile_id)[1] - tolerance,
+                                   tile_bbox(tile_id)[2] + tolerance, tile_bbox(tile_id)[3] + tolerance)):
+            needed.append(code)
+    return sorted(needed)
+
+
 def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources'),
         access_cache=None, out=Path('/tmp/ff-pnw-norm'), only=None, resume=False,
-        core_pct=CORE_PCT, halo_pct=HALO_PCT, state_share=STATE_SHARE):
+        core_pct=CORE_PCT, halo_pct=HALO_PCT, state_share=STATE_SHARE, access_states=None):
     started = time.monotonic()
     access_cache = Path(access_cache) if access_cache else Path(source_cache)
     source_cache, out = Path(source_cache), Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    journal_path = out / 'pnw-release-journal.json'
+    journal_path = out / f'pnw-release-journal-{state_code}.json'
     journal = _journal(journal_path)
+    access_cache_manifest = None
 
     shares_all = shares_for_tiles(state_code)
     tiles, eligible = select_tiles(shares_all, core_pct, halo_pct, state_share)
@@ -263,30 +302,43 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
         if missing:
             raise SystemExit(f'Tiles not in the derived release: {sorted(missing)}')
         tiles = sorted(wanted)
-    print(f'Derived {len(tiles)} release tiles: {", ".join(tiles)}', flush=True)
+    print(f'Derived {len(tiles)} release tiles for {state_code}: {", ".join(tiles)}', flush=True)
 
     from fruiting_bulk_adapters import (build_fire, build_habitat, build_public_land,
                                         load_cache_manifest, prepare_national, prepare_state,
-                                        prepare_tile, soil_inputs)
+                                        prepare_tile, soil_inputs, tile_bbox)
     from fruiting_osm_access import build as build_access, validate_ready as validate_access_ready
 
     # 1. Reusable sources: national products and state soil are prepared once; a
-    # READY entry is reused and never re-downloaded.
+    #    READY entry is reused and never re-downloaded.
     print('preparing national sources (reused when already READY)', flush=True)
     prepare_national(source_cache, ['forest-type', 'land-cover', 'canopy', 'states'])
     print(f'preparing {state_code} soil (reused when already READY)', flush=True)
     prepare_state(source_cache, state_code)
-    entry = load_cache_manifest(access_cache).get('sources', {}).get('osm_access:' + state_code)
-    if entry:
+    prepared_states = [state_code] + [s.strip().upper() for s in (access_states or '').split(',') if s.strip()]
+    prepared_states = sorted(dict.fromkeys(prepared_states))
+    for code in prepared_states:
+        entry = load_cache_manifest(access_cache).get('sources', {}).get('osm_access:' + code)
+        if not entry:
+            raise SystemExit(f'Prepared {code} OSM access source not found; run '
+                             'tools/fruiting_osm_access.py prepare --state ' + code + ' first (never per tile)')
         validate_access_ready(access_cache, entry)
-        print(f"OR access source validated: {entry.get('sourceUrl')}", flush=True)
-    else:
-        raise SystemExit('Prepared OR OSM access source not found; run '
-                         'tools/fruiting_osm_access.py prepare --state OR first (never per tile)')
+        print(f"{code} access source validated: {entry.get('sourceUrl')}", flush=True)
+
+    manifest = json.loads((DATA / 'manifest.json').read_text())
+    published_tiles = {t['id']: t for t in manifest['tiles']}
 
     # 2. Phase A: habitat + public land + fire, published per tile so habitat
-    #    completeness (and coverageTiles) precedes the access proof pass.
-    phase_a = [t for t in tiles if not (resume and (journal.get(t, {}).get('habitat') and _published_matches(t, journal[t]['habitat'], 'habitat')))]
+    #    completeness (and coverageTiles) precedes the access proof pass. Tiles
+    #    already published complete are never rebuilt by another state's run.
+    phase_a = [t for t in tiles
+               if (published_tiles.get(t, {}).get('habitat') or {}).get('status') != 'AVAILABLE'
+               and not (resume and (journal.get(t, {}).get('habitat') and _published_matches(t, journal[t]['habitat'], 'habitat')))]
+    for t in tiles:
+        if t not in phase_a:
+            journal.setdefault(t, {}).setdefault('habitat', {})
+            if (published_tiles.get(t, {}).get('habitat') or {}).get('sha256'):
+                journal[t]['habitat'] = {'sha256': published_tiles[t]['habitat']['sha256'], 'previouslyPublished': True}
     if phase_a:
         print(f'phase A (habitat/public-land/fire): {", ".join(phase_a)}', flush=True)
     for tile in phase_a:
@@ -311,6 +363,8 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
 
     # 3. Phase B: access proof for every tile whose habitat is complete (the
     #    access builder requires the tile to be inside the release coverage).
+    #    Per tile, evidence is composed from exactly the prepared states that
+    #    geographically reach the tile.
     manifest = json.loads((DATA / 'manifest.json').read_text())
     coverage = set(manifest['summary'].get('coverageTiles', []))
     phase_b = [t for t in tiles if t in coverage and not (resume and (journal.get(t, {}).get('access') and _published_matches(t, journal[t]['access'], 'accessPoints')))]
@@ -318,24 +372,28 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
         print(f'phase B (access): {", ".join(phase_b)}', flush=True)
     for tile in phase_b:
         tile_started = time.monotonic()
+        tile_access_states = _access_states_for_tile(tile, prepared_states)
         try:
-            build_access(access_cache, [state_code], tile, out)
+            build_access(access_cache, tile_access_states, tile, out)
             failures = _publish(ROOT, [tile], ['access'], out)
             if failures:
                 raise RuntimeError(f'{failures} publication failures for {tile}')
-            journal[tile]['access'] = {'sha256': _published_sha256(tile, 'accessPoints'),
-                                       'seconds': round(time.monotonic() - tile_started, 1)}
+            journal.setdefault(tile, {})['access'] = {'sha256': _published_sha256(tile, 'accessPoints'),
+                                                      'states': tile_access_states,
+                                                      'seconds': round(time.monotonic() - tile_started, 1)}
         except Exception as exc:
             journal.setdefault(tile, {})['access'] = {'error': str(exc)}
             print(f'FAILED {tile} phase B: {exc}', flush=True)
         _save_journal(journal_path, journal)
 
     blocked = [t for t in tiles if t not in coverage and journal.get(t, {}).get('habitat', {}).get('sha256')]
-    summary = {'tiles': tiles, 'habitatComplete': sorted(t for t in tiles if journal.get(t, {}).get('habitat', {}).get('sha256')),
+    summary = {'state': state_code, 'tiles': tiles,
+               'habitatComplete': sorted(t for t in tiles if journal.get(t, {}).get('habitat', {}).get('sha256')),
                'accessComplete': sorted(t for t in tiles if journal.get(t, {}).get('access', {}).get('sha256')),
                'habitatFailed': sorted(t for t in tiles if journal.get(t, {}).get('habitat', {}).get('error')),
                'accessFailed': sorted(t for t in tiles if journal.get(t, {}).get('access', {}).get('error')),
                'accessBlockedIncompleteHabitat': sorted(blocked),
+               'accessStatesByTile': {t: _access_states_for_tile(t, prepared_states) for t in tiles if t in coverage},
                'seconds': round(time.monotonic() - started, 1)}
     print(json.dumps(summary, indent=2), flush=True)
     if summary['habitatFailed'] or summary['accessFailed']:
@@ -370,6 +428,9 @@ def main():
         if name == 'run':
             p.add_argument('--out', default=Path('/tmp/ff-pnw-norm'), type=Path)
             p.add_argument('--resume', action='store_true')
+            p.add_argument('--access-states', default=None,
+                           help='Extra prepared OSM states to merge for boundary tiles (e.g. OR,WA); '
+                                'each tile still composes only the states that geographically reach it')
             p.add_argument('--dry-run', action='store_true', help='Print the plan and exit without building')
     args = parser.parse_args()
     if args.command == 'plan':
@@ -381,7 +442,7 @@ def main():
                                     args.core_pct, args.halo_pct, args.state_share, args.only), indent=2))
         return
     run(args.state, args.source_cache, args.access_cache, args.out, args.only, args.resume,
-        args.core_pct, args.halo_pct, args.state_share)
+        args.core_pct, args.halo_pct, args.state_share, args.access_states)
 
 
 if __name__ == '__main__':

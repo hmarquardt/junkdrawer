@@ -191,6 +191,53 @@ class AccessContract(unittest.TestCase):
             right = access.read_local(folder / 'candidates.parquet', [-105.5, 39, -105, 40])
             self.assertIn('osm:node:1', {r['id'] for r in left} & {r['id'] for r in right})
 
+    def test_transit_ferry_and_institutional_parking_is_never_a_start(self):
+        """Washington-scale audit: transit park-and-rides, ferry lots and
+        institutional lots are rejected generically; Sno-Parks and trailheads
+        stay evidence."""
+        def parking(name=None, operator=None):
+            tags = {'amenity': 'parking', 'parking': 'surface'}
+            if name:
+                tags['name'] = name
+            if operator:
+                tags['operator'] = operator
+            return feature(tags, geometry=Point(-105.5, 39.5), ident='osm:node:99')
+        lot = access.normalize(parking('Gateway Transit Center Park and Ride', 'TriMet'),
+                               access.RoadIndex([], self.project), [], self.project, 'v')
+        ferry = access.normalize(parking('Ferry Waiting Area', 'Washington State Ferries'),
+                                 access.RoadIndex([], self.project), [], self.project, 'v')
+        school = access.normalize(parking('Parent Parking', 'Beaverton School District'),
+                                  access.RoadIndex([], self.project), [], self.project, 'v')
+        sno = access.normalize(parking('White River West Sno-Park', 'Oregon Department of Transportation'),
+                               access.RoadIndex([], self.project), [], self.project, 'v')
+        trailhead = access.normalize(feature({'highway': 'trailhead', 'name': 'School Canyon Trailhead'}),
+                                     access.RoadIndex([], self.project), [], self.project, 'v')
+        for row in (lot, ferry, school):
+            self.assertEqual(row['evidence_grade'], 'REJECTED', row['name'])
+            self.assertFalse(row['start_eligible'])
+        self.assertIn('transit', lot['evidence_reason'])
+        self.assertNotEqual(sno['evidence_grade'], 'REJECTED')
+        self.assertNotEqual(trailhead['evidence_grade'], 'REJECTED')
+
+    def test_edge_crossing_area_publishes_in_exactly_one_tile(self):
+        """A parking polygon spanning an integer-degree line is selected by its
+        representative point with half-open edges, so adjacent tile builds
+        cannot double-publish it."""
+        polygon = box(-122.0005, 45.99986, -121.9995, 46.00014)  # crosses lat 46 and lon -122
+        candidate = feature({'amenity': 'parking', 'name': 'Edge Parking'},
+                            geometry=polygon, ident='osm:way:42')
+        # Exactly one adjacent tile may claim the feature, wherever the stable
+        # representative point falls.
+        adjacent = [[-123, 45, -122, 46], [-122, 45, -121, 46], [-123, 46, -122, 47], [-122, 46, -121, 47]]
+        claims = [b for b in adjacent if access.in_tile(candidate, b)]
+        self.assertEqual(len(claims), 1, claims)
+        # A representative point exactly on the edge belongs to the north/east tile only.
+        on_edge = feature({'amenity': 'parking'}, geometry=Point(-122.0, 46.0), ident='osm:node:43')
+        self.assertFalse(access.in_tile(on_edge, [-123, 45, -122, 46]))
+        self.assertFalse(access.in_tile(on_edge, [-123, 46, -122, 47]))
+        self.assertFalse(access.in_tile(on_edge, [-122, 45, -121, 46]))
+        self.assertTrue(access.in_tile(on_edge, [-122, 46, -121, 47]))
+
     def test_ready_reuse_corruption_and_failed_refresh(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache = Path(tmp)

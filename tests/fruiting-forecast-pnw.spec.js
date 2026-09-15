@@ -326,3 +326,59 @@ test('a real PNW search loads the canary tile and ranks Pacific Northwest target
   expect(r.ranked.map(x=>x[0])).not.toContain('porcini');
   expect(errors).toEqual([]);
 });
+test('a Columbia cross-state search loads both states, dedupes access and reuses the cache warm',async({page})=>{
+  test.setTimeout(300000);
+  const errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  let parquetRequests=0;
+  page.on('request',r=>{if(/data\/fruiting-forecast\/(habitat|pl|ap|fire)\/.*\.parquet/.test(r.url()))parquetRequests++});
+  await page.route('**/api/analytics/**',r=>r.abort());
+  await page.route('https://tile.openstreetmap.org/**',r=>r.abort());
+  await page.route('https://api.inaturalist.org/**',r=>r.fulfill({json:{total_results:0,results:[]}}));
+  await page.route('https://api.open-meteo.com/v1/forecast**',r=>{const u=new URL(r.request().url());const lat=u.searchParams.get('latitude').split(',').map(Number),lon=u.searchParams.get('longitude').split(',').map(Number);const rows=lat.map((v,i)=>weatherPayload(v,lon[i]));return r.fulfill({json:rows.length===1?rows[0]:rows})});
+  await page.goto(`http://127.0.0.1:${artifactPort}/fruiting-forecast.html`,{waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__&&window.FF_ECOREGIONS);
+  await page.addInitScript(()=>window.__FF_TEST_FAST__=true);
+  await page.locator('#radiusSelect').selectOption('50');
+  await page.locator('#locationInput').fill('45.63, -122.65');
+  await page.locator('#analyzeBtn').click();
+  await expect(page.locator('#status')).toContainText('Analysis ready',{timeout:200000});
+  const cold=parquetRequests;
+  const r=await page.evaluate(()=>{
+    const t=window.__FRUITING_FORECAST_TEST__,s=t.getState();
+    const shared=(s.gis.manifest? (s.gis.manifest.tiles||[]).find(x=>x.id==='n45_w123'):null);
+    const soilStates=shared? [...new Set((shared.habitat.sources||[]).filter(x=>x.id==='ssurgo_sda').map(x=>x.state))] : [];
+    const a=s.analysis,props=s.gis.properties||[];
+    const stateOf=c=>{const p=props.find(g=>g.id===c.id);return p&&p.stateCode||null};
+    const accessRows=(a.candidates||[]).flatMap(c=>c.accessPoints||[]);
+    return {profile:a.biology.profileId,tiles:s.gis.tiles.map(x=>x.id),gis:a.gis.status,
+      ranked:a.ranked.map(x=>x.speciesId),species:a.ranked.length,
+      orProperties:(a.candidates||[]).filter(c=>stateOf(c)==='OR').length,
+      waProperties:(a.candidates||[]).filter(c=>stateOf(c)==='WA').length,
+      jurisdictions:[...new Set((a.candidates||[]).map(c=>c.rule.collectingStatus))],
+      accessUnique:new Set(accessRows.map(x=>x.accessId)).size,
+      accessRows:accessRows.length,
+      starts:(a.candidates||[]).filter(c=>c.suggestedStart).slice(0,5).map(c=>({property:c.name,state:stateOf(c),start:c.suggestedStart.name,grade:c.suggestedStart.evidenceGrade||c.suggestedStart.confidence,accessId:c.suggestedStart.accessId})),
+      soilStates};
+  });
+  const warmBefore=parquetRequests;
+  await page.locator('#analyzeBtn').click();
+  await expect(page.locator('#status')).toContainText('Analysis ready',{timeout:200000});
+  const warmRequests=parquetRequests-warmBefore;
+  console.log('PNW_COLUMBIA '+JSON.stringify({...r,coldRequests:cold,warmRequests}));
+  expect(r.profile).toBe('pnw');
+  expect(r.tiles).toEqual(expect.arrayContaining(['n45_w123','n45_w122','n44_w123']));
+  expect(r.tiles.some(id=>id.startsWith('n46_'))).toBe(true); // Washington row loads
+  expect(r.gis).toBe('enhanced');
+  expect(r.ranked).toEqual(expect.arrayContaining(['chanterelleFormosus','chanterelleSubalbidus','matsutakeMurrillianum','craterelleNeotubaeformis','morelBurn']));
+  expect(r.ranked).not.toContain('porcini'); // ecological, not administrative selection
+  // Per-property access views may repeat evidence shared through an ambiguous
+  // property association; map pins deduplicate by stable accessId, so repeats
+  // stay few and the same feature is never published twice across tiles.
+  expect(r.accessRows).toBeGreaterThan(500);
+  expect(r.accessRows - r.accessUnique).toBeLessThan(20);
+  expect(r.soilStates).toEqual(expect.arrayContaining(['OR','WA'])); // shared tile composes both soils
+  expect(r.jurisdictions).toEqual(['UNKNOWN_VERIFY']); // no invented rules on either side
+  expect(warmRequests).toBe(0); // warm repeat fetches zero GIS bytes
+  expect(errors).toEqual([]);
+});
