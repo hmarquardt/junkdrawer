@@ -187,6 +187,74 @@ def validate_access(con, source, meta, columns):
             raise ValueError('Suggested Start requires eligible mapped access evidence')
 
 
+def publish_tiles(root, tids, layers, source_dir, output=None, resume=False):
+    """Publish one normalized source directory into the release manifest.
+
+    Deterministic sorted tile order; a failed tile keeps its previous evidence
+    and never corrupts successful ones; the manifest is atomically replaced
+    after every layer so an interrupted run leaves a valid release behind.
+    Returns the failure count.
+    """
+    output = output or root/'data/fruiting-forecast'
+    output.mkdir(parents=True,exist_ok=True)
+    # Exclusive lock prevents concurrent manifest lost updates. Remove only after
+    # verifying the recorded PID is no longer running following hard interruption.
+    lock=output/'.publish.lock'
+    fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
+    os.write(fd,str(os.getpid()).encode());os.close(fd)
+    try:
+        path=output/'manifest.json'
+        manifest=json.loads(path.read_text()) if path.exists() else {'schemaVersion':4,'tiles':[]}
+        entries={t['id']:t for t in manifest['tiles']}
+        con=duckdb.connect()
+        failures=0
+        for tid in sorted(tids):
+            entry=entries.setdefault(tid,{'id':tid,'bbox':bounds(tid)})
+            for layer in layers:
+                sub,count_key,required=LAYERS[layer];key=KEYS[layer]
+                source=source_dir/sub/(tid+'.parquet');sidecar=source.with_suffix('.parquet.json')
+                old=entry.get(key,{})
+                try:
+                    if not source.exists() or not sidecar.exists():
+                        if not old.get('url'): entry[key]={'status':'UNBUILT','statusNote':'Normalized source and provenance sidecar required.'}
+                        continue
+                    meta=json.loads(sidecar.read_text())
+                    if meta.get('status') not in {'AVAILABLE','PARTIAL','VERIFIED_EMPTY'} or not meta.get('datasetVersion') or not meta.get('sourceUrl'):
+                        raise ValueError('Source must declare version, URL and coverage status')
+                    digest=hashlib.sha256(source.read_bytes()).hexdigest()
+                    if resume and old.get('sha256')==digest and old.get('datasetVersion')==meta['datasetVersion'] and old.get('status')==meta['status'] and (output/old.get('url','missing')).is_file():
+                        if hashlib.sha256((output/old['url']).read_bytes()).hexdigest()==digest: continue
+                    columns={row[0] for row in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(source)]).fetchall()}
+                    if not required<=columns: raise ValueError('Missing normalized columns: '+str(sorted(required-columns)))
+                    if layer == 'access': validate_access(con, source, meta, columns)
+                    count=con.execute('SELECT count(*) FROM read_parquet(?)',[str(source)]).fetchone()[0]
+                    if (count==0)!=(meta['status']=='VERIFIED_EMPTY'): raise ValueError('Row count contradicts declared coverage')
+                    # Content-addressed output keeps old manifest assets valid until commit.
+                    target=output/sub/(tid+'-'+digest[:16]+'.parquet')
+                    target.parent.mkdir(parents=True,exist_ok=True)
+                    tmp=target.with_suffix('.tmp');shutil.copyfile(source,tmp);os.replace(tmp,target)
+                    entry[key]={**meta,'url':target.relative_to(output).as_posix(),count_key:count,'bytes':target.stat().st_size,'sha256':digest}
+                except Exception as exc:
+                    failures+=1
+                    if old.get('url'): entry[key]={**old,'lastBuildAttempt':{'status':'FAILED','error':str(exc)}}
+                    else: entry[key]={'status':'FAILED','error':str(exc)}
+                finally:
+                    if entry.get('accessPoints', {}).get('status') in {'AVAILABLE', 'VERIFIED_EMPTY'} and 'unbuilt' in entry.get('habitat', {}):
+                        entry['habitat']['unbuilt'] = [x for x in entry['habitat']['unbuilt'] if x != 'access']
+                    manifest['schemaVersion']=4
+                    manifest['tiles']=[entries[k] for k in sorted(entries)]
+                    manifest['summary']={**(manifest.get('summary') or {}), **summary_of(manifest['tiles']), **coverage_of(manifest['tiles'], root)}
+                    manifest.setdefault('tileSchema',{})['subdirs']={layer: LAYERS[layer][0]+'/' for layer in LAYERS}
+                    # Deterministic release identifier; no wall-clock bytes in output.
+                    manifest['datasetVersion']='content-'+hashlib.sha256(json.dumps(manifest['tiles'],sort_keys=True).encode()).hexdigest()[:16]
+                    atomic_json(path,manifest)
+        con.close()
+        print(f'Published/checkpointed {len(tids)} tiles × {len(layers)} layers; {failures} failures')
+        return failures
+    finally:
+        lock.unlink()
+
+
 def main(root):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('scope', choices=['tile','bbox','state','conus'])
@@ -215,60 +283,5 @@ def main(root):
     if a.plan:
         print(json.dumps({'tiles':len(tids),'layers':layers,'jobs':len(tids)*len(layers),'networkRequests':0,'tileIds':sorted(tids)}));return
     if not a.source_dir: p.error('publication requires --source-dir of normalized bulk-source tiles')
-    a.output.mkdir(parents=True,exist_ok=True)
-    # Exclusive lock prevents concurrent manifest lost updates. Remove only after
-    # verifying the recorded PID is no longer running following hard interruption.
-    lock=a.output/'.publish.lock'
-    fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
-    os.write(fd,str(os.getpid()).encode());os.close(fd)
-    try:
-        path=a.output/'manifest.json'
-        manifest=json.loads(path.read_text()) if path.exists() else {'schemaVersion':4,'tiles':[]}
-        entries={t['id']:t for t in manifest['tiles']}
-        con=duckdb.connect()
-        failures=0
-        for tid in sorted(tids):
-            entry=entries.setdefault(tid,{'id':tid,'bbox':bounds(tid)})
-            for layer in layers:
-                sub,count_key,required=LAYERS[layer];key=KEYS[layer]
-                source=a.source_dir/sub/(tid+'.parquet');sidecar=source.with_suffix('.parquet.json')
-                old=entry.get(key,{})
-                try:
-                    if not source.exists() or not sidecar.exists():
-                        if not old.get('url'): entry[key]={'status':'UNBUILT','statusNote':'Normalized source and provenance sidecar required.'}
-                        continue
-                    meta=json.loads(sidecar.read_text())
-                    if meta.get('status') not in {'AVAILABLE','PARTIAL','VERIFIED_EMPTY'} or not meta.get('datasetVersion') or not meta.get('sourceUrl'):
-                        raise ValueError('Source must declare version, URL and coverage status')
-                    digest=hashlib.sha256(source.read_bytes()).hexdigest()
-                    if a.resume and old.get('sha256')==digest and old.get('datasetVersion')==meta['datasetVersion'] and old.get('status')==meta['status'] and (a.output/old.get('url','missing')).is_file():
-                        if hashlib.sha256((a.output/old['url']).read_bytes()).hexdigest()==digest: continue
-                    columns={row[0] for row in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(source)]).fetchall()}
-                    if not required<=columns: raise ValueError('Missing normalized columns: '+str(sorted(required-columns)))
-                    if layer == 'access': validate_access(con, source, meta, columns)
-                    count=con.execute('SELECT count(*) FROM read_parquet(?)',[str(source)]).fetchone()[0]
-                    if (count==0)!=(meta['status']=='VERIFIED_EMPTY'): raise ValueError('Row count contradicts declared coverage')
-                    # Content-addressed output keeps old manifest assets valid until commit.
-                    target=a.output/sub/(tid+'-'+digest[:16]+'.parquet')
-                    target.parent.mkdir(parents=True,exist_ok=True)
-                    tmp=target.with_suffix('.tmp');shutil.copyfile(source,tmp);os.replace(tmp,target)
-                    entry[key]={**meta,'url':target.relative_to(a.output).as_posix(),count_key:count,'bytes':target.stat().st_size,'sha256':digest}
-                except Exception as exc:
-                    failures+=1
-                    if old.get('url'): entry[key]={**old,'lastBuildAttempt':{'status':'FAILED','error':str(exc)}}
-                    else: entry[key]={'status':'FAILED','error':str(exc)}
-                finally:
-                    if entry.get('accessPoints', {}).get('status') in {'AVAILABLE', 'VERIFIED_EMPTY'} and 'unbuilt' in entry.get('habitat', {}):
-                        entry['habitat']['unbuilt'] = [x for x in entry['habitat']['unbuilt'] if x != 'access']
-                    manifest['schemaVersion']=4
-                    manifest['tiles']=[entries[k] for k in sorted(entries)]
-                    manifest['summary']={**(manifest.get('summary') or {}), **summary_of(manifest['tiles']), **coverage_of(manifest['tiles'], root)}
-                    manifest.setdefault('tileSchema',{})['subdirs']={layer: LAYERS[layer][0]+'/' for layer in LAYERS}
-                    # Deterministic release identifier; no wall-clock bytes in output.
-                    manifest['datasetVersion']='content-'+hashlib.sha256(json.dumps(manifest['tiles'],sort_keys=True).encode()).hexdigest()[:16]
-                    atomic_json(path,manifest)
-        con.close()
-        print(f'Published/checkpointed {len(tids)} tiles × {len(layers)} layers; {failures} failures')
-        if failures: raise SystemExit(1)
-    finally:
-        lock.unlink()
+    failures=publish_tiles(root, tids, layers, a.source_dir, a.output, a.resume)
+    if failures: raise SystemExit(1)

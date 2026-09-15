@@ -1,5 +1,137 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 8 — bounded Oregon PNW production release (2026-09-15)
+
+Started from `da56302`. Biology, species rosters, coefficients, calendars, weights and geography definitions are frozen. This revision builds the first complete vertical-stack region: regional biology + weather + forest hosts + elevation + canopy + land cover + soil + wildfire + public land + collecting-rule status + physical access + Suggested Start + browser caching, over a derived Oregon tile set. No Washington, no California, no CONUS.
+
+### Derived tile selection (recorded before execution)
+
+`tools/fruiting_pnw_release.py` derives the release from repository data — pinned EPA Level III (`ecoregions.json`, PNW profile = codes 1/2/3/4) and Census states (`states.json`) — intersected in equal-area EPSG:5070. No rectangle, no hand-maintained list:
+
+- Candidate tiles: every 1-degree tile in lat 40–48 / lon −127–−114 whose *Oregon share* ≥ 1% is evaluated; only tiles with Oregon share ≥ 25% are eligible, which excludes Washington-dominant tiles (`n46_w123` 1.3% OR, `n46_w124` 18.6% OR) and ocean tiles.
+- **Core**: PNW share ≥ 50%.
+- **Halo**: 25% ≤ PNW < 50%, included only when four-connected to the selected set (BFS flood fill from the core), so a 25–100 mile search near the release edge loads real neighboring evidence instead of ending abruptly.
+- Result: **11 tiles — 7 core + 4 halo**. Recorded per-tile PNW% / OR% / significant adjacent profile shares:
+
+| Tile | Role | PNW % | OR % | Adjacent profile(s) |
+|---|---|---:|---:|---|
+| `n42_w123` | core | 50.8 | 96.6 | southeast (Klamath) 34.0, interiorMountains 15.3 |
+| `n42_w125` | halo | 26.8 | 42.7 | southeast 15.8 |
+| `n43_w123` | core (canary) | 100.0 | 100.0 | — |
+| `n43_w124` | core | 71.7 | 100.0 | southeast 28.3 |
+| `n43_w125` | halo | 27.9 | 28.5 | — |
+| `n44_w122` | halo | 32.0 | 100.0 | interiorMountains 67.1 (Blue Mountains/Eastern Cascades) |
+| `n44_w123` | core | 100.0 | 100.0 | — |
+| `n44_w124` | core (canary) | 100.0 | 100.0 | — |
+| `n45_w122` | halo | 39.8 | 68.6 | interiorMountains 42.1, southwest 18.1 |
+| `n45_w123` | core | 99.8 | 67.8 | — |
+| `n45_w124` | core | 96.4 | 97.1 | — |
+
+Excluded deliberately: `n42_w122` (PNW 1.3%, arid east side), `n42_w124` (PNW 6.8%, Klamath), `n43_w122` (PNW 12.0%, Eastern Cascades high desert), `n44_w125` (PNW 8.3%, mostly ocean), all `n46_*` (Oregon share < 25% — would import Washington geography), and every tile east of the derived halo set (interior/arid). The halo set exercises the PNW/interior ecological boundary (Blue Mountains/Eastern Cascades → unsupported `interiorMountains`), the southern Klamath boundary (unsupported `southeast`), and the open-ocean edge.
+
+### Release-size gate (dry-run plan, recorded before building)
+
+Estimates use only real published PNW measurements (canaries `n44_w124` + `n43_w123` averages): habitat 14,089 B/tile, public land 171,633 B/tile, fire 500,179 B/tile, access 66,698 B/tile → estimated new bytes for the 9 new tiles ≈ **6.77 MB** (habitat 126,801; public land 1,544,697; fire 4,501,611; access 600,282). Sources: national products + `ssurgo_sda:OR` already READY in `/tmp/ffsrc` (checksum-verified reuse, zero new soil requests — 1 state, prepared once); 9 new 3DEP DEM preparations (~50–60 MB each, per-tile TNM resolution); prepared Oregon Geofabrik PBF reused (SHA256 `5511e363f0cfdc41…`, extract 2026-09-13T20:21:20Z, 253,592,262 bytes — validated on reuse, never redownloaded). The projected release is modest; no optimization is warranted.
+
+### Batch orchestration
+
+`tools/fruiting_pnw_release.py run` executes the smallest useful orchestration layer over the existing prepare/build/publish components: (1) prepare national + state soil (idempotent, READY reuse), validate the prepared OR access source; (2) **Phase A** per tile in deterministic lat-then-lon order — prepare tile DEM, compose habitat/public-land/fire from the source cache, publish through the existing publisher boundary (lock, atomic manifest, content-addressed assets, `--resume`); (3) **Phase B** — access proof per tile, only after that tile's habitat is complete and inside `coverageTiles` (the access builder's existing release-geography guard). A JSON journal in the normalized output dir makes runs restartable; a failed tile is journaled and never corrupts successful tiles; byte-identical outputs are skipped via the publisher's digest resume. The publisher gained an importable `publish_tiles()` (behavior-preserving refactor; CLI unchanged).
+
+### Execution record (2026-09-15)
+
+The full run completed with **zero failures**: one-tile smoke run (`n44_w123`) 115.6 s end-to-end (TNM release resolution → `USGS_1_n45w123_20250804.tif` download → PAD-US/MTBS hosted-service queries → habitat/pl/fire build+publish → access build+publish), then the remaining tiles at **757.7 s** for a full non-resume pass (all 11 tiles; a repeat build without `--resume` produced byte-identical outputs where sources were unchanged, and the publisher's digest resume made the rebuild cheap). Source reuse verified live: national products (FIA forest type 168,022,806 B; Annual NLCD land cover 1,427,423,034 B; NLCD tree canopy 3,740,022,899 B; Census states 186,432 B), `ssurgo_sda:OR` (12,556 mapunit rows, survey vintages 2025-09-09…2026-08-05, 52 survey areas), and the prepared Oregon Geofabrik PBF (`oregon-260913.osm.pbf`, 253,592,262 B, header 2026-09-13T20:21:20Z, SHA256 `5511e363f0cfdc41ac3d6a9b34668b6a34a2131ae88cc638c7f8d818190c6ddc`) were all already READY and were checksum-validated on reuse — **no source was re-downloaded for this release**. Seven new 3DEP DEMs were resolved from the TNM bucket listing and downloaded (n43w123, n43w125, n44w124, n44w125, n45w122, n45w123, n46w122 as USGS north-edge names for the new release tiles); PAD-US/MTBS hosted-service query caches were populated per tile (`padus_v2_*`/`mtbs_*`, restart-safe).
+
+Published per-tile PNW bytes (habitat / public-land / fire / access / eligible starts):
+
+| Tile | Role | Habitat | Public land | Fire | Access | Starts |
+|---|---|---:|---:|---:|---:|---:|
+| `n42_w123` | core | 14,381 | 165,328 | 324,248 | 74,346 | 161 |
+| `n42_w125` | halo | 12,197 | 88,962 | 244,025 | 23,113 | 33 |
+| `n43_w123` | core (canary) | 13,749 | 174,262 | 980,912 | 34,238 | 86 |
+| `n43_w124` | core | 14,128 | 96,690 | 241,937 | 24,746 | 25 |
+| `n43_w125` | halo | 11,740 | 46,800 | 388 (VERIFIED_EMPTY, 0 perimeters) | 25,695 | 54 |
+| `n44_w122` | halo | 14,611 | 120,919 | 1,158,040 | 66,661 | 135 |
+| `n44_w123` | core | 14,423 | 137,745 | 1,524,272 | 47,323 | 75 |
+| `n44_w124` | core (canary) | 14,429 | 169,005 | 19,446 | 99,158 | 131 |
+| `n45_w122` | halo | 13,708 | 145,435 | 713,824 | 65,621 | 160 |
+| `n45_w123` | core | 13,952 | 631,605 | 659,191 | 362,013 | 349 |
+| `n45_w124` | core | 14,511 | 156,612 | 17,368 | 69,340 | 122 |
+| **Total** | | **151,829** | **1,933,363** | **5,883,651** | **892,254** | **1,532** |
+
+The whole PNW vertical stack is **8,861,097 bytes** (~8.9 MB). Habitat candidates processed: 60,913 across the release (n45_w123 Portland-metro/Columbia-Gorge tile alone: 24,702 candidates → 3,206 published → 349 eligible starts). `n43_w125` fire is an explicit `VERIFIED_EMPTY` (ocean-heavy southern coast, zero mapped MTBS perimeters) — the honest declaration, not a missing source. Soil coverage tracks real land (n43_w125 108/400 drainage cells at 28.5% land share; inland tiles 279–399/400); ocean cells keep NULL and the soil component stays AVAILABLE.
+
+### Regional false-positive audit (Task 9)
+
+Every tile's full normalized audit file (`<tile>.audit.json`, including unpublished candidates) was inspected by name/operator/association, not only counts:
+
+- **Systematic flaw found and fixed generically.** Regional scaling surfaced institutional lots passing the recreation-context test through adjacent mapped footways: "Parent Parking" (Beaverton School District, inside Whitford Middle School) and a college lot (Clackamas Community College) graded HIGH/MEDIUM start-eligible, plus "Office Parking" (Baskett Slough NWR headquarters lot) HIGH. Fix in `fruiting_osm_access.normalize()`: PARKING-only word-boundary rejection of institutional education contexts — the feature's own name/operator (`school|college|university|campus|academy`), explicit institutional lot names (`parent|student|staff|customer|office|employee parking`), or any associated property name (`school|college|university|campus`) — now REJECTED with reason "Structured, institutional or non-recreation parking". **531 rows flipped across the release** (e.g. n45_w123 398; n44_w124 57 incl. 40 school-restricted cautions); starts went 407→349 (n45_w123) and 132→131 (n44_w124). The rule is deliberately PARKING-only: explicit `highway=trailhead` evidence survives place names like "School Canyon Trailhead" (USFS, n45_w122, verified real). Name matching uses word boundaries ("trail" cannot match "trailer" retained from the canary fix).
+- **No over-rejection of legitimate university-forest access.** McDonald-Dunn Research Forest (Oregon State University) keeps its 8 HIGH parking/trailhead starts; its published operator is "OSU Research Forests" and the PAD-US property name contains no school/college/university/campus word. The forest's locked gates (100/200/400/800 Gate etc.) remain RESTRICTED cautions, never starts.
+- **Rejections verified correct:** Walmart Supercenter, Cottage Grove High School (×5), Lane Community College–Cottage Grove, Harrison Village Apartments, UPS employee parking, "Air Garage", "Parking Lot D", Beaverton school lots. None of these is a mushroom-relevant forest access point.
+- **Reviewed and deliberately kept:** "Locked Gate Day-Use Area" (Deschutes River Segment E) has no restriction tags — a name alone is not a tag, so no restriction is fabricated; it stays HIGH with the visible name. "South West Parking Lot" inside Bush Pasture (Corvallis city park) is real public recreation parking. "Academy Square" `access=customers` parking remains RESTRICTED (the tool's associated-property pattern is deliberately narrower than the audit scanner and explicit restrictions always surface as cautions).
+- Gates audited: RESTRICTED gates are genuinely `access=private/no`, `locked=yes`, or forestry gates (e.g. McDonald-Dunn); REVIEW rows are genuinely unassociated candidates (local audit only, never published).
+
+### Tile-edge identity QA at regional scale (Tasks 16–17)
+
+Across all 11 published PNW tiles: habitat has exactly 4,400 cells (11×400, no duplicates or missing edge cells); public land has 5,843 unique property IDs with **zero identity conflicts** (no same-id/different-name or cross-state id); MTBS has 261 unique perimeters, **28 crossing tile edges with one stable identity each**, zero within-tile duplicates; access has 7,796 published rows, **all unique `osm:*` IDs, zero cross-tile duplicates and zero coordinate conflicts**, so no start can appear twice. Area parking crossing a tile edge is published once in the tile containing its mapped representative point with full unclipped geometry.
+
+**Orphan cleanup:** auditing every published `habitat/`, `pl/`, `ap/`, `fire/` file against the manifest revealed 22 dead content-addressed assets (~3.3 MB) — superseded digests from earlier revisions (12 old Southern-Rockies public-land files and 2 Colorado habitat files), the pre-manifest legacy sampler access stubs (`ap/n35_w087`, `ap/n36_w085/086/087`), and 4 access files superseded by the institutional-lot fix within this pass (including the committed `ap/n44_w124-45c48870…`). All were unreferenced by every current manifest generation; removed so the published asset set contains only live evidence.
+
+### Browser measurements (Tasks 12, 19–20)
+
+Representative searches from `44.60, -123.50` (central Coast Range/Willamette), real Parquet over a local static server, mocked basemap only:
+
+| Radius | Tiles loaded | Properties | Radius-filtered access rows | Cold elapsed |
+|---|---:|---:|---:|---:|
+| 10 mi | 1 | 221 | 651 | 4.5 s |
+| 25 mi | 2 | 589 | 1,130 | 3.2 s |
+| 50 mi | 7 | 2,035 | 2,769 | 4.4 s |
+| 100 mi | 9 | 5,339 | 6,659 | 11.1 s |
+
+Only required tiles lazy-load at every radius; a warm repeat fetch of the 25-mile search reloads **zero Parquet bytes** (IndexedDB/OPFS byte cache; the osm-access transfer test proves 0 repeat bytes including duplicate descriptors). Cold full-sweep transfer measured at the response layer: habitat 125,251 B + public land 1,679,073 B + access 775,275 B + fire 5,314,990 B = **7.89 MB across 35 requests** (9 tiles; fire bytes are dominated by two large perimeters in n44_w123/n44_w122). A single-tile radius-filtered access query processes 1,064 rows in 693 ms in-page. **Access source asymmetry:** the browser receives an 892 KB access layer for the whole region (and ~0.8 MB per tile worst case) derived from a 253.6 MB state PBF plus a 144.7 MB prepared road/candidate cache that never leaves the build machine.
+
+### Manual QA record (Task 22)
+
+Reviewed desktop + 390 px mobile screenshots and JSON reports (`/tmp/pnw-*.png/json` from the removed diagnostic harness; cases and exact selected properties retained in the JSON):
+
+- **Coast Range (chanterelle forest, mapped access):** Siuslaw National Forest — Suggested Start Pawn Trail Trailhead `osm:node:13020145359` (HIGH, inside), collecting UNKNOWN_VERIFY shown independently.
+- **Western Cascades:** Deschutes National Forest — HIGH unnamed mapped parking start inside; plus a no-access case (Blue Mountain Park, county land) showing "Suggested start unavailable … does not mean the property is inaccessible" with Huntability lowered by confidence (34/100), not penalized.
+- **Southern Oregon PNW:** Rogue River National Forest — Anderson Mountain Trailhead (MEDIUM, `ambiguous-multiple-properties` property ambiguity preserved), Huntability 46/100; the same search loads `n42_w123`, `n43_w123`, `n43_w124`.
+- **PNW/interior boundary (44.00, −121.75, 50 mi):** per-sector arbitration verified in-page — 3 PNW zones receive the five PNW targets; 2 zones inside Eastern Cascades/Blue Mountains resolve `interiorMountains` with **empty species lists** (unsupported), while GIS properties and mapped starts still load there. GIS coverage and biological-model coverage remain separate dimensions.
+- **Strong biology / no mapped access:** recommendation still present with confidence lowered (UNMAPPED, confidence factor 0.75).
+- **Good access / poor current biology:** a HIGH-access property with a 20/100 biological fixture scored **recommended 11/100** — access cannot manufacture a recommendation.
+- Collected-rule status remains UNKNOWN_VERIFY with "no matched rule" for every inspected Oregon property; no Oregon collecting permissions were invented (Task 13).
+
+### Tests (Task 26)
+
+- New `tests/test_fruiting_pnw_release.py` (7 tests): selection thresholds/flood-fill/state-gate on synthetic shares, determinism, real-selection == published release with per-tile role/share invariants, plan estimates from real measurements, honest missing-cache reporting, journal-resume digest semantics.
+- `tests/test_fruiting_bulk_adapters.py` (52 tests, +2): updated PNW release footprint incl. derived-geometry equality, per-tile component/layer completeness with the explicit ocean VERIFIED_EMPTY, scaled soil floors, cross-tile access identity over real published data (no duplicate ids/places/starts), no `n46_*` Washington tiles, WA bbox-metadata semantics documented.
+- `tests/fruiting-forecast-conus.spec.js`: 25-tile release declaration (habitat AVAILABLE, five components, OR soil, pl/fire/access status per tile incl. VERIFIED_EMPTY fire) + a new derived release-summary test (coverageTiles 25, pnw profile 11, access AVAILABLE 13, fire verifiedEmpty 1 / available 24).
+- Publisher refactor (`publish_tiles()`) is behavior-preserving; the 6 publication tests pass unchanged.
+- OSM access suite 14 tests pass; institutional-rejection behavior is exercised through the real release artifacts above (audit files) plus the word-boundary fixtures from the canary pass.
+
+### Regression outside PNW (Task 23)
+
+The full browser suite (98 active tests) re-ran green: Colorado Southern Rockies canaries, the New Mexico boundary tiles, the two-state release digests, Indiana legacy tiles, mixed-schema DuckDB-Wasm reads (`union_by_name=true`), collecting-rule jurisdiction scoping and the legacy access reads are unchanged. Only the release-footprint test data and the WA bbox-metadata expectation changed, both with updated documentation. No habitat, PAD-US, MTBS or legacy access asset bytes changed; all legacy Parquet remains readable.
+
+### Data-lake metrics for the announcement (Task 21)
+
+Computed from the repository (2026-09-15): **179 modern tile-layer Parquet assets** across 65 published tiles (25 complete release tiles + 40 legacy/sampler), **≈27.8 MB total fruiting-forecast static data** (habitat 0.87 MB, public-land 5.81 MB, access 1.55 MB, fire 8.38 MB, plus shared geography/rules JSON); git pack ~24.3 MiB. Three modeled ecological profiles with **13 provisional target-taxa** (hardwood 4, Southern Rockies 4, PNW 5 — regional parameters differ even where target ids repeat). Authoritative source systems: USDA FIA forest type groups, USGS 3DEP, MRLC Annual NLCD + Tree Canopy, NRCS SSURGO via Soil Data Access, USGS PAD-US, USGS MTBS, US Census cartographic boundaries, EPA Level III ecoregions, OpenStreetMap/Geofabrik PBF extracts, Open-Meteo, iNaturalist. DuckDB-Wasm runs the in-browser SQL/Parquet analysis; IndexedDB (+ OPFS attempt) caches downloaded tile bytes; cold searches fetch only required tiles, warm searches ideally fetch zero.
+
+### Scaling projection (Task 25; no large build executed)
+
+Using measured production numbers (~0.8 MB published bytes/tile across the four GIS layers; ~1.5–2.5 min per tile build+publish; ~0.7–2 min DEM download; 1 PAD-US + 1 MTBS query per tile; one state soil preparation ≈ minutes; one state PBF preparation ≈ 2–3 min after download):
+
+- **Full modeled Oregon PNW** (every ≥25% PNW-share Oregon tile incl. Klamath-edge): ~16 tiles → ~13 MB published, ~30 min build after sources. Marginal.
+- **Oregon + western Washington** (Puget Lowland/Coast Range/Cascades west of the crest): ~28–32 tiles → ~25 MB published; needs one WA PBF preparation (~300 MB, ~2–3 min) + WA SDA soil; DEM prep dominated by downloads.
+- **All three currently modeled regions at full extent** (hardwood Great Lakes states + Southern Rockies CO/NM complete + PNW OR/WA): roughly 120–180 tiles → **~100–150 MB** published; the dominant costs are per-tile PAD-US/MTBS queries and DEM downloads; state soil tables for ~10 states.
+- **CONUS GIS factory**: ~955 catalog land tiles → **~770 MB** published, ~1.6 GB transient DEM traffic, ~25–40 GB of state PBF sources, PAD-US/MTBS ≈ 2 queries/tile. GitHub Pages: the full repo already stands at ~24 MiB packed; a CONUS-sized 770 MB payload would exceed practical Pages limits (soft 1 GB/site) — a separate release artifact or object storage would be required, plus a tile-catalog-driven lazy manifest. Not executed; the bounded-release architecture (derived selection + size gate + batch orchestrator) is the pattern to repeat.
+
+### Remaining weaknesses and exact next task
+
+The PNW release is bounded to Oregon by the state-share rule; Washington publishes zero tiles but legitimately appears in `states` bbox metadata for the Columbia-river tiles. Connectivity is still a bounded local geometric check, not routing; "Locked Gate Day-Use Area" shows names can encode restrictions that tags don't (left to the reader by design). PAD-US includes hundreds of small school/city parcels in the Willamette Valley, which inflates public-land property counts in urban tiles (n45_w123: 3,620 properties) — presentation, not correctness; access evidence remains forest-filtered. OSM completeness varies (rural tiles like n43_w124 have 25 starts while metro tiles have 349). The n43_w125 VERIFIED_EMPTY fire case is honest but means burn-morel scoring there rests on absence of mapped fire, which is not evidence of absence (consistent with the project-wide MTBS semantics).
+
+**Next recommended task: extend the release to western Washington under the same derived-selection rule (PNW-share + connectivity, state share = WA), reusing this contract end to end** — one Washington Geofabrik PBF preparation, WA SDA soil, per-tile DEM/PAD-US/MTBS, the same publisher path — and re-measure the release-size gate before building. The state-share gate and the derived tile list already generalize; no code change should be needed beyond the state code and bounds. Alternatively, if the announcement comes first, the measured metrics above are complete for it.
+
 ## Revision 7 — state PBF access canaries (2026-09-15)
 
 Started from `192c160`. This section supersedes the revision-6 access-UNBUILT decisions below. Biology, species, coefficients and geography are frozen. Published canaries are existing `n39_w106` and `n40_w106` (Colorado), and `n44_w124` and `n43_w123` (Oregon); no new tile geography is authorized in this pass.
@@ -220,12 +352,14 @@ Earlier `e1ccb64`-era notes:
 - data/fruiting-forecast/biology-research.json: 30 sources, 16 candidates, 5 pnw and 4 southernRockies entries marked `implemented: true`. Revision 6 added the PNW-GTR-576, PNW-GTR-412, Trudell 2017, Trappe 2004 and iNaturalist-taxa sources plus four implemented PNW candidates and explicit promotion criteria for the research-only ones. Every entry carries `supports` / `doesNotSupport` / `missing`. Revision 4 added the `ssurgoSda` source entry: soil is published as environmental evidence but no Southern Rockies model weights it, because the reviewed sources do not support a calibrated soil-moisture response.
 - data/fruiting-forecast/manifest.json: schema 4 with publisher-recomputed `summary.layers` (populated / verifiedEmpty / unbuilt / failed, `available`, per-component coverage for habitat, consistent with tileCount), `summary.publishedTiles` (every tile with a populated layer), `summary.coverageTiles` (release tiles whose habitat declares every component AVAILABLE, derived rather than hand-maintained), `summary.states` and `summary.ecologicalProfiles` (pinned-boundary intersections, explicitly separate dimensions), retained human-readable coverage fields, `habitatSchema` and `publicLandSchema` descriptions (soil units, missing semantics, identity composite, jurisdiction confidence), and the biology descriptor.
 - tools/build-fruiting-gis.py: legacy sampler plus `build` (publisher) and `bulk` (adapters) dispatch.
-- tools/fruiting_tile_publish.py: network-free publication boundary. Four layers (habitat, public-land, access, fire), per-layer source sidecars, schema/count checks, checksums, content-addressed assets, atomic manifest replacement after each layer, incremental merge, lock, and completeness-aware summary maintenance.
+- tools/fruiting_tile_publish.py: network-free publication boundary. Four layers (habitat, public-land, access, fire), per-layer source sidecars, schema/count checks, checksums, content-addressed assets, atomic manifest replacement after each layer, incremental merge, lock, and completeness-aware summary maintenance. Revision 8 exposed the loop as an importable `publish_tiles()` (CLI unchanged).
+- tools/fruiting_pnw_release.py: derived bounded-release tool (revision 8). `plan` reproduces the tile selection from the pinned EPA Level III + Census states geometry in equal-area EPSG:5070 (core ≥ 50% PNW share, halo 25–50% four-connected, Oregon share ≥ 25%) and estimates size from real published measurements; `run` orchestrates prepare → Phase A (habitat/public-land/fire) → Phase B (access) with a JSON journal, deterministic order, resume, and per-tile failure isolation. No rectangle, no hand-maintained tile list.
 - tests/fruiting-forecast-pnw.spec.js: 10 deterministic Pacific Northwest tests: target/taxonomy resolution, golden-chanterelle wet-up, habitat and season ordering, white-chanterelle independent calendar, matsutake host/season/temperature/elevation/missing-evidence ordering, craterelle hemlock ordering and winter window, cross-region suppression, PNW/interior per-sector arbitration, canary artifact digests with Oregon soil provenance, DuckDB schema evolution with the new hemlock signal, and a real PNW search.
 - tests/fruiting-forecast-conus.spec.js: 29 deterministic tests: Colorado species cases, fire-evidence cases, geographic suppression, jurisdiction scoping, per-sector boundary arbitration, the bounded two-state 14-tile release declaration with digest checks, a real DuckDB-Wasm load of western tiles plus a legacy eastern tile (including soil differentiation and real cross-tile public-land/MTBS identity reads), deterministic cross-tile dedupe fixtures, a real interstate search with per-sector ecology and jurisdiction isolation, canopy/land-cover scoring behavior, and habitat completeness semantics.
-- tests/test_fruiting_bulk_adapters.py: 50 deterministic tests for adapter contracts, the cache manifest/checksum/corruption path, the Soil Data Access and package soil paths (normalized contract, batched point join, ambiguity, explicit failure/empty, gSSURGO/FileGDB and gNATSGO/GeoPackage packaging equivalence), DEM release resolution, habitat composition with optional sources absent, state-scoped SDA preparation with independent caches/restart reuse and a failing refresh that cannot invalidate another state, exact cross-state mukey inclusion, failure/retry of a batched point query, property identity, legacy-tile backward compatibility, and the committed two-state release (component/layer completeness, real SSURGO values with explicit gaps, conservative jurisdiction, cross-tile MTBS identity, release-scope manifest assertions, PNW canary component/layer completeness, Oregon soil provenance, the hemlock signal, and the three-state coverage dimensions).
+- tests/test_fruiting_bulk_adapters.py: 52 deterministic tests for adapter contracts, the cache manifest/checksum/corruption path, the Soil Data Access and package soil paths (normalized contract, batched point join, ambiguity, explicit failure/empty, gSSURGO/FileGDB and gNATSGO/GeoPackage packaging equivalence), DEM release resolution, habitat composition with optional sources absent, state-scoped SDA preparation with independent caches/restart reuse and a failing refresh that cannot invalidate another state, exact cross-state mukey inclusion, failure/retry of a batched point query, property identity, legacy-tile backward compatibility, and the committed two-state release (component/layer completeness, real SSURGO values with explicit gaps, conservative jurisdiction, cross-tile MTBS identity, release-scope manifest assertions, PNW release component/layer completeness with the explicit ocean VERIFIED_EMPTY, Oregon soil provenance, the hemlock signal, the three-state coverage dimensions, the EPA-derived PNW release equality with per-tile roles/shares, and regional cross-tile access identity).
+- tests/test_fruiting_pnw_release.py: 7 deterministic release-tool tests (selection algorithm on synthetic shares, determinism, real-selection == published release, plan measurement basis, honest missing-cache state, journal resume digests).
 - tests/test_fruiting_tile_publish.py: 5 publication tests (incremental integrity/empty/failure, completeness components, coverage dimensions, profile-roster drift guard against the browser mapping, and coverage refresh on publication).
-- junk-drawer.json and footer: 2026.09.15.2 (revision 6 added the Pacific Northwest profile and its canary tiles; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
+- junk-drawer.json and footer: 2026.09.15.4 (revision 8 published the bounded Oregon PNW production release; revision 6 added the Pacific Northwest profile and its canary tiles; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
 
 ## Rebuild commands
 
@@ -247,6 +381,16 @@ Prepare the national products once, then the state soil attribute table once, th
       uv run --with rasterio --with duckdb --with requests --with shapely --with pyshp tools/build-fruiting-gis.py bulk build --tile "$t" --soil-states CO,NM --cache /tmp/ffsrc --out /tmp/ff-norm --layers habitat,public-land,fire
       uv run --with duckdb tools/build-fruiting-gis.py build tile "$t" --source-dir /tmp/ff-norm --resume
     done
+
+The bounded Oregon PNW release (revision 8) uses the derived batch orchestrator instead of the per-tile loop; it reuses the same source-cache conventions, validates the prepared OSM access source, and publishes through the same boundary:
+
+    uv run --with duckdb --with rasterio --with requests --with shapely --with pyproj --with pyshp --with osmium==4.3.1 \
+      tools/fruiting_pnw_release.py plan --state OR --source-cache /tmp/ffsrc --access-cache /tmp/fruiting-forecast-gis-sources
+    uv run --with duckdb --with rasterio --with requests --with shapely --with pyproj --with pyshp --with osmium==4.3.1 \
+      tools/fruiting_pnw_release.py run --state OR --source-cache /tmp/ffsrc --access-cache /tmp/fruiting-forecast-gis-sources \
+      --out /tmp/ff-pnw-norm [--resume] [--only n44_w123]
+
+`plan` is network-free (selection from pinned repository geometry + real published measurements); `run` prepares missing sources once, builds Phase A (habitat/public-land/fire) then Phase B (access) per tile in deterministic order, and journals restartable progress. The access PBF itself is prepared separately, once per state: `uv run tools/fruiting_osm_access.py prepare --state OR --snapshot 260913 --cache /tmp/fruiting-forecast-gis-sources`.
 
 Listing every prepared soil state is safe for every tile: a state that does not own any of the tile's mukeys is skipped, and a prepared neighbouring state is included automatically when it does (exact membership, not a range guess). A gSSURGO/gNATSGO state package can replace the SDA attribute table: `bulk prepare state --state CO --source gssurgo --archive /path/gSSURGO_CO.zip` (the same normalized contract is used by `build --soil-states CO`).
 

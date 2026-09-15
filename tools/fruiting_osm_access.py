@@ -280,9 +280,18 @@ def normalize(candidate, roads, properties, project, source_version):
     conditions = {k: v for k, v in tags.items() if ':conditional' in k or k in {'seasonal', 'opening_hours'}}
     irrelevant = kind == 'PARKING' and (tags.get('parking') in {'multi-storey', 'underground', 'rooftop', 'garage', 'carports'}
                   or tags.get('building') not in {None, 'no'} or tags.get('covered') == 'yes'
-                  or bool(re.search(r'supermarket|walmart|costco|apartment|resident|employee|hospital|garage', text)))
+                  or bool(re.search(r'supermarket|walmart|costco|apartment|resident|employee|hospital|garage', text))
+                  # Regional-scale audit: institutional lots (schools, colleges,
+                  # campuses, office/parent/staff lots) are not credible starts
+                  # for public-land mushroom access. Name-word matches are
+                  # deliberately PARKING-only: an explicit mapped trailhead
+                  # stays evidence even when a place is named "School Canyon".
+                  or bool(re.search(r'\b(?:school|college|university|campus|academy)\b', text))
+                  or bool(re.search(r'\b(?:parent|student|staff|customer|office)\s+parking\b', tags.get('name', ''), re.I))
+                  or any(re.search(r'\b(?:school|college|university|campus)\b', a['property_name'] or '', re.I)
+                         for a in associations))
     if irrelevant:
-        grade, reasons = 'REJECTED', ['Structured or non-recreation parking']
+        grade, reasons = 'REJECTED', ['Structured, institutional or non-recreation parking']
     elif blocked:
         grade, reasons = 'RESTRICTED', blocked
     elif not associations:
