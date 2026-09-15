@@ -39,14 +39,22 @@ Source preparation scopes are explicit because a national product must never be
 re-downloaded per tile:
   * national products (forest type groups, NLCD land cover, NLCD tree canopy,
     Census states): `prepare national`
-  * state/regional products (gSSURGO soil): `prepare state --state CO`
+  * state/regional products (SSURGO/gSSURGO/gNATSGO soil): `prepare state --state CO`
   * tile products (a 3DEP 1x1 degree DEM): `prepare tile --tile n40_w106`
+
+Soil has one normalized contract regardless of upstream packaging. The default
+source in 2026 is the authoritative NRCS Soil Data Access (SSURGO) tabular
+service: one query per state for the mapunit attribute table and one batched
+point-to-MUKEY query per tile. A gSSURGO or gNATSGO state package can be
+substituted with `prepare state --source gssurgo|gnatsgo`; the habitat build
+consumes the same normalized rows either way.
 
 Usage (preparation only; the app has no runtime backend):
   uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py sources
   uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py prepare national --sources forest-type,land-cover,canopy --cache /tmp/ffsrc
+  uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py prepare state --state CO --cache /tmp/ffsrc
   uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py prepare tile --tile n40_w106 --cache /tmp/ffsrc
-  uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py build --tile n40_w106 --cache /tmp/ffsrc --out /tmp/ff-normalized
+  uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py build --tile n40_w106 --soil-states CO --cache /tmp/ffsrc --out /tmp/ff-normalized
 """
 from __future__ import annotations
 
@@ -54,9 +62,11 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ElementTree
 import zipfile
 from pathlib import Path
 
@@ -528,16 +538,53 @@ def dem_path(cache: Path, tile_id: str) -> Path:
     return cache / f"dem_{usgs_dem_tile_id(tile_id)}.tif"
 
 
+def dem_release_listing_url(tile_id: str) -> str:
+    usgs = usgs_dem_tile_id(tile_id)
+    return ("https://prd-tnm.s3.amazonaws.com/?list-type=2&max-keys=1000&prefix="
+            f"StagedProducts/Elevation/1/TIFF/historical/{usgs}/USGS_1_{usgs}_")
+
+
+def list_dem_releases(tile_id: str, timeout: int = 120) -> list[str]:
+    """Latest-first list of 3DEP releases for a tile from the public TNM bucket.
+
+    The pinned global release does not exist for every tile, so tile scope must
+    resolve its own release instead of assuming one date nationwide.
+    """
+    usgs = usgs_dem_tile_id(tile_id)
+    response = requests.get(dem_release_listing_url(tile_id), timeout=timeout)
+    response.raise_for_status()
+    root = ElementTree.fromstring(response.content)
+    namespace = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
+    releases = set()
+    for key in root.findall(".//s3:Key", namespace):
+        match = re.search(rf"USGS_1_{usgs}_(\d{{8}})\.tif$", key.text or "")
+        if match:
+            releases.add(match.group(1))
+    return sorted(releases, reverse=True)
+
+
 def prepare_tile(cache: Path, tile_id: str) -> dict:
     """Prepare tile-scoped sources (the 3DEP 1x1 degree DEM). Never touches national products."""
     manifest = load_cache_manifest(cache)
+    usgs = usgs_dem_tile_id(tile_id)
+    key = f"{DEM_1ARC['id']}:{usgs}"
     target = dem_path(cache, tile_id)
-    url = dem_tile_url(tile_id)
-    if not target.exists():
-        _download(url, target, resume=True)
-    key = f"{DEM_1ARC['id']}:{usgs_dem_tile_id(tile_id)}"
+    previous = (manifest.get("sources") or {}).get(key) or {}
+    if target.exists():
+        # A cached tile keeps the release it was fetched with; never silently swap.
+        match = re.search(r"_(\d{8})\.tif$", previous.get("sourceUrl") or "")
+        release = match.group(1) if match else DEM_1ARC["release"]
+        note = previous.get("releaseNote") or "Cached file reused; release recorded from its download URL."
+    else:
+        releases = list_dem_releases(tile_id)
+        release = releases[0] if releases else DEM_1ARC["release"]
+        note = f"Latest of {len(releases)} releases listed by the TNM bucket." if releases else \
+            "Listing unavailable; fell back to the pinned release."
+        _download(dem_tile_url(tile_id, release), target, resume=True)
     validated = {"status": "READY", "scope": "tile", "tile": tile_id, "archive": target.name,
-                 "bytes": target.stat().st_size, "datasetVersion": DEM_1ARC["datasetVersion"], "sourceUrl": url}
+                 "bytes": target.stat().st_size, "datasetVersion": f"{DEM_1ARC['datasetVersion']}-{release}",
+                 "sourceUrl": dem_tile_url(tile_id, release), "release": release, "releaseNote": note,
+                 "releaseListingUrl": dem_release_listing_url(tile_id)}
     try:
         import rasterio
         with rasterio.open(target) as source:
@@ -599,43 +646,96 @@ def _sample_raster(source, transform_to, points: list[tuple[float, float]],
     return values
 
 
-# ─ Soil (gSSURGO) ─────────────────────────────────────────────────────
+# ─ Soil ──────────────────────────────────────────────────────────────
 #
-# The scalable national design is one prepared gSSURGO state archive per state:
-# the mapunit (mukey) raster is sampled locally at the tile's grid points and the
-# sampled mukeys are joined to the authoritative `muaggatt` mapunit aggregate
-# attribute table. That is one national/state download and zero per-point remote
-# calls, unlike the legacy Soil Data Access point sampler.
+# Soil evidence has ONE normalized contract no matter how the upstream product
+# is packaged:
 #
-# Only attributes a biological model can actually use are ingested. Units are
-# explicit; a map unit or attribute that is absent stays NULL, never a fabricated
+#   mukey -> {drainage_class, awc_25_cm, awc_50_cm, flood_frequency,
+#             hydrologic_group, slope_deg}
+#
+# Three authoritative NRCS sources can fill that contract:
+#   * "sda"      Soil Data Access SSURGO tabular + batched point->MUKEY queries
+#                (state attribute table fetched once, one point query per tile);
+#   * "gssurgo"  a gSSURGO state package (mapunit raster + muaggatt table);
+#   * "gnatsgo"  a gNATSGO state package (same shape, gap-filled).
+#
+# The habitat build never inspects the packaging format: it consumes normalized
+# rows and preserves NULL for any point or attribute the source does not cover.
+# Units are explicit; a missing survey or attribute is never a fabricated
 # neutral value.
 SOIL_COMPONENT = "soil"
 SOIL_COLUMNS = ("drainage_class", "awc_25_cm", "awc_50_cm", "flood_frequency",
                 "hydrologic_group", "slope_deg")
+SOIL_ATTRIBUTE_COLUMNS = [
+    ("mukey", "BIGINT"), ("musym", "VARCHAR"), ("areasymbol", "VARCHAR"),
+    ("drainage_class", "VARCHAR"), ("awc_25_cm", "DOUBLE"), ("awc_50_cm", "DOUBLE"),
+    ("flood_frequency", "VARCHAR"), ("hydrologic_group", "VARCHAR"), ("slope_deg", "DOUBLE"),
+]
+# Authoritative muaggatt attribute names (SSURGO/gSSURGO/gNATSGO all share them).
+SOIL_MUAGGATT_ATTRIBUTES = ("drclassdcd", "aws025wta", "aws050wta", "flodfreqdcd",
+                            "hydgrpdcd", "slopegraddcp")
+SOIL_UNITS = {"awc_25_cm": "centimeters", "awc_50_cm": "centimeters", "slope_deg": "percent slope"}
+SOIL_ATTRIBUTE_DESCRIPTIONS = {
+    "drainage_class": "drainage class (dominant condition, text)",
+    "awc_25_cm": "available water storage 0-25 cm (weighted average, cm)",
+    "awc_50_cm": "available water storage 0-50 cm (weighted average, cm)",
+    "flood_frequency": "flooding frequency class (dominant condition, text)",
+    "hydrologic_group": "hydrologic soil group (dominant condition, text)",
+    "slope_deg": "slope gradient (dominant condition, percent)",
+}
 
+SDA_ENDPOINT = "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest"
+SDA_SOIL = {
+    "id": "ssurgo_sda",
+    "kind": "sda",
+    "scope": "state",
+    "provider": "USDA Natural Resources Conservation Service",
+    "dataset": "SSURGO (Soil Survey Geographic Database) via Soil Data Access",
+    "productPage": "https://sdmdataaccess.sc.egov.usda.gov/",
+    "sourceUrl": SDA_ENDPOINT,
+    "datasetVersion": "ssurgo-sda",
+    "attributes": SOIL_ATTRIBUTE_DESCRIPTIONS,
+    "units": SOIL_UNITS,
+    "caveat": ("SSURGO coverage only. One query per state supplies the authoritative mapunit aggregate "
+               "attributes; one batched point-in-mapunit query per tile resolves the sampled grid cells. "
+               "A sampled point with no mapunit, and any attribute the mapunit does not publish, stays "
+               "NULL. STATSGO2 gap filling is deliberately NOT applied here because it would present "
+               "coarse state-level data as survey-grade soil."),
+}
 GSSURGO = {
     "id": "gssurgo",
+    "kind": "package",
     "scope": "state",
     "provider": "USDA Natural Resources Conservation Service",
     "dataset": "Gridded Soil Survey Geographic (gSSURGO) Database, state package",
     "productPage": "https://www.nrcs.usda.gov/resources/data-and-reports/gridded-soil-survey-geographic-gssurgo-database",
     "archiveNameTemplate": "gSSURGO_{state}.zip",
-    "datasetVersion": "gssurgo-state-current",
-    "units": {"awc_25_cm": "centimeters", "awc_50_cm": "centimeters", "slope_deg": "percent slope"},
-    "attributes": {
-        "drclassdcd": "drainage class (dominant condition, text)",
-        "aws025wta": "available water storage 0-25 cm (weighted average, cm)",
-        "aws050wta": "available water storage 0-50 cm (weighted average, cm)",
-        "flodfreqdcd": "flooding frequency class (dominant condition, text)",
-        "hydgrpdcd": "hydrologic soil group (dominant condition, text)",
-        "slopegraddcp": "slope gradient (dominant condition, percent)",
-    },
+    "datasetVersion": "gssurgo-state",
+    "attributes": SOIL_ATTRIBUTE_DESCRIPTIONS,
+    "units": SOIL_UNITS,
     "caveat": ("gSSURGO NRCS state packages do not publish one stable public URL for every state; the archive name "
                "and the SHA256 recorded in the cache manifest are authoritative, and an operator may place a state "
                "archive in the cache. The mapunit raster is sampled locally and joined to the shipped muaggatt "
                "table; survey areas without data stay missing. Missing soil is never a neutral biological value."),
 }
+GNATSGO = {
+    "id": "gnatsgo",
+    "kind": "package",
+    "scope": "state",
+    "provider": "USDA Natural Resources Conservation Service",
+    "dataset": "Gridded National Soil Survey Geographic (gNATSGO) Database, state package",
+    "productPage": "https://www.nrcs.usda.gov/resources/data-and-reports/gridded-national-soil-survey-geographic-gnatsgo-database",
+    "archiveNameTemplate": "gNATSGO_{state}.zip",
+    "datasetVersion": "gnatsgo-state",
+    "attributes": SOIL_ATTRIBUTE_DESCRIPTIONS,
+    "units": SOIL_UNITS,
+    "caveat": ("gNATSGO is the NRCS annually refreshed national gridded soil product: primarily SSURGO with "
+               "STATSGO2 gap filling. Mapunit raster + muaggatt are read with the same normalized contract as "
+               "gSSURGO; points sourced from STATSGO2 rather than SSURGO are coarse by construction and the "
+               "means of separating them depends on the package's source raster, which is not yet consumed here."),
+}
+SOIL_ARCHIVE_SOURCES = {"gssurgo": GSSURGO, "gnatsgo": GNATSGO}
 
 
 def _discover_mukey_raster(root: Path) -> Path | None:
@@ -662,12 +762,11 @@ def _read_muaggatt(extracted: Path, gdb: Path | None) -> list[dict]:
         with open(csv_path, newline="") as handle:
             return [{key.lower(): value for key, value in row.items()} for row in csv.DictReader(handle)]
     if gdb is None:
-        raise SystemExit("gSSURGO package has neither muaggatt.csv nor a FileGDB")
+        raise SystemExit("Soil package has neither muaggatt.csv nor a FileGDB")
     try:
         import pyogrio
     except ImportError as exc:
-        raise SystemExit("Reading gSSURGO FileGDB tables requires pyogrio: "
-                         "uv run --with pyogrio ...") from exc
+        raise SystemExit("Reading soil FileGDB tables requires pyogrio: uv run --with pyogrio ...") from exc
     frame = pyogrio.read_dataframe(gdb, layer="muaggatt", read_geometry=False)
     return [{str(key).lower(): value for key, value in record.items()} for record in frame.to_dict("records")]
 
@@ -681,47 +780,173 @@ def _to_float(value) -> float | None:
         return None
 
 
-def prepare_state(cache: Path, state: str, archive: Path | None = None) -> dict:
-    """Prepare one gSSURGO state package. No invented URL: if no archive or pinned
-    URL is available, the source stays explicitly FAILED/UNBUILT."""
+def normalize_soil_attribute(row: dict) -> dict:
+    """Normalize any upstream packaging (muaggatt, SDA result columns) to the contract."""
+    return {
+        "drainage_class": row.get("drainage_class", row.get("drclassdcd")),
+        "awc_25_cm": _to_float(row.get("awc_25_cm", row.get("aws025wta"))),
+        "awc_50_cm": _to_float(row.get("awc_50_cm", row.get("aws050wta"))),
+        "flood_frequency": row.get("flood_frequency", row.get("flodfreqdcd")),
+        "hydrologic_group": row.get("hydrologic_group", row.get("hydgrpdcd")),
+        "slope_deg": _to_float(row.get("slope_deg", row.get("slopegraddcp"))),
+    }
+
+
+# ─ Soil: Soil Data Access (SSURGO tabular + batched point lookup) ─────
+
+
+def _sda_query(query: str, timeout: int = 300) -> list[list]:
+    """One authoritative SDA query. Returns the raw Table (first row is the header)."""
+    response = requests.post(SDA_ENDPOINT, json={"query": query, "format": "JSON+COLUMNNAME"}, timeout=timeout)
+    response.raise_for_status()
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise ValueError(f"Soil Data Access returned non-JSON: {response.text[:200]}") from exc
+    if "Table" not in body:
+        raise ValueError(f"Soil Data Access rejected the query: {str(body)[:300]}")
+    return body["Table"] or []
+
+
+def sda_attribute_query(state: str) -> str:
+    if not re.fullmatch(r"[A-Z]{2}", state):
+        raise ValueError(f"Invalid state code: {state}")
+    return ("SELECT m.mukey, m.musym, l.areasymbol, ma.drclassdcd, ma.aws025wta, ma.aws050wta, "
+            "ma.flodfreqdcd, ma.hydgrpdcd, ma.slopegraddcp "
+            "FROM mapunit m JOIN legend l ON m.lkey = l.lkey LEFT JOIN muaggatt ma ON m.mukey = ma.mukey "
+            f"WHERE l.areasymbol LIKE '{state}%' ORDER BY m.mukey")
+
+
+def sda_point_query(points: list[tuple[float, float]]) -> str:
+    """Batched point -> MUKEY lookup. One query per tile, never one per point."""
+    values = ",".join(f"('{lat:.3f}_{lon:.3f}','point({lon} {lat})')" for lat, lon in points)
+    return ("SELECT p.pt AS point_id, m.mukey FROM (VALUES " + values + ") AS p(pt,wkt) "
+            "CROSS APPLY SDA_Get_Mukey_from_intersection_with_WktWgs84(p.wkt) m")
+
+
+def fetch_sda_attributes(state: str) -> list[dict]:
+    query = sda_attribute_query(state)
+    table = _sda_query(query)
+    if len(table) < 2:
+        return []
+    header = [str(name).lower() for name in table[0]]
+    rows = []
+    for record in table[1:]:
+        raw = dict(zip(header, record))
+        normalized = normalize_soil_attribute(raw)
+        normalized.update({"mukey": int(raw["mukey"]), "musym": raw.get("musym"),
+                           "areasymbol": raw.get("areasymbol")})
+        rows.append(normalized)
+    return rows
+
+
+def fetch_sda_point_mukeys(points: list[tuple[float, float]], timeout: int = 300) -> dict:
+    """Resolve MUKEY for sample points in batches. A point can intersect more than
+    one mapunit at a boundary; the smallest MUKEY wins deterministically."""
+    resolved: dict[str, int] = {}
+    ambiguous: dict[str, list[int]] = {}
+    chunk = 400
+    for start in range(0, len(points), chunk):
+        table = _sda_query(sda_point_query(points[start:start + chunk]), timeout=timeout)
+        if len(table) < 2:
+            continue
+        grouped: dict[str, list[int]] = {}
+        for point_id, mukey in table[1:]:  # row 0 is the column-name header
+            if point_id is None or mukey in (None, ""):
+                continue
+            grouped.setdefault(str(point_id), []).append(int(mukey))
+        for point_id, mukeys in grouped.items():
+            unique = sorted(set(mukeys))
+            resolved[point_id] = unique[0]
+            if len(unique) > 1:
+                ambiguous[point_id] = unique
+    return {"mukeys": resolved, "ambiguous": ambiguous}
+
+
+def prepare_state(cache: Path, state: str, source: str = "sda", archive: Path | None = None) -> dict:
+    """Prepare one authoritative NRCS soil source for a state.
+
+    `sda` fetches the normalized SSURGO attribute table once (cache/soil/<ST>-attributes.parquet).
+    `gssurgo`/`gnatsgo` validate an operator-provided state package instead. Either way the
+    completion marker is written only after the data validates.
+    """
     state = state.upper()
     manifest = load_cache_manifest(cache)
-    key = f"{GSSURGO['id']}:{state}"
-    target = cache / GSSURGO["archiveNameTemplate"].format(state=state)
-    if archive is not None and archive.exists() and not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(archive.read_bytes())
-    url = GSSURGO.get("urlTemplate", "").format(state=state) if GSSURGO.get("urlTemplate") else None
-    if not target.exists():
-        entry = {"status": "FAILED", "scope": "state", "state": state, "archive": target.name,
-                 "datasetVersion": GSSURGO["datasetVersion"],
-                 "error": ("No gSSURGO archive is present and no pinned download URL is configured for this state. "
-                           "Place the NRCS state package in the cache or refresh the URL from the product page."),
-                 "productPage": GSSURGO["productPage"]}
+    if source in SOIL_ARCHIVE_SOURCES:
+        descriptor = SOIL_ARCHIVE_SOURCES[source]
+        key = f"{descriptor['id']}:{state}"
+        target = cache / descriptor["archiveNameTemplate"].format(state=state)
+        if archive is not None and archive.exists() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive.read_bytes())
+        if not target.exists():
+            return _record(cache, manifest, key, {
+                "status": "FAILED", "scope": "state", "state": state, "archive": target.name,
+                "datasetVersion": descriptor["datasetVersion"], "productPage": descriptor["productPage"],
+                "error": ("No soil archive is present for this state. Place the NRCS state package in the cache "
+                          "or use the default `--source sda` Soil Data Access path.")})
+        digest = _sha256(target)
+        try:
+            with zipfile.ZipFile(target) as bundle:
+                members = bundle.namelist()
+            if not any(".gdb/" in name.lower() for name in members) and \
+                    not any("mukey" in name.lower() for name in members):
+                raise ValueError("archive contains no FileGDB or mukey raster")
+            entry = {"status": "READY", "scope": "state", "source": source, "state": state,
+                     "archive": target.name, "bytes": target.stat().st_size, "sha256": digest,
+                     "members": len(members), "datasetVersion": descriptor["datasetVersion"],
+                     "productPage": descriptor["productPage"]}
+        except Exception as exc:
+            entry = {"status": "FAILED", "scope": "state", "source": source, "state": state,
+                     "archive": target.name, "bytes": target.stat().st_size, "sha256": digest,
+                     "datasetVersion": descriptor["datasetVersion"], "error": str(exc)}
         return _record(cache, manifest, key, entry)
-    digest = _sha256(target)
+
+    if source != "sda":
+        raise SystemExit(f"Unknown soil source: {source} (choose sda, gssurgo or gnatsgo)")
+    key = f"{SDA_SOIL['id']}:{state}"
+    query = sda_attribute_query(state)
+    retrieved = time.strftime("%Y-%m-%d")
     try:
-        with zipfile.ZipFile(target) as bundle:
-            members = bundle.namelist()
-        if not any(name.lower().endswith(".gdb/") or ".gdb/" in name.lower() for name in members) and \
-                not any("mukey" in name.lower() for name in members):
-            raise ValueError("archive contains no FileGDB or mukey raster")
-        entry = {"status": "READY", "scope": "state", "state": state, "archive": target.name,
-                 "bytes": target.stat().st_size, "sha256": digest, "members": len(members),
-                 "datasetVersion": GSSURGO["datasetVersion"], "sourceUrl": url,
-                 "productPage": GSSURGO["productPage"]}
+        rows = fetch_sda_attributes(state)
     except Exception as exc:
-        entry = {"status": "FAILED", "scope": "state", "state": state, "archive": target.name,
-                 "bytes": target.stat().st_size, "sha256": digest,
-                 "datasetVersion": GSSURGO["datasetVersion"], "error": str(exc)}
-    return _record(cache, manifest, key, entry)
+        return _record(cache, manifest, key, {
+            "status": "FAILED", "scope": "state", "source": "sda", "state": state,
+            "datasetVersion": SDA_SOIL["datasetVersion"], "sourceUrl": SDA_ENDPOINT,
+            "error": f"Soil Data Access query failed: {exc}"})
+    if not rows:
+        return _record(cache, manifest, key, {
+            "status": "EMPTY", "scope": "state", "source": "sda", "state": state,
+            "datasetVersion": SDA_SOIL["datasetVersion"], "sourceUrl": SDA_ENDPOINT,
+            "statusNote": "Soil Data Access returned no mapunits for this state; soil stays UNBUILT."})
+    attributes_path = cache / "soil" / f"{state}-attributes.parquet"
+    meta = {
+        "datasetVersion": f"{SDA_SOIL['datasetVersion']}-{retrieved}",
+        "sourceUrl": SDA_ENDPOINT,
+        "status": "AVAILABLE",
+        "state": state,
+        "rowCount": len(rows),
+        "queryFingerprint": hashlib.sha256(query.encode()).hexdigest()[:16],
+        "collectedAt": retrieved,
+        "source": {**SDA_SOIL},
+        "units": SOIL_UNITS,
+        "attributes": SOIL_ATTRIBUTE_DESCRIPTIONS,
+    }
+    write_parquet(attributes_path, rows, SOIL_ATTRIBUTE_COLUMNS, meta)
+    entry = _record(cache, manifest, key, {
+        "status": "READY", "scope": "state", "source": "sda", "state": state,
+        "datasetVersion": meta["datasetVersion"], "sourceUrl": SDA_ENDPOINT,
+        "productPage": SDA_SOIL["productPage"], "attributesPath": str(attributes_path.relative_to(cache)),
+        "rows": len(rows), "queryFingerprint": meta["queryFingerprint"], "collectedAt": retrieved})
+    return entry
 
 
-def _extract_state_soil(cache: Path, state: str) -> dict | None:
-    manifest = load_cache_manifest(cache)
-    entry = (manifest.get("sources") or {}).get(f"{GSSURGO['id']}:{state}") or {}
-    archive = cache / GSSURGO["archiveNameTemplate"].format(state=state)
-    if entry.get("status") != "READY" or not archive.exists():
+def _package_soil_entry(cache: Path, state: str, entry: dict) -> dict | None:
+    descriptor = SOIL_ARCHIVE_SOURCES.get(entry.get("source"))
+    if descriptor is None:
+        return None
+    archive = cache / descriptor["archiveNameTemplate"].format(state=state)
+    if not archive.exists():
         return None
     extracted = cache / "extracted" / f"{archive.stem}-{entry['sha256'][:8]}"
     marker = extracted / ".ready"
@@ -734,49 +959,125 @@ def _extract_state_soil(cache: Path, state: str) -> dict | None:
     gdb = _discover_filegdb(extracted)
     if raster is None and gdb is None:
         return None
-    return {"state": state, "root": extracted, "raster": raster, "gdb": gdb,
-            "muaggatt": _read_muaggatt(extracted, gdb),
-            "source": {"id": GSSURGO["id"], "provider": GSSURGO["provider"], "dataset": GSSURGO["dataset"],
-                       "productPage": GSSURGO["productPage"], "sha256": entry["sha256"],
-                       "state": state, "attributes": GSSURGO["attributes"], "units": GSSURGO["units"],
-                       "caveat": GSSURGO["caveat"]},
-            "datasetVersion": f"{GSSURGO['datasetVersion']}:{state}"}
+    table = _read_muaggatt(extracted, gdb)
+    attributes = {int(row["mukey"]): normalize_soil_attribute(row)
+                  for row in table if row.get("mukey") not in (None, "")}
+    return {"state": state, "kind": "package", "raster": raster, "attributes": attributes,
+            "point_mukeys": None,
+            "source": {"id": descriptor["id"], "provider": descriptor["provider"],
+                       "dataset": descriptor["dataset"], "productPage": descriptor["productPage"],
+                       "sha256": entry["sha256"], "state": state,
+                       "attributes": descriptor["attributes"], "units": descriptor["units"],
+                       "caveat": descriptor["caveat"]},
+            "datasetVersion": f"{entry['datasetVersion']}:{state}"}
 
 
-def soil_inputs(cache: Path, states: list[str]) -> list[dict]:
-    prepared = [soil for state in states if (soil := _extract_state_soil(cache, state.upper()))]
+def _load_sda_attributes(cache: Path, state: str, entry: dict) -> dict:
+    path = cache / entry.get("attributesPath", f"soil/{state}-attributes.parquet")
+    connection = duckdb.connect()
+    try:
+        table = connection.execute("SELECT * FROM read_parquet(?)", [str(path)])
+        columns = [description[0] for description in table.description]
+        return {int(row[columns.index("mukey")]): dict(zip(columns, row)) for row in table.fetchall()}
+    finally:
+        connection.close()
+
+
+def _tile_point_mukeys(cache: Path, tile_id: str, points: list[tuple[float, float]], step: float) -> dict:
+    """Cached per-tile point -> MUKEY resolution. One batched SDA call per tile."""
+    path = cache / "soil" / f"{tile_id}-points.json"
+    if path.exists():
+        try:
+            cached = json.loads(path.read_text())
+            if cached.get("step") == step and cached.get("pointCount") == len(points):
+                return cached
+        except (ValueError, OSError):
+            pass  # A damaged cache is re-queried, never trusted.
+    result = fetch_sda_point_mukeys(points)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"tile": tile_id, "step": step, "retrievedAt": time.strftime("%Y-%m-%d"),
+               "pointCount": len(points), "resolved": len(result["mukeys"]),
+               "unresolved": len(points) - len(result["mukeys"]),
+               "ambiguous": result["ambiguous"], "mukeys": result["mukeys"]}
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return payload
+
+
+def soil_inputs(cache: Path, states: list[str], tile_id: str | None = None,
+                step: float = STEP_DEGREES) -> list[dict]:
+    """Normalized soil inputs for a state list, optionally resolved for one tile.
+
+    The gSSURGO/gNATSGO package path supplies a mapunit raster; the SDA path
+    supplies a point -> MUKEY map. Both become the same attribute lookup, so the
+    habitat build does not know which product produced the evidence.
+    """
+    manifest = load_cache_manifest(cache)
+    sources = manifest.get("sources") or {}
+    prepared = []
+    point_cache = None
+    for state in [name.upper() for name in states]:
+        sda_entry = sources.get(f"{SDA_SOIL['id']}:{state}") or {}
+        package_entry = None
+        for descriptor in (GNATSGO, GSSURGO):
+            candidate = sources.get(f"{descriptor['id']}:{state}") or {}
+            if candidate.get("status") == "READY":
+                package_entry = candidate
+                break
+        if sda_entry.get("status") == "READY":
+            attributes = _load_sda_attributes(cache, state, sda_entry)
+            if point_cache is None and tile_id:
+                point_cache = _tile_point_mukeys(cache, tile_id, sample_points(tile_id, step), step)
+            entry = {"state": state, "kind": "sda", "raster": None, "attributes": attributes,
+                     "point_mukeys": (point_cache or {}).get("mukeys"),
+                     "source": {"id": SDA_SOIL["id"], "provider": SDA_SOIL["provider"],
+                                "dataset": SDA_SOIL["dataset"], "sourceUrl": SDA_ENDPOINT,
+                                "productPage": SDA_SOIL["productPage"],
+                                "attributes": SDA_SOIL["attributes"], "units": SDA_SOIL["units"],
+                                "caveat": SDA_SOIL["caveat"], "state": state,
+                                "collectedAt": sda_entry.get("collectedAt"),
+                                "pointLookup": f"{tile_id}-points.json" if tile_id else None,
+                                "ambiguousPoints": len((point_cache or {}).get("ambiguous") or {})},
+                     "datasetVersion": f"{sda_entry['datasetVersion']}:{state}"}
+            prepared.append(entry)
+        elif package_entry:
+            entry = _package_soil_entry(cache, state, package_entry)
+            if entry:
+                prepared.append(entry)
     return prepared
 
 
 def merge_soil_samples(soil_prepared: list[dict], points: list[tuple[float, float]]) -> dict:
-    """Sample prepared state mapunit rasters and join to muaggatt.
+    """Join normalized soil evidence onto the tile's grid points.
 
     A point covered by an earlier state is not overwritten by a later one; points
-    with no mapunit or no attribute remain None. Requires rasterio only when a
-    raster is actually present.
+    with no mapunit or no attribute remain None. Raster sampling needs rasterio
+    only when a package raster is actually present.
     """
     columns = {key: [None] * len(points) for key in SOIL_COLUMNS}
     for entry in soil_prepared:
-        if entry.get("raster") is None:
-            continue
-        import rasterio
-        from rasterio.warp import transform as warp_transform
-        lookup = {int(row["mukey"]): row for row in entry["muaggatt"]
-                  if row.get("mukey") not in (None, "")}
-        with rasterio.open(entry["raster"]) as source:
-            values = _sample_raster(source, warp_transform, points)
+        values = [None] * len(points)
+        if entry.get("raster") is not None:
+            import rasterio
+            from rasterio.warp import transform as warp_transform
+            with rasterio.open(entry["raster"]) as source:
+                values = _sample_raster(source, warp_transform, points)
+        elif entry.get("point_mukeys") is not None:
+            mukeys = entry["point_mukeys"]
+            values = [mukeys.get(f"{lat:.3f}_{lon:.3f}") for lat, lon in points]
+        lookup = entry.get("attributes") or {}
         for index, value in enumerate(values):
             if value is None or columns["drainage_class"][index] is not None:
                 continue
             row = lookup.get(int(value))
             if not row:
                 continue
-            columns["drainage_class"][index] = row.get("drclassdcd")
-            columns["awc_25_cm"][index] = _to_float(row.get("aws025wta"))
-            columns["awc_50_cm"][index] = _to_float(row.get("aws050wta"))
-            columns["flood_frequency"][index] = row.get("flodfreqdcd")
-            columns["hydrologic_group"][index] = row.get("hydgrpdcd")
-            columns["slope_deg"][index] = _to_float(row.get("slopegraddcp"))
+            normalized = normalize_soil_attribute(row)
+            columns["drainage_class"][index] = normalized["drainage_class"]
+            columns["awc_25_cm"][index] = normalized["awc_25_cm"]
+            columns["awc_50_cm"][index] = normalized["awc_50_cm"]
+            columns["flood_frequency"][index] = normalized["flood_frequency"]
+            columns["hydrologic_group"][index] = normalized["hydrologic_group"]
+            columns["slope_deg"][index] = normalized["slope_deg"]
     return columns
 
 
@@ -797,9 +1098,10 @@ def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGRE
     """Compose one habitat tile from every prepared source on the 0.05-degree grid.
 
     Required: forest-type-group + 3DEP elevation. Optional and composed when
-    prepared: Annual NLCD land cover, NLCD tree canopy, gSSURGO soil. A missing
-    optional source stays NULL/UNBUILT and lowers the declared completeness; it is
-    never imputed. The caller never stitches intermediate Parquet fragments.
+    prepared: Annual NLCD land cover, NLCD tree canopy, NRCS soil (SDA SSURGO or a
+    gSSURGO/gNATSGO package, normalized identically). A missing optional source
+    stays NULL/UNBUILT and lowers the declared completeness; it is never imputed.
+    The caller never stitches intermediate Parquet fragments.
     """
     import rasterio
     from rasterio.warp import transform as warp_transform
@@ -807,6 +1109,11 @@ def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGRE
     points = sample_points(tile_id, step)
     archive = _archive_path(cache, FOREST_GROUP)
     elevation_path = dem_path(cache, tile_id)
+    # Provenance follows the actual prepared DEM entry: 3DEP releases differ per tile.
+    cache_manifest = load_cache_manifest(cache)
+    dem_entry = (cache_manifest.get("sources") or {}).get(f"{DEM_1ARC['id']}:{usgs_dem_tile_id(tile_id)}") or {}
+    dem_source_url = dem_entry.get("sourceUrl") or dem_tile_url(tile_id)
+    dem_version = dem_entry.get("datasetVersion") or DEM_1ARC["datasetVersion"]
     if not archive.exists():
         raise SystemExit(f"Missing pinned forest-type-group archive: {archive} (run prepare national first)")
     if not elevation_path.exists():
@@ -882,8 +1189,8 @@ def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGRE
          "resolutionM": FOREST_GROUP["resolutionM"], "citation": FOREST_GROUP["citation"],
          "caveat": FOREST_GROUP["caveat"]},
         {"id": DEM_1ARC["id"], "provider": DEM_1ARC["provider"], "dataset": DEM_1ARC["dataset"],
-         "sourceUrl": dem_tile_url(tile_id), "crs": DEM_1ARC["crs"], "units": "meters",
-         "citation": DEM_1ARC["citation"], "caveat": DEM_1ARC["caveat"]},
+         "sourceUrl": dem_source_url, "datasetVersion": dem_version, "crs": DEM_1ARC["crs"],
+         "units": "meters", "citation": DEM_1ARC["citation"], "caveat": DEM_1ARC["caveat"]},
     ]
     units = {"elevation_ft": "feet", "sourceElevation": "meters", "canopy": "fraction 0..1 (source percent / 100)"}
     if land_cover_ready:
@@ -904,7 +1211,7 @@ def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGRE
         units["canopySourcePercent"] = "percent 0..100"
     if soil_ready:
         sources.extend(entry["source"] for entry in soil_prepared)
-    version_parts = [FOREST_GROUP["datasetVersion"], DEM_1ARC["datasetVersion"]]
+    version_parts = [FOREST_GROUP["datasetVersion"], dem_version]
     if land_cover_ready:
         version_parts.append(NLCD_LANDCOVER["datasetVersion"])
     if canopy_image is not None:
@@ -920,7 +1227,7 @@ def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGRE
         "statusNote": ("Composed from mapped FIA forest-type-group classes and 3DEP elevation"
                        + (", Annual NLCD land cover" if land_cover_ready else "")
                        + (", NLCD tree canopy" if canopy_image is not None else "")
-                       + (", gSSURGO soil" if soil_ready else "")
+                       + (", NRCS soil" if soil_ready else "")
                        + (". Soil is absent in this tile (null, not zero) and remains UNBUILT."
                           if not soil_ready else ".")
                        + ("" if status == "AVAILABLE" else " Required habitat components are missing; the tile is PARTIAL.")),
@@ -1179,7 +1486,8 @@ def build_public_land(tile_id: str, cache: Path, out: Path, timeout: int = 240) 
 
 def source_registry() -> dict:
     return {"forestTypeGroups": FOREST_GROUP, "elevation": DEM_1ARC, "landCover": NLCD_LANDCOVER,
-            "canopy": NLCD_TCC, "fire": MTBS, "publicLand": PADUS, "soil": GSSURGO, "states": STATES}
+            "canopy": NLCD_TCC, "fire": MTBS, "publicLand": PADUS,
+            "soilSda": SDA_SOIL, "soilGssurgo": GSSURGO, "soilGnatsgo": GNATSGO, "states": STATES}
 
 
 def main() -> None:
@@ -1196,10 +1504,12 @@ def main() -> None:
     tile = prepare_sub.add_parser("tile", help="Download/validate tile-scoped products (3DEP DEM)")
     tile.add_argument("--tile", required=True)
     tile.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
-    state = prepare_sub.add_parser("state", help="Prepare a state-scoped product (gSSURGO)")
+    state = prepare_sub.add_parser("state", help="Prepare a state-scoped soil source (default: SDA SSURGO)")
     state.add_argument("--state", required=True)
+    state.add_argument("--source", choices=["sda", "gssurgo", "gnatsgo"], default="sda",
+                       help="sda = NRCS Soil Data Access SSURGO (default); gssurgo/gnatsgo = operator-supplied state package")
     state.add_argument("--archive", type=Path, default=None,
-                       help="Operator-supplied NRCS state archive when no pinned URL is available")
+                       help="Operator-supplied NRCS state package for --source gssurgo|gnatsgo")
     state.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
 
     build_parser = sub.add_parser("build", help="Compose normalized tile layers from the local source cache")
@@ -1210,7 +1520,7 @@ def main() -> None:
                               help="Comma-separated subset of habitat,public-land,fire")
     build_parser.add_argument("--step", type=float, default=STEP_DEGREES)
     build_parser.add_argument("--soil-states", default="",
-                              help="Comma-separated state codes whose prepared gSSURGO should be composed into habitat")
+                              help="Comma-separated state codes whose prepared NRCS soil should be composed into habitat")
     args = parser.parse_args()
 
     if args.command == "sources":
@@ -1226,11 +1536,12 @@ def main() -> None:
         elif args.scope == "tile":
             print(json.dumps(prepare_tile(args.cache, args.tile), indent=2))
         else:
-            print(json.dumps(prepare_state(args.cache, args.state, args.archive), indent=2))
+            print(json.dumps(prepare_state(args.cache, args.state, args.source, args.archive), indent=2))
         return
 
     soil_states = [name.strip() for name in args.soil_states.split(",") if name.strip()]
-    soil_prepared = soil_inputs(args.cache, soil_states) if soil_states else None
+    soil_prepared = (soil_inputs(args.cache, soil_states, args.tile, args.step)
+                     if soil_states else None)
     builders = {"habitat": lambda: build_habitat(args.tile, args.cache, args.out, args.step, soil_prepared),
                 "public-land": lambda: build_public_land(args.tile, args.cache, args.out),
                 "fire": lambda: build_fire(args.tile, args.cache, args.out)}

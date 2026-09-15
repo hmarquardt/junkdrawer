@@ -10,6 +10,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import threading
@@ -28,6 +29,10 @@ spec.loader.exec_module(bulk)
 DATA = ROOT / 'data/fruiting-forecast'
 TILE = 'n40_w106'
 TILE_2 = 'n39_w106'
+# The bounded Southern Rockies release: the 3x3 southern bbox plus the two
+# verified Front Range / Never Summer tiles above it.
+RELEASE_TILES = ('n37_w106', 'n37_w107', 'n37_w108', 'n38_w106', 'n38_w107', 'n38_w108',
+                 'n39_w106', 'n39_w107', 'n39_w108', 'n40_w106', 'n40_w107')
 
 
 class AdapterContracts(unittest.TestCase):
@@ -208,7 +213,10 @@ class SourceCache(unittest.TestCase):
 
 
 class SoilAdapter(unittest.TestCase):
-    """The gSSURGO path is tested with a synthetic package shaped like the real product."""
+    """Soil has one normalized contract for the SDA and package sources alike."""
+
+    ATTRIBUTE_HEADER = ["mukey", "musym", "areasymbol", "drclassdcd", "aws025wta", "aws050wta",
+                        "flodfreqdcd", "hydgrpdcd", "slopegraddcp"]
 
     def _package(self, root: Path) -> Path:
         import rasterio
@@ -232,17 +240,96 @@ class SoilAdapter(unittest.TestCase):
             bundle.write(root / 'muaggatt.csv', 'muaggatt.csv')
         return archive
 
-    def test_discovery_and_point_join_preserve_missing_attributes(self):
+    def _fake_sda(self, attribute_rows=None):
+        """Deterministic stand-in for Soil Data Access (no network in tests)."""
+        header = self.ATTRIBUTE_HEADER
+        rows = attribute_rows or [
+            [100, '1', 'CO001', 'Well drained', '9.5', '18.2', 'None', 'B', '5'],
+            [200, '2', 'CO001', 'Poorly drained', '4.1', '8.0', 'Frequent', 'C', '2'],
+            [50, '3', 'CO001', 'Excessively drained', '6.2', '11.5', 'None', 'A', '15'],
+            [300, '4', 'CO001', 'Well drained', None, '12.0', 'None', 'A', '9'],
+        ]
+
+        def fake_query(query: str, timeout: int = 300):
+            if 'CROSS APPLY' in query:
+                ids = re.findall(r"\('([\d.\-_]+)','point", query)
+                table = [["point_id", "mukey"]]
+                for index, point_id in enumerate(ids):
+                    if index == len(ids) - 1:
+                        continue  # last point deliberately unresolved
+                    table.append([point_id, "100" if index < len(ids) // 2 else "200"])
+                table.append([ids[0], "50"])  # boundary ambiguity: smallest mukey must win
+                return table
+            return [header] + rows
+
+        return fake_query
+
+    def test_sda_state_prepare_and_batched_point_join(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            original = bulk._sda_query
+            bulk._sda_query = self._fake_sda()
+            try:
+                entry = bulk.prepare_state(cache, 'co', source='sda')
+                self.assertEqual(entry['status'], 'READY')
+                self.assertEqual(entry['rows'], 4)
+                self.assertTrue((cache / entry['attributesPath']).exists())
+                points = bulk.sample_points('n39_w106')
+                prepared = bulk.soil_inputs(cache, ['CO'], tile_id='n39_w106')
+                self.assertEqual(len(prepared), 1)
+                self.assertEqual(prepared[0]['kind'], 'sda')
+                # The batched point query is cached for reuse; the smallest MUKEY wins boundaries.
+                cache_file = json.loads((cache / 'soil' / 'n39_w106-points.json').read_text())
+                self.assertEqual(cache_file['resolved'], len(points) - 1)
+                self.assertEqual(cache_file['ambiguous'][f'{points[0][0]:.3f}_{points[0][1]:.3f}'], [50, 100])
+                columns = bulk.merge_soil_samples(prepared, points)
+                self.assertEqual(columns['drainage_class'][0], 'Excessively drained')  # mukey 50
+                self.assertEqual(columns['awc_25_cm'][0], 6.2)
+                self.assertEqual(columns['drainage_class'][len(points) // 2], 'Poorly drained')  # mukey 200
+                # The unresolved final point stays missing, never neutral.
+                self.assertIsNone(columns['drainage_class'][-1])
+                self.assertIsNone(columns['awc_25_cm'][-1])
+            finally:
+                bulk._sda_query = original
+
+    def test_sda_failure_is_explicit_and_not_ready(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            original = bulk._sda_query
+            bulk._sda_query = lambda query, timeout=300: (_ for _ in ()).throw(RuntimeError('SDA offline'))
+            try:
+                entry = bulk.prepare_state(cache, 'CO', source='sda')
+                self.assertEqual(entry['status'], 'FAILED')
+                self.assertIn('SDA offline', entry['error'])
+                self.assertEqual(bulk.soil_inputs(cache, ['CO']), [])
+            finally:
+                bulk._sda_query = original
+
+    def test_sda_empty_state_is_not_ready(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            original = bulk._sda_query
+            bulk._sda_query = lambda query, timeout=300: [self.ATTRIBUTE_HEADER]
+            try:
+                entry = bulk.prepare_state(cache, 'CO', source='sda')
+                self.assertEqual(entry['status'], 'EMPTY')
+                self.assertEqual(bulk.soil_inputs(cache, ['CO']), [])
+            finally:
+                bulk._sda_query = original
+
+    def test_package_discovery_and_point_join_use_the_same_contract(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             archive = self._package(root)
             cache = root / 'cache'
             cache.mkdir()
             shutil.copyfile(archive, cache / archive.name)
-            entry = bulk.prepare_state(cache, 'CO')
+            entry = bulk.prepare_state(cache, 'CO', source='gssurgo')
             self.assertEqual(entry['status'], 'READY')
+            self.assertEqual(entry['source'], 'gssurgo')
             prepared = bulk.soil_inputs(cache, ['CO'])
             self.assertEqual(len(prepared), 1)
+            self.assertEqual(prepared[0]['kind'], 'package')
             points = [(39.575, -106.175), (39.575, -106.125), (39.525, -106.175),
                       (39.525, -106.125), (39.45, -106.150)]
             columns = bulk.merge_soil_samples(prepared, points)
@@ -259,9 +346,9 @@ class SoilAdapter(unittest.TestCase):
     def test_missing_state_package_is_failed_not_invented(self):
         with tempfile.TemporaryDirectory() as temp:
             cache = Path(temp)
-            entry = bulk.prepare_state(cache, 'CO')
+            entry = bulk.prepare_state(cache, 'CO', source='gssurgo')
             self.assertEqual(entry['status'], 'FAILED')
-            self.assertIn('No gSSURGO archive', entry['error'])
+            self.assertIn('No soil archive', entry['error'])
             self.assertEqual(bulk.soil_inputs(cache, ['CO']), [])
 
     def test_raster_free_archive_without_mapunit_data_is_not_ready(self):
@@ -269,8 +356,18 @@ class SoilAdapter(unittest.TestCase):
             cache = Path(temp)
             with zipfile.ZipFile(cache / 'gSSURGO_CO.zip', 'w') as bundle:
                 bundle.writestr('README.txt', 'no soil here')
-            entry = bulk.prepare_state(cache, 'CO')
+            entry = bulk.prepare_state(cache, 'CO', source='gssurgo')
             self.assertEqual(entry['status'], 'FAILED')
+
+    def test_both_sources_normalize_to_the_same_columns(self):
+        sda = bulk.normalize_soil_attribute({'drclassdcd': 'Well drained', 'aws025wta': '9.5',
+                                             'aws050wta': '18.2', 'flodfreqdcd': 'None',
+                                             'hydgrpdcd': 'B', 'slopegraddcp': '5'})
+        package = bulk.normalize_soil_attribute({'drclassdcd': 'Well drained', 'aws025wta': '9.5',
+                                                 'aws050wta': '18.2', 'flodfreqdcd': 'None',
+                                                 'hydgrpdcd': 'B', 'slopegraddcp': '5'})
+        self.assertEqual(sda, package)
+        self.assertEqual(set(sda), set(bulk.SOIL_COLUMNS))
 
 
 class HabitatComposition(unittest.TestCase):
@@ -355,14 +452,17 @@ class PublishedColoradoTiles(unittest.TestCase):
             self.assertEqual(habitat['cells'], 400)
             self.assertEqual(habitat['components'],
                              {'forestType': 'AVAILABLE', 'elevation': 'AVAILABLE', 'landCover': 'AVAILABLE',
-                              'canopy': 'AVAILABLE', 'soil': 'UNBUILT'})
-            self.assertIn('soil', habitat['unbuilt'])
-            self.assertNotIn('canopy', habitat['unbuilt'])
+                              'canopy': 'AVAILABLE', 'soil': 'AVAILABLE'})
+            self.assertEqual(habitat['unbuilt'], ['access'])
             self.assertEqual(habitat['units']['elevation_ft'], 'feet')
             self.assertIn('fraction', habitat['units']['canopy'])
             source_ids = {source['id'] for source in habitat['sources']}
             self.assertEqual(source_ids, {'forest_type_groups', '3dep_1arcsecond',
-                                          'nlcd_land_cover', 'nlcd_tree_canopy'})
+                                          'nlcd_land_cover', 'nlcd_tree_canopy', 'ssurgo_sda'})
+            soil = next(source for source in habitat['sources'] if source['id'] == 'ssurgo_sda')
+            self.assertIn('Soil Data Access', soil['dataset'])
+            self.assertEqual(soil['units']['awc_25_cm'], 'centimeters')
+            self.assertTrue(soil['attributes'])
 
     def test_habitat_carries_real_canopy_land_cover_and_west_host_evidence(self):
         for tile_id in (TILE, TILE_2):
@@ -372,7 +472,9 @@ class PublishedColoradoTiles(unittest.TestCase):
                            'evergreen', 'mixed_forest', 'wetland', 'spruce_fir_signal',
                            'fir_spruce_mountain_hemlock_signal', 'lodgepole_pine_signal',
                            'ponderosa_pine_signal', 'douglas_fir_signal', 'aspen_birch_signal',
-                           'forest_mapped', 'elevation_ft', 'forest_type_code'):
+                           'forest_mapped', 'elevation_ft', 'forest_type_code',
+                           'drainage_class', 'awc_25_cm', 'awc_50_cm', 'flood_frequency',
+                           'hydrologic_group', 'slope_deg'):
                 self.assertIn(column, columns, (tile_id, column))
             canopies = [record['canopy'] for record in records]
             self.assertEqual(len(canopies), 400)
@@ -460,11 +562,12 @@ class PublishedColoradoTiles(unittest.TestCase):
         for layer, stat in summary.items():
             self.assertEqual(sum(stat[key] for key in ('populated', 'verifiedEmpty', 'unbuilt', 'failed')), tile_count, layer)
             self.assertEqual(stat['verifiedEmpty'], 0, layer)
-        self.assertGreaterEqual(summary['habitat']['available'], 2)
-        self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], 2)
-        self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], 2)
-        self.assertEqual(summary['habitat']['components']['soil']['UNBUILT'], 2)
-        self.assertGreaterEqual(summary['fire']['populated'], 2)
+        self.assertGreaterEqual(summary['habitat']['available'], len(RELEASE_TILES))
+        self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], len(RELEASE_TILES))
+        self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], len(RELEASE_TILES))
+        self.assertEqual(summary['habitat']['components']['soil']['AVAILABLE'], len(RELEASE_TILES))
+        self.assertEqual(summary['habitat']['components']['soil']['UNBUILT'], 0)
+        self.assertGreaterEqual(summary['fire']['populated'], len(RELEASE_TILES))
         for tile in self.manifest['tiles']:
             asset = tile.get('habitat') or {}
             if asset.get('status') in {'AVAILABLE', 'PARTIAL'}:
@@ -498,6 +601,75 @@ class PublishedColoradoTiles(unittest.TestCase):
         descriptor = self.manifest['collectingRules']
         self.assertEqual(descriptor['schemaVersion'], 2)
         self.assertEqual(descriptor['datasetVersion'], rules['datasetVersion'])
+
+
+class BoundedSouthernRockiesRelease(unittest.TestCase):
+    """The 11-tile release must be complete, differentiated and honestly gapped."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.manifest = json.loads((DATA / 'manifest.json').read_text())
+        cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
+        cls.con = duckdb.connect()
+
+    def habitat_path(self, tile_id):
+        return str(DATA / self.tiles[tile_id]['habitat']['url'])
+
+    def test_every_release_tile_has_all_five_components_and_all_four_layers(self):
+        for tile_id in RELEASE_TILES:
+            tile = self.tiles[tile_id]
+            habitat = tile['habitat']
+            self.assertEqual(habitat['status'], 'AVAILABLE', tile_id)
+            self.assertEqual(habitat['cells'], 400, tile_id)
+            self.assertEqual(habitat['components'], {'forestType': 'AVAILABLE', 'elevation': 'AVAILABLE',
+                                                     'landCover': 'AVAILABLE', 'canopy': 'AVAILABLE',
+                                                     'soil': 'AVAILABLE'}, tile_id)
+            self.assertEqual(tile['publicLands']['status'], 'AVAILABLE', tile_id)
+            self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
+            self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
+            self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
+            self.assertEqual(tile['accessPoints']['status'], 'UNBUILT', tile_id)
+
+    def test_real_ssurgo_soil_evidence_is_present_with_explicit_gaps(self):
+        known_drainage = ('well drained', 'moderately well drained', 'somewhat excessively drained',
+                          'excessively drained', 'somewhat poorly drained', 'poorly drained',
+                          'very poorly drained')
+        for tile_id in RELEASE_TILES:
+            row = self.con.execute(f"""
+                SELECT count(*), count(drainage_class), count(awc_25_cm), count(awc_50_cm),
+                       count(hydrologic_group), min(awc_25_cm), max(awc_25_cm), min(slope_deg), max(slope_deg)
+                FROM read_parquet('{self.habitat_path(tile_id)}')""").fetchone()
+            cells, drainage, awc25, awc50, groups, min_awc, max_awc, min_slope, max_slope = row
+            self.assertEqual(cells, 400, tile_id)
+            self.assertGreaterEqual(drainage, 300, f'{tile_id} has implausibly sparse soil coverage')
+            self.assertEqual(awc25, awc50, tile_id)
+            self.assertGreaterEqual(groups, 300, tile_id)
+            self.assertGreaterEqual(min_awc, 0.0, tile_id)
+            self.assertLessEqual(max_awc, 25.0, tile_id)
+            self.assertGreaterEqual(min_slope, 0.0, tile_id)
+            self.assertLessEqual(max_slope, 200.0, tile_id)
+            classes = {value.lower() for (value,) in self.con.execute(
+                f"SELECT DISTINCT drainage_class FROM read_parquet('{self.habitat_path(tile_id)}') "
+                "WHERE drainage_class IS NOT NULL").fetchall()}
+            self.assertTrue(classes <= set(known_drainage), (tile_id, classes))
+            # Missing evidence stays missing instead of becoming a neutral value.
+            self.assertGreater(400 - drainage, 0, f'{tile_id} unexpectedly has no missing soil cells')
+
+    def test_soil_evidence_differs_across_the_region(self):
+        classes = self.con.execute("""
+            SELECT drainage_class, count(*) FROM read_parquet(?)
+            WHERE drainage_class IS NOT NULL GROUP BY 1 ORDER BY 2 DESC""",
+            [[self.habitat_path(tile_id) for tile_id in RELEASE_TILES]]).fetchall()
+        self.assertGreaterEqual(len(classes), 5)
+        self.assertEqual(classes[0][0], 'Well drained')
+        # Wet valley soils exist somewhere in the release; the region is not one uniform class.
+        self.assertTrue(any(name and 'poorly drained' in name.lower() for name, _ in classes))
+
+    def test_release_manifest_declares_the_bounded_extent_not_conus(self):
+        coverage = self.manifest['summary']['coverage']
+        self.assertIn('Southern Rockies', coverage)
+        self.assertNotIn('955', coverage)
+        self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])), sorted(RELEASE_TILES))
 
 
 if __name__ == '__main__':
