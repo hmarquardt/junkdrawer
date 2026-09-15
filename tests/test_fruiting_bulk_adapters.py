@@ -29,10 +29,13 @@ spec.loader.exec_module(bulk)
 DATA = ROOT / 'data/fruiting-forecast'
 TILE = 'n40_w106'
 TILE_2 = 'n39_w106'
-# The bounded Southern Rockies release: the 3x3 southern bbox plus the two
-# verified Front Range / Never Summer tiles above it.
-RELEASE_TILES = ('n37_w106', 'n37_w107', 'n37_w108', 'n38_w106', 'n38_w107', 'n38_w108',
-                 'n39_w106', 'n39_w107', 'n39_w108', 'n40_w106', 'n40_w107')
+# The bounded Colorado release: the 3x3 southern bbox plus the two verified
+# Front Range / Never Summer tiles above it.
+COLORADO_TILES = ('n37_w106', 'n37_w107', 'n37_w108', 'n38_w106', 'n38_w107', 'n38_w108',
+                  'n39_w106', 'n39_w107', 'n39_w108', 'n40_w106', 'n40_w107')
+# The northern New Mexico extension: Taos/Carson NF, Pecos/Santa Fe NF, Santa Fe/Sandia.
+NEW_MEXICO_TILES = ('n36_w107', 'n36_w106', 'n35_w106')
+RELEASE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES))
 
 
 class AdapterContracts(unittest.TestCase):
@@ -215,7 +218,7 @@ class SourceCache(unittest.TestCase):
 class SoilAdapter(unittest.TestCase):
     """Soil has one normalized contract for the SDA and package sources alike."""
 
-    ATTRIBUTE_HEADER = ["mukey", "musym", "areasymbol", "drclassdcd", "aws025wta", "aws050wta",
+    ATTRIBUTE_HEADER = ["mukey", "musym", "areasymbol", "saverest", "drclassdcd", "aws025wta", "aws050wta",
                         "flodfreqdcd", "hydgrpdcd", "slopegraddcp"]
 
     def _package(self, root: Path) -> Path:
@@ -244,10 +247,10 @@ class SoilAdapter(unittest.TestCase):
         """Deterministic stand-in for Soil Data Access (no network in tests)."""
         header = self.ATTRIBUTE_HEADER
         rows = attribute_rows or [
-            [100, '1', 'CO001', 'Well drained', '9.5', '18.2', 'None', 'B', '5'],
-            [200, '2', 'CO001', 'Poorly drained', '4.1', '8.0', 'Frequent', 'C', '2'],
-            [50, '3', 'CO001', 'Excessively drained', '6.2', '11.5', 'None', 'A', '15'],
-            [300, '4', 'CO001', 'Well drained', None, '12.0', 'None', 'A', '9'],
+            [100, '1', 'CO001', '8/29/2025 3:26:00 PM', 'Well drained', '9.5', '18.2', 'None', 'B', '5'],
+            [200, '2', 'CO001', '8/29/2025 3:26:00 PM', 'Poorly drained', '4.1', '8.0', 'Frequent', 'C', '2'],
+            [50, '3', 'CO001', '8/29/2025 3:26:00 PM', 'Excessively drained', '6.2', '11.5', 'None', 'A', '15'],
+            [300, '4', 'CO002', '9/2/2025 5:15:13 PM', 'Well drained', None, '12.0', 'None', 'A', '9'],
         ]
 
         def fake_query(query: str, timeout: int = 300):
@@ -261,6 +264,33 @@ class SoilAdapter(unittest.TestCase):
                 table.append([ids[0], "50"])  # boundary ambiguity: smallest mukey must win
                 return table
             return [header] + rows
+
+        return fake_query
+
+    def _fake_multi_state_sda(self, calls):
+        """CO has mukeys 100-199, NM has 300-399 (disjoint, as real MUKEYs are)."""
+        co_rows = [
+            [100, '1', 'CO001', '8/29/2025 3:26:00 PM', 'Well drained', '9.5', '18.2', 'None', 'B', '5'],
+            [150, '2', 'CO001', '8/29/2025 3:26:00 PM', 'Poorly drained', '4.1', '8.0', 'Frequent', 'C', '2'],
+        ]
+        nm_rows = [
+            [300, '10', 'NM001', '7/1/2025 1:00:00 PM', 'Excessively drained', '6.2', '11.5', 'None', 'A', '15'],
+            [350, '11', 'NM001', '7/1/2025 1:00:00 PM', 'Somewhat poorly drained', None, '9.0', 'Rare', 'D', '3'],
+        ]
+
+        def fake_query(query: str, timeout: int = 300):
+            calls.append(query)
+            if 'CROSS APPLY' in query:
+                ids = re.findall(r"\('([\d.\-_]+)','point", query)
+                table = [["point_id", "mukey"]]
+                for index, point_id in enumerate(ids):
+                    table.append([point_id, "300" if index == 0 else ("350" if index == 1 else "100")])
+                return table
+            if re.search(r"LIKE 'NM%'", query):
+                return [self.ATTRIBUTE_HEADER] + nm_rows
+            if re.search(r"LIKE 'CO%'", query):
+                return [self.ATTRIBUTE_HEADER] + co_rows
+            return [self.ATTRIBUTE_HEADER]
 
         return fake_query
 
@@ -314,6 +344,126 @@ class SoilAdapter(unittest.TestCase):
                 entry = bulk.prepare_state(cache, 'CO', source='sda')
                 self.assertEqual(entry['status'], 'EMPTY')
                 self.assertEqual(bulk.soil_inputs(cache, ['CO']), [])
+            finally:
+                bulk._sda_query = original
+
+    def test_state_preparation_is_scoped_and_restart_reuses_ready_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            calls = []
+            original = bulk._sda_query
+            bulk._sda_query = self._fake_multi_state_sda(calls)
+            try:
+                first = bulk.prepare_state(cache, 'CO', source='sda')
+                self.assertEqual(first['status'], 'READY')
+                self.assertEqual(first['rows'], 2)
+                self.assertEqual(first['surveyAreaCount'], 1)
+                self.assertEqual(first['surveyVintage'], '2025-08-29')
+                self.assertEqual([first['mukeyMin'], first['mukeyMax']], [100, 150])
+                state_queries = len([q for q in calls if 'CROSS APPLY' not in q])
+                second = bulk.prepare_state(cache, 'CO', source='sda')
+                self.assertTrue(second.get('reused'))
+                self.assertEqual(len([q for q in calls if 'CROSS APPLY' not in q]), state_queries,
+                                 'an unchanged state must not be re-queried')
+                # New Mexico is an independent cache entry.
+                nm = bulk.prepare_state(cache, 'NM', source='sda')
+                self.assertEqual(nm['status'], 'READY')
+                self.assertEqual(nm['rows'], 2)
+                self.assertEqual(nm['surveyVintage'], '2025-07-01')
+                self.assertNotEqual(nm['attributesPath'], first['attributesPath'])
+                self.assertEqual([nm['mukeyMin'], nm['mukeyMax']], [300, 350])
+                self.assertEqual(bulk.load_cache_manifest(cache)['sources']['ssurgo_sda:CO']['status'], 'READY')
+                # A failed New Mexico refresh cannot invalidate the Colorado entry.
+                bulk._sda_query = lambda query, timeout=300: (_ for _ in ()).throw(RuntimeError('NM offline'))
+                failed = bulk.prepare_state(cache, 'NM', source='sda')
+                self.assertEqual(failed['status'], 'READY')  # unchanged metadata reuses the ready cache
+                self.assertTrue(failed.get('reused'))
+                (cache / 'soil' / 'NM-attributes.parquet').unlink()
+                retry = bulk.prepare_state(cache, 'NM', source='sda')
+                self.assertEqual(retry['status'], 'FAILED')
+                sources = bulk.load_cache_manifest(cache)['sources']
+                self.assertEqual(sources['ssurgo_sda:CO']['status'], 'READY')
+                self.assertEqual(sources['ssurgo_sda:NM']['status'], 'FAILED')
+                self.assertEqual(len(bulk.soil_inputs(cache, ['CO'])), 1)
+            finally:
+                bulk._sda_query = original
+
+    def test_cross_state_tile_uses_each_states_own_soil(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            original = bulk._sda_query
+            bulk._sda_query = self._fake_multi_state_sda([])
+            try:
+                bulk.prepare_state(cache, 'CO', source='sda')
+                bulk.prepare_state(cache, 'NM', source='sda')
+                # The caller asks only for Colorado, but the tile's points resolve to both states.
+                prepared = bulk.soil_inputs(cache, ['CO'], tile_id='n39_w106')
+                states = {entry['state']: entry for entry in prepared}
+                self.assertEqual(set(states), {'CO', 'NM'})
+                self.assertEqual(states['CO']['source']['inclusion'], 'requested')
+                self.assertEqual(states['NM']['source']['inclusion'], 'tile-mukey-match')
+                points = bulk.sample_points('n39_w106')
+                columns = bulk.merge_soil_samples(prepared, points)
+                self.assertEqual(columns['drainage_class'][0], 'Excessively drained')  # NM mukey 300
+                self.assertEqual(columns['awc_25_cm'][1], None)  # NM mukey 350 missing attribute
+                self.assertEqual(columns['drainage_class'][1], 'Somewhat poorly drained')
+                self.assertEqual(columns['drainage_class'][2], 'Well drained')  # CO mukey 100
+            finally:
+                bulk._sda_query = original
+
+    def test_requested_state_without_mukey_overlap_is_not_auto_included(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            original = bulk._sda_query
+            bulk._sda_query = self._fake_sda()
+            try:
+                bulk.prepare_state(cache, 'CO', source='sda')
+                # A distinct state whose range does not cover this tile's mukeys is not loaded.
+                bulk._sda_query = self._fake_other_state_sda()
+                bulk.prepare_state(cache, 'NM', source='sda')
+                prepared = bulk.soil_inputs(cache, ['CO'], tile_id='n39_w106')
+                self.assertEqual({entry['state'] for entry in prepared}, {'CO'})
+            finally:
+                bulk._sda_query = original
+
+    def _fake_other_state_sda(self):
+        def fake_query(query: str, timeout: int = 300):
+            if 'CROSS APPLY' in query:
+                ids = re.findall(r"\('([\d.\-_]+)','point", query)
+                table = [["point_id", "mukey"]]
+                table.extend([pid, '100'] for pid in ids)
+                return table
+            return [self.ATTRIBUTE_HEADER] + [
+                [900, '90', 'NM900', '7/1/2025 1:00:00 PM', 'Well drained', '5.0', '10.0', 'None', 'B', '2']]
+        return fake_query
+
+    def test_failed_point_query_leaves_no_cache_and_recovers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            mode = {'value': 'ok'}
+            original = bulk._sda_query
+            healthy = self._fake_multi_state_sda([])
+
+            def flaky(query, timeout=300):
+                if 'CROSS APPLY' in query and mode['value'] == 'fail':
+                    raise RuntimeError('point query unavailable')
+                return healthy(query, timeout)
+
+            bulk._sda_query = flaky
+            try:
+                bulk.prepare_state(cache, 'NM', source='sda')
+                self.assertEqual(len(bulk.soil_inputs(cache, ['NM'], tile_id='n39_w106')), 1)
+                self.assertTrue((cache / 'soil' / 'n39_w106-points.json').exists())
+                mode['value'] = 'fail'
+                with self.assertRaises(RuntimeError):
+                    bulk.soil_inputs(cache, ['NM'], tile_id='n36_w107')
+                # A failed tile writes no cache marker, so a rerun retries it.
+                self.assertFalse((cache / 'soil' / 'n36_w107-points.json').exists())
+                self.assertEqual(bulk.load_cache_manifest(cache)['sources']['ssurgo_sda:NM']['status'], 'READY')
+                self.assertEqual(len(bulk.soil_inputs(cache, ['NM'], tile_id='n39_w106')), 1)
+                mode['value'] = 'ok'
+                self.assertEqual(len(bulk.soil_inputs(cache, ['NM'], tile_id='n36_w107')), 1)
+                self.assertTrue((cache / 'soil' / 'n36_w107-points.json').exists())
             finally:
                 bulk._sda_query = original
 
@@ -403,6 +553,29 @@ class SoilAdapter(unittest.TestCase):
                                                  'hydgrpdcd': 'B', 'slopegraddcp': '5'})
         self.assertEqual(sda, package)
         self.assertEqual(set(sda), set(bulk.SOIL_COLUMNS))
+
+
+class PublicLandIdentity(unittest.TestCase):
+    """Name alone must never merge two different public-land properties."""
+
+    def test_identity_is_state_and_designation_aware(self):
+        base = bulk.public_land_property_id('State Trust Land', 'State Land Board', 'Fee', 'Fee', 'NM')
+        self.assertEqual(base, bulk.public_land_property_id('State Trust Land', 'State Land Board', 'Fee', 'Fee', 'NM'))
+        self.assertNotEqual(base, bulk.public_land_property_id('State Trust Land', 'State Land Board', 'Fee', 'Fee', 'CO'))
+        self.assertNotEqual(
+            bulk.public_land_property_id('Pecos Wilderness', 'Forest Service', 'Designation', 'Designation', 'NM'),
+            bulk.public_land_property_id('Pecos Wilderness', 'Forest Service', 'Fee', 'Fee', 'NM'))
+        self.assertNotEqual(
+            bulk.public_land_property_id('Unresolved Place', 'Unknown manager', None, None, None),
+            bulk.public_land_property_id('Unresolved Place', 'Unknown manager', None, None, 'CO'))
+        self.assertNotEqual(
+            bulk.public_land_property_id('Twin Lakes', 'Forest Service', 'Fee', 'Fee', 'CO'),
+            bulk.public_land_property_id('Twin Lakes', 'Bureau of Land Management', 'Fee', 'Fee', 'CO'))
+
+    def test_public_land_schema_declares_identity_fields(self):
+        columns = {name for name, _ in bulk.PUBLIC_LAND_COLUMNS}
+        self.assertIn('source_category', columns)
+        self.assertIn('source_designation', columns)
 
 
 class HabitatComposition(unittest.TestCase):
@@ -705,6 +878,108 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
         self.assertIn('Southern Rockies', coverage)
         self.assertNotIn('955', coverage)
         self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])), sorted(RELEASE_TILES))
+        # Administrative, ecological and layer dimensions stay separate and derived.
+        self.assertEqual(sorted(self.manifest['summary']['publishedTiles']), sorted(
+            tile['id'] for tile in self.manifest['tiles']
+            if any((tile.get(key) or {}).get('url') and (tile.get(key) or {}).get('status') in {'AVAILABLE', 'PARTIAL'}
+                   for key in ('habitat', 'publicLands', 'accessPoints', 'fireHistory'))))
+        self.assertGreaterEqual(self.manifest['summary']['states'].get('NM', 0), len(NEW_MEXICO_TILES))
+        self.assertGreaterEqual(self.manifest['summary']['states'].get('CO', 0), len(COLORADO_TILES))
+        self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('southernRockies'), len(RELEASE_TILES))
+
+
+class TwoStateRelease(unittest.TestCase):
+    """The second-state extension must be real, state-scoped and honestly gapped."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.manifest = json.loads((DATA / 'manifest.json').read_text())
+        cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
+        cls.con = duckdb.connect()
+
+    def test_new_mexico_tiles_are_fully_built_and_access_stays_unbuilt(self):
+        for tile_id in NEW_MEXICO_TILES:
+            tile = self.tiles[tile_id]
+            habitat = tile['habitat']
+            self.assertEqual(habitat['status'], 'AVAILABLE', tile_id)
+            self.assertEqual(habitat['cells'], 400, tile_id)
+            self.assertEqual(set(habitat['components'].values()), {'AVAILABLE'}, tile_id)
+            self.assertEqual(habitat['unbuilt'], ['access'], tile_id)
+            self.assertEqual(tile['publicLands']['status'], 'AVAILABLE', tile_id)
+            self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
+            self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
+            self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
+            self.assertEqual(tile['accessPoints']['status'], 'UNBUILT', tile_id)
+            self.assertTrue(any(source['id'] == 'ssurgo_sda' for source in habitat['sources']), tile_id)
+
+    def test_soil_sources_are_state_scoped_and_current(self):
+        for tile_id in NEW_MEXICO_TILES:
+            soil = next(source for source in self.tiles[tile_id]['habitat']['sources'] if source['id'] == 'ssurgo_sda')
+            self.assertEqual(soil['state'], 'NM', tile_id)
+            self.assertEqual(soil['inclusion'], 'requested', tile_id)
+            self.assertTrue(soil['collectedAt'], tile_id)
+            self.assertTrue(str(soil.get('surveyVintage', '')).startswith('2025'), tile_id)
+            self.assertIn(':NM@', self.tiles[tile_id]['habitat']['datasetVersion'])
+        for tile_id in COLORADO_TILES:
+            soil = next(source for source in self.tiles[tile_id]['habitat']['sources'] if source['id'] == 'ssurgo_sda')
+            self.assertEqual(soil['state'], 'CO', tile_id)
+
+    def test_new_mexico_evidence_differs_from_colorado(self):
+        def summarize(tile_id):
+            path = str(DATA / self.tiles[tile_id]['habitat']['url'])
+            row = self.con.execute(f"""SELECT min(elevation_ft), max(elevation_ft), sum(evergreen), sum(deciduous),
+                sum(CASE WHEN forest_group = 'pinyon_juniper' THEN 1 ELSE 0 END)
+                FROM read_parquet('{path}')""").fetchone()
+            return row
+        co_row = summarize(TILE)
+        nm_rows = [summarize(tile_id) for tile_id in NEW_MEXICO_TILES]
+        self.assertLess(min(row[0] for row in nm_rows), 6000, 'New Mexico tiles should descend lower')
+        self.assertGreater(max(row[1] for row in nm_rows), 11000)
+        # Pinyon-juniper woodland is a New Mexico hallmark in this release, not a Colorado one.
+        self.assertGreater(sum(row[4] for row in nm_rows), 100)
+        self.assertLess(co_row[4], 20)
+        self.assertNotEqual(nm_rows, [co_row, co_row, co_row])
+
+    def test_public_land_jurisdiction_is_conservative_near_the_state_line(self):
+        paths = [str(DATA / self.tiles[tile_id]['publicLands']['url']) for tile_id in RELEASE_TILES]
+        confidences = dict(self.con.execute(
+            'SELECT jurisdiction_confidence, count(*) FROM read_parquet(?) GROUP BY 1', [paths]).fetchall())
+        self.assertTrue(set(confidences) <= {'authoritative', 'ambiguous-near-boundary', 'unresolved'}, confidences)
+        self.assertGreater(confidences.get('authoritative', 0), 100)
+        self.assertGreater(confidences.get('ambiguous-near-boundary', 0), 0,
+                           'the state line must produce at least one conservative unknown')
+        contradictory = self.con.execute("""
+            SELECT count(*) FROM read_parquet(?) WHERE
+              (jurisdiction_confidence = 'authoritative' AND state_code IS NULL) OR
+              (jurisdiction_confidence <> 'authoritative' AND state_code IS NOT NULL)""", [paths]).fetchone()[0]
+        self.assertEqual(contradictory, 0)
+
+    def test_public_land_identity_never_merges_different_properties(self):
+        paths = [str(DATA / self.tiles[tile_id]['publicLands']['url']) for tile_id in RELEASE_TILES]
+        conflicting = self.con.execute("""
+            SELECT count(*) FROM (
+              SELECT property_id FROM read_parquet(?)
+              GROUP BY 1 HAVING count(DISTINCT state_code) > 1 OR count(DISTINCT property_name) > 1)""",
+            [paths]).fetchone()[0]
+        self.assertEqual(conflicting, 0)
+        # One unit across tiles keeps one identity; the browser deduplicates by it.
+        repeated = self.con.execute("""
+            SELECT property_id, count(*) FROM read_parquet(?) GROUP BY 1 HAVING count(*) > 3""", [paths]).fetchall()
+        self.assertTrue(repeated, 'large units spanning tiles should share a property_id')
+
+    def test_release_contains_cross_tile_mtbs_perimeters(self):
+        paths = [str(DATA / self.tiles[tile_id]['fireHistory']['url']) for tile_id in RELEASE_TILES]
+        shared = self.con.execute("""
+            SELECT perimeter_id, count(*) FROM read_parquet(?) GROUP BY 1 HAVING count(*) > 1""", [paths]).fetchall()
+        self.assertTrue(shared, 'a perimeter crossing a tile edge must keep one stable identity')
+        # Identity is stable per row; the browser deduplicates the biological event.
+        duplicated_within_tile = 0
+        for tile_id in RELEASE_TILES:
+            path = str(DATA / self.tiles[tile_id]['fireHistory']['url'])
+            duplicated_within_tile += self.con.execute(f"""
+                SELECT count(*) FROM (SELECT perimeter_id FROM read_parquet('{path}')
+                GROUP BY 1 HAVING count(*) > 1)""").fetchone()[0]
+        self.assertEqual(duplicated_within_tile, 0)
 
 
 if __name__ == '__main__':

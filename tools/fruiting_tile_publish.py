@@ -41,6 +41,83 @@ def tiles_for_bbox(box):
         raise ValueError('Expected a valid CONUS west south east north bbox')
     return [f'n{lat:02d}_w{abs(lon):03d}' for lat in range(math.floor(s), math.ceil(n)) for lon in range(math.floor(w),math.ceil(e))]
 
+def _bbox_intersects(a, b):
+    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
+# Explicit roster from fruiting-forecast.html (ECO_PROFILE_GROUPS). A Python test
+# parses the HTML and fails if this copy drifts from the browser's mapping.
+ECO_PROFILE_GROUPS = {
+    'pnw': [1, 2, 3, 4], 'california': [6, 7, 8], 'interiorMountains': [5, 9, 11, 15, 16, 17, 19, 23, 41],
+    'southernRockies': [21], 'southwest': [10, 12, 13, 14, 20, 22, 24, 79, 80, 81],
+    'northernForests': [48, 49, 50, 51, 58, 59, 82, 83, 84],
+    'hardwood': [40, 45, 47, 52, 53, 54, 55, 56, 57, 61, 62, 63, 64, 72, 74],
+    'appalachians': [36, 37, 38, 39, 66, 67, 68, 69, 70, 71],
+    'southeast': [34, 35, 65, 73, 75, 76, 77, 78, 85],
+    'plains': [25, 26, 27, 28, 29, 30, 31, 32, 33, 42, 43, 44, 46, 60],
+}
+
+
+def coverage_of(tiles, root):
+    """Lightweight derived coverage summary. Three separate dimensions:
+
+    * publishedTiles: every tile with at least one populated layer (includes legacy);
+    * coverageTiles: release tiles whose habitat declares all components AVAILABLE;
+    * states / ecologicalProfiles: which administrative and EPA Level III boundaries
+      intersect published tiles, from the pinned boundary bounding boxes. This is
+      approximate addressing metadata, not a clipping audit, and it is deliberately
+      not conflated with layer availability or model maturity.
+    """
+    def populated(tile):
+        for key in KEYS.values():
+            asset = tile.get(key) or {}
+            if asset.get('url') and asset.get('status') in {'AVAILABLE', 'PARTIAL'}:
+                return True
+        return False
+
+    published = sorted(tile['id'] for tile in tiles if populated(tile))
+    complete = sorted(tile['id'] for tile in tiles
+                      if (tile.get('habitat') or {}).get('status') == 'AVAILABLE'
+                      and (tile.get('habitat') or {}).get('components')
+                      and all(status == 'AVAILABLE'
+                              for status in ((tile.get('habitat') or {}).get('components') or {}).values()))
+    geo_dir = root / 'data/fruiting-forecast'
+    state_features = json.loads((geo_dir / 'states.json').read_text())['features'] if (geo_dir / 'states.json').exists() else []
+    eco_features = json.loads((geo_dir / 'ecoregions.json').read_text())['features'] if (geo_dir / 'ecoregions.json').exists() else []
+    code_profile = {str(code): name for name, codes in ECO_PROFILE_GROUPS.items() for code in codes}
+    states, profiles = {}, {}
+    for tile in tiles:
+        if tile['id'] not in published:
+            continue
+        bbox = tile.get('bbox')
+        if not bbox or len(bbox) != 4:
+            continue
+        for feature in state_features:
+            if _bbox_intersects(bbox, feature['bbox']):
+                code = feature['properties'].get('code')
+                states[code] = states.get(code, 0) + 1
+        seen = set()
+        for feature in eco_features:
+            if not _bbox_intersects(bbox, feature['bbox']):
+                continue
+            name = code_profile.get(str(feature['properties'].get('code')))
+            if name:
+                seen.add(name)
+        for name in seen:
+            profiles[name] = profiles.get(name, 0) + 1
+    return {
+        'publishedTiles': published,
+        'coverageTiles': complete,
+        'states': dict(sorted(states.items())),
+        'ecologicalProfiles': dict(sorted(profiles.items())),
+        'coverageSemantics': ('publishedTiles covers every tile with a populated layer including legacy samples; '
+                              'coverageTiles covers release tiles whose habitat declares every component AVAILABLE; '
+                              'states and ecologicalProfiles come from pinned boundary bounding boxes that intersect '
+                              'published tiles. Administrative, ecological and layer availability are separate '
+                              'dimensions and are not interchangeable.'),
+    }
+
+
 def summary_of(tiles):
     """Recomputed on every checkpoint so About/diagnostics never show stale counts."""
     out = {'tileCount': len(tiles), 'layers': {}}
@@ -150,7 +227,7 @@ def main(root):
                 finally:
                     manifest['schemaVersion']=4
                     manifest['tiles']=[entries[k] for k in sorted(entries)]
-                    manifest['summary']={**(manifest.get('summary') or {}), **summary_of(manifest['tiles'])}
+                    manifest['summary']={**(manifest.get('summary') or {}), **summary_of(manifest['tiles']), **coverage_of(manifest['tiles'], root)}
                     manifest.setdefault('tileSchema',{})['subdirs']={layer: LAYERS[layer][0]+'/' for layer in LAYERS}
                     # Deterministic release identifier; no wall-clock bytes in output.
                     manifest['datasetVersion']='content-'+hashlib.sha256(json.dumps(manifest['tiles'],sort_keys=True).encode()).hexdigest()[:16]

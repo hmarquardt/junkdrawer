@@ -74,6 +74,38 @@ test('failed collecting rules retain named public-land geometry',async({page})=>
  });
  expect(result.count).toBe(1);expect(result.status).toBe('UNKNOWN_VERIFY');expect(result.habitat).toBeNull();expect(result.rules.error).toContain('503');expect(errors).toEqual([]);
 });
+test('cross-tile aggregation keeps distinct properties and deduplicates the same unit',async({page})=>{
+ const errors=await open(page);
+ await page.route('**/co-pl.parquet',r=>r.fulfill({body:Buffer.from([1])}));
+ await page.route('**/nm-pl.parquet',r=>r.fulfill({body:Buffer.from([1])}));
+ await page.route('**/tile-fire.parquet',r=>r.fulfill({body:Buffer.from([1])}));
+ const result=await page.evaluate(async()=>{
+  const t=__FRUITING_FORECAST_TEST__,h=__FRUITING_FORECAST_HUNTABILITY_TEST__,s=t.getState();
+  const mk=(id,name,state,conf,lon,lat)=>({property_id:id,property_name:name,manager:'Forest Service',property_type:'National Forest',ownership_class:'PUBLIC',access_class:'PUBLIC',state_name:state,state_code:state,jurisdiction_confidence:conf,geometry_json:JSON.stringify({type:'Polygon',coordinates:[[[lon-.1,lat-.1],[lon+.1,lat-.1],[lon+.1,lat+.1],[lon-.1,lat+.1],[lon-.1,lat-.1]]]}),min_lon:lon-.1,min_lat:lat-.1,max_lon:lon+.1,max_lat:lat+.1,center_lat:lat,center_lon:lon});
+  const coRows=[mk('p1','Twin Lakes','CO','authoritative',-105.5,37.5),mk('p2','Shared Unit','CO','authoritative',-105.4,37.4)];
+  const nmRows=[mk('p3','Twin Lakes','NM','authoritative',-105.5,36.9),mk('p2','Shared Unit','CO','authoritative',-105.4,37.4)];
+  const geom=JSON.stringify({type:'Polygon',coordinates:[[[-105.6,36.9],[-105.3,36.9],[-105.3,37.1],[-105.6,37.1],[-105.6,36.9]]]});
+  const fire=[{perimeter_id:'COFIREx',fire_name:'Shared Fire',fire_year:2018,severity:null,geometry_json:geom,min_lon:-105.6,min_lat:36.9,max_lon:-105.3,max_lat:37.1,source_id:'MTBS',source_url:'https://www.mtbs.gov/x',retrieved_at:'2026-09-15'}];
+  s.gis.persistent=true;s.gis.duckdb={registerFileBuffer:async()=>{}};
+  s.gis.conn={query:async sql=>{
+    if(sql.includes('property_id IS NOT NULL'))return {toArray:()=>sql.includes('n37_w106_pl')?coRows:nmRows};
+    if(sql.includes('perimeter_id IS NOT NULL'))return {toArray:()=>sql.includes('n37_w106_fire')?fire:fire.slice(0,1)};
+    return {toArray:()=>[]};
+  }};
+  const tiles=[
+    {id:'n37_w106',bbox:[-106,37,-105,38],publicLands:{status:'AVAILABLE',url:'co-pl.parquet',properties:2},fireHistory:{status:'AVAILABLE',url:'tile-fire.parquet',perimeters:1}},
+    {id:'n36_w106',bbox:[-106,36,-105,37],publicLands:{status:'AVAILABLE',url:'nm-pl.parquet',properties:2},fireHistory:{status:'AVAILABLE',url:'tile-fire.parquet',perimeters:1}}];
+  const props=await h.publicLandRows(s.gis.conn,{schemaVersion:4,tiles:[]},{lat:37.2,lon:-105.5},60,null,false,tiles);
+  const fireOut=await h.fireRows(s.gis.conn,null,tiles);
+  return {props:props.map(p=>({name:p.name,state:p.stateCode,id:p.id})),fire:fireOut.perimeters.map(f=>f.perimeterId)};
+ });
+ // Same name in two states is two legitimate properties; one unit across tiles is one record.
+ expect(result.props.filter(p=>p.name==='Twin Lakes').length).toBe(2);
+ expect(result.props.filter(p=>p.name==='Shared Unit').length).toBe(1);
+ expect(result.fire.filter(id=>id==='COFIREx').length).toBe(1);
+ expect(result.fire).toEqual(expect.arrayContaining(['COFIREx']));
+ expect(errors).toEqual([]);
+});
 test('historical plausibility and disturbance contracts never turn missing evidence into absence',async({page})=>{
  await open(page);const r=await page.evaluate(()=>{const t=__FRUITING_FORECAST_BIO_TEST__;return {missing:t.historicalPlausibility(null),sparse:t.historicalPlausibility({status:'AVAILABLE',records:0,distinctYears:0}),repeated:t.historicalPlausibility({status:'AVAILABLE',records:10,distinctYears:3}),fire:t.disturbanceEvidence(null),known:t.disturbanceEvidence({status:'AVAILABLE',fireYear:2025,sourceUrl:'https://example.gov/fire'},new Date(2026,7,1))}});
  expect(r.missing.penalty).toBe(0);expect(r.sparse.penalty).toBe(0);expect(r.repeated.supportsPresence).toBe(true);expect(r.fire).toBeNull();expect(r.known.yearsSinceFire).toBe(1);expect(r.known.severity).toBeNull();
@@ -282,7 +314,9 @@ test.beforeAll(async()=>{
   throw new Error('Static artifact server did not start');
 });
 test.afterAll(()=>{if(artifactServer)artifactServer.kill()});
-const RELEASE_TILES=['n37_w106','n37_w107','n37_w108','n38_w106','n38_w107','n38_w108','n39_w106','n39_w107','n39_w108','n40_w106','n40_w107'];
+const COLORADO_TILES=['n37_w106','n37_w107','n37_w108','n38_w106','n38_w107','n38_w108','n39_w106','n39_w107','n39_w108','n40_w106','n40_w107'];
+const NEW_MEXICO_TILES=['n36_w107','n36_w106','n35_w106'];
+const RELEASE_TILES=[...NEW_MEXICO_TILES,...COLORADO_TILES].sort();
 test('bounded Southern Rockies release declares complete habitat with real soil and matching digests',async({page})=>{
   const errors=[];
   page.on('pageerror',e=>errors.push(e.message));
@@ -339,10 +373,10 @@ test('bounded Southern Rockies release declares complete habitat with real soil 
       expect(result.tiles[id][layer].matches).toBe(true);
     }
   }
-  expect(result.summary.components.canopy.AVAILABLE).toBeGreaterThanOrEqual(11);
-  expect(result.summary.components.soil.AVAILABLE).toBeGreaterThanOrEqual(11);
+  expect(result.summary.components.canopy.AVAILABLE).toBeGreaterThanOrEqual(RELEASE_TILES.length);
+  expect(result.summary.components.soil.AVAILABLE).toBeGreaterThanOrEqual(RELEASE_TILES.length);
   expect(result.summary.components.soil.UNBUILT).toBe(0);
-  expect(result.westernCounts.habitatComplete).toBeGreaterThanOrEqual(11);
+  expect(result.westernCounts.habitatComplete).toBeGreaterThanOrEqual(RELEASE_TILES.length);
   expect(errors).toEqual([]);
 });
 test('both western tiles and a legacy eastern tile load together in DuckDB-Wasm',async({page})=>{
@@ -395,6 +429,102 @@ test('both western tiles and a legacy eastern tile load together in DuckDB-Wasm'
   expect(result.soil.n40[0].classes).toBeTruthy();
   expect(result.soil.n39[0].classes).toBeTruthy();
   expect(result.soil.n40[0].classes).not.toBe(result.soil.n39[0].classes);
+});
+test('real cross-tile public-land and MTBS identities survive DuckDB reads',async({page})=>{
+  test.setTimeout(180000);
+  await page.route('**/api/analytics/**',r=>r.abort());
+  await page.route('https://tile.openstreetmap.org/**',r=>r.abort());
+  await page.goto(`http://127.0.0.1:${artifactPort}/fruiting-forecast.html`,{waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__);
+  const result=await page.evaluate(async()=>{
+    const t=window.__FRUITING_FORECAST_TEST__,s=t.getState();
+    const conn=await t.initDuckDB();
+    const manifest=await t.gisManifest(true);
+    const pick=id=>(manifest.tiles||[]).find(x=>x.id===id);
+    const load=async(url,name)=>{const r=await fetch('data/fruiting-forecast/'+url);await s.gis.duckdb.registerFileBuffer(name,new Uint8Array(await r.arrayBuffer()));return "'"+name+"'"};
+    const conv=r=>r.toArray().map(x=>Object.fromEntries(Object.entries(x).map(([k,v])=>[k,typeof v==='bigint'?Number(v):v])));
+    const coPl=await load(pick('n37_w107').publicLands.url,'co_pl');
+    const nmPl=await load(pick('n36_w107').publicLands.url,'nm_pl');
+    const pl=conv(await conn.query('SELECT count(*) n, count(DISTINCT property_id) ids FROM read_parquet(['+coPl+','+nmPl+'], union_by_name=true)'));
+    const sharedProperties=conv(await conn.query('SELECT count(*) shared FROM (SELECT property_id FROM read_parquet('+coPl+') INTERSECT SELECT property_id FROM read_parquet('+nmPl+'))'));
+    const coFire=await load(pick('n37_w107').fireHistory.url,'co_fire');
+    const nmFire=await load(pick('n36_w107').fireHistory.url,'nm_fire');
+    const fire=conv(await conn.query('SELECT count(*) n, count(DISTINCT perimeter_id) ids FROM read_parquet(['+coFire+','+nmFire+'])'));
+    const sharedPerimeters=conv(await conn.query('SELECT count(*) shared FROM (SELECT perimeter_id FROM read_parquet('+coFire+') INTERSECT SELECT perimeter_id FROM read_parquet('+nmFire+'))'));
+    const ambiguous=conv(await conn.query('SELECT jurisdiction_confidence confidence, count(*) n FROM read_parquet(['+coPl+','+nmPl+'], union_by_name=true) GROUP BY 1 ORDER BY 2 DESC'));
+    return {pl,sharedProperties,fire,sharedPerimeters,ambiguous};
+  });
+  // A unit clipped into both tiles keeps one identity, so rows exceed distinct ids.
+  expect(result.pl[0].n).toBeGreaterThan(result.pl[0].ids);
+  expect(result.sharedProperties[0].shared).toBeGreaterThan(0);
+  expect(result.fire[0].n).toBeGreaterThanOrEqual(result.fire[0].ids);
+  expect(result.sharedPerimeters[0].shared).toBeGreaterThan(0);
+  const confidence=Object.fromEntries(result.ambiguous.map(r=>[r.confidence,r.n]));
+  expect(confidence.authoritative).toBeGreaterThan(100);
+  expect(confidence['ambiguous-near-boundary']).toBeGreaterThan(0);
+});
+test('interstate search loads both states, isolates jurisdiction and follows ecology',async({page})=>{
+  test.setTimeout(240000);
+  const errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.route('**/api/analytics/**',r=>r.abort());
+  await page.route('https://tile.openstreetmap.org/**',r=>r.abort());
+  await page.route('https://api.inaturalist.org/**',r=>r.fulfill({json:{total_results:0,results:[]}}));
+  await page.route('https://api.open-meteo.com/v1/forecast**',r=>{const u=new URL(r.request().url());const lat=u.searchParams.get('latitude').split(',').map(Number),lon=u.searchParams.get('longitude').split(',').map(Number);const rows=lat.map((v,i)=>weatherPayload(v,lon[i]));return r.fulfill({json:rows.length===1?rows[0]:rows})});
+  const gisRequests=[];
+  page.on('response',r=>{const u=r.url();if(u.includes('data/fruiting-forecast/'))gisRequests.push(u.split('data/fruiting-forecast/')[1].split('?')[0])});
+  await page.goto(`http://127.0.0.1:${artifactPort}/fruiting-forecast.html`,{waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__&&window.FF_ECOREGIONS);
+  await page.addInitScript(()=>window.__FF_TEST_FAST__=true);
+  await page.locator('#radiusSelect').selectOption('50');
+  await page.locator('#locationInput').fill('36.90, -105.25');
+  await page.locator('#analyzeBtn').click();
+  await expect(page.locator('#status')).toContainText('Analysis ready',{timeout:200000});
+  const result=await page.evaluate(()=>{
+    const t=window.__FRUITING_FORECAST_TEST__,s=t.getState(),a=s.analysis;
+    const h=window.__FRUITING_FORECAST_HUNTABILITY_TEST__;
+    const properties=s.gis.properties.map(p=>({name:p.name,state:p.stateCode,confidence:p.jurisdictionConfidence,status:p.rule.collectingStatus}));
+    const zoneConsistency=a.zones.every(z=>{
+      const allowed=(a.zoneBiology[z.id]||{}).speciesIds||[];
+      return z.scores.every(sc=>allowed.includes(sc.speciesId));
+    });
+    // Fixture rules isolate jurisdictions even though no CO/NM rules are published yet.
+    const rules={verifiedAt:'2026-09-01',rules:[
+      {id:'co-rule',jurisdiction:{state:'CO'},scope:{managerContains:'Forest Service'},collectingStatus:'ALLOWED_WITH_LIMITS',sourceUrl:'https://example.gov/co'},
+      {id:'nm-rule',jurisdiction:{state:'NM'},scope:{managerContains:'Forest Service'},collectingStatus:'PERMIT_REQUIRED',sourceUrl:'https://example.gov/nm'}]};
+    const prop=(state,confidence)=>({name:'Carson National Forest',manager:'Forest Service',propertyType:'National Forest',ownershipClass:'PUBLIC',stateCode:state,jurisdictionConfidence:confidence});
+    const isolation={
+      co:h.resolveCollectingRule(prop('CO','authoritative'),rules).collectingStatus,
+      nm:h.resolveCollectingRule(prop('NM','authoritative'),rules).collectingStatus,
+      ambiguous:h.resolveCollectingRule(prop(null,'ambiguous-near-boundary'),rules).collectingStatus,
+      unresolved:h.resolveCollectingRule(prop(null,'unresolved'),rules).collectingStatus};
+    return {tiles:s.gis.tiles.map(x=>x.id),properties,profile:a.biology.profileId,targets:a.speciesConfiguration.map(x=>x.id),
+      sectorBiologyCount:a.sectorBiologyCount,zoneConsistency,isolation,
+      zoneProfiles:Object.keys(a.zoneBiology).map(k=>a.zoneBiology[k].profileId).filter((v,i,arr)=>arr.indexOf(v)===i)};
+  });
+  expect(result.tiles).toEqual(expect.arrayContaining(['n37_w106','n36_w106']));
+  expect(result.profile).toBe('southernRockies');
+  expect(result.targets).toEqual(['porcini','chanterelleRoseocanus','morelNatural','morelBurn']);
+  expect(result.sectorBiologyCount).toBeGreaterThanOrEqual(2);
+  expect(result.zoneConsistency).toBe(true);
+  expect(gisRequests.some(p=>p.startsWith('habitat/n37_w106'))).toBe(true);
+  expect(gisRequests.some(p=>p.startsWith('habitat/n36_w106'))).toBe(true);
+  // Lazy loading: no published tile outside the search box is fetched.
+  expect(gisRequests.some(p=>p.startsWith('habitat/n40_w107')||p.startsWith('habitat/n37_w108'))).toBe(false);
+  const states=new Set(result.properties.map(p=>p.state).filter(Boolean));
+  expect(states.has('CO')).toBe(true);
+  expect(states.has('NM')).toBe(true);
+  // Published rules are Indiana-only, so nothing here inherits a state-scoped rule.
+  expect(result.properties.every(p=>p.status==='UNKNOWN_VERIFY')).toBe(true);
+  expect(result.properties.filter(p=>p.confidence!=='authoritative').every(p=>p.state===null)).toBe(true);
+  // Fixture rules never leak across the line, and ambiguous jurisdiction matches none.
+  expect(result.isolation.co).toBe('ALLOWED_WITH_LIMITS');
+  expect(result.isolation.nm).toBe('PERMIT_REQUIRED');
+  expect(result.isolation.ambiguous).toBe('UNKNOWN_VERIFY');
+  expect(result.isolation.unresolved).toBe('UNKNOWN_VERIFY');
+  expect(result.zoneProfiles.length).toBeGreaterThan(1);
+  expect(result.zoneProfiles).toContain('southernRockies');
+  expect(errors).toEqual([]);
 });
 test('canopy and land cover reach scoreHabitat without replacing host evidence',async({page})=>{
   const errors=await open(page);

@@ -204,6 +204,7 @@ STATES = {
     "sha256": "0fd2d6562708ff8182c00d5d25b5556d049ecf2794d97b89ed2dac4d5e9e2c8d",
     "archiveBytes": 186432,
     "datasetVersion": "us-census-state-cb-2023-20m",
+    "toleranceDegrees": 0.02,
     "citation": "U.S. Census Bureau. 2023. Cartographic Boundary Files, state boundaries (1:20,000,000).",
     "caveat": ("PAD-US ST_Name is 'Not Applicable' for federal units, so it cannot supply jurisdiction. "
                "Jurisdiction is assigned here by point-in-polygon against the Census state boundaries and the "
@@ -372,6 +373,12 @@ PUBLIC_LAND_COLUMNS = [
     ("jurisdiction_source", "VARCHAR"), ("geometry_json", "VARCHAR"),
     ("min_lon", "DOUBLE"), ("min_lat", "DOUBLE"), ("max_lon", "DOUBLE"), ("max_lat", "DOUBLE"),
     ("center_lat", "DOUBLE"), ("center_lon", "DOUBLE"), ("geometry_source", "VARCHAR"), ("source_url", "VARCHAR"),
+    # Additive identity/provenance fields. The hosted PAD-US public-access layer
+    # publishes no stable unit ID (BndryID reads "Not Applicable"), so identity is
+    # the authoritative name+manager+category+designation composite plus the
+    # Census-resolved state; name alone must never merge two different properties.
+    ("source_category", "VARCHAR"), ("source_designation", "VARCHAR"),
+    ("jurisdiction_confidence", "VARCHAR"),
 ]
 
 
@@ -793,6 +800,19 @@ def _read_muaggatt(extracted: Path, table_source: Path | None = None) -> list[di
     raise SystemExit(f"Unsupported soil table source: {source.name}")
 
 
+def _parse_us_date(value):
+    """Parse the survey save dates SDA publishes (for example 8/29/2025 3:26:00 PM)."""
+    if not value:
+        return None
+    text = str(value).strip()
+    for pattern in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return time.strptime(text, pattern)
+        except ValueError:
+            continue
+    return None
+
+
 def _to_float(value) -> float | None:
     if value is None:
         return None
@@ -833,9 +853,11 @@ def _sda_query(query: str, timeout: int = 300) -> list[list]:
 def sda_attribute_query(state: str) -> str:
     if not re.fullmatch(r"[A-Z]{2}", state):
         raise ValueError(f"Invalid state code: {state}")
-    return ("SELECT m.mukey, m.musym, l.areasymbol, ma.drclassdcd, ma.aws025wta, ma.aws050wta, "
+    return ("SELECT m.mukey, m.musym, l.areasymbol, sc.saverest, ma.drclassdcd, ma.aws025wta, ma.aws050wta, "
             "ma.flodfreqdcd, ma.hydgrpdcd, ma.slopegraddcp "
-            "FROM mapunit m JOIN legend l ON m.lkey = l.lkey LEFT JOIN muaggatt ma ON m.mukey = ma.mukey "
+            "FROM mapunit m JOIN legend l ON m.lkey = l.lkey "
+            "JOIN sacatalog sc ON sc.areasymbol = l.areasymbol "
+            "LEFT JOIN muaggatt ma ON m.mukey = ma.mukey "
             f"WHERE l.areasymbol LIKE '{state}%' ORDER BY m.mukey")
 
 
@@ -857,7 +879,7 @@ def fetch_sda_attributes(state: str) -> list[dict]:
         raw = dict(zip(header, record))
         normalized = normalize_soil_attribute(raw)
         normalized.update({"mukey": int(raw["mukey"]), "musym": raw.get("musym"),
-                           "areasymbol": raw.get("areasymbol")})
+                           "areasymbol": raw.get("areasymbol"), "saverest": raw.get("saverest")})
         rows.append(normalized)
     return rows
 
@@ -929,6 +951,12 @@ def prepare_state(cache: Path, state: str, source: str = "sda", archive: Path | 
         raise SystemExit(f"Unknown soil source: {source} (choose sda, gssurgo or gnatsgo)")
     key = f"{SDA_SOIL['id']}:{state}"
     query = sda_attribute_query(state)
+    fingerprint = hashlib.sha256(query.encode()).hexdigest()[:16]
+    existing = (manifest.get("sources") or {}).get(key) or {}
+    if (existing.get("status") == "READY" and existing.get("queryFingerprint") == fingerprint
+            and (cache / existing.get("attributesPath", "")).exists()):
+        # Unchanged source metadata with the prepared table present: reuse, never re-query.
+        return {**existing, "reused": True}
     retrieved = time.strftime("%Y-%m-%d")
     try:
         rows = fetch_sda_attributes(state)
@@ -943,14 +971,22 @@ def prepare_state(cache: Path, state: str, source: str = "sda", archive: Path | 
             "datasetVersion": SDA_SOIL["datasetVersion"], "sourceUrl": SDA_ENDPOINT,
             "statusNote": "Soil Data Access returned no mapunits for this state; soil stays UNBUILT."})
     attributes_path = cache / "soil" / f"{state}-attributes.parquet"
+    mukeys = [int(row["mukey"]) for row in rows if row.get("mukey") is not None]
+    vintages = sorted(v for v in (_parse_us_date(row.get("saverest")) for row in rows) if v)
+    survey_areas = {str(row.get("areasymbol")) for row in rows if row.get("areasymbol")}
     meta = {
         "datasetVersion": f"{SDA_SOIL['datasetVersion']}-{retrieved}",
         "sourceUrl": SDA_ENDPOINT,
         "status": "AVAILABLE",
         "state": state,
         "rowCount": len(rows),
-        "queryFingerprint": hashlib.sha256(query.encode()).hexdigest()[:16],
+        "queryFingerprint": fingerprint,
         "collectedAt": retrieved,
+        "mukeyMin": min(mukeys) if mukeys else None,
+        "mukeyMax": max(mukeys) if mukeys else None,
+        "surveyAreaCount": len(survey_areas),
+        "surveyVintage": time.strftime("%Y-%m-%d", vintages[-1]) if vintages else None,
+        "surveyVintageOldest": time.strftime("%Y-%m-%d", vintages[0]) if vintages else None,
         "source": {**SDA_SOIL},
         "units": SOIL_UNITS,
         "attributes": SOIL_ATTRIBUTE_DESCRIPTIONS,
@@ -960,7 +996,10 @@ def prepare_state(cache: Path, state: str, source: str = "sda", archive: Path | 
         "status": "READY", "scope": "state", "source": "sda", "state": state,
         "datasetVersion": meta["datasetVersion"], "sourceUrl": SDA_ENDPOINT,
         "productPage": SDA_SOIL["productPage"], "attributesPath": str(attributes_path.relative_to(cache)),
-        "rows": len(rows), "queryFingerprint": meta["queryFingerprint"], "collectedAt": retrieved})
+        "rows": len(rows), "queryFingerprint": fingerprint, "collectedAt": retrieved,
+        "mukeyMin": meta["mukeyMin"], "mukeyMax": meta["mukeyMax"],
+        "surveyAreaCount": meta["surveyAreaCount"], "surveyVintage": meta["surveyVintage"],
+        "surveyVintageOldest": meta["surveyVintageOldest"]})
     return entry
 
 
@@ -1026,6 +1065,37 @@ def _tile_point_mukeys(cache: Path, tile_id: str, points: list[tuple[float, floa
     return payload
 
 
+def _ready_sda_states(sources: dict) -> dict:
+    return {key.split(":", 1)[1]: entry for key, entry in sources.items()
+            if key.startswith(f"{SDA_SOIL['id']}:") and entry.get("status") == "READY"}
+
+
+def _state_covers_any_mukey(cache: Path, entry: dict, tile_mukeys: set[int]) -> bool:
+    """Exact membership check: does this prepared state own any of the tile's mukeys?
+
+    MUKEYs are national identifiers and CO/NM numeric ranges overlap, so a range
+    heuristic cannot decide coverage; the check is a filtered read of the small
+    normalized attribute table.
+    """
+    if not tile_mukeys:
+        return False
+    low, high = entry.get("mukeyMin"), entry.get("mukeyMax")
+    if low is not None and high is not None and not any(low <= value <= high for value in tile_mukeys):
+        return False
+    path = cache / entry.get("attributesPath", "")
+    if not path.exists():
+        return False
+    placeholders = ",".join("?" * len(tile_mukeys))
+    connection = duckdb.connect()
+    try:
+        count = connection.execute(
+            f"SELECT count(*) FROM read_parquet(?) WHERE mukey IN ({placeholders})",
+            [str(path), *sorted(tile_mukeys)]).fetchone()[0]
+        return count > 0
+    finally:
+        connection.close()
+
+
 def soil_inputs(cache: Path, states: list[str], tile_id: str | None = None,
                 step: float = STEP_DEGREES) -> list[dict]:
     """Normalized soil inputs for a state list, optionally resolved for one tile.
@@ -1033,12 +1103,32 @@ def soil_inputs(cache: Path, states: list[str], tile_id: str | None = None,
     The gSSURGO/gNATSGO package path supplies a mapunit raster; the SDA path
     supplies a point -> MUKEY map. Both become the same attribute lookup, so the
     habitat build does not know which product produced the evidence.
+
+    When a tile is given, any other prepared state that owns one of the tile's
+    resolved mukeys is included automatically (an exact membership check, because
+    MUKEY ranges overlap across states). A tile that crosses a state line therefore
+    gets each point's own state evidence; the caller's state list never suppresses
+    a neighbour's soil just because the tile was requested from the other side of
+    the line. MUKEYs are national identifiers, so the join itself can never mix two
+    states' attributes.
     """
     manifest = load_cache_manifest(cache)
     sources = manifest.get("sources") or {}
-    prepared = []
+    requested = list(dict.fromkeys(name.upper() for name in states))
     point_cache = None
-    for state in [name.upper() for name in states]:
+    if tile_id:
+        point_cache = _tile_point_mukeys(cache, tile_id, sample_points(tile_id, step), step)
+    tile_mukeys = {int(value) for value in (point_cache or {}).get("mukeys", {}).values()
+                   if value is not None}
+    auto_included = []
+    if tile_mukeys:
+        for state, entry in sorted(_ready_sda_states(sources).items()):
+            if state in requested:
+                continue
+            if _state_covers_any_mukey(cache, entry, tile_mukeys):
+                auto_included.append(state)
+    prepared = []
+    for state in requested + auto_included:
         sda_entry = sources.get(f"{SDA_SOIL['id']}:{state}") or {}
         package_entry = None
         for descriptor in (GNATSGO, GSSURGO):
@@ -1048,8 +1138,6 @@ def soil_inputs(cache: Path, states: list[str], tile_id: str | None = None,
                 break
         if sda_entry.get("status") == "READY":
             attributes = _load_sda_attributes(cache, state, sda_entry)
-            if point_cache is None and tile_id:
-                point_cache = _tile_point_mukeys(cache, tile_id, sample_points(tile_id, step), step)
             entry = {"state": state, "kind": "sda", "raster": None, "attributes": attributes,
                      "point_mukeys": (point_cache or {}).get("mukeys"),
                      "source": {"id": SDA_SOIL["id"], "provider": SDA_SOIL["provider"],
@@ -1058,6 +1146,9 @@ def soil_inputs(cache: Path, states: list[str], tile_id: str | None = None,
                                 "attributes": SDA_SOIL["attributes"], "units": SDA_SOIL["units"],
                                 "caveat": SDA_SOIL["caveat"], "state": state,
                                 "collectedAt": sda_entry.get("collectedAt"),
+                                "surveyVintage": sda_entry.get("surveyVintage"),
+                                "mukeyRange": [sda_entry.get("mukeyMin"), sda_entry.get("mukeyMax")],
+                                "inclusion": "requested" if state in requested else "tile-mukey-match",
                                 "pointLookup": f"{tile_id}-points.json" if tile_id else None,
                                 "ambiguousPoints": len((point_cache or {}).get("ambiguous") or {})},
                      "datasetVersion": f"{sda_entry['datasetVersion']}:{state}"}
@@ -1065,6 +1156,7 @@ def soil_inputs(cache: Path, states: list[str], tile_id: str | None = None,
         elif package_entry:
             entry = _package_soil_entry(cache, state, package_entry)
             if entry:
+                entry["inclusion"] = "requested"
                 prepared.append(entry)
     return prepared
 
@@ -1387,13 +1479,21 @@ def _round_geometry(geometry: dict, digits: int = 5) -> dict:
 
 
 def _state_lookup(cache: Path):
-    """Prepared Census state polygons for authoritative jurisdiction by point."""
+    """Prepared Census state polygons for authoritative jurisdiction by point.
+
+    Returns (state_code, state_name, ambiguous). `ambiguous` is True when the point
+    lies within the dataset's simplification tolerance of the resolved state's
+    boundary, where the published geometry cannot distinguish this state from its
+    neighbour. Ambiguous jurisdiction is left unresolved so no state-scoped rule can
+    leak across the line; the property geometry is still published.
+    """
     import shapefile
     import zipfile
 
     from shapely.geometry import Point, shape
     from shapely.prepared import prep
 
+    tolerance = float(STATES.get("toleranceDegrees", 0.02))
     archive = cache / "cb_2023_us_state_20m.zip"
     if not archive.exists():
         _download(STATES["url"], archive)
@@ -1405,10 +1505,30 @@ def _state_lookup(cache: Path):
         for record in reader.iterShapeRecords():
             fields = record.record.as_dict()
             geom = shape(record.shape.__geo_interface__)
-            entries.append((fields["STUSPS"], fields["NAME"], prep(geom), geom.bounds))
-    return lambda lon, lat: next(((code, name) for code, name, prepared, bounds in entries
-                                  if bounds[0] <= lon <= bounds[2] and bounds[1] <= lat <= bounds[3]
-                                  and prepared.contains(Point(lon, lat))), (None, None))
+            entries.append((fields["STUSPS"], fields["NAME"], prep(geom), geom.bounds, geom))
+
+    def resolve(lon: float, lat: float):
+        point = Point(lon, lat)
+        for code, name, prepared, bounds, geom in entries:
+            if bounds[0] <= lon <= bounds[2] and bounds[1] <= lat <= bounds[3] and prepared.contains(point):
+                return code, name, geom.boundary.distance(point) < tolerance
+        return None, None, False
+
+    return resolve
+
+
+def public_land_property_id(name: str, manager: str, category: str | None,
+                            designation: str | None, state_code: str | None) -> str:
+    """Stable identity for a published public-land record.
+
+    The hosted PAD-US layer exposes no reliable unit identifier, so identity is a
+    composite of authoritative attributes plus the Census-resolved state. Two
+    different properties that share a name in different states (or with different
+    designations) never collapse into one record; the same unit clipped into two
+    tiles in the same state keeps one identity and is deduplicated by the browser.
+    """
+    key = "|".join([name or "", manager or "", category or "", designation or "", state_code or "UNKNOWN"])
+    return hashlib.sha1(key.encode()).hexdigest()[:16]
 
 
 def pad_property_type(name: str, manager: str) -> str:
@@ -1436,11 +1556,11 @@ def build_public_land(tile_id: str, cache: Path, out: Path, timeout: int = 240) 
         "geometryType": "esriGeometryEnvelope",
         "inSR": 4326,
         "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "Pub_Access,BndryName,Unit_Nm,MngNm_Desc,Category,ST_Name",
+        "outFields": "Pub_Access,BndryName,Unit_Nm,MngNm_Desc,Category,DesTp_Desc,FeatClass,ST_Name",
         "returnGeometry": "true",
         "maxAllowableOffset": 0.00025,
         "resultRecordCount": 2000,
-    }, cache, f"padus_{tile_id}", timeout), tile_id)
+    }, cache, f"padus_v2_{tile_id}", timeout), tile_id)
     resolve_state = _state_lookup(cache)
     from shapely.geometry import box as shapely_box, mapping as shapely_mapping, shape as shapely_shape
     from shapely.validation import make_valid
@@ -1461,24 +1581,31 @@ def build_public_land(tile_id: str, cache: Path, out: Path, timeout: int = 240) 
         clipped = make_valid(shapely_shape(geometry)).intersection(tile_shape)
         if clipped.is_empty:
             continue
-        record = grouped.setdefault((name, manager), {"geometries": [], "access": set()})
+        category = (attributes.get("Category") or "").strip() or None
+        designation = (attributes.get("DesTp_Desc") or "").strip() or None
+        record = grouped.setdefault((name, manager, category, designation),
+                                    {"geometries": [], "access": set()})
         record["geometries"].append(clipped)
         record["access"].add(access)
     rows = []
-    for (name, manager), record in sorted(grouped.items(), key=lambda item: item[0][0]):
+    for (name, manager, category, designation), record in sorted(grouped.items(), key=lambda item: item[0][0]):
         merged = record["geometries"][0]
         for extra in record["geometries"][1:]:
             merged = merged.union(extra)
         bounds = tuple(round(value, 5) for value in make_valid(merged).bounds)
         representative = make_valid(merged).representative_point()
         access = next(iter(record["access"])) if len(record["access"]) == 1 else "MIXED"
-        state_code, state_name = resolve_state(representative.x, representative.y)
+        state_code, state_name, ambiguous = resolve_state(representative.x, representative.y)
+        if ambiguous:
+            state_code, state_name = None, None
         rows.append({
-            "property_id": hashlib.sha1(f"{name}|{manager}".encode()).hexdigest()[:16],
+            "property_id": public_land_property_id(name, manager, category, designation, state_code),
             "property_name": name, "manager": manager,
             "property_type": pad_property_type(name, manager),
             "ownership_class": "PRIVATE" if "private" in manager.lower() else access,
             "access_class": access, "state_name": state_name, "state_code": state_code,
+            "jurisdiction_confidence": ("ambiguous-near-boundary" if ambiguous
+                                        else ("authoritative" if state_code else "unresolved")),
             "jurisdiction_source": STATES["datasetVersion"] if state_code else None,
             "geometry_json": json.dumps(_round_geometry(shapely_mapping(make_valid(merged))), separators=(",", ":")),
             "min_lon": bounds[0], "min_lat": bounds[1],
@@ -1486,17 +1613,23 @@ def build_public_land(tile_id: str, cache: Path, out: Path, timeout: int = 240) 
             "center_lat": round((bounds[1] + bounds[3]) / 2, 5), "center_lon": round((bounds[0] + bounds[2]) / 2, 5),
             "geometry_source": "PAD-US (public access schema, hosted service)",
             "source_url": "https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-download",
+            "source_category": category, "source_designation": designation,
         })
-    rows = [row for row in rows if row["state_code"]]
     meta = {
         "datasetVersion": f"{PADUS['datasetVersion']}+{STATES['datasetVersion']}",
         "sourceUrl": PADUS["query"],
         "status": "AVAILABLE" if rows else "VERIFIED_EMPTY",
         "statusNote": ("PAD-US public-access polygons intersecting this tile, clipped to the tile and each assigned "
-                       "an authoritative state jurisdiction by point-in-polygon. PAD-US ST_Name is discarded as "
-                       "jurisdiction because it reads 'Not Applicable' for federal units. Same-named units are "
-                       "grouped, so two different parks sharing a name inside one tile are merged. Rows without a "
-                       "resolved state are dropped: an unknown jurisdiction must not inherit any state-scoped rule."),
+                       "an authoritative state jurisdiction by point-in-polygon against Census boundaries. PAD-US "
+                       "ST_Name is discarded as jurisdiction because it reads 'Not Applicable' for federal units, and "
+                       "BndryID likewise reads 'Not Applicable', so property identity is the authoritative "
+                       "name+manager+category+designation composite plus the resolved state. Same-named units inside "
+                       "one tile/state are grouped; the same unit clipped into two same-state tiles keeps one identity "
+                       "and is deduplicated by the browser; a unit on a state line becomes one jurisdiction-scoped "
+                       "record per state. A property whose point lies within the simplification tolerance of a state "
+                       "boundary is published with jurisdiction_confidence='ambiguous-near-boundary' and no state, so "
+                       "its geometry remains visible while no state-scoped collecting rule can apply; properties "
+                       "outside every state are kept as 'unresolved' for the same reason."),
         "source": [{"id": PADUS["id"], "provider": PADUS["provider"], "dataset": PADUS["dataset"],
                     "caveat": PADUS["caveat"]},
                    {"id": STATES["id"], "provider": STATES["provider"], "dataset": STATES["dataset"],

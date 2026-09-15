@@ -62,4 +62,54 @@ class Publication(unittest.TestCase):
             self.assertEqual(manifest['summary']['layers']['habitat']['components']['soil']['UNBUILT'],1)
             con.close()
 
+class CoverageMetadata(unittest.TestCase):
+    def test_profile_roster_matches_the_browser_mapping(self):
+        import re
+        html=(ROOT/'fruiting-forecast.html').read_text()
+        marker='ECO_PROFILE_GROUPS='
+        start=html.index(marker)+len(marker)
+        literal=html[start:html.index('};',start)+1]
+        browser={name:[int(code) for code in codes.split(',')]
+                 for name,codes in re.findall(r'([A-Za-z]+):\[([0-9,]+)\]',literal)}
+        self.assertEqual(browser,pub.ECO_PROFILE_GROUPS)
+
+    def test_coverage_dimensions_are_separate_and_derived(self):
+        tiles=[
+            {'id':'n39_w106','bbox':[-106,39,-105,40],
+             'habitat':{'status':'AVAILABLE','url':'a.parquet','components':{'forestType':'AVAILABLE','elevation':'AVAILABLE','landCover':'AVAILABLE','canopy':'AVAILABLE','soil':'AVAILABLE'}}},
+            {'id':'n38_w088','bbox':[-88,38,-87,39],'habitat':{'status':'PARTIAL','url':'b.parquet'}},
+            {'id':'n39_w107','bbox':[-107,39,-106,40],'habitat':{'status':'UNBUILT'}},
+        ]
+        coverage=pub.coverage_of(tiles,ROOT)
+        # Publication and completeness are different questions.
+        self.assertEqual(coverage['publishedTiles'],['n38_w088','n39_w106'])
+        self.assertEqual(coverage['coverageTiles'],['n39_w106'])
+        # Administrative and ecological dimensions come from pinned boundaries.
+        # Bounding-box intersection is approximate addressing, so border states may
+        # appear; the tile's own state must be present and counted once.
+        self.assertIn('CO',coverage['states'])
+        self.assertIn('IN',coverage['states'])
+        self.assertEqual(coverage['states']['CO'],1)
+        self.assertEqual(coverage['states']['IN'],1)
+        self.assertEqual(coverage['ecologicalProfiles']['southernRockies'],1)
+        self.assertEqual(coverage['ecologicalProfiles']['hardwood'],1)
+        self.assertIn('separate',coverage['coverageSemantics'])
+
+    def test_publication_refreshes_coverage_summary(self):
+        with tempfile.TemporaryDirectory() as d:
+            base=Path(d);source=base/'source';out=base/'out';(source/'habitat').mkdir(parents=True)
+            tile=source/'habitat/n39_w106.parquet'
+            con=duckdb.connect()
+            con.execute("COPY (SELECT 39.0 lat,-106.0 lon,1.0 forest,.6 canopy,9000 elevation_ft) TO ? (FORMAT PARQUET)",[str(tile)])
+            tile.with_suffix('.parquet.json').write_text(json.dumps({
+                'datasetVersion':'fixture-habitat-v2','sourceUrl':'https://example.gov/habitat','status':'AVAILABLE',
+                'components':{'forestType':'AVAILABLE','elevation':'AVAILABLE','landCover':'AVAILABLE','canopy':'AVAILABLE','soil':'AVAILABLE'}}))
+            args=['build-fruiting-gis.py','build','tile','n39_w106','--source-dir',str(source),'--output',str(out)]
+            with patch.object(sys,'argv',args):pub.main(ROOT)
+            summary=json.loads((out/'manifest.json').read_text())['summary']
+            self.assertEqual(summary['coverageTiles'],['n39_w106'])
+            self.assertIn('CO',summary['states'])
+            self.assertEqual(summary['ecologicalProfiles']['southernRockies'],1)
+            con.close()
+
 if __name__=='__main__':unittest.main()
