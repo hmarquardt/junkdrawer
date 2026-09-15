@@ -245,6 +245,11 @@ FOREST_SIGNAL_CLASSES = {
     "ponderosa_pine_signal": (220,),
     "douglas_fir_signal": (200,),
     "aspen_birch_signal": (900,),
+    # Pacific Northwest host evidence. Class 300 is "hemlock / Sitka spruce" in the
+    # authoritative FIA legend; it is distinct from Douglas-fir (200) and from the
+    # fir/spruce/mountain-hemlock group (260), and no PNW model may substitute one
+    # for another. Added additively: legacy and earlier western tiles read it as NULL.
+    "hemlock_sitka_spruce_signal": (300,),
 }
 
 # Land-cover evidence derived from the pinned Annual NLCD class legend. The

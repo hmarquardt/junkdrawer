@@ -35,7 +35,13 @@ COLORADO_TILES = ('n37_w106', 'n37_w107', 'n37_w108', 'n38_w106', 'n38_w107', 'n
                   'n39_w106', 'n39_w107', 'n39_w108', 'n40_w106', 'n40_w107')
 # The northern New Mexico extension: Taos/Carson NF, Pecos/Santa Fe NF, Santa Fe/Sandia.
 NEW_MEXICO_TILES = ('n36_w107', 'n36_w106', 'n35_w106')
+# Pacific Northwest canaries: central Oregon Coast Range / Willamette fringe and
+# the southern Oregon Cascades.
+PNW_TILES = ('n44_w124', 'n43_w123')
+# The bounded Southern Rockies release (Colorado + northern New Mexico).
 RELEASE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES))
+# Every tile whose habitat declares all components AVAILABLE.
+AVAILABLE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES + PNW_TILES))
 
 
 class AdapterContracts(unittest.TestCase):
@@ -770,12 +776,12 @@ class PublishedColoradoTiles(unittest.TestCase):
         for layer, stat in summary.items():
             self.assertEqual(sum(stat[key] for key in ('populated', 'verifiedEmpty', 'unbuilt', 'failed')), tile_count, layer)
             self.assertEqual(stat['verifiedEmpty'], 0, layer)
-        self.assertGreaterEqual(summary['habitat']['available'], len(RELEASE_TILES))
-        self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], len(RELEASE_TILES))
-        self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], len(RELEASE_TILES))
-        self.assertEqual(summary['habitat']['components']['soil']['AVAILABLE'], len(RELEASE_TILES))
+        self.assertGreaterEqual(summary['habitat']['available'], len(AVAILABLE_TILES))
+        self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], len(AVAILABLE_TILES))
+        self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], len(AVAILABLE_TILES))
+        self.assertEqual(summary['habitat']['components']['soil']['AVAILABLE'], len(AVAILABLE_TILES))
         self.assertEqual(summary['habitat']['components']['soil']['UNBUILT'], 0)
-        self.assertGreaterEqual(summary['fire']['populated'], len(RELEASE_TILES))
+        self.assertGreaterEqual(summary['fire']['populated'], len(AVAILABLE_TILES))
         for tile in self.manifest['tiles']:
             asset = tile.get('habitat') or {}
             if asset.get('status') in {'AVAILABLE', 'PARTIAL'}:
@@ -877,7 +883,7 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
         coverage = self.manifest['summary']['coverage']
         self.assertIn('Southern Rockies', coverage)
         self.assertNotIn('955', coverage)
-        self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])), sorted(RELEASE_TILES))
+        self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])), sorted(AVAILABLE_TILES))
         # Administrative, ecological and layer dimensions stay separate and derived.
         self.assertEqual(sorted(self.manifest['summary']['publishedTiles']), sorted(
             tile['id'] for tile in self.manifest['tiles']
@@ -886,6 +892,8 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
         self.assertGreaterEqual(self.manifest['summary']['states'].get('NM', 0), len(NEW_MEXICO_TILES))
         self.assertGreaterEqual(self.manifest['summary']['states'].get('CO', 0), len(COLORADO_TILES))
         self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('southernRockies'), len(RELEASE_TILES))
+        self.assertGreaterEqual(self.manifest['summary']['states'].get('OR', 0), len(PNW_TILES))
+        self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('pnw'), len(PNW_TILES))
 
 
 class TwoStateRelease(unittest.TestCase):
@@ -980,6 +988,79 @@ class TwoStateRelease(unittest.TestCase):
                 SELECT count(*) FROM (SELECT perimeter_id FROM read_parquet('{path}')
                 GROUP BY 1 HAVING count(*) > 1)""").fetchone()[0]
         self.assertEqual(duplicated_within_tile, 0)
+
+
+class PacificNorthwestRelease(unittest.TestCase):
+    """The third modeled region must publish real, distinct PNW evidence."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.manifest = json.loads((DATA / 'manifest.json').read_text())
+        cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
+        cls.con = duckdb.connect()
+
+    def habitat_path(self, tile_id):
+        return str(DATA / self.tiles[tile_id]['habitat']['url'])
+
+    def test_canaries_are_fully_built_and_access_stays_unbuilt(self):
+        for tile_id in PNW_TILES:
+            tile = self.tiles[tile_id]
+            habitat = tile['habitat']
+            self.assertEqual(habitat['status'], 'AVAILABLE', tile_id)
+            self.assertEqual(habitat['cells'], 400, tile_id)
+            self.assertEqual(set(habitat['components'].values()), {'AVAILABLE'}, tile_id)
+            self.assertEqual(habitat['unbuilt'], ['access'], tile_id)
+            self.assertEqual(tile['publicLands']['status'], 'AVAILABLE', tile_id)
+            self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
+            self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
+            self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
+            self.assertEqual(tile['accessPoints']['status'], 'UNBUILT', tile_id)
+
+    def test_oregon_soil_is_state_scoped_and_current(self):
+        for tile_id in PNW_TILES:
+            habitat = self.tiles[tile_id]['habitat']
+            soil = next(source for source in habitat['sources'] if source['id'] == 'ssurgo_sda')
+            self.assertEqual(soil['state'], 'OR', tile_id)
+            self.assertEqual(soil['inclusion'], 'requested', tile_id)
+            self.assertIn(':OR@', habitat['datasetVersion'])
+            self.assertTrue(str(soil.get('surveyVintage', '')).startswith('202'), tile_id)
+            row = self.con.execute(f"""SELECT count(*), count(drainage_class), count(awc_25_cm)
+                FROM read_parquet('{self.habitat_path(tile_id)}')""").fetchone()
+            self.assertEqual(row[0], 400, tile_id)
+            self.assertGreater(row[1], 200, f'{tile_id} soil coverage is implausibly sparse')
+            self.assertGreater(row[2], 200, tile_id)
+
+    def test_pnw_host_evidence_uses_the_new_hemlock_signal(self):
+        columns, records = None, None
+        table = self.con.execute('SELECT * FROM read_parquet(?)', [self.habitat_path('n44_w124')])
+        columns = [description[0] for description in table.description]
+        records = [dict(zip(columns, row)) for row in table.fetchall()]
+        self.assertIn('hemlock_sitka_spruce_signal', columns)
+        self.assertTrue(all(value in (0.0, 1.0) for value in (record['hemlock_sitka_spruce_signal'] for record in records)))
+        douglas = sum(record['douglas_fir_signal'] or 0 for record in records)
+        self.assertGreater(douglas, 150, 'Douglas-fir should dominate the mapped Coast Range tile')
+        # The Cascades canary carries fir/spruce/mountain-hemlock and a higher elevation band.
+        table = self.con.execute('SELECT * FROM read_parquet(?)', [self.habitat_path('n43_w123')])
+        columns = [description[0] for description in table.description]
+        cascade = [dict(zip(columns, row)) for row in table.fetchall()]
+        self.assertGreater(sum(record['fir_spruce_mountain_hemlock_signal'] or 0 for record in cascade), 0)
+        self.assertGreater(sum(record['douglas_fir_signal'] or 0 for record in cascade), 150)
+        coast_high = max(record['elevation_ft'] for record in records)
+        cascade_high = max(record['elevation_ft'] for record in cascade)
+        self.assertGreater(cascade_high, coast_high)
+
+    def test_manifest_declares_the_pnw_profile_and_state(self):
+        summary = self.manifest['summary']
+        self.assertEqual(summary['ecologicalProfiles'].get('pnw'), len(PNW_TILES))
+        self.assertGreaterEqual(summary['states'].get('OR', 0), len(PNW_TILES))
+        self.assertEqual(summary['states'].get('WA'), None)
+        self.assertEqual(sorted(summary['coverageTiles']), sorted(AVAILABLE_TILES))
+
+    def test_legacy_tiles_lack_the_hemlock_column(self):
+        tile = self.tiles['n37_w088']['habitat']
+        table = self.con.execute('SELECT * FROM read_parquet(?)', [str(DATA / tile['url'])])
+        columns = [description[0] for description in table.description]
+        self.assertNotIn('hemlock_sitka_spruce_signal', columns)
 
 
 if __name__ == '__main__':
