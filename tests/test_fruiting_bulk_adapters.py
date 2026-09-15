@@ -343,6 +343,41 @@ class SoilAdapter(unittest.TestCase):
             self.assertIsNone(columns['drainage_class'][4])
             self.assertIsNone(columns['awc_25_cm'][4])
 
+    def test_gnatsgo_geopackage_package_uses_the_same_contract(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._package(root)  # provides the mukey raster fixture
+            connection = sqlite3.connect(root / 'soil.gpkg')
+            connection.execute('CREATE TABLE muaggatt (mukey INTEGER, drclassdcd TEXT, aws025wta REAL, '
+                               'aws050wta REAL, flodfreqdcd TEXT, hydgrpdcd TEXT, slopegraddcp REAL)')
+            connection.executemany('INSERT INTO muaggatt VALUES (?,?,?,?,?,?,?)', [
+                (1, 'Well drained', 9.5, 18.2, 'None', 'B', 5),
+                (2, 'Poorly drained', 4.1, 8.0, 'Frequent', 'C', 2),
+                (3, 'Well drained', None, 12.0, 'None', 'A', 9),
+                (4, 'Excessively drained', 6.2, 11.5, 'None', 'A', 15)])
+            connection.commit()
+            connection.close()
+            cache = root / 'cache'
+            cache.mkdir()
+            with zipfile.ZipFile(cache / 'gNATSGO_CO.zip', 'w') as bundle:
+                bundle.write(root / 'mukey.tif', 'mukey.tif')
+                bundle.write(root / 'soil.gpkg', 'soil.gpkg')
+            entry = bulk.prepare_state(cache, 'CO', source='gnatsgo')
+            self.assertEqual(entry['status'], 'READY')
+            self.assertEqual(entry['source'], 'gnatsgo')
+            prepared = bulk.soil_inputs(cache, ['CO'])
+            self.assertEqual(len(prepared), 1)
+            self.assertEqual(prepared[0]['source']['id'], 'gnatsgo')
+            points = [(39.575, -106.175), (39.575, -106.125), (39.525, -106.175), (39.525, -106.125)]
+            columns = bulk.merge_soil_samples(prepared, points)
+            self.assertEqual(columns['drainage_class'][0], 'Well drained')
+            self.assertEqual(columns['awc_50_cm'][0], 18.2)
+            self.assertEqual(columns['hydrologic_group'][1], 'C')
+            self.assertIsNone(columns['awc_25_cm'][2])
+            self.assertEqual(columns['hydrologic_group'][2], 'A')
+            self.assertEqual(columns['drainage_class'][3], 'Excessively drained')
+
     def test_missing_state_package_is_failed_not_invented(self):
         with tempfile.TemporaryDirectory() as temp:
             cache = Path(temp)

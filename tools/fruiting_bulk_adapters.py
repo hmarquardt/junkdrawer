@@ -732,8 +732,9 @@ GNATSGO = {
     "units": SOIL_UNITS,
     "caveat": ("gNATSGO is the NRCS annually refreshed national gridded soil product: primarily SSURGO with "
                "STATSGO2 gap filling. Mapunit raster + muaggatt are read with the same normalized contract as "
-               "gSSURGO; points sourced from STATSGO2 rather than SSURGO are coarse by construction and the "
-               "means of separating them depends on the package's source raster, which is not yet consumed here."),
+               "gSSURGO, from a FileGDB, GeoPackage or SQLite package. Points sourced from STATSGO2 rather than "
+               "SSURGO are coarse by construction; the package's source raster that would separate them is not "
+               "yet consumed here, so such points should be treated as missing for survey-grade questions."),
 }
 SOIL_ARCHIVE_SOURCES = {"gssurgo": GSSURGO, "gnatsgo": GNATSGO}
 
@@ -745,30 +746,51 @@ def _discover_mukey_raster(root: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def _discover_filegdb(root: Path) -> Path | None:
-    return next((path for path in sorted(root.rglob("*.gdb")) if path.is_dir()), None)
+def _discover_soil_tables(root: Path) -> Path | None:
+    """Locate the packaged mapunit aggregate table.
 
-
-def _read_muaggatt(extracted: Path, gdb: Path | None) -> list[dict]:
-    """Read the authoritative mapunit aggregate table.
-
-    Prefers a `muaggatt.csv` supplied beside the package (also how deterministic
-    tests exercise the contract) and otherwise reads the `muaggatt` layer from the
-    shipped FileGDB through pyogrio/GDAL's OpenFileGDB driver.
+    gSSURGO ships a FileGDB; gNATSGO 2026 ships GeoPackage/SQLite; deterministic
+    fixtures also use a plain CSV. Any of them maps to the same normalized rows.
     """
-    csv_path = next((path for path in extracted.rglob("muaggatt.csv")), None)
-    if csv_path:
+    preferred = [
+        next((path for path in sorted(root.rglob("muaggatt.csv"))), None),
+        next((path for path in sorted(root.rglob("*.gdb")) if path.is_dir()), None),
+        next((path for path in sorted(root.rglob("*.gpkg"))), None),
+        next((path for path in sorted(root.rglob("*.sqlite"))), None),
+        next((path for path in sorted(root.rglob("*.sqlite3"))), None),
+    ]
+    return next((path for path in preferred if path is not None), None)
+
+
+def _read_muaggatt(extracted: Path, table_source: Path | None = None) -> list[dict]:
+    """Read the authoritative mapunit aggregate table from whatever the package ships."""
+    source = table_source or _discover_soil_tables(extracted)
+    if source is None:
+        raise SystemExit("Soil package supplies no muaggatt.csv, FileGDB, GeoPackage or SQLite table")
+    if source.suffix.lower() == ".csv":
         import csv
-        with open(csv_path, newline="") as handle:
+        with open(source, newline="") as handle:
             return [{key.lower(): value for key, value in row.items()} for row in csv.DictReader(handle)]
-    if gdb is None:
-        raise SystemExit("Soil package has neither muaggatt.csv nor a FileGDB")
-    try:
-        import pyogrio
-    except ImportError as exc:
-        raise SystemExit("Reading soil FileGDB tables requires pyogrio: uv run --with pyogrio ...") from exc
-    frame = pyogrio.read_dataframe(gdb, layer="muaggatt", read_geometry=False)
-    return [{str(key).lower(): value for key, value in record.items()} for record in frame.to_dict("records")]
+    if source.suffix.lower() in {".gpkg", ".sqlite", ".sqlite3"}:
+        # GeoPackage is SQLite; read the table directly so no GDAL dependency is needed.
+        import sqlite3
+        connection = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        try:
+            cursor = connection.execute("SELECT * FROM muaggatt")
+            columns = [description[0].lower() for description in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except sqlite3.Error as exc:
+            raise SystemExit(f"Soil SQLite/GeoPackage has no readable muaggatt table: {exc}") from exc
+        finally:
+            connection.close()
+    if source.suffix.lower() == ".gdb":
+        try:
+            import pyogrio
+        except ImportError as exc:
+            raise SystemExit("Reading soil FileGDB tables requires pyogrio: uv run --with pyogrio ...") from exc
+        frame = pyogrio.read_dataframe(source, layer="muaggatt", read_geometry=False)
+        return [{str(key).lower(): value for key, value in record.items()} for record in frame.to_dict("records")]
+    raise SystemExit(f"Unsupported soil table source: {source.name}")
 
 
 def _to_float(value) -> float | None:
@@ -889,9 +911,10 @@ def prepare_state(cache: Path, state: str, source: str = "sda", archive: Path | 
         try:
             with zipfile.ZipFile(target) as bundle:
                 members = bundle.namelist()
-            if not any(".gdb/" in name.lower() for name in members) and \
+            packaging = (".gdb/", ".gpkg", ".sqlite")
+            if not any(any(token in name.lower() for token in packaging) for name in members) and \
                     not any("mukey" in name.lower() for name in members):
-                raise ValueError("archive contains no FileGDB or mukey raster")
+                raise ValueError("archive contains no FileGDB/GeoPackage/SQLite package or mukey raster")
             entry = {"status": "READY", "scope": "state", "source": source, "state": state,
                      "archive": target.name, "bytes": target.stat().st_size, "sha256": digest,
                      "members": len(members), "datasetVersion": descriptor["datasetVersion"],
@@ -956,10 +979,10 @@ def _package_soil_entry(cache: Path, state: str, entry: dict) -> dict | None:
             bundle.extractall(extracted)
         marker.write_text(json.dumps({"sha256": entry["sha256"]}) + "\n")
     raster = _discover_mukey_raster(extracted)
-    gdb = _discover_filegdb(extracted)
-    if raster is None and gdb is None:
+    table_source = _discover_soil_tables(extracted)
+    if raster is None and table_source is None:
         return None
-    table = _read_muaggatt(extracted, gdb)
+    table = _read_muaggatt(extracted, table_source)
     attributes = {int(row["mukey"]): normalize_soil_attribute(row)
                   for row in table if row.get("mukey") not in (None, "")}
     return {"state": state, "kind": "package", "raster": raster, "attributes": attributes,
