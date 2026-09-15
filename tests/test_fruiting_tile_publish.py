@@ -44,4 +44,22 @@ class Publication(unittest.TestCase):
             self.assertEqual(json.loads((out/'manifest.json').read_text())['tiles'][0]['habitat']['status'],'VERIFIED_EMPTY')
             con.close()
 
+    def test_completeness_components_are_carried_and_summarized(self):
+        with tempfile.TemporaryDirectory() as d:
+            base=Path(d);source=base/'source';out=base/'out';(source/'habitat').mkdir(parents=True)
+            tile=source/'habitat/n39_w106.parquet'
+            con=duckdb.connect()
+            con.execute("COPY (SELECT 39.0 lat,-106.0 lon,1.0 forest,.6 canopy,9000 elevation_ft) TO ? (FORMAT PARQUET)",[str(tile)])
+            tile.with_suffix('.parquet.json').write_text(json.dumps({
+                'datasetVersion':'fixture-habitat-v2','sourceUrl':'https://example.gov/habitat','status':'AVAILABLE',
+                'components':{'forestType':'AVAILABLE','elevation':'AVAILABLE','landCover':'AVAILABLE','canopy':'AVAILABLE','soil':'UNBUILT'}}))
+            args=['build-fruiting-gis.py','build','tile','n39_w106','--source-dir',str(source),'--output',str(out)]
+            with patch.object(sys,'argv',args):pub.main(ROOT)
+            manifest=json.loads((out/'manifest.json').read_text())
+            habitat=manifest['tiles'][0]['habitat']
+            self.assertEqual(habitat['components']['canopy'],'AVAILABLE')
+            self.assertEqual(manifest['summary']['layers']['habitat']['available'],1)
+            self.assertEqual(manifest['summary']['layers']['habitat']['components']['soil']['UNBUILT'],1)
+            con.close()
+
 if __name__=='__main__':unittest.main()

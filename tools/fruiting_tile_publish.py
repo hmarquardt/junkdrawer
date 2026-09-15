@@ -54,6 +54,8 @@ def summary_of(tiles):
                 stat['populated'] += 1
                 stat['bytes'] += asset.get('bytes') or 0
                 stat['rows'] += asset.get(count_key) or 0
+                if status == 'AVAILABLE':
+                    stat['available'] = stat.get('available', 0) + 1
             elif status == 'VERIFIED_EMPTY':
                 stat['verifiedEmpty'] += 1
             elif status == 'FAILED':
@@ -61,6 +63,18 @@ def summary_of(tiles):
             else:
                 stat['unbuilt'] += 1
         out['layers'][layer] = stat
+    # Habitat completeness is explicit component coverage, never inferred from a
+    # Parquet file existing. Counts describe publication declarations only.
+    components = {}
+    for tile in tiles:
+        asset = tile.get('habitat') or {}
+        if asset.get('status') not in {'AVAILABLE', 'PARTIAL'} or not asset.get('url'):
+            continue
+        for name, component_status in sorted((asset.get('components') or {}).items()):
+            bucket = components.setdefault(name, {'AVAILABLE': 0, 'UNBUILT': 0, 'MISSING': 0})
+            bucket[component_status] = bucket.get(component_status, 0) + 1
+    if components:
+        out['layers']['habitat']['components'] = components
     return out
 
 

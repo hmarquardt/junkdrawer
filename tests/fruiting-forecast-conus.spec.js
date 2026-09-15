@@ -268,7 +268,7 @@ test('a radius crossing an ecological boundary scores every sector with its own 
   expect(errors).toEqual([]);
 });
 
-// End-to-end artifact check for the real published Colorado tile: normalized source ->
+// End-to-end artifact checks for the real published Colorado tiles: normalized source ->
 // publisher -> manifest -> browser fetch. Parquet field content is asserted by
 // tests/test_fruiting_bulk_adapters.py because DuckDB-Wasm is not guaranteed offline.
 const artifactPort=8800+(process.pid%600);
@@ -282,7 +282,7 @@ test.beforeAll(async()=>{
   throw new Error('Static artifact server did not start');
 });
 test.afterAll(()=>{if(artifactServer)artifactServer.kill()});
-test('published Colorado tile is declared and its assets match the manifest digest',async({page})=>{
+test('both published Colorado tiles declare complete core habitat and match manifest digests',async({page})=>{
   const errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/api/analytics/**',r=>r.abort());
@@ -292,39 +292,135 @@ test('published Colorado tile is declared and its assets match the manifest dige
   const result=await page.evaluate(async()=>{
     const t=window.__FRUITING_FORECAST_TEST__;
     const manifest=await t.gisManifest(true);
-    const tile=(manifest.tiles||[]).find(x=>x.id==='n40_w106');
-    if(!tile)return {missing:true};
     const digest=async(url,baseline)=>{
       const response=await fetch('data/fruiting-forecast/'+url);
       const buffer=await response.arrayBuffer();
       const value=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))).map(x=>x.toString(16).padStart(2,'0')).join('');
       return {status:response.status,bytes:buffer.byteLength,matches:value===baseline};
     };
-    return {
-      missing:false,
-      habitat:{status:tile.habitat.status,cells:tile.habitat.cells,unit:tile.habitat.units,unbuilt:tile.habitat.unbuilt,fetch:await digest(tile.habitat.url,tile.habitat.sha256)},
-      publicLands:{status:tile.publicLands.status,properties:tile.publicLands.properties,fetch:await digest(tile.publicLands.url,tile.publicLands.sha256)},
-      fire:{status:tile.fireHistory.status,perimeters:tile.fireHistory.perimeters,fetch:await digest(tile.fireHistory.url,tile.fireHistory.sha256)},
-      bbox:tile.bbox,
-      layers:Object.keys(manifest.summary&&manifest.summary.layers||{}),
-      firePopulated:manifest.summary&&manifest.summary.layers&&manifest.summary.layers.fire&&manifest.summary.layers.fire.populated
-    };
+    const tiles={};
+    for(const id of ['n40_w106','n39_w106']){
+      const tile=(manifest.tiles||[]).find(x=>x.id===id);
+      if(!tile){tiles[id]={missing:true};continue}
+      tiles[id]={missing:false,bbox:tile.bbox,habitat:{status:tile.habitat.status,cells:tile.habitat.cells,components:tile.habitat.components,required:tile.habitat.requiredComponents,units:tile.habitat.units,unbuilt:tile.habitat.unbuilt,fetch:await digest(tile.habitat.url,tile.habitat.sha256)},publicLands:{status:tile.publicLands.status,properties:tile.publicLands.properties,fetch:await digest(tile.publicLands.url,tile.publicLands.sha256)},fire:{status:tile.fireHistory.status,perimeters:tile.fireHistory.perimeters,fetch:await digest(tile.fireHistory.url,tile.fireHistory.sha256)}};
+    }
+    const westernCounts=await t.aboutManifestCounts(manifest);
+    return {tiles,westernCounts,summary:manifest.summary.layers.habitat};
   });
-  expect(result.missing).toBe(false);
-  expect(result.bbox).toEqual([-106,40,-105,41]);
-  expect(result.habitat.status).toBe('PARTIAL');
-  expect(result.habitat.cells).toBe(400);
-  expect(result.habitat.unit.elevation_ft).toBe('feet');
-  expect(result.habitat.unbuilt).toEqual(expect.arrayContaining(['canopy','soil']));
-  expect(result.habitat.fetch.status).toBe(200);
-  expect(result.habitat.fetch.matches).toBe(true);
-  expect(result.publicLands.status).toBe('AVAILABLE');
-  expect(result.publicLands.properties).toBeGreaterThan(0);
-  expect(result.publicLands.fetch.matches).toBe(true);
-  expect(result.fire.status).toBe('AVAILABLE');
-  expect(result.fire.perimeters).toBeGreaterThan(0);
-  expect(result.fire.fetch.matches).toBe(true);
-  expect(result.layers).toEqual(expect.arrayContaining(['habitat','public-land','access','fire']));
-  expect(result.firePopulated).toBeGreaterThan(0);
+  for(const id of ['n40_w106','n39_w106']){
+    const tile=result.tiles[id];
+    expect(tile.missing).toBe(false);
+    expect(tile.bbox[0]).toBe(-106);
+    expect(tile.habitat.status).toBe('AVAILABLE');
+    expect(tile.habitat.cells).toBe(400);
+    expect(tile.habitat.units.elevation_ft).toBe('feet');
+    expect(tile.habitat.units.canopy).toContain('fraction');
+    // Canopy is genuine evidence now; soil remains explicitly UNBUILT, not faked.
+    expect(tile.habitat.components.canopy).toBe('AVAILABLE');
+    expect(tile.habitat.components.landCover).toBe('AVAILABLE');
+    expect(tile.habitat.components.soil).toBe('UNBUILT');
+    expect(tile.habitat.unbuilt).toEqual(expect.arrayContaining(['soil']));
+    expect(tile.habitat.unbuilt).not.toEqual(expect.arrayContaining(['canopy','nlcdLandCover']));
+    expect(tile.habitat.fetch.status).toBe(200);
+    expect(tile.habitat.fetch.matches).toBe(true);
+    expect(tile.publicLands.status).toBe('AVAILABLE');
+    expect(tile.publicLands.properties).toBeGreaterThan(0);
+    expect(tile.publicLands.fetch.matches).toBe(true);
+    expect(tile.fire.status).toBe('AVAILABLE');
+    expect(tile.fire.perimeters).toBeGreaterThan(0);
+    expect(tile.fire.fetch.matches).toBe(true);
+  }
+  expect(result.summary.components.canopy.AVAILABLE).toBeGreaterThanOrEqual(2);
+  expect(result.summary.components.soil.UNBUILT).toBeGreaterThanOrEqual(2);
+  expect(result.westernCounts.habitatComplete).toBeGreaterThanOrEqual(2);
   expect(errors).toEqual([]);
+});
+test('both western tiles and a legacy eastern tile load together in DuckDB-Wasm',async({page})=>{
+  test.setTimeout(180000);
+  await page.route('**/api/analytics/**',r=>r.abort());
+  await page.route('https://tile.openstreetmap.org/**',r=>r.abort());
+  await page.goto(`http://127.0.0.1:${artifactPort}/fruiting-forecast.html`,{waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__);
+  const result=await page.evaluate(async()=>{
+    const t=window.__FRUITING_FORECAST_TEST__,s=t.getState();
+    const conn=await t.initDuckDB();
+    const manifest=await t.gisManifest(true);
+    const pick=id=>(manifest.tiles||[]).find(x=>x.id===id);
+    // Wide schema first on purpose: this is the mixed-schema case the app must survive.
+    const urls=['n40_w106','n39_w106','n37_w088'].map(id=>pick(id).habitat.url);
+    const names=[];
+    for(let i=0;i<urls.length;i++){
+      const response=await fetch('data/fruiting-forecast/'+urls[i]);
+      names.push('f'+i);
+      await s.gis.duckdb.registerFileBuffer('f'+i,new Uint8Array(await response.arrayBuffer()));
+    }
+    const list=names.map(n=>"'"+n+"'").join(',');
+    const conv=r=>r.toArray().map(x=>Object.fromEntries(Object.entries(x).map(([k,v])=>[k,typeof v==='bigint'?Number(v):v])));
+    const union=conv(await conn.query('SELECT count(*) n, count(canopy) canopy, sum(evergreen) evergreen, sum(wetland) wetland FROM read_parquet(['+list+'], union_by_name=true)'));
+    let mixedWithout=null;
+    try{await conn.query('SELECT * FROM read_parquet(['+list+'])')}catch(e){mixedWithout=e.message}
+    const western=conv(await conn.query('SELECT count(*) n, count(canopy) canopy, sum(evergreen) evergreen FROM read_parquet(['+names.slice(0,2).map(n=>"'"+n+"'").join(',')+'])'));
+    const classesFor=async name=>conv(await conn.query("SELECT string_agg(DISTINCT land_class, ',' ORDER BY land_class) classes FROM read_parquet('"+name+"')"));
+    const classes={n40:await classesFor(names[0]),n39:await classesFor(names[1])};
+    return {union,western,classes,mixedWithout};
+  });
+  expect(result.union[0].n).toBe(1000); // 400 + 400 western + 200 legacy
+  expect(result.union[0].canopy).toBe(1000); // legacy tiles also carry sampled canopy
+  expect(result.union[0].evergreen).toBeGreaterThan(300); // western land-cover evidence survives the union
+  expect(result.mixedWithout).toBeTruthy(); // documents why union_by_name is required
+  expect(result.western[0].n).toBe(800);
+  expect(result.western[0].canopy).toBe(800);
+  expect(result.western[0].evergreen).toBeGreaterThan(300);
+  // The legacy tile contributes no evergreen evidence (NULL, not 0) to the union.
+  expect(result.union[0].evergreen).toBe(result.western[0].evergreen);
+  const classSets={n40:result.classes.n40[0].classes,n39:result.classes.n39[0].classes};
+  expect(classSets.n40).toBeTruthy();
+  expect(classSets.n39).toBeTruthy();
+  expect(classSets.n40).not.toBe(classSets.n39);
+});
+test('canopy and land cover reach scoreHabitat without replacing host evidence',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const t=__FRUITING_FORECAST_TEST__,b=__FRUITING_FORECAST_BIO_TEST__;
+    const sp=b.regionalSpecies(b.resolveBiology(39.48,-106.05)).find(x=>x.id==='porcini');
+    const base={available:true,sampleCells:24,soil:{},terrain:{elevationMedianFt:10000},access:{},confidence:{cellCoverage:1,hostQuality:.65,soilCoverage:0}};
+    const conifer={...base,forest:{cover:.62,deciduous:0,open:.05,canopy:.55,dominantClass:'evergreen_forest'},hosts:{spruceFir:0,firSpruceMountainHemlock:.6,lodgepolePine:.4,ponderosaPine:0,douglasFir:0,aspenBirch:0,mappedCoverage:.9}};
+    const openGround={...base,forest:{cover:.06,deciduous:0,open:.82,canopy:.04,dominantClass:'grassland_herbaceous'},hosts:{spruceFir:0,firSpruceMountainHemlock:0,lodgepolePine:0,ponderosaPine:0,douglasFir:0,aspenBirch:0,mappedCoverage:.9}};
+    const wrongHosts={...base,forest:{cover:.62,deciduous:0,open:.05,canopy:.55,dominantClass:'evergreen_forest'},hosts:{spruceFir:0,firSpruceMountainHemlock:0,lodgepolePine:0,ponderosaPine:0,douglasFir:0,aspenBirch:0,mappedCoverage:.9}};
+    const noCanopy={...base,forest:{cover:.62,deciduous:null,open:null,canopy:null,dominantClass:'evergreen_forest'},hosts:conifer.hosts};
+    return {conifer:t.scoreHabitat(sp,conifer),open:t.scoreHabitat(sp,openGround),wrongHosts:t.scoreHabitat(sp,wrongHosts),noCanopy:t.scoreHabitat(sp,noCanopy),legacyShape:t.scoreHabitat(sp,{available:true,sampleCells:8,forest:{cover:.62,deciduous:null,open:null},hosts:{spruceFir:.5,firSpruceMountainHemlock:.5,mappedCoverage:.8},soil:{},terrain:{},access:{},confidence:{cellCoverage:.9,hostQuality:.65,soilCoverage:0}})};
+  });
+  expect(r.conifer.parts.canopy).toBeGreaterThan(60);
+  expect(r.conifer.parts.host).toBeGreaterThan(20);
+  // Canopy and land cover do not substitute for mapped host evidence.
+  expect(r.conifer.parts.host).toBeGreaterThan(r.wrongHosts.parts.host);
+  expect(r.conifer.score).toBeGreaterThan(r.wrongHosts.score);
+  expect(r.open.parts.canopy).toBeLessThan(30);
+  expect(r.open.score).toBeLessThan(r.conifer.score);
+  // Missing canopy is omitted evidence that lowers available weight, never a zero.
+  expect(r.noCanopy.parts.canopy).toBeNull();
+  expect(r.noCanopy.availableWeight).toBeLessThan(r.conifer.availableWeight);
+  // A legacy-shaped habitat object (no evergreen/canopy keys) still scores on forest + host.
+  expect(r.legacyShape.parts.canopy).toBeNull();
+  expect(r.legacyShape.parts.forest).toBeGreaterThan(70);
+  expect(r.legacyShape.score).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+test('habitat completeness is explicit and never implied by a published file',async({page})=>{
+  await open(page);
+  const r=await page.evaluate(()=>{
+    const t=__FRUITING_FORECAST_TEST__;
+    const manifest={datasetVersion:'fixture',tiles:[
+      {id:'complete',habitat:{status:'AVAILABLE',url:'a.parquet',components:{forestType:'AVAILABLE',elevation:'AVAILABLE',landCover:'AVAILABLE',canopy:'AVAILABLE',soil:'UNBUILT'}}},
+      {id:'legacy',habitat:{status:'PARTIAL',url:'b.parquet'}},
+      {id:'file-only',url:'c.parquet'},
+      {id:'empty',habitat:{status:'VERIFIED_EMPTY'}}
+    ]};
+    return t.aboutManifestCounts(manifest);
+  });
+  expect(r.habitat).toBe(3);
+  expect(r.habitatComplete).toBe(1);
+  expect(r.components.canopy.AVAILABLE).toBe(1);
+  expect(r.components.canopy.UNBUILT).toBe(0);
+  expect(r.components.soil.UNBUILT).toBe(1);
 });

@@ -27,10 +27,25 @@ Unit and identifier contracts (deliberate, documented in code):
   * Cells outside a raster extent or mask are written as NULL, never as 0.
   * Missing optional evidence (canopy, soil, access) stays NULL and the habitat
     sidecar status is PARTIAL -- never 0 and never AVAILABLE.
+  * Canopy is stored as a 0..1 fraction in the `canopy` column. The pinned source
+    product publishes 0..100 percent, so the conversion happens here once.
+  * Land cover is a point-sampled categorical class (`land_class`) plus explicit
+    derived cover signals (`forest`, `deciduous`, `open_land`, `evergreen`,
+    `mixed_forest`, `wetland`). The adapter does not invent biology: it exposes
+    the mapped product classes and the documented derivation, and regional
+    species models decide how to weight them.
+
+Source preparation scopes are explicit because a national product must never be
+re-downloaded per tile:
+  * national products (forest type groups, NLCD land cover, NLCD tree canopy,
+    Census states): `prepare national`
+  * state/regional products (gSSURGO soil): `prepare state --state CO`
+  * tile products (a 3DEP 1x1 degree DEM): `prepare tile --tile n40_w106`
 
 Usage (preparation only; the app has no runtime backend):
   uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py sources
-  uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py prepare --tile n40_w106 --cache /tmp/ffsrc
+  uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py prepare national --sources forest-type,land-cover,canopy --cache /tmp/ffsrc
+  uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py prepare tile --tile n40_w106 --cache /tmp/ffsrc
   uv run --with rasterio --with duckdb --with requests tools/fruiting_bulk_adapters.py build --tile n40_w106 --cache /tmp/ffsrc --out /tmp/ff-normalized
 """
 from __future__ import annotations
@@ -38,8 +53,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import time
+import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 import duckdb
@@ -47,14 +65,17 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 STEP_DEGREES = 0.05
+CACHE_MANIFEST = "source-manifest.json"
 
 # ─ Pinned sources ─────────────────────────────────────────────────────
 
 FOREST_GROUP = {
     "id": "forest_type_groups",
+    "scope": "national",
     "provider": "USDA Forest Service FIA / Remote Sensing Applications Center",
     "dataset": "Forest Type Groups of the United States (conus_forestgroup)",
     "url": "https://data.fs.usda.gov/geodata/rastergateway/forest_type/conus_forestgroup.zip",
+    "archiveName": "conus_forestgroup.zip",
     "member": "conus_forestgroup.img",
     "sha256": "5ef0fa8212764e5337f4aeb94569cce144e5cb5a598314bb4f6ac23bf0f7dfbf",
     "archiveBytes": 168022806,
@@ -69,6 +90,7 @@ FOREST_GROUP = {
 
 DEM_1ARC = {
     "id": "3dep_1arcsecond",
+    "scope": "tile",
     "provider": "USGS 3D Elevation Program",
     "dataset": "National Elevation Dataset (NED) 1 arc-second (about 30 m) 1x1 degree GeoTIFF",
     "urlTemplate": "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1/TIFF/historical/n{lat}w{lon:03d}/USGS_1_n{lat}w{lon:03d}_{release}.tif",
@@ -81,8 +103,78 @@ DEM_1ARC = {
     "caveat": "Tile IDs in the USGS product name the NORTH edge latitude; Fruiting Forecast tiles name the south edge.",
 }
 
+# Annual NLCD Land Cover (CONUS), Collection 1 Version 2, year 2023. The archive
+# is cached once and point-sampled for every tile; the full 16-class legend is the
+# authoritative product legend (GDAL raster attribute table in the .aux.xml).
+NLCD_LANDCOVER = {
+    "id": "nlcd_land_cover",
+    "scope": "national",
+    "provider": "USGS / MRLC (Multi-Resolution Land Characteristics Consortium)",
+    "dataset": "Annual NLCD Land Cover, CONUS, 2023, Collection 1 Version 2",
+    "productPage": "https://www.mrlc.gov/data/nlcd-2023-land-cover-conus",
+    "url": "https://www.mrlc.gov/downloads/sciweb1/shared/mrlc/data-bundles/Annual_NLCD_LndCov_2023_CU_C1V2.zip",
+    "archiveName": "Annual_NLCD_LndCov_2023_CU_C1V2.zip",
+    "cacheAliases": ["nlcd_landcover_2023.zip"],
+    "member": "Annual_NLCD_LndCov_2023_CU_C1V2.tif",
+    "sha256": "da50297bc65c07a8210999d20e2b59e69a8d1470273e1ed9344884988fd47aaf",
+    "archiveBytes": 1427423034,
+    "datasetVersion": "annual-nlcd-lndcov-2023-c1v2",
+    "crs": "CONUS Albers Equal Area (EPSG:5070 parameters; file proj string 'AEA WGS84')",
+    "resolutionM": 30,
+    "units": "categorical class code (see legend)",
+    "noDataValues": (250,),
+    "legend": {
+        11: "open_water", 12: "perennial_ice_snow",
+        21: "developed_open_space", 22: "developed_low_intensity",
+        23: "developed_medium_intensity", 24: "developed_high_intensity",
+        31: "barren_land", 41: "deciduous_forest", 42: "evergreen_forest",
+        43: "mixed_forest", 52: "shrub_scrub", 71: "grassland_herbaceous",
+        81: "pasture_hay", 82: "cultivated_crops", 90: "woody_wetlands",
+        95: "emergent_herbaceous_wetlands",
+    },
+    "citation": "U.S. Geological Survey, 2025, Annual NLCD (National Land Cover Database) Collection 1 Version 2 land cover, 2023.",
+    "caveat": ("Categorical 30 m product. Land cover is point-sampled at the 0.05-degree cell center, so a cell "
+               "represents the class at its center, not a fraction of its area; cell means across a zone are the "
+               "proportion of sampled centers in each class. The derived cover signals use the same class mapping "
+               "as the legacy NLCD sampler so eastern and western semantics stay identical."),
+    "urlCaveat": ("MRLC hosts products behind dated links that move between releases. The pinned archive name, byte "
+                  "count and SHA256 are authoritative here; an operator may place a byte-identical archive in the "
+                  "cache (or refresh the URL from productPage) when the hosted link changes."),
+}
+
+# NLCD Tree Canopy Cover (CONUS) v2021-4. This is the current NLCD TCC release
+# distributed by MRLC/USGS alongside the Annual NLCD land cover product. The
+# 2021 vintage is deliberate: it is the pinned product this repository cached and
+# measured. Canopy and land cover are separate environmental signals.
+NLCD_TCC = {
+    "id": "nlcd_tree_canopy",
+    "scope": "national",
+    "provider": "USDA Forest Service / USGS MRLC",
+    "dataset": "NLCD Tree Canopy Cover (CONUS), v2021-4",
+    "productPage": "https://www.mrlc.gov/data/nlcd-2021-tree-canopy-cover-conus",
+    "url": "https://www.mrlc.gov/downloads/sciweb1/shared/mrlc/data-bundles/nlcd_tcc_conus_2021_v2021-4.zip",
+    "archiveName": "nlcd_tcc_conus_2021_v2021-4.zip",
+    "cacheAliases": ["nlcd_tcc_2021.zip"],
+    "member": "nlcd_tcc_conus_2021_v2021-4.tif",
+    "sha256": "7afe3a6856eacd30eb557515e821ab9a491df0e18231b107a2fe129e27541fb0",
+    "archiveBytes": 3740022899,
+    "datasetVersion": "nlcd-tcc-conus-2021-v2021-4",
+    "crs": "CONUS Albers Equal Area (EPSG:5070 parameters; file proj string 'Albers Conical Equal Area')",
+    "resolutionM": 30,
+    "units": "percent tree canopy cover (0-100); stored in habitat as a 0..1 fraction",
+    "noDataValues": (254, 255),
+    "citation": ("USDA Forest Service, 2023. NLCD Tree Canopy Cover (CONUS) v2021-4. "
+                 "Housman, I.; Heyer, J.; et al., methods documented in the distributed product metadata."),
+    "caveat": ("Percent canopy cover pixel values 0-100; 254 is the non-processing area and 255 the background, both "
+               "stored as NULL. The canopy product is 2021 while the pinned land-cover product is 2023; the two-year "
+               "difference is documented rather than corrected. Canopy is forest-structure evidence, never a host "
+               "substitute: a spruce-specific mapped forest type stays more informative than generic canopy."),
+    "urlCaveat": NLCD_LANDCOVER["urlCaveat"],
+}
+
 MTBS = {
     "id": "mtbs",
+    "scope": "tile",
     "provider": "USDA Forest Service / USGS Monitoring Trends in Burn Severity",
     "dataset": "MTBS Burned Area Boundaries (All Years)",
     "query": "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MTBS_01/MapServer/63/query",
@@ -94,9 +186,11 @@ MTBS = {
 
 STATES = {
     "id": "us_census_states",
+    "scope": "national",
     "provider": "U.S. Census Bureau",
     "dataset": "Cartographic Boundary File, State, 1:20,000,000 (cb_2023_us_state_20m)",
     "url": "https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_state_20m.zip",
+    "archiveName": "cb_2023_us_state_20m.zip",
     "sha256": "0fd2d6562708ff8182c00d5d25b5556d049ecf2794d97b89ed2dac4d5e9e2c8d",
     "archiveBytes": 186432,
     "datasetVersion": "us-census-state-cb-2023-20m",
@@ -108,6 +202,7 @@ STATES = {
 
 PADUS = {
     "id": "padus",
+    "scope": "tile",
     "provider": "USGS GAP (Esri-hosted Public Access edition)",
     "dataset": "PAD-US Protected Areas, public-access schema",
     "query": "https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services/PADUS_Public_Access/FeatureServer/0/query",
@@ -140,6 +235,41 @@ FOREST_SIGNAL_CLASSES = {
     "douglas_fir_signal": (200,),
     "aspen_birch_signal": (900,),
 }
+
+# Land-cover evidence derived from the pinned Annual NLCD class legend. The
+# adapter exposes mapped evidence only; it does not assign species weights.
+# `forest`/`deciduous`/`open_land` deliberately reuse the legacy NLCD sampler's
+# class mapping so eastern and western tiles keep identical semantics. The
+# evergreen/mixed/wetland columns are additive western-era fields: legacy tiles
+# do not have them and read as NULL, never as 0.
+LAND_COVER_CLASSES = NLCD_LANDCOVER["legend"]
+LAND_COVER_FOREST = {41, 42, 43, 90}
+LAND_COVER_DECIDUOUS = {41}
+LAND_COVER_OPEN = {71, 81, 82}
+
+
+def land_cover_record(code: int | None) -> dict:
+    """Map a raw Annual NLCD class value to row fields. Unknown codes stay missing."""
+    if code is None or code not in LAND_COVER_CLASSES:
+        return {"land_class": None, "forest": None, "deciduous": None, "open_land": None,
+                "evergreen": None, "mixed_forest": None, "wetland": None}
+    return {
+        "land_class": LAND_COVER_CLASSES[code],
+        "forest": 1.0 if code in LAND_COVER_FOREST else 0.0,
+        "deciduous": 1.0 if code in LAND_COVER_DECIDUOUS else 0.0,
+        "open_land": 1.0 if code in LAND_COVER_OPEN else 0.0,
+        "evergreen": 1.0 if code == 42 else 0.0,
+        "mixed_forest": 1.0 if code == 43 else 0.0,
+        "wetland": 1.0 if code in {90, 95} else 0.0,
+    }
+
+
+def canopy_fraction(percent: float | None) -> float | None:
+    """NLCD TCC publishes 0..100 percent; habitat stores a 0..1 fraction. Values
+    outside 0..100 (254 non-processing, 255 background) stay missing."""
+    if percent is None or not 0 <= percent <= 100:
+        return None
+    return round(percent / 100.0, 4)
 
 
 def tile_lat(tile_id: str) -> int:
@@ -206,7 +336,16 @@ HABITAT_COLUMNS = [
     ("hydrologic_group", "VARCHAR"), ("slope_deg", "DOUBLE"), ("access_class", "VARCHAR"),
     ("access_category", "VARCHAR"), ("property_name", "VARCHAR"), ("access_manager", "VARCHAR"),
     ("forest_group", "VARCHAR"), ("forest_type_code", "INTEGER"),
-] + [(column, "DOUBLE") for column in FOREST_SIGNAL_CLASSES]
+] + [(column, "DOUBLE") for column in FOREST_SIGNAL_CLASSES] + [
+    # Additive western-era land-cover fields. Appended after the original columns so a
+    # legacy tile remains positionally readable; mixed-schema reads use union_by_name.
+    ("evergreen", "DOUBLE"), ("mixed_forest", "DOUBLE"), ("wetland", "DOUBLE"),
+]
+
+# The core habitat stack a release requires before a tile can be called AVAILABLE.
+# Soil is intentionally optional: it is valuable but not part of the core release.
+HABITAT_REQUIRED_COMPONENTS = ("forestType", "elevation", "canopy", "landCover")
+HABITAT_OPTIONAL_COMPONENTS = ("soil",)
 
 FIRE_COLUMNS = [
     ("perimeter_id", "VARCHAR"), ("fire_name", "VARCHAR"), ("fire_year", "INTEGER"),
@@ -247,38 +386,196 @@ def write_parquet(path: Path, rows: list[dict], columns: list[tuple[str, str]], 
 # ─ Source cache preparation ───────────────────────────────────────────
 
 
-def _download(url: str, destination: Path) -> None:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while chunk := handle.read(1 << 24):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download(url: str, destination: Path, expected_sha256: str | None = None, resume: bool = True) -> str:
+    """Download once, resuming a partial file when the server supports it.
+
+    The `.part` file is never treated as ready. The pinned SHA256 is verified
+    before the file is promoted, so an interrupted or corrupted download cannot
+    masquerade as a prepared source.
+    """
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_suffix(destination.suffix + ".part")
-    print(f"Downloading {url}")
-    with urllib.request.urlopen(url, timeout=900) as response, open(tmp, "wb") as handle:
-        while chunk := response.read(1 << 20):
-            handle.write(chunk)
+    start = tmp.stat().st_size if resume and tmp.exists() else 0
+    headers = {"User-Agent": "fruiting-forecast-bulk-adapters/1.0"}
+    if start:
+        headers["Range"] = f"bytes={start}-"
+    print(f"Downloading {url}" + (f" (resuming at {start:,} bytes)" if start else ""))
+    try:
+        response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=900)
+        if start and getattr(response, "status", 200) != 206:
+            print("  Server ignored the range request; restarting the download")
+            start = 0
+        mode = "ab" if start else "wb"
+        with response, open(tmp, mode) as handle:
+            while chunk := response.read(1 << 22):
+                handle.write(chunk)
+    except urllib.error.HTTPError as exc:
+        if start and exc.code == 416:
+            print("  Partial file is already complete; verifying it")
+        else:
+            raise
+    digest = _sha256(tmp)
+    if expected_sha256 and digest != expected_sha256:
+        tmp.rename(tmp.with_suffix(tmp.suffix + ".mismatch"))
+        raise SystemExit(f"Checksum mismatch for {destination.name}: got {digest}, expected {expected_sha256}. "
+                         f"The mismatched partial was kept as {tmp.name}.mismatch and is NOT ready.")
     tmp.replace(destination)
+    return digest
 
 
-def _raster_paths(cache: Path, tile_id: str) -> tuple[Path, Path]:
-    return cache / "conus_forestgroup.zip", cache / f"dem_{usgs_dem_tile_id(tile_id)}.tif"
+def cache_manifest_path(cache: Path) -> Path:
+    return cache / CACHE_MANIFEST
 
 
-def prepare(cache: Path, tile_id: str, forest: bool = True, dem: bool = True) -> dict:
-    """Download pinned sources once. Existing files are reused (restartable, no re-download)."""
+def load_cache_manifest(cache: Path) -> dict:
+    path = cache_manifest_path(cache)
+    if path.exists():
+        return json.loads(path.read_text())
+    return {"schemaVersion": 1, "sources": {}}
+
+
+def save_cache_manifest(cache: Path, manifest: dict) -> None:
     cache.mkdir(parents=True, exist_ok=True)
+    manifest["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    tmp = cache_manifest_path(cache).with_suffix(".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, cache_manifest_path(cache))
+
+
+def _validate_archive(archive: Path, source: dict) -> dict:
+    """Structural validation: readable zip, expected member present, member size
+    matches the archive directory. Returns member metadata. Does not CRC-scan
+    multi-gigabyte archives (the pinned SHA256 is the integrity check)."""
+    with zipfile.ZipFile(archive) as bundle:
+        names = bundle.namelist()
+        member = source.get("member")
+        if member and member not in names:
+            raise ValueError(f"{archive.name} does not contain expected member {member}")
+        info = bundle.getinfo(member) if member else None
+    return {"members": len(names), "member": member,
+            "memberBytes": info.file_size if info else None}
+
+
+def _archive_path(cache: Path, source: dict) -> Path:
+    """Canonical pinned archive name, or a documented cache alias when an older
+    cache used a shorter local filename."""
+    canonical = cache / source.get("archiveName", Path(source["url"]).name)
+    if canonical.exists():
+        return canonical
+    for alias in source.get("cacheAliases", []):
+        candidate = cache / alias
+        if candidate.exists():
+            return candidate
+    return canonical
+
+
+def _record(cache: Path, manifest: dict, key: str, entry: dict) -> dict:
+    entry = {"validatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **entry}
+    manifest.setdefault("sources", {})[key] = entry
+    save_cache_manifest(cache, manifest)
+    return entry
+
+
+def prepare_national(cache: Path, names: list[str] | None = None) -> dict:
+    """Prepare the pinned national products once. Existing verified archives are
+    reused; a present-but-wrong archive is FAILED, never silently re-downloaded."""
+    registry = {"forest-type": FOREST_GROUP, "land-cover": NLCD_LANDCOVER,
+                "canopy": NLCD_TCC, "states": STATES}
+    chosen = names or list(registry)
+    manifest = load_cache_manifest(cache)
     prepared = {}
-    if forest:
-        archive = _raster_paths(cache, tile_id)[0]
+    for name in chosen:
+        source = registry.get(name)
+        if source is None:
+            raise SystemExit(f"Unknown national source: {name} (choose from {', '.join(registry)})")
+        archive = _archive_path(cache, source)
         if not archive.exists():
-            _download(FOREST_GROUP["url"], archive)
-        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        prepared["forestTypeGroups"] = {"path": str(archive), "bytes": archive.stat().st_size,
-                                        "sha256": digest, "sha256Matches": digest == FOREST_GROUP["sha256"]}
-    if dem:
-        target = _raster_paths(cache, tile_id)[1]
-        url = dem_tile_url(tile_id)
-        if not target.exists():
-            _download(url, target)
-        prepared["elevation"] = {"path": str(target), "bytes": target.stat().st_size, "sourceUrl": url}
+            digest = _download(source["url"], archive, expected_sha256=source.get("sha256"))
+        else:
+            digest = _sha256(archive)
+        if source.get("sha256") and digest != source["sha256"]:
+            entry = _record(cache, manifest, source["id"], {
+                "status": "FAILED", "scope": "national", "archive": archive.name, "bytes": archive.stat().st_size,
+                "sha256": digest, "expectedSha256": source["sha256"], "sha256Matches": False,
+                "datasetVersion": source["datasetVersion"],
+                "error": "Cached archive does not match the pinned checksum; delete it and prepare again."})
+            prepared[name] = entry
+            continue
+        try:
+            structure = _validate_archive(archive, source)
+            entry = _record(cache, manifest, source["id"], {
+                "status": "READY", "scope": "national", "archive": archive.name, "bytes": archive.stat().st_size,
+                "sha256": digest, "expectedSha256": source.get("sha256"), "sha256Matches": True,
+                "datasetVersion": source["datasetVersion"], "productPage": source.get("productPage"),
+                "sourceUrl": source["url"], **structure})
+        except Exception as exc:
+            entry = _record(cache, manifest, source["id"], {
+                "status": "FAILED", "scope": "national", "archive": archive.name, "bytes": archive.stat().st_size,
+                "sha256": digest, "datasetVersion": source["datasetVersion"], "error": str(exc)})
+        prepared[name] = entry
     return prepared
+
+
+def dem_path(cache: Path, tile_id: str) -> Path:
+    return cache / f"dem_{usgs_dem_tile_id(tile_id)}.tif"
+
+
+def prepare_tile(cache: Path, tile_id: str) -> dict:
+    """Prepare tile-scoped sources (the 3DEP 1x1 degree DEM). Never touches national products."""
+    manifest = load_cache_manifest(cache)
+    target = dem_path(cache, tile_id)
+    url = dem_tile_url(tile_id)
+    if not target.exists():
+        _download(url, target, resume=True)
+    key = f"{DEM_1ARC['id']}:{usgs_dem_tile_id(tile_id)}"
+    validated = {"status": "READY", "scope": "tile", "tile": tile_id, "archive": target.name,
+                 "bytes": target.stat().st_size, "datasetVersion": DEM_1ARC["datasetVersion"], "sourceUrl": url}
+    try:
+        import rasterio
+        with rasterio.open(target) as source:
+            if source.width <= 0 or source.height <= 0:
+                raise ValueError("empty raster")
+            validated.update(rasterSize=[source.width, source.height], crs=str(source.crs), nodata=source.nodata)
+    except Exception as exc:
+        validated = {**validated, "status": "FAILED", "error": f"DEM is not a readable raster: {exc}"}
+    return _record(cache, manifest, key, validated)
+
+
+def _prepared_member(cache: Path, source: dict) -> Path | None:
+    """Return the extracted member path for a READY national source, else None.
+
+    Extraction is cached with a completion marker; a partial extraction is never
+    reused. A missing/unprepared source stays missing instead of being invented.
+    """
+    manifest = load_cache_manifest(cache)
+    entry = (manifest.get("sources") or {}).get(source["id"]) or {}
+    archive = _archive_path(cache, source)
+    if entry.get("status") != "READY" or not archive.exists():
+        return None
+    target_dir = cache / "extracted" / source["sha256"][:12]
+    member = target_dir / source["member"]
+    marker = member.with_suffix(member.suffix + ".ready")
+    if marker.exists() and member.exists():
+        return member
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if member.exists():
+        member.unlink()
+    with zipfile.ZipFile(archive) as bundle:
+        bundle.extract(source["member"], target_dir)
+    expected = entry.get("memberBytes")
+    if expected and member.stat().st_size != expected:
+        member.unlink()
+        raise SystemExit(f"Extraction of {source['member']} produced {member.stat().st_size} bytes, expected {expected}")
+    marker.write_text(json.dumps({"archiveSha256": source["sha256"], "memberBytes": member.stat().st_size}) + "\n")
+    return member
 
 
 def meters_to_feet(value: float | None) -> float | None:
@@ -286,82 +583,350 @@ def meters_to_feet(value: float | None) -> float | None:
     return None if value is None else round(value * 3.28084, 2)
 
 
-def _sample_raster(source, transform_to, points: list[tuple[float, float]]) -> list[float | None]:
+def _sample_raster(source, transform_to, points: list[tuple[float, float]],
+                   extra_nodata: tuple[float, ...] = ()) -> list[float | None]:
     """Sample a raster at WGS84 points. Out-of-mask cells return None, never 0."""
     xs, ys = transform_to("EPSG:4326", source.crs, [p[1] for p in points], [p[0] for p in points])
     nodata = source.nodata
+    candidates = tuple(DEM_1ARC["noDataValues"]) + tuple(extra_nodata)
     values: list[float | None] = []
     for sample in source.sample(zip(xs, ys)):
         value: float | None = float(sample[0])
-        if nodata is not None and abs(value - nodata) < 1e-6:
-            value = None
-        else:
-            for candidate in DEM_1ARC["noDataValues"]:
-                if abs(value - candidate) < 1e-6:
-                    value = None
-                    break
-        values.append(value)
+        missing = nodata is not None and abs(value - nodata) < 1e-6
+        if not missing:
+            missing = any(abs(value - candidate) < 1e-6 for candidate in candidates)
+        values.append(None if missing else value)
     return values
 
 
-def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGREES) -> dict:
-    """Sample the pinned forest-type-group and 3DEP rasters onto the 0.05-degree grid."""
-    import zipfile
+# ─ Soil (gSSURGO) ─────────────────────────────────────────────────────
+#
+# The scalable national design is one prepared gSSURGO state archive per state:
+# the mapunit (mukey) raster is sampled locally at the tile's grid points and the
+# sampled mukeys are joined to the authoritative `muaggatt` mapunit aggregate
+# attribute table. That is one national/state download and zero per-point remote
+# calls, unlike the legacy Soil Data Access point sampler.
+#
+# Only attributes a biological model can actually use are ingested. Units are
+# explicit; a map unit or attribute that is absent stays NULL, never a fabricated
+# neutral value.
+SOIL_COMPONENT = "soil"
+SOIL_COLUMNS = ("drainage_class", "awc_25_cm", "awc_50_cm", "flood_frequency",
+                "hydrologic_group", "slope_deg")
 
+GSSURGO = {
+    "id": "gssurgo",
+    "scope": "state",
+    "provider": "USDA Natural Resources Conservation Service",
+    "dataset": "Gridded Soil Survey Geographic (gSSURGO) Database, state package",
+    "productPage": "https://www.nrcs.usda.gov/resources/data-and-reports/gridded-soil-survey-geographic-gssurgo-database",
+    "archiveNameTemplate": "gSSURGO_{state}.zip",
+    "datasetVersion": "gssurgo-state-current",
+    "units": {"awc_25_cm": "centimeters", "awc_50_cm": "centimeters", "slope_deg": "percent slope"},
+    "attributes": {
+        "drclassdcd": "drainage class (dominant condition, text)",
+        "aws025wta": "available water storage 0-25 cm (weighted average, cm)",
+        "aws050wta": "available water storage 0-50 cm (weighted average, cm)",
+        "flodfreqdcd": "flooding frequency class (dominant condition, text)",
+        "hydgrpdcd": "hydrologic soil group (dominant condition, text)",
+        "slopegraddcp": "slope gradient (dominant condition, percent)",
+    },
+    "caveat": ("gSSURGO NRCS state packages do not publish one stable public URL for every state; the archive name "
+               "and the SHA256 recorded in the cache manifest are authoritative, and an operator may place a state "
+               "archive in the cache. The mapunit raster is sampled locally and joined to the shipped muaggatt "
+               "table; survey areas without data stay missing. Missing soil is never a neutral biological value."),
+}
+
+
+def _discover_mukey_raster(root: Path) -> Path | None:
+    candidates = [path for path in sorted(root.rglob("*.tif")) if "mukey" in path.name.lower()]
+    if not candidates:
+        candidates = [path for path in sorted(root.rglob("*.tif*")) if path.suffix.lower() in {".tif", ".tiff"}]
+    return candidates[0] if candidates else None
+
+
+def _discover_filegdb(root: Path) -> Path | None:
+    return next((path for path in sorted(root.rglob("*.gdb")) if path.is_dir()), None)
+
+
+def _read_muaggatt(extracted: Path, gdb: Path | None) -> list[dict]:
+    """Read the authoritative mapunit aggregate table.
+
+    Prefers a `muaggatt.csv` supplied beside the package (also how deterministic
+    tests exercise the contract) and otherwise reads the `muaggatt` layer from the
+    shipped FileGDB through pyogrio/GDAL's OpenFileGDB driver.
+    """
+    csv_path = next((path for path in extracted.rglob("muaggatt.csv")), None)
+    if csv_path:
+        import csv
+        with open(csv_path, newline="") as handle:
+            return [{key.lower(): value for key, value in row.items()} for row in csv.DictReader(handle)]
+    if gdb is None:
+        raise SystemExit("gSSURGO package has neither muaggatt.csv nor a FileGDB")
+    try:
+        import pyogrio
+    except ImportError as exc:
+        raise SystemExit("Reading gSSURGO FileGDB tables requires pyogrio: "
+                         "uv run --with pyogrio ...") from exc
+    frame = pyogrio.read_dataframe(gdb, layer="muaggatt", read_geometry=False)
+    return [{str(key).lower(): value for key, value in record.items()} for record in frame.to_dict("records")]
+
+
+def _to_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def prepare_state(cache: Path, state: str, archive: Path | None = None) -> dict:
+    """Prepare one gSSURGO state package. No invented URL: if no archive or pinned
+    URL is available, the source stays explicitly FAILED/UNBUILT."""
+    state = state.upper()
+    manifest = load_cache_manifest(cache)
+    key = f"{GSSURGO['id']}:{state}"
+    target = cache / GSSURGO["archiveNameTemplate"].format(state=state)
+    if archive is not None and archive.exists() and not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(archive.read_bytes())
+    url = GSSURGO.get("urlTemplate", "").format(state=state) if GSSURGO.get("urlTemplate") else None
+    if not target.exists():
+        entry = {"status": "FAILED", "scope": "state", "state": state, "archive": target.name,
+                 "datasetVersion": GSSURGO["datasetVersion"],
+                 "error": ("No gSSURGO archive is present and no pinned download URL is configured for this state. "
+                           "Place the NRCS state package in the cache or refresh the URL from the product page."),
+                 "productPage": GSSURGO["productPage"]}
+        return _record(cache, manifest, key, entry)
+    digest = _sha256(target)
+    try:
+        with zipfile.ZipFile(target) as bundle:
+            members = bundle.namelist()
+        if not any(name.lower().endswith(".gdb/") or ".gdb/" in name.lower() for name in members) and \
+                not any("mukey" in name.lower() for name in members):
+            raise ValueError("archive contains no FileGDB or mukey raster")
+        entry = {"status": "READY", "scope": "state", "state": state, "archive": target.name,
+                 "bytes": target.stat().st_size, "sha256": digest, "members": len(members),
+                 "datasetVersion": GSSURGO["datasetVersion"], "sourceUrl": url,
+                 "productPage": GSSURGO["productPage"]}
+    except Exception as exc:
+        entry = {"status": "FAILED", "scope": "state", "state": state, "archive": target.name,
+                 "bytes": target.stat().st_size, "sha256": digest,
+                 "datasetVersion": GSSURGO["datasetVersion"], "error": str(exc)}
+    return _record(cache, manifest, key, entry)
+
+
+def _extract_state_soil(cache: Path, state: str) -> dict | None:
+    manifest = load_cache_manifest(cache)
+    entry = (manifest.get("sources") or {}).get(f"{GSSURGO['id']}:{state}") or {}
+    archive = cache / GSSURGO["archiveNameTemplate"].format(state=state)
+    if entry.get("status") != "READY" or not archive.exists():
+        return None
+    extracted = cache / "extracted" / f"{archive.stem}-{entry['sha256'][:8]}"
+    marker = extracted / ".ready"
+    if not marker.exists():
+        extracted.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(extracted)
+        marker.write_text(json.dumps({"sha256": entry["sha256"]}) + "\n")
+    raster = _discover_mukey_raster(extracted)
+    gdb = _discover_filegdb(extracted)
+    if raster is None and gdb is None:
+        return None
+    return {"state": state, "root": extracted, "raster": raster, "gdb": gdb,
+            "muaggatt": _read_muaggatt(extracted, gdb),
+            "source": {"id": GSSURGO["id"], "provider": GSSURGO["provider"], "dataset": GSSURGO["dataset"],
+                       "productPage": GSSURGO["productPage"], "sha256": entry["sha256"],
+                       "state": state, "attributes": GSSURGO["attributes"], "units": GSSURGO["units"],
+                       "caveat": GSSURGO["caveat"]},
+            "datasetVersion": f"{GSSURGO['datasetVersion']}:{state}"}
+
+
+def soil_inputs(cache: Path, states: list[str]) -> list[dict]:
+    prepared = [soil for state in states if (soil := _extract_state_soil(cache, state.upper()))]
+    return prepared
+
+
+def merge_soil_samples(soil_prepared: list[dict], points: list[tuple[float, float]]) -> dict:
+    """Sample prepared state mapunit rasters and join to muaggatt.
+
+    A point covered by an earlier state is not overwritten by a later one; points
+    with no mapunit or no attribute remain None. Requires rasterio only when a
+    raster is actually present.
+    """
+    columns = {key: [None] * len(points) for key in SOIL_COLUMNS}
+    for entry in soil_prepared:
+        if entry.get("raster") is None:
+            continue
+        import rasterio
+        from rasterio.warp import transform as warp_transform
+        lookup = {int(row["mukey"]): row for row in entry["muaggatt"]
+                  if row.get("mukey") not in (None, "")}
+        with rasterio.open(entry["raster"]) as source:
+            values = _sample_raster(source, warp_transform, points)
+        for index, value in enumerate(values):
+            if value is None or columns["drainage_class"][index] is not None:
+                continue
+            row = lookup.get(int(value))
+            if not row:
+                continue
+            columns["drainage_class"][index] = row.get("drclassdcd")
+            columns["awc_25_cm"][index] = _to_float(row.get("aws025wta"))
+            columns["awc_50_cm"][index] = _to_float(row.get("aws050wta"))
+            columns["flood_frequency"][index] = row.get("flodfreqdcd")
+            columns["hydrologic_group"][index] = row.get("hydgrpdcd")
+            columns["slope_deg"][index] = _to_float(row.get("slopegraddcp"))
+    return columns
+
+
+def habitat_components(forest: bool, elevation: bool, land_cover: bool, canopy: bool, soil: bool) -> dict:
+    """Explicit component completeness. A tile is never AVAILABLE just because a
+    Parquet file exists: every required component must be present."""
+    return {
+        "forestType": "AVAILABLE" if forest else "UNBUILT",
+        "elevation": "AVAILABLE" if elevation else "UNBUILT",
+        "landCover": "AVAILABLE" if land_cover else "UNBUILT",
+        "canopy": "AVAILABLE" if canopy else "UNBUILT",
+        "soil": "AVAILABLE" if soil else "UNBUILT",
+    }
+
+
+def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGREES,
+                  soil_prepared: list[dict] | None = None) -> dict:
+    """Compose one habitat tile from every prepared source on the 0.05-degree grid.
+
+    Required: forest-type-group + 3DEP elevation. Optional and composed when
+    prepared: Annual NLCD land cover, NLCD tree canopy, gSSURGO soil. A missing
+    optional source stays NULL/UNBUILT and lowers the declared completeness; it is
+    never imputed. The caller never stitches intermediate Parquet fragments.
+    """
     import rasterio
     from rasterio.warp import transform as warp_transform
 
     points = sample_points(tile_id, step)
-    archive, dem_path = _raster_paths(cache, tile_id)
+    archive = _archive_path(cache, FOREST_GROUP)
+    elevation_path = dem_path(cache, tile_id)
     if not archive.exists():
-        raise SystemExit(f"Missing pinned forest-type-group archive: {archive} (run prepare first)")
-    if not dem_path.exists():
-        raise SystemExit(f"Missing pinned 3DEP DEM tile: {dem_path} (run prepare first)")
-    extracted = cache / f"forestgroup_{FOREST_GROUP['sha256'][:8]}"
-    image = extracted / FOREST_GROUP["member"]
-    if not image.exists():
-        with zipfile.ZipFile(archive) as bundle:
-            bundle.extract(FOREST_GROUP["member"], extracted)
+        raise SystemExit(f"Missing pinned forest-type-group archive: {archive} (run prepare national first)")
+    if not elevation_path.exists():
+        raise SystemExit(f"Missing pinned 3DEP DEM tile: {elevation_path} (run prepare tile first)")
+    forest_image = _prepared_member(cache, FOREST_GROUP)
+    if forest_image is None:
+        raise SystemExit(f"Forest-type-group archive is not prepared/validated in {cache} (run prepare national)")
 
-    with rasterio.open(image) as groups:
+    land_cover_image = _prepared_member(cache, NLCD_LANDCOVER)
+    canopy_image = _prepared_member(cache, NLCD_TCC)
+
+    with rasterio.open(forest_image) as groups:
         codes = _sample_raster(groups, warp_transform, points)
-    with rasterio.open(dem_path) as dem:
+    with rasterio.open(elevation_path) as dem:
         elevations_m = _sample_raster(dem, warp_transform, points)
+    land_cover_codes = None
+    if land_cover_image is not None:
+        with rasterio.open(land_cover_image) as cover:
+            values = _sample_raster(cover, warp_transform, points, extra_nodata=NLCD_LANDCOVER["noDataValues"])
+        land_cover_codes = [None if value is None else int(value) for value in values]
+    canopy_percent = None
+    if canopy_image is not None:
+        with rasterio.open(canopy_image) as canopy:
+            canopy_percent = _sample_raster(canopy, warp_transform, points,
+                                            extra_nodata=NLCD_TCC["noDataValues"])
+    soil_columns = ({key: [None] * len(points) for key in SOIL_COLUMNS}
+                    if not soil_prepared else merge_soil_samples(soil_prepared, points))
 
     rows = []
-    for (lat, lon), code, elevation_m in zip(points, codes, elevations_m):
-        record = forest_group_record(None if code is None else int(code))
+    for index, (lat, lon) in enumerate(points):
+        record = forest_group_record(None if codes[index] is None else int(codes[index]))
         group_name = record["forest_group"]
+        cover = land_cover_record(None if land_cover_codes is None else land_cover_codes[index])
+        land_cover_ready = land_cover_codes is not None
         rows.append({
             "cell_id": f"{lat:.3f}_{lon:.3f}", "lat": lat, "lon": lon,
-            # land_class mirrors the only mapped vegetation label available in this proof.
-            "land_class": group_name or ("not_forest_mapped" if code is not None else None),
-            "forest": record["forest"], "forest_mapped": record["forest_mapped"],
-            "deciduous": None, "open_land": None, "canopy": None,
-            "elevation_ft": meters_to_feet(elevation_m),
-            "drainage_class": None, "awc_25_cm": None, "awc_50_cm": None,
-            "flood_frequency": None, "hydrologic_group": None, "slope_deg": None,
+            "land_class": cover["land_class"] if land_cover_ready
+                          else (group_name or ("not_forest_mapped" if codes[index] is not None else None)),
+            "forest": cover["forest"] if land_cover_ready else record["forest"],
+            "forest_mapped": record["forest_mapped"],
+            "deciduous": cover["deciduous"] if land_cover_ready else None,
+            "open_land": cover["open_land"] if land_cover_ready else None,
+            "canopy": canopy_fraction(None if canopy_percent is None else canopy_percent[index]),
+            "elevation_ft": meters_to_feet(elevations_m[index]),
+            "drainage_class": soil_columns["drainage_class"][index],
+            "awc_25_cm": soil_columns["awc_25_cm"][index],
+            "awc_50_cm": soil_columns["awc_50_cm"][index],
+            "flood_frequency": soil_columns["flood_frequency"][index],
+            "hydrologic_group": soil_columns["hydrologic_group"][index],
+            "slope_deg": soil_columns["slope_deg"][index],
             "access_class": None, "access_category": None, "property_name": None, "access_manager": None,
             "forest_group": group_name, "forest_type_code": record["forest_type_code"],
             **{key: record[key] for key in FOREST_SIGNAL_CLASSES},
+            "evergreen": cover["evergreen"] if land_cover_ready else None,
+            "mixed_forest": cover["mixed_forest"] if land_cover_ready else None,
+            "wetland": cover["wetland"] if land_cover_ready else None,
         })
+
+    soil_ready = soil_prepared is not None and len(soil_prepared) > 0
+    components = habitat_components(True, True, land_cover_image is not None, canopy_image is not None, soil_ready)
+    status = "AVAILABLE" if all(components[key] == "AVAILABLE" for key in HABITAT_REQUIRED_COMPONENTS) else "PARTIAL"
+    unbuilt = []
+    if components["canopy"] != "AVAILABLE":
+        unbuilt.append("canopy")
+    if components["landCover"] != "AVAILABLE":
+        unbuilt.append("nlcdLandCover")
+    if components["soil"] != "AVAILABLE":
+        unbuilt.append(SOIL_COMPONENT)
+    unbuilt.append("access")
+    sources = [
+        {"id": FOREST_GROUP["id"], "provider": FOREST_GROUP["provider"], "dataset": FOREST_GROUP["dataset"],
+         "sha256": FOREST_GROUP["sha256"], "crs": FOREST_GROUP["crs"],
+         "resolutionM": FOREST_GROUP["resolutionM"], "citation": FOREST_GROUP["citation"],
+         "caveat": FOREST_GROUP["caveat"]},
+        {"id": DEM_1ARC["id"], "provider": DEM_1ARC["provider"], "dataset": DEM_1ARC["dataset"],
+         "sourceUrl": dem_tile_url(tile_id), "crs": DEM_1ARC["crs"], "units": "meters",
+         "citation": DEM_1ARC["citation"], "caveat": DEM_1ARC["caveat"]},
+    ]
+    units = {"elevation_ft": "feet", "sourceElevation": "meters", "canopy": "fraction 0..1 (source percent / 100)"}
+    if land_cover_ready:
+        sources.append({"id": NLCD_LANDCOVER["id"], "provider": NLCD_LANDCOVER["provider"],
+                        "dataset": NLCD_LANDCOVER["dataset"], "sha256": NLCD_LANDCOVER["sha256"],
+                        "crs": NLCD_LANDCOVER["crs"], "resolutionM": NLCD_LANDCOVER["resolutionM"],
+                        "citation": NLCD_LANDCOVER["citation"], "caveat": NLCD_LANDCOVER["caveat"],
+                        "legend": {str(code): name for code, name in NLCD_LANDCOVER["legend"].items()},
+                        "derivation": {"forest": sorted(LAND_COVER_FOREST), "deciduous": sorted(LAND_COVER_DECIDUOUS),
+                                       "open": sorted(LAND_COVER_OPEN), "evergreen": [42], "mixedForest": [43],
+                                       "wetland": [90, 95]}})
+        units["landCover"] = "categorical class sampled at the cell center"
+    if canopy_image is not None:
+        sources.append({"id": NLCD_TCC["id"], "provider": NLCD_TCC["provider"], "dataset": NLCD_TCC["dataset"],
+                        "sha256": NLCD_TCC["sha256"], "crs": NLCD_TCC["crs"],
+                        "resolutionM": NLCD_TCC["resolutionM"], "citation": NLCD_TCC["citation"],
+                        "caveat": NLCD_TCC["caveat"], "sourceUnits": "percent 0..100"})
+        units["canopySourcePercent"] = "percent 0..100"
+    if soil_ready:
+        sources.extend(entry["source"] for entry in soil_prepared)
+    version_parts = [FOREST_GROUP["datasetVersion"], DEM_1ARC["datasetVersion"]]
+    if land_cover_ready:
+        version_parts.append(NLCD_LANDCOVER["datasetVersion"])
+    if canopy_image is not None:
+        version_parts.append(NLCD_TCC["datasetVersion"])
+    if soil_ready:
+        version_parts.extend(entry["datasetVersion"] for entry in soil_prepared)
     meta = {
-        "datasetVersion": f"habitat-bulk-v1:{FOREST_GROUP['datasetVersion']}+{DEM_1ARC['datasetVersion']}@step{step}",
+        "datasetVersion": f"habitat-bulk-v2:{'+'.join(version_parts)}@step{step}",
         "sourceUrl": FOREST_GROUP["url"],
-        "status": "PARTIAL",
-        "statusNote": ("Mapped forest-type-group class and 3DEP elevation only. Canopy, soil and access "
-                       "evidence are absent in this tile (null, not zero) and remain UNBUILT."),
-        "sources": [
-            {"id": FOREST_GROUP["id"], "provider": FOREST_GROUP["provider"], "dataset": FOREST_GROUP["dataset"],
-             "sha256": FOREST_GROUP["sha256"], "crs": FOREST_GROUP["crs"],
-             "resolutionM": FOREST_GROUP["resolutionM"], "citation": FOREST_GROUP["citation"],
-             "caveat": FOREST_GROUP["caveat"]},
-            {"id": DEM_1ARC["id"], "provider": DEM_1ARC["provider"], "dataset": DEM_1ARC["dataset"],
-             "sourceUrl": dem_tile_url(tile_id), "crs": DEM_1ARC["crs"], "units": "meters",
-             "citation": DEM_1ARC["citation"], "caveat": DEM_1ARC["caveat"]},
-        ],
-        "units": {"elevation_ft": "feet", "sourceElevation": "meters"},
-        "unbuilt": ["canopy", "soil", "access", "nlcdLandCover"],
+        "status": status,
+        "components": components,
+        "requiredComponents": list(HABITAT_REQUIRED_COMPONENTS),
+        "statusNote": ("Composed from mapped FIA forest-type-group classes and 3DEP elevation"
+                       + (", Annual NLCD land cover" if land_cover_ready else "")
+                       + (", NLCD tree canopy" if canopy_image is not None else "")
+                       + (", gSSURGO soil" if soil_ready else "")
+                       + (". Soil is absent in this tile (null, not zero) and remains UNBUILT."
+                          if not soil_ready else ".")
+                       + ("" if status == "AVAILABLE" else " Required habitat components are missing; the tile is PARTIAL.")),
+        "sources": sources,
+        "units": units,
+        "unbuilt": unbuilt,
         "cellStepDegrees": step,
     }
     write_parquet(out / "habitat" / f"{tile_id}.parquet", rows, HABITAT_COLUMNS, meta)
@@ -612,32 +1177,61 @@ def build_public_land(tile_id: str, cache: Path, out: Path, timeout: int = 240) 
 # ─ CLI ────────────────────────────────────────────────────────────────
 
 
+def source_registry() -> dict:
+    return {"forestTypeGroups": FOREST_GROUP, "elevation": DEM_1ARC, "landCover": NLCD_LANDCOVER,
+            "canopy": NLCD_TCC, "fire": MTBS, "publicLand": PADUS, "soil": GSSURGO, "states": STATES}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("sources", help="Print the pinned source registry")
-    prepare_parser = sub.add_parser("prepare", help="Download pinned sources into the local cache once")
-    build_parser = sub.add_parser("build", help="Normalize a tile from the local source cache")
-    for target in (prepare_parser, build_parser):
-        target.add_argument("--tile", required=True, help="Fruiting Forecast tile ID, e.g. n40_w106")
-        target.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
-    prepare_parser.add_argument("--skip-forest", action="store_true")
-    prepare_parser.add_argument("--skip-dem", action="store_true")
+    sources_parser = sub.add_parser("sources", help="Print the pinned source registry and cache readiness")
+    sources_parser.add_argument("--cache", type=Path, default=None)
+
+    prepare_parser = sub.add_parser("prepare", help="Prepare pinned sources before any tile build")
+    prepare_sub = prepare_parser.add_subparsers(dest="scope", required=True)
+    national = prepare_sub.add_parser("national", help="Download/validate national products once")
+    national.add_argument("--sources", default="forest-type,land-cover,canopy,states")
+    national.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
+    tile = prepare_sub.add_parser("tile", help="Download/validate tile-scoped products (3DEP DEM)")
+    tile.add_argument("--tile", required=True)
+    tile.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
+    state = prepare_sub.add_parser("state", help="Prepare a state-scoped product (gSSURGO)")
+    state.add_argument("--state", required=True)
+    state.add_argument("--archive", type=Path, default=None,
+                       help="Operator-supplied NRCS state archive when no pinned URL is available")
+    state.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
+
+    build_parser = sub.add_parser("build", help="Compose normalized tile layers from the local source cache")
+    build_parser.add_argument("--tile", required=True, help="Fruiting Forecast tile ID, e.g. n40_w106")
+    build_parser.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
     build_parser.add_argument("--out", type=Path, default=Path("/tmp/fruiting-forecast-normalized"))
     build_parser.add_argument("--layers", default="habitat,public-land,fire",
                               help="Comma-separated subset of habitat,public-land,fire")
     build_parser.add_argument("--step", type=float, default=STEP_DEGREES)
+    build_parser.add_argument("--soil-states", default="",
+                              help="Comma-separated state codes whose prepared gSSURGO should be composed into habitat")
     args = parser.parse_args()
 
     if args.command == "sources":
-        print(json.dumps({"forestTypeGroups": FOREST_GROUP, "elevation": DEM_1ARC, "fire": MTBS,
-                          "publicLand": PADUS}, indent=2))
+        output = source_registry()
+        if args.cache:
+            output["cache"] = {"path": str(args.cache), "manifest": load_cache_manifest(args.cache).get("sources", {})}
+        print(json.dumps(output, indent=2))
         return
     if args.command == "prepare":
-        print(json.dumps(prepare(args.cache, args.tile, not args.skip_forest, not args.skip_dem), indent=2))
+        if args.scope == "national":
+            names = [name.strip() for name in args.sources.split(",") if name.strip()]
+            print(json.dumps(prepare_national(args.cache, names), indent=2))
+        elif args.scope == "tile":
+            print(json.dumps(prepare_tile(args.cache, args.tile), indent=2))
+        else:
+            print(json.dumps(prepare_state(args.cache, args.state, args.archive), indent=2))
         return
 
-    builders = {"habitat": lambda: build_habitat(args.tile, args.cache, args.out, args.step),
+    soil_states = [name.strip() for name in args.soil_states.split(",") if name.strip()]
+    soil_prepared = soil_inputs(args.cache, soil_states) if soil_states else None
+    builders = {"habitat": lambda: build_habitat(args.tile, args.cache, args.out, args.step, soil_prepared),
                 "public-land": lambda: build_public_land(args.tile, args.cache, args.out),
                 "fire": lambda: build_fire(args.tile, args.cache, args.out)}
     for layer in [name.strip() for name in args.layers.split(",") if name.strip()]:
