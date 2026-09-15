@@ -1673,12 +1673,20 @@ def main() -> None:
                        help="Operator-supplied NRCS state package for --source gssurgo|gnatsgo")
     state.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
 
+    access_prepare = prepare_sub.add_parser("access", help="Prepare a Geofabrik state PBF once (requires osmium, shapely and pyproj)")
+    access_prepare.add_argument("--state", required=True, choices=["CO", "OR", "NM"])
+    access_prepare.add_argument("--snapshot", default="latest")
+    access_prepare.add_argument("--refresh", action="store_true")
+    access_prepare.add_argument("--pbf", type=Path, default=None)
+    access_prepare.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
+
     build_parser = sub.add_parser("build", help="Compose normalized tile layers from the local source cache")
     build_parser.add_argument("--tile", required=True, help="Fruiting Forecast tile ID, e.g. n40_w106")
     build_parser.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
     build_parser.add_argument("--out", type=Path, default=Path("/tmp/fruiting-forecast-normalized"))
     build_parser.add_argument("--layers", default="habitat,public-land,fire",
-                              help="Comma-separated subset of habitat,public-land,fire")
+                              help="Comma-separated subset of habitat,public-land,fire,access")
+    build_parser.add_argument("--access-states", default="", help="Comma-separated prepared OSM state codes for --layers access")
     build_parser.add_argument("--step", type=float, default=STEP_DEGREES)
     build_parser.add_argument("--soil-states", default="",
                               help="Comma-separated state codes whose prepared NRCS soil should be composed into habitat")
@@ -1696,6 +1704,9 @@ def main() -> None:
             print(json.dumps(prepare_national(args.cache, names), indent=2))
         elif args.scope == "tile":
             print(json.dumps(prepare_tile(args.cache, args.tile), indent=2))
+        elif args.scope == "access":
+            from fruiting_osm_access import prepare as prepare_access
+            print(json.dumps(prepare_access(args.cache, args.state, args.refresh, args.snapshot, args.pbf), indent=2))
         else:
             print(json.dumps(prepare_state(args.cache, args.state, args.source, args.archive), indent=2))
         return
@@ -1706,10 +1717,18 @@ def main() -> None:
     builders = {"habitat": lambda: build_habitat(args.tile, args.cache, args.out, args.step, soil_prepared),
                 "public-land": lambda: build_public_land(args.tile, args.cache, args.out),
                 "fire": lambda: build_fire(args.tile, args.cache, args.out)}
+    if "access" in args.layers.split(","):
+        from fruiting_osm_access import build as build_access
+        if not args.access_states:
+            raise SystemExit("--layers access requires --access-states with prepared state codes")
+        builders["access"] = lambda: build_access(args.cache, args.access_states.split(","), args.tile, args.out)
     for layer in [name.strip() for name in args.layers.split(",") if name.strip()]:
         if layer not in builders:
             raise SystemExit(f"Unknown layer: {layer}")
         result = builders[layer]()
+        if layer == "access":
+            print(json.dumps(result, indent=2))
+            continue
         rows = result.get("cells") or result.get("properties") or result.get("perimeters") or 0
         print(f"{layer}: {result['status']} · {rows} rows · {result['datasetVersion']}")
 

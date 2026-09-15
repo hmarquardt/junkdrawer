@@ -62,6 +62,26 @@ class Publication(unittest.TestCase):
             self.assertEqual(manifest['summary']['layers']['habitat']['components']['soil']['UNBUILT'],1)
             con.close()
 
+class AccessPublication(unittest.TestCase):
+    def test_modern_access_rejects_generated_starts_and_duplicate_identity(self):
+        with tempfile.TemporaryDirectory() as tmp, duckdb.connect() as con:
+            source = Path(tmp) / 'access.parquet'
+            con.execute("CREATE TABLE access AS SELECT 'osm:node:1' access_id, 'node' osm_type, '1' osm_id, true start_eligible, 'HIGH' evidence_grade, 'TRAILHEAD' AS \"type\", 'osm-node' location_method, NULL::VARCHAR restriction, '[\"p1\"]' property_ids_json, 'v1' source_version, '{\"type\":\"Point\",\"coordinates\":[-105.5,39.5]}' geometry_json")
+            columns = {r[0] for r in con.execute('DESCRIBE access').fetchall()}
+            meta = {'schemaVersion':2, 'license':'ODbL-1.0', 'attribution':'© OpenStreetMap contributors'}
+            def validate():
+                con.execute('COPY access TO ? (FORMAT PARQUET)', [str(source)])
+                pub.validate_access(con, source, meta, columns)
+            validate()
+            con.execute("UPDATE access SET location_method='property-centroid'")
+            with self.assertRaisesRegex(ValueError, 'Suggested Start'):
+                validate()
+            con.execute("UPDATE access SET location_method='osm-node'")
+            con.execute('INSERT INTO access SELECT * FROM access')
+            with self.assertRaisesRegex(ValueError, 'unique stable OSM'):
+                validate()
+
+
 class CoverageMetadata(unittest.TestCase):
     def test_profile_roster_matches_the_browser_mapping(self):
         import re

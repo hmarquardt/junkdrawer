@@ -155,6 +155,38 @@ def summary_of(tiles):
     return out
 
 
+def validate_access(con, source, meta, columns):
+    """Additive v2 contract: genuine source identity and explicit start eligibility.
+
+    Legacy sources retain their original minimum schema. The publisher cannot
+    independently verify OSM mapping quality, but rejects incompatible claims.
+    """
+    if meta.get('schemaVersion', 1) < 2:
+        return
+    required = {'osm_type', 'osm_id', 'geometry_json', 'location_method', 'property_ids_json',
+                'evidence_grade', 'start_eligible', 'restriction', 'source_version', 'type'}
+    if not required <= columns:
+        raise ValueError('Missing access v2 columns: ' + str(sorted(required - columns)))
+    if meta.get('license') != 'ODbL-1.0' or not meta.get('attribution'):
+        raise ValueError('OSM access requires ODbL and contributor attribution')
+    rows = con.execute('SELECT access_id, osm_type, osm_id, start_eligible, evidence_grade, type, '
+                       'location_method, restriction, property_ids_json, source_version, geometry_json '
+                       'FROM read_parquet(?)', [str(source)]).fetchall()
+    seen = set()
+    for ident, osm_type, osm_id, start, grade, kind, method, restriction, properties, version, geometry in rows:
+        if not re.fullmatch(r'osm:(node|way|relation):[0-9]+', ident or '') or ident != f'osm:{osm_type}:{osm_id}' or ident in seen:
+            raise ValueError('Access requires unique stable OSM identity')
+        seen.add(ident)
+        if not version or not isinstance(json.loads(properties), list) or not json.loads(properties):
+            raise ValueError('Access requires source version and property associations')
+        geom = json.loads(geometry)
+        if not isinstance(geom, dict) or not geom.get('coordinates'):
+            raise ValueError('Access requires mapped geometry')
+        if start and (grade not in {'HIGH', 'MEDIUM'} or kind not in {'TRAILHEAD', 'PARKING'}
+                      or method not in {'osm-node', 'mapped-area-representative-point'} or restriction):
+            raise ValueError('Suggested Start requires eligible mapped access evidence')
+
+
 def main(root):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('scope', choices=['tile','bbox','state','conus'])
@@ -213,6 +245,7 @@ def main(root):
                         if hashlib.sha256((a.output/old['url']).read_bytes()).hexdigest()==digest: continue
                     columns={row[0] for row in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(source)]).fetchall()}
                     if not required<=columns: raise ValueError('Missing normalized columns: '+str(sorted(required-columns)))
+                    if layer == 'access': validate_access(con, source, meta, columns)
                     count=con.execute('SELECT count(*) FROM read_parquet(?)',[str(source)]).fetchone()[0]
                     if (count==0)!=(meta['status']=='VERIFIED_EMPTY'): raise ValueError('Row count contradicts declared coverage')
                     # Content-addressed output keeps old manifest assets valid until commit.
@@ -225,6 +258,8 @@ def main(root):
                     if old.get('url'): entry[key]={**old,'lastBuildAttempt':{'status':'FAILED','error':str(exc)}}
                     else: entry[key]={'status':'FAILED','error':str(exc)}
                 finally:
+                    if entry.get('accessPoints', {}).get('status') in {'AVAILABLE', 'VERIFIED_EMPTY'} and 'unbuilt' in entry.get('habitat', {}):
+                        entry['habitat']['unbuilt'] = [x for x in entry['habitat']['unbuilt'] if x != 'access']
                     manifest['schemaVersion']=4
                     manifest['tiles']=[entries[k] for k in sorted(entries)]
                     manifest['summary']={**(manifest.get('summary') or {}), **summary_of(manifest['tiles']), **coverage_of(manifest['tiles'], root)}

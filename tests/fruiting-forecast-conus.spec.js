@@ -360,13 +360,13 @@ test('bounded Southern Rockies release declares complete habitat with real soil 
     expect(tile.habitat.components.soil).toBe('AVAILABLE');
     expect(tile.habitat.components.canopy).toBe('AVAILABLE');
     expect(tile.habitat.components.landCover).toBe('AVAILABLE');
-    expect(tile.habitat.unbuilt).toEqual(['access']);
+    expect(tile.habitat.unbuilt).toEqual(['n39_w106','n40_w106','n44_w124','n43_w123'].includes(id)?[]:['access']);
     expect(tile.habitat.sources).toContain('ssurgo_sda');
     expect(tile.publicLands.status).toBe('AVAILABLE');
     expect(tile.publicLands.properties).toBeGreaterThan(0);
     expect(tile.fire.status).toBe('AVAILABLE');
     expect(tile.fire.perimeters).toBeGreaterThan(0);
-    expect(tile.access.status).toBe('UNBUILT');
+    expect(tile.access.status).toBe(['n39_w106','n40_w106','n44_w124','n43_w123'].includes(id)?'AVAILABLE':'UNBUILT');
   }
   for(const id of ['n40_w106','n37_w107']){
     for(const layer of ['habitat','publicLands','fire']){

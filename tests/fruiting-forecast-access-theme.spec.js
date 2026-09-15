@@ -87,6 +87,7 @@ test('suggested start prefers confidence over distance', async ({ page }) => {
       { name:'High far', type:'TRAILHEAD', confidence:'HIGH', distanceToHabitatMi:3.2 },
       { name:'Medium mid', type:'PARKING', confidence:'MEDIUM', distanceToHabitatMi:1.4 }
     ];
+    pts.forEach((p,i)=>Object.assign(p,{accessId:'legacy'+i,lat:38.3,lon:-87.6,sourceUrl:'https://osm.org/node/'+(i+1)}));
     return { best:a.suggestedStart(pts).name, rev:a.suggestedStart(pts.slice().reverse()).name, label:a.accessTypeLabel('BOAT_RAMP') };
   });
   expect(r.best).toBe('High far');
@@ -122,8 +123,8 @@ test('no access points shows honest empty state without fake pins', async ({ pag
     s.selectedSpecies = 'chanterelle'; s.selectedZone = 'center'; s.selectedProperty = 'pike';
     h.renderDetail();
   });
-  await expect(page.locator('#detailContent')).toContainText('No verified access point found');
-  await expect(page.locator('#detailContent')).toContainText('No pin was invented');
+  await expect(page.locator('#detailContent')).toContainText('No suitable mapped access point found');
+  await expect(page.locator('#detailContent')).toContainText('does not mean the property is inaccessible');
   expect(errors).toEqual([]);
 });
 

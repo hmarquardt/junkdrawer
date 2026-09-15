@@ -248,12 +248,12 @@ test('PNW canary tiles publish five-component habitat with Oregon soil and match
     expect(tile.habitat.soilState).toBe('OR');
     expect(tile.habitat.soilInclusion).toBe('requested');
     expect(String(tile.habitat.surveyVintage)).toMatch(/^202[5-6]-/);
-    expect(tile.habitat.unbuilt).toEqual(['access']);
+    expect(tile.habitat.unbuilt).toEqual(['n39_w106','n40_w106','n44_w124','n43_w123'].includes(id)?[]:['access']);
     expect(tile.publicLands.status).toBe('AVAILABLE');
     expect(tile.publicLands.properties).toBeGreaterThan(0);
     expect(tile.fire.status).toBe('AVAILABLE');
     expect(tile.fire.perimeters).toBeGreaterThan(0);
-    expect(tile.access).toBe('UNBUILT');
+    expect(tile.access).toBe('AVAILABLE');
     for(const layer of ['habitat','publicLands','fire']){
       expect(tile[layer].fetch.status).toBe(200);
       expect(tile[layer].fetch.matches).toBe(true);

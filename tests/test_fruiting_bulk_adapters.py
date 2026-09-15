@@ -41,6 +41,7 @@ PNW_TILES = ('n44_w124', 'n43_w123')
 # The bounded Southern Rockies release (Colorado + northern New Mexico).
 RELEASE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES))
 # Every tile whose habitat declares all components AVAILABLE.
+ACCESS_TILES = ('n39_w106', 'n40_w106', 'n44_w124', 'n43_w123')
 AVAILABLE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES + PNW_TILES))
 
 
@@ -667,7 +668,7 @@ class PublishedColoradoTiles(unittest.TestCase):
             self.assertEqual(habitat['components'],
                              {'forestType': 'AVAILABLE', 'elevation': 'AVAILABLE', 'landCover': 'AVAILABLE',
                               'canopy': 'AVAILABLE', 'soil': 'AVAILABLE'})
-            self.assertEqual(habitat['unbuilt'], ['access'])
+            self.assertEqual(habitat['unbuilt'], [] if tile_id in ACCESS_TILES else ['access'])
             self.assertEqual(habitat['units']['elevation_ft'], 'feet')
             self.assertIn('fraction', habitat['units']['canopy'])
             source_ids = {source['id'] for source in habitat['sources']}
@@ -842,7 +843,7 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
             self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
             self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
-            self.assertEqual(tile['accessPoints']['status'], 'UNBUILT', tile_id)
+            self.assertEqual(tile['accessPoints']['status'], 'AVAILABLE' if tile_id in ACCESS_TILES else 'UNBUILT', tile_id)
 
     def test_real_ssurgo_soil_evidence_is_present_with_explicit_gaps(self):
         known_drainage = ('well drained', 'moderately well drained', 'somewhat excessively drained',
@@ -912,12 +913,12 @@ class TwoStateRelease(unittest.TestCase):
             self.assertEqual(habitat['status'], 'AVAILABLE', tile_id)
             self.assertEqual(habitat['cells'], 400, tile_id)
             self.assertEqual(set(habitat['components'].values()), {'AVAILABLE'}, tile_id)
-            self.assertEqual(habitat['unbuilt'], ['access'], tile_id)
+            self.assertEqual(habitat['unbuilt'], [] if tile_id in ACCESS_TILES else ['access'], tile_id)
             self.assertEqual(tile['publicLands']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
             self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
-            self.assertEqual(tile['accessPoints']['status'], 'UNBUILT', tile_id)
+            self.assertEqual(tile['accessPoints']['status'], 'AVAILABLE' if tile_id in ACCESS_TILES else 'UNBUILT', tile_id)
             self.assertTrue(any(source['id'] == 'ssurgo_sda' for source in habitat['sources']), tile_id)
 
     def test_soil_sources_are_state_scoped_and_current(self):
@@ -1002,19 +1003,19 @@ class PacificNorthwestRelease(unittest.TestCase):
     def habitat_path(self, tile_id):
         return str(DATA / self.tiles[tile_id]['habitat']['url'])
 
-    def test_canaries_are_fully_built_and_access_stays_unbuilt(self):
+    def test_canaries_are_fully_built_with_real_access(self):
         for tile_id in PNW_TILES:
             tile = self.tiles[tile_id]
             habitat = tile['habitat']
             self.assertEqual(habitat['status'], 'AVAILABLE', tile_id)
             self.assertEqual(habitat['cells'], 400, tile_id)
             self.assertEqual(set(habitat['components'].values()), {'AVAILABLE'}, tile_id)
-            self.assertEqual(habitat['unbuilt'], ['access'], tile_id)
+            self.assertEqual(habitat['unbuilt'], [] if tile_id in ACCESS_TILES else ['access'], tile_id)
             self.assertEqual(tile['publicLands']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
             self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
-            self.assertEqual(tile['accessPoints']['status'], 'UNBUILT', tile_id)
+            self.assertEqual(tile['accessPoints']['status'], 'AVAILABLE' if tile_id in ACCESS_TILES else 'UNBUILT', tile_id)
 
     def test_oregon_soil_is_state_scoped_and_current(self):
         for tile_id in PNW_TILES:
