@@ -51,8 +51,8 @@ class Planner(unittest.TestCase):
         self.assertIn('WA', columbia['stateShares'])
         self.assertGreater(len(columbia['profileShares']), 0)
         klamath = self.by_id['n42_w123']
-        self.assertIn('california', klamath['profileShares'],
-                      'the Klamath Mountains share must map to the california profile, not southeast')
+        self.assertIn('pnw', klamath['profileShares'],
+                      'the Klamath Mountains share must map to the pnw profile (revision 12), not southeast')
         self.assertNotIn('southeast', klamath['profileShares'])
         self.assertGreater(self.coverage['tilesMultipleProfiles'], 250)
         self.assertGreater(self.coverage['tilesMultipleStates'], 200)
@@ -87,18 +87,19 @@ class Planner(unittest.TestCase):
 
     def test_coverage_separates_gis_production_from_biology(self):
         cov = self.coverage
-        self.assertEqual(set(cov['profiles']), {'pnw', 'california', 'interiorMountains', 'southernRockies',
-                                                'southwest', 'northernForests', 'hardwood', 'appalachians',
-                                                'southeast', 'plains'})
+        self.assertEqual(set(cov['profiles']), {'pnw', 'california', 'sierraNevada', 'interiorMountains',
+                                                'southernRockies', 'southwest', 'northernForests', 'hardwood',
+                                                'appalachians', 'southeast', 'plains'})
         self.assertEqual(cov['profiles']['pnw']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['northernForests']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['southeast']['biologyMaturity'], 'PROVISIONAL')
-        self.assertEqual(cov['profiles']['california']['biologyMaturity'], 'UNSUPPORTED')
+        self.assertEqual(cov['profiles']['california']['biologyMaturity'], 'PROVISIONAL')
+        self.assertEqual(cov['profiles']['sierraNevada']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['interiorMountains']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['southwest']['biologyMaturity'], 'UNSUPPORTED')
         self.assertEqual(cov['profiles']['plains']['biologyMaturity'], 'UNSUPPORTED')
         self.assertEqual(cov['profiles']['pnw']['tilesGisComplete'], 19)
-        self.assertEqual(cov['tilesGisComplete'], 28)  # 19 PNW + 2 Colorado + 4 national + 3 interior canaries
+        self.assertEqual(cov['tilesGisComplete'], 32)  # 28 + the four California canaries
         # GIS-complete coverage under an unsupported profile must stay small and honest.
         self.assertLess(cov['tilesGisComplete'], cov['relevantLandTiles'])
         self.assertIn('not finished national mushroom coverage', cov['coverageSemantics'])

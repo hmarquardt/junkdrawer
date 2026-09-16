@@ -59,14 +59,16 @@ class SelectionAlgorithm(unittest.TestCase):
         derived, eligible = pnw_release.select_tiles(first)
         expected = ['n42_w123', 'n42_w125', 'n43_w123', 'n43_w124', 'n43_w125', 'n44_w122',
                     'n44_w123', 'n44_w124', 'n45_w122', 'n45_w123', 'n45_w124']
-        self.assertEqual(sorted(derived), expected,
-                         'the Oregon footprint must not drift after state generalization')
-        # Every published PNW tile is exactly the derived release; roles and shares
-        # stay inside the documented thresholds.
+        # Revision 12 corrected the crosswalk (Klamath 78 -> pnw), which legitimately
+        # raises n42_w124 to 100% PNW share: it is derived future work, while the
+        # published release roster is unchanged.
+        self.assertEqual(sorted(derived), sorted(expected + ['n42_w124']))
+        self.assertEqual(eligible['n42_w124']['pnwSharePct'], 100.0)
         published_pnw = sorted(t['id'] for t in MANIFEST['tiles']
                                if t['id'] in expected and t['publicLands'].get('status') in {'AVAILABLE', 'VERIFIED_EMPTY'})
         self.assertEqual(published_pnw, expected)
-        for tile_id in expected:
+        self.assertNotIn('n42_w124', published_pnw, 'the ripple tile is future work, not published')
+        for tile_id in sorted(set(expected) | {'n42_w124'}):
             row = eligible[tile_id]
             self.assertGreaterEqual(row['stateSharePct'], 25.0, tile_id)
             self.assertGreaterEqual(row['pnwSharePct'], 25.0, tile_id)
@@ -85,14 +87,19 @@ class SelectionAlgorithm(unittest.TestCase):
         derived, eligible = pnw_release.select_tiles(shares)
         expected = ['n45_w122', 'n45_w123', 'n46_w122', 'n46_w123', 'n46_w124',
                     'n47_w122', 'n47_w123', 'n47_w124', 'n47_w125', 'n48_w123']
-        self.assertEqual(sorted(derived), expected)
+        # The North Cascades reassignment (77 -> pnw) adds four Washington tiles
+        # as derived future work; the published release roster is unchanged.
+        self.assertEqual(sorted(derived), sorted(expected + ['n47_w121', 'n48_w120', 'n48_w121', 'n48_w122']),
+                         sorted(derived))
         roles = {t: eligible[t]['role'] for t in expected}
+        # n47_w122 (eastern North Cascades foothills) becomes core under the
+        # corrected crosswalk; the published roster is unchanged either way.
         self.assertEqual(sorted(t for t, r in roles.items() if r == 'core'),
-                         ['n45_w123', 'n46_w122', 'n46_w123', 'n46_w124', 'n47_w123', 'n47_w124'])
+                         ['n45_w123', 'n46_w122', 'n46_w123', 'n46_w124', 'n47_w122', 'n47_w123', 'n47_w124', 'n48_w123'])
         self.assertEqual(sorted(t for t, r in roles.items() if r == 'halo'),
-                         ['n45_w122', 'n47_w122', 'n47_w125', 'n48_w123'])
+                         ['n45_w122', 'n47_w125'])
         # Interior Washington stays excluded; no Canada-border tile sneaks in.
-        for tile_id in ('n46_w121', 'n47_w121', 'n48_w121', 'n48_w122', 'n49_w123', 'n45_w121'):
+        for tile_id in ('n46_w121', 'n49_w123', 'n45_w121'):
             self.assertNotIn(tile_id, derived, tile_id)
         # The two shared Columbia tiles are also Oregon release tiles; no other
         # Oregon tile appears in the Washington derivation.
@@ -113,33 +120,35 @@ class Plan(unittest.TestCase):
     def test_oregon_plan_estimates_use_real_published_measurements(self):
         plan = pnw_release.build_plan('OR')
         self.assertEqual(sorted(plan['tiles']),
-                         ['n42_w123', 'n42_w125', 'n43_w123', 'n43_w124', 'n43_w125', 'n44_w122',
-                          'n44_w123', 'n44_w124', 'n45_w122', 'n45_w123', 'n45_w124'])
+                         sorted(['n42_w123', 'n42_w124', 'n42_w125', 'n43_w123', 'n43_w124', 'n43_w125',
+                                 'n44_w122', 'n44_w123', 'n44_w124', 'n45_w122', 'n45_w123', 'n45_w124']))
         self.assertEqual(plan['estimates']['basis'], 'measured published PNW tiles')
         for key in ('habitatBytesPerTile', 'publicLandsBytesPerTile', 'fireHistoryBytesPerTile', 'accessPointsBytesPerTile'):
             self.assertGreater(plan['estimates'][key], 0, key)
         self.assertEqual(set(plan['estimates']['estimatedNewBytes']),
                          {'habitat', 'publicLands', 'fireHistory', 'accessPoints'})
-        # The union of existing and new tiles is always the whole derived release;
-        # every Oregon release tile is published, so no tile remains new.
+        # The union of existing and new tiles is always the whole derived release.
         self.assertEqual(sorted(set(plan['newTiles']) | set(plan['existingTiles'])), sorted(plan['tiles']))
         self.assertTrue({'n43_w123', 'n44_w124'} <= set(plan['existingTiles']))
-        self.assertEqual(plan['newTiles'], [])
+        # The Klamath correction raised n42_w124 to core: derived future work.
+        self.assertEqual(plan['newTiles'], ['n42_w124'])
         shares = plan['shares']
         self.assertGreater(shares['n44_w123']['pnwSharePct'], shares['n44_w122']['pnwSharePct'])
         self.assertIn('interiorMountains', shares['n44_w122']['adjacentProfiles'],
                       'the eastern halo must record its unsupported interior adjacency')
-        self.assertIn('california', shares['n42_w123']['adjacentProfiles'],
-                      'the southern core must record its Klamath adjacency (Klamath is a california-profile code)')
+        # Klamath (78) is inside pnw since revision 12: n42_w123 is pnw-dominant
+        # and its former Klamath adjacency merged into the pnw share.
+        self.assertGreater(shares['n42_w123']['pnwSharePct'], 80.0)
+        self.assertIn('interiorMountains', shares['n42_w123']['adjacentProfiles'])
 
     def test_washington_plan_reports_shared_and_new_tiles(self):
         plan = pnw_release.build_plan('WA')
-        # Every Washington release tile is now published; the plan reports them
-        # as existing, never as new work.
+        # The published Washington roster is complete; the North Cascades
+        # correction derives four additional future-work tiles.
         self.assertEqual(sorted(set(plan['newTiles']) | set(plan['existingTiles'])), sorted(plan['tiles']))
-        self.assertEqual(plan['newTiles'], [])
+        self.assertEqual(sorted(plan['newTiles']), ['n47_w121', 'n48_w120', 'n48_w121', 'n48_w122'])
         self.assertTrue({'n45_w122', 'n45_w123'} <= set(plan['existingTiles']))
-        self.assertEqual(plan['roles']['n48_w123'], 'halo')
+        self.assertEqual(plan['roles']['n48_w123'], 'core')  # North Cascades correction made it pnw-core
         self.assertGreater(plan['estimates']['accessPointsBytesPerTile'], 0)
 
     def test_plan_reports_missing_caches_without_inventing_readiness(self):

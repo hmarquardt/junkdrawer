@@ -166,9 +166,10 @@ test('Northern Rockies / Interior Mountains resolves as a coherent modeled profi
     expect(zone.maturity).toBe('PROVISIONAL');
     expect(zone.ids).toEqual(['morelBurn','matsutakeMurrillianum']);
   }
-  // Task-Zero reassignments: North Cascades -> PNW, Sierra -> california, AZ/NM mountains -> southernRockies.
+  // Task-Zero reassignments: North Cascades -> PNW, AZ/NM mountains -> southernRockies.
+  // Revision 12: Sierra Nevada (code 5) is its own snowmelt-montane profile.
   expect(r.northCascades.profileId).toBe('pnw');
-  expect(r.sierra.profileId).toBe('california');
+  expect(r.sierra.profileId).toBe('sierraNevada');
   expect(r.azNm.profileId).toBe('southernRockies');
   expect(r.azNm.ids).toEqual(['porcini','chanterelleRoseocanus','morelNatural','morelBurn']);
   // A sky-island point inside EPA 23 resolves the monsoon profile.
@@ -263,5 +264,117 @@ test('Interior boundaries: rubriceps stays south, PNW targets stay west, sky isl
   expect(r.interior.ids).not.toContain('chanterelleFormosus'); // PNW maritime targets never transfer east
   expect(r.imMorelBurn).not.toBe(r.srMorelBurn);             // distinct regional models
   expect(r.azNm.profileId).toBe('southernRockies');          // AZ/NM mountains -> monsoon profile
+  expect(errors).toEqual([]);
+});
+test('California Task Zero: Mediterranean and Sierra split with Klamath reassignment',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    const at=(lat,lon)=>{const bio=b.resolveBiology(lat,lon);return {profileId:bio.profileId,maturity:bio.maturity,code:bio.ecoregionCode,ecosystem:bio.ecoregionName,ids:b.regionalSpecies(bio).map(s=>s.id)}};
+    return {oakWoodland:at(38.3,-122.5),soCal:at(34.2,-117.2),valley:at(36.9,-119.8),
+      sierra:at(37.7,-119.5),klamath:at(41.5,-122.9),
+      californiaTargets:b.profiles.california.targets,sierraTargets:b.profiles.sierraNevada.targets,
+      pnwIds:b.profiles.pnw.targets};
+  });
+  // Mediterranean: oak woodland, SoCal mountains, and the valley all resolve california.
+  for(const zone of [r.oakWoodland,r.soCal,r.valley]){
+    expect(zone.profileId).toBe('california');
+    expect(zone.maturity).toBe('PROVISIONAL');
+  }
+  expect(r.oakWoodland.ids).toEqual(['chanterelleCalifornicus','craterellusCalicornucopioides','lactariusRubidus','morel']);
+  // Sierra is a distinct snowmelt-montane profile.
+  expect(r.sierra.profileId).toBe('sierraNevada');
+  expect(r.sierra.ids).toEqual(['morelBurn','springKing']);
+  // Task-Zero reassignment: the Klamath/North Coast resolves PNW (GTR-412 documents
+  // matsutake fruiting in the Klamath NF; GTR-576 extends the golden chanterelle).
+  expect(r.klamath.profileId).toBe('pnw');
+  expect(r.pnwIds).toHaveProperty('matsutakeMurrillianum');
+  expect(Object.keys(r.californiaTargets)).toEqual(['chanterelleCalifornicus','craterellusCalicornucopioides','lactariusRubidus','morel']);
+  expect(Object.keys(r.sierraTargets)).toEqual(['morelBurn','springKing']);
+  expect(errors).toEqual([]);
+});
+test('California Mediterranean ordering: winter-rain season, oak host, summer drought',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__,t=__FRUITING_FORECAST_TEST__;
+    const sp=b.regionalSpecies(b.resolveBiology(38.3,-122.5)).find(s=>s.id==='chanterelleCalifornicus');
+    const oakHabitat={available:true,sampleCells:24,forest:{cover:.55,deciduous:.4,open:.1,canopy:.6,evergreen:.35,dominantClass:'western_oak'},
+      hosts:{westernOak:.85,tanoakLaurel:.25,oakHickory:0,mappedCoverage:.9},soil:{},terrain:{},
+      confidence:{cellCoverage:1,hostQuality:.7,soilCoverage:.9}};
+    const zone=(rain,soilT)=>({point:{searchRadius:25},elevation:200,habitat:oakHabitat,
+      metrics:{rain14:rain,rain7:rain*.7,rain10:rain*.9,rain30:rain*1.8,daysSinceRain:4,wetDays14:8,soilMoisture:.26,soilTemp:soilT,airTemp:soilT+10,humidity:75,vpd:.5,wind:6,et07:.25}});
+    const january=t.scoreSpecies(sp,zone(2.2,48),null,new Date(2026,0,15));
+    const july=t.scoreSpecies(sp,zone(.1,72),null,new Date(2026,6,15));
+    const wrongHost=t.scoreSpecies(sp,{point:{searchRadius:25},elevation:200,habitat:{...oakHabitat,hosts:{westernOak:0,tanoakLaurel:0,oakHickory:0,mappedCoverage:.9}},metrics:zone(2.2,48).metrics},null,new Date(2026,0,15));
+    return {january:january.score,july:july.score,wrongHost:wrongHost.score,
+      missing:january.missing,gap:january.declaredGaps,
+      fogNote:b.profiles.california.targets.chanterelleCalifornicus.provenance.fog.slice(0,40)};
+  });
+  expect(r.january).toBeGreaterThan(r.july+20);   // winter-rain fruiting vs dry-summer shutdown
+  expect(r.january).toBeGreaterThan(r.wrongHost); // California oak host signal matters
+  expect(r.gap[0].weight).toBe(12);               // declared Coast Live Oak resolution gap
+  expect(r.fogNote).toContain('fog');
+  expect(errors).toEqual([]);
+});
+test('Sierra ordering: snowmelt season, elevation progression, distinct morel model',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__,t=__FRUITING_FORECAST_TEST__;
+    const bio=b.resolveBiology(37.7,-119.5);
+    const roster=b.regionalSpecies(bio);
+    const king=roster.find(s=>s.id==='springKing');
+    if(!king)throw Error('springKing missing: '+JSON.stringify({profileId:bio.profileId,ids:roster.map(s=>s.id),ecoType:typeof window.FF_ECOREGIONS,ecoFeatures:window.FF_ECOREGIONS&&window.FF_ECOREGIONS.features&&window.FF_ECOREGIONS.features.length}));
+    const conifer={available:true,sampleCells:24,forest:{cover:.72,deciduous:.04,open:.03,canopy:.55,evergreen:.72,dominantClass:'california_mixed_conifer'},
+      hosts:{californiaMixedConifer:.8,ponderosaPine:.5,spruceFir:.55,lodgepolePine:.35,douglasFir:.2,mappedCoverage:.92},
+      soil:{},terrain:{},confidence:{cellCoverage:1,hostQuality:.7,soilCoverage:.9}};
+    const zone=(elevM,month)=>({point:{searchRadius:25},elevation:elevM,habitat:conifer,
+      metrics:{rain14:1.2,rain7:.8,rain10:1.1,rain30:2.2,daysSinceRain:6,wetDays14:4,soilMoisture:.24,soilTemp:elevM>2100?8:14,airTemp:elevM>2100?14:20,humidity:50,vpd:.8,wind:7,et07:.35}});
+    const june=t.scoreSpecies(king,zone(1800,6),null,new Date(2026,5,15));
+    const november=t.scoreSpecies(king,zone(1800,11),null,new Date(2026,10,15));
+    const highElev=t.scoreSpecies(king,zone(4000,6),null,new Date(2026,5,15)); // above the declared belt + soft
+    const im=b.profiles.interiorMountains.targets.morelBurn, sn=b.profiles.sierraNevada.targets.morelBurn;
+    return {june:june.score,november:november.score,highElev:highElev.score,
+      months:b.profiles.sierraNevada.targets.morelBurn.months,
+      elev:b.profiles.sierraNevada.targets.morelBurn.elevationFt,
+      sameMorelObject:im===sn,
+      imMonths:im.months,
+      snowmelt:sn.morelBurn? 'x' : (b.profiles.sierraNevada.targets.morelBurn.snowmelt||{}).status,
+      provenance:b.profiles.sierraNevada.targets.morelBurn.provenance.morelBurn.slice(0,40)};
+  });
+  expect(r.june).toBeGreaterThan(r.november);   // spring snowmelt season
+  expect(r.highElev).toBeLessThan(r.june);      // late-spring high elevation lags in June
+  expect(r.months).toEqual([4,5,6,7]);          // Sierra progression, not the interior [6,7,8]
+  expect(r.elev).toEqual([3500,9500]);
+  expect(r.sameMorelObject).toBe(false);        // distinct Sierra model
+  expect(r.provenance).toContain('GTR-710');
+  expect(errors).toEqual([]);
+});
+test('No cross-taxon contamination: California taxa are distinct from PNW/SR/interior',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    return {caChanterelle:b.baseTaxa.chanterelleCalifornicus.scientific,
+      caTrumpet:b.baseTaxa.craterellusCalicornucopioides.scientific,
+      pnwChanterelle:b.baseTaxa.chanterelleFormosus.scientific,
+      springKing:b.baseTaxa.springKing.scientific,
+      caInat:b.baseTaxa.chanterelleCalifornicus.inat,
+      trumpetInat:b.baseTaxa.craterellusCalicornucopioides.inat,
+      kingInat:b.baseTaxa.springKing.inat,
+      caProfileHasFormosus:'chanterelleFormosus' in b.profiles.california.targets,
+      caProfileHasRubriceps:'porcini' in b.profiles.california.targets,
+      sierraHasRubriceps:'porcini' in b.profiles.sierraNevada.targets,
+      pnwHasCalifornicus:'chanterelleCalifornicus' in b.profiles.pnw.targets};
+  });
+  expect(r.caChanterelle).toBe('Cantharellus californicus');
+  expect(r.caTrumpet).toBe('Craterellus calicornucopioides');
+  expect(r.pnwChanterelle).toBe('Cantharellus formosus');
+  expect(r.springKing).toBe('Boletus rex-veris');
+  expect(r.caInat).toBe(120444);
+  expect(r.trumpetInat).toBe(473935);
+  expect(r.kingInat).toBe(438025);
+  expect(r.caProfileHasFormosus).toBe(false);
+  expect(r.caProfileHasRubriceps).toBe(false);
+  expect(r.sierraHasRubriceps).toBe(false);
+  expect(r.pnwHasCalifornicus).toBe(false);
   expect(errors).toEqual([]);
 });

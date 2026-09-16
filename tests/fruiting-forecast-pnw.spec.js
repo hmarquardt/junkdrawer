@@ -162,10 +162,11 @@ test('PNW biology never leaks into neighboring unsupported profiles',async({page
   // exactly the interior targets and never PNW biology.
   expect(r.interiorOregon.profileId).toBe('interiorMountains');
   expect(r.interiorOregon.ids).toEqual(['morelBurn','matsutakeMurrillianum']);
-  for(const zone of ['california','plains']){
-    expect(r[zone].ids).toHaveLength(0);
-    expect(r[zone].ids).not.toContain('chanterelleFormosus');
-  }
+  // California is now modeled: it receives its own targets and never PNW ids.
+  expect(r.california.profileId).toBe('california');
+  expect(r.california.ids).toEqual(['chanterelleCalifornicus','craterellusCalicornucopioides','lactariusRubidus','morel']);
+  expect(r.plains.ids).toHaveLength(0);
+  expect(r.plains.ids).not.toContain('chanterelleFormosus');
   // Southern Rockies targets stay out of the Pacific Northwest and vice versa.
   expect(r.pnw.ids).not.toContain('porcini');
   expect(r.pnw.ids).not.toContain('chanterelleRoseocanus');

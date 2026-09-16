@@ -45,7 +45,20 @@ sys.path.insert(0, str(ROOT / 'tools'))
 CORE_PCT = 50.0
 HALO_PCT = 25.0
 STATE_SHARE = 25.0
-PROFILE_CODES = {'pnw': ('1', '2', '3', '4')}
+# The PNW profile codes come from the publisher's roster (single source of
+# truth with the browser; the drift guard covers both). Resolved lazily so the
+# Klamath (78) and North Cascades (77) reassignments stay in sync automatically.
+def _profile_codes():
+    from fruiting_tile_publish import ECO_PROFILE_GROUPS
+    return {name: tuple(str(c) for c in codes) for name, codes in ECO_PROFILE_GROUPS.items()}
+
+PROFILE_CODES = None  # resolved on first use via _pnw_codes()
+
+def _pnw_codes():
+    global PROFILE_CODES
+    if PROFILE_CODES is None:
+        PROFILE_CODES = _profile_codes()
+    return PROFILE_CODES['pnw']
 METRIC_CRS = 'EPSG:5070'
 
 
@@ -55,14 +68,15 @@ def _projected(geom, transformer):
 
 def _load_geometries(state_code='OR'):
     eco = json.loads((DATA / 'ecoregions.json').read_text())
+    codes = _pnw_codes()
     pnw_parts, profiles = [], {}
     for feature in eco['features']:
         code = str(feature['properties']['code'])
         geometry = make_valid(shape_of(feature['geometry']))
-        if code in PROFILE_CODES['pnw']:
+        if code in codes:
             pnw_parts.append(geometry)
-        for profile, codes in PROFILE_CODES.items():
-            if code in codes:
+        for profile, pcodes in PROFILE_CODES.items():
+            if code in pcodes:
                 profiles.setdefault(profile, []).append(geometry)
     states = json.loads((DATA / 'states.json').read_text())
     state_geometry = None
@@ -109,7 +123,7 @@ def shares_for_tiles(state_code='OR', latitudes=None, longitudes=None,
     others = {}
     for feature in eco['features']:
         code = str(feature['properties']['code'])
-        if code in PROFILE_CODES['pnw']:
+        if code in _pnw_codes():
             continue
         profile = next((name for name, codes in ECO_PROFILE_GROUPS.items() if code in [str(c) for c in codes]), None)
         if profile:
