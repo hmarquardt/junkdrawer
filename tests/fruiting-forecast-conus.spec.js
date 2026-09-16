@@ -38,14 +38,15 @@ async function open(page){
   await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__&&window.FF_ECOREGIONS);
   return errors;
 }
-const places=[['Indiana',38.3553,-87.5675,'hardwood'],['Colorado',39.48,-106.05,'southernRockies'],['PNW',47.6,-123.5,'pnw'],['California',38.5,-122.7,'california'],['Great Lakes',46.5,-89.5,'northernForests'],['Southeast',31.5,-83.5,'southeast'],['Plains',38.5,-100.5,'plains'],['Southwest',33.5,-112.1,'southwest']];
+const places=[['Indiana',38.3553,-87.5675,'hardwood'],['Colorado',39.48,-106.05,'southernRockies'],['PNW',47.6,-123.5,'pnw'],['California',38.5,-122.7,'california'],['Great Lakes',46.5,-89.5,'northernForests'],['Southeast',31.5,-83.5,'southeast'],['Plains',38.5,-100.5,'plains'],['Sonoran Desert',33.5,-112.1,'warmDesert'],['Columbia Plateau',46.8,-119.2,'coldBasins']];
 for(const [name,lat,lon,expected] of places)test(name+' resolves using EPA polygons',async({page})=>{const errors=await open(page);const result=await page.evaluate(([lat,lon])=>{const t=__FRUITING_FORECAST_BIO_TEST__,b=t.resolveBiology(lat,lon);return {b,ids:t.regionalSpecies(b).map(s=>s.id)}},[lat,lon]);expect(result.b.profileId).toBe(expected);expect(result.b.ecoregionCode).toBeTruthy();if(expected==='southernRockies')expect(result.ids).toEqual(['porcini','chanterelleRoseocanus','morelNatural','morelBurn']);if(expected==='pnw')expect(result.ids).toEqual(['chanterelleFormosus','chanterelleSubalbidus','matsutakeMurrillianum','craterelleNeotubaeformis','morelBurn']);if(expected==='northernForests')expect(result.ids).toEqual(['morel','chanterelle','chicken','maitake','oyster','puffball','hericium']);if(expected==='southeast')expect(result.ids).toEqual(['chanterelleLateritius','honeyRingless','morel','chicken','oyster','maitake','puffball','hericium']);if(expected==='california')expect(result.ids).toEqual(['chanterelleCalifornicus','craterellusCalicornucopioides','lactariusRubidus','morel']);if(!['hardwood','southernRockies','pnw','northernForests','southeast','california'].includes(expected))expect(result.ids).toEqual([]);expect(errors).toEqual([])});
 test('Colorado analysis and unsupported geography never expose Midwest scores',async({page})=>{
  const errors=await open(page);
  for(const [coords,count] of [['38.3553, -87.5675',7],['39.48, -106.05',4],['33.5, -112.1',0]]){
  await page.locator('#locationInput').fill(coords);await page.locator('#analyzeBtn').click();await expect(page.locator('#status')).toContainText('Analysis ready');await expect(page.locator('.rank-card')).toHaveCount(count);
  if(count===4){await expect(page.locator('#rankedList')).toContainText('Porcini');await expect(page.locator('#topBet')).toContainText('Southern Rockies');await expect(page.locator('#detailContent')).toContainText('Not calibrated');await page.screenshot({path:'/private/tmp/ff-colorado.png',fullPage:true})}
- if(!count)await expect(page.locator('#topBet')).toContainText('Unsupported');
+ // The Sonoran point is modeled sparse (Warm Deserts), not unsupported.
+ if(!count)await expect(page.locator('#topBet')).toContainText('Modeled · sparse');
  }
  expect(errors).toEqual([]);
 });
@@ -327,7 +328,9 @@ const PNW_TILES=[...new Set([...PNW_OREGON_TILES,...PNW_WASHINGTON_TILES])];
 // Wet westside/ocean tiles where the pinned MTBS service maps no >=1000-acre fire.
 const PNW_OCEAN_TILES=['n43_w125','n46_w123','n46_w124','n47_w123','n47_w125','n48_w123'];
 const ACCESS_TILES=['n39_w106','n40_w106',...PNW_TILES];
-const RELEASE_TILES=[...NEW_MEXICO_TILES,...COLORADO_TILES,...PNW_TILES].sort();
+// Revision-13 Southwest canaries (madrean monsoon + modeled-sparse basins/deserts).
+const SOUTHWEST_CANARY_TILES=['n35_w111','n46_w119','n33_w112'];
+const RELEASE_TILES=[...NEW_MEXICO_TILES,...COLORADO_TILES,...PNW_TILES,...SOUTHWEST_CANARY_TILES].sort();
 // Revision-10 national canaries (Northern Forests + Southeast vertical stack).
 const NATIONAL_CANARY_TILES=['n45_w085','n45_w070','n30_w084','n32_w084'];
 // Revision-11 interior canaries (Northern Rockies / Interior Mountains).
@@ -419,15 +422,15 @@ test('release summary derives bounded PNW production coverage without conflating
       pnwTiles:(manifest.tiles||[]).filter(x=>TILE_SET.includes(x.id))
         .map(x=>({id:x.id,habitat:x.habitat.status,pl:x.publicLands.status,fire:x.fireHistory.status,access:x.accessPoints.status,cells:x.habitat.cells,components:x.habitat.components}))};
   }, [...PNW_TILES,...INTERIOR_CANARY_TILES,...CALIFORNIA_CANARY_TILES]);
-  // Derived dimensions, not hand-maintained numbers: 44 complete release tiles
-  // (14 SR + 19 PNW + 4 + 3 + 4 canary sets through revision 12).
-  expect(result.coverageTiles.length).toBe(44);
+  // Derived dimensions, not hand-maintained numbers: 47 complete release tiles
+  // (14 SR + 19 PNW + 4 + 3 + 4 + 3 canary sets through revision 13).
+  expect(result.coverageTiles.length).toBe(47);
   expect(result.profiles.sierraNevada).toBe(4);
   expect(result.profiles.pnw).toBe(21); // 19 + the Klamath reassignment (78) now addressing two more published-tile bboxes
   expect(result.profiles.northernForests).toBe(2);
   // Profile counts are the documented bbox-approximate addressing dimension:
   // published-tile bboxes that touch interiorMountains ecoregion bboxes.
-  expect(result.profiles.interiorMountains).toBe(13);
+  expect(result.profiles.interiorMountains).toBe(14); // +1: the Columbia Plateau canary bbox touches Blue Mountains
   expect(result.states.MI).toBeGreaterThanOrEqual(1);
   expect(result.states.ME).toBeGreaterThanOrEqual(1);
   expect(result.states.FL).toBeGreaterThanOrEqual(1);
@@ -435,11 +438,11 @@ test('release summary derives bounded PNW production coverage without conflating
   expect(result.states.WY).toBeGreaterThanOrEqual(1);
   expect(result.states.OR).toBeGreaterThanOrEqual(14);
   expect(result.states.WA).toBeGreaterThanOrEqual(11);
-  expect(result.habitat.available).toBe(44);
-  expect(result.publicLand.available).toBe(44);
-  expect(result.access.available).toBe(32); // 28 + the four California canaries
-  expect(result.fire.verifiedEmpty).toBe(8); // wet westside/ocean tiles declare it explicitly
-  expect(result.fire.available).toBe(36);
+  expect(result.habitat.available).toBe(47);
+  expect(result.publicLand.available).toBe(47);
+  expect(result.access.available).toBe(35); // 32 + the three Southwest canaries
+  expect(result.fire.verifiedEmpty).toBe(9); // wet westside/ocean/madrean-basin tiles declare it explicitly
+  expect(result.fire.available).toBe(38);
   for(const tile of result.pnwTiles){
     expect(tile.habitat).toBe('AVAILABLE');
     expect(tile.cells).toBe(400);
@@ -577,7 +580,10 @@ test('interstate search loads both states, isolates jurisdiction and follows eco
   });
   expect(result.tiles).toEqual(expect.arrayContaining(['n37_w106','n36_w106']));
   expect(result.profile).toBe('southernRockies');
-  expect(result.targets).toEqual(['porcini','chanterelleRoseocanus','morelNatural','morelBurn']);
+  // The radius may cross into madrean sectors (code 22/23 NM border), in which
+  // case the configuration carries that sector's targets too.
+  expect(result.targets).toEqual(expect.arrayContaining(['porcini','chanterelleRoseocanus','morelNatural','morelBurn']));
+  expect(result.targets).not.toContain('chanterelleFormosus');
   expect(result.sectorBiologyCount).toBeGreaterThanOrEqual(2);
   expect(result.zoneConsistency).toBe(true);
   expect(gisRequests.some(p=>p.startsWith('habitat/n37_w106'))).toBe(true);

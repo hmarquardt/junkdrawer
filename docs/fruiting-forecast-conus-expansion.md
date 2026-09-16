@@ -1,5 +1,65 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 13 — Southwest Task Zero, modeled-sparse semantics, madrean monsoon profile (2026-09-16)
+
+Started from `067aa7b`. **Full CONUS biological + GIS coverage remains the launch requirement**, and no launch is recommended this pass. The pass audited the historical ten-code `southwest` bucket (Task Zero), resolved the code-18 omission, split the bucket into three biological profiles, introduced MODELED_SPARSE semantics, implemented the Madrean monsoon profile with `Boletus barrowsii`, and built three Southwest canaries.
+
+### Task Zero — the Southwest bucket audit + code 18 (Tasks Zero, Zero-A, Zero-B)
+
+A crosswalk-completeness audit found **code 18 (Wyoming Basin) silently unassigned** — the only EPA Level III code missing from every roster revision since the first. EPA's higher-order grouping places it among western cold-desert systems, and its mushroom ecology (sagebrush-grassland, pinyon-juniper, cool-season moisture, episodic thunderstorms, sparse forest) matches the cold-basin regime rather than any monsoon or maritime profile. **Fixed: 18 → `coldBasins`.** A global invariant now prevents recurrence: the planner verifies every pinned CONUS Level III code resolves to a profile (zero unassigned), and a browser test pins a Wyoming Basin coordinate resolving intentionally.
+
+The ten-code bucket split into three genuinely different mushroom ecologies:
+
+| Profile | Codes | Regime | Outcome |
+|---|---|---|---|
+| `madrean` | 20 (Colorado Plateaus), 22 (AZ/NM Plateau), 79 (Madrean Archipelago) | monsoon-driven ponderosa/mixed-conifer highlands and sky islands inside cold basins | **MODELED** — `Boletus barrowsii` |
+| `coldBasins` | 10 (Columbia Plateau), 12 (Snake River Plain), 13 (Central Basin and Range), 18 (Wyoming Basin), 80 (Northern Basin and Range) | cold xeric sagebrush-grassland, cool-season moisture, pinyon-juniper, sparse forest | **MODELED_SPARSE** (no target clears the bar) |
+| `warmDesert` | 14 (Mojave), 24 (Chihuahuan Desert), 81 (Sonoran Basin and Range) | warm deserts, very low forest fraction | **MODELED_SPARSE** |
+
+National profile count becomes **13**; the historical `southwest` name no longer exists.
+
+### MODELED_SPARSE semantics (Task 1)
+
+The smallest honest architecture: a third profile `maturity` value, `MODELED_SPARSE`, with an empty target roster plus a `sparseNote` explaining what was researched and why no target ranks. The UI distinguishes it from UNSUPPORTED: a user on the Sonoran desert floor sees "Modeled · sparse — this ecology has been researched and modeled, but no mushroom target currently clears the evidence and forecastability bar here" instead of "Unsupported". Habitat/weather evidence remains visible. Pinyon-juniper (FIA 180) was exposed as a display-evidence signal (`pinyon_juniper_signal`) with an explicit no-weight rule: tree presence alone does not establish mushroom habitat. Modeled-sparse is reusable for Great Plains; a browser test pins the UI behavior.
+
+### Implemented biology (Tasks 2–16)
+
+**`boleteBarrowsii` (NEW, madrean CORE, PROVISIONAL)** — Boletus barrowsii (Thiers 1976, Boletes of the Southwestern United States; GBIF-accepted; iNat 129328). Thiers documents the southwestern bolete collecting geography (southwestern Colorado, northern/western New Mexico, eastern Utah, northern/western Arizona — exactly codes 20/22/23/79) and the sharp late-July/August abundance increase tied to monsoon thunderstorms. Madrean model: months [7,8] shoulders [6,9], ponderosa-led hosts (ponderosa 1.0 + CA-mixed-conifer/spruce-fir/lodgepole), elevation 5,500–9,000 ft declared a ponderosa-belt proxy, monsoon precipitation bands (14-day [.8–4.5 in], wetDays 4–12) with independent provenance. **Habitat-gated**: barrowsii ranks only where mapped ponderosa/mixed-conifer cells exist, never across the basin floor (Task 14). Distinct from B. rubriceps (separate taxa, separate models, no shared coefficients); the SR profile keeps rubriceps unchanged.
+
+**RESEARCH_ONLY:** Morchella kaibabensis (Baroni et al. 2018 — documented Kaibab NF, ~2,700–2,800 m, May; narrow documented range, no mappable driver for the moist-soil non-burn ecology); riparian Pleurotus/P. populinus (no mapped cottonwood/riparian host signal — declared gap); C. roseocanus in Arizona (regional reports only; the spruce-therefore-chanterelle mistake is not repeated); Madrean morel transfer rejected (kaibabensis geography is NOT generalized to desert basins). **Pinyon-juniper (Task 9):** display-only, unweighted.
+
+**Weather models (Tasks 10–12):** MONSOON_PRECIP for madrean (sourced to Thiers' late-July/August direction; NOT the Colorado bands); cold basins and warm deserts deliberately carry NO weather model — an elaborate desert model would imply opportunity the evidence does not support (Task 12).
+
+### Southwest canaries (Tasks 18–19)
+
+Built through the planner `run --tiles` path in **341.5 s, zero failures**; AZ sources prepared once (AZ PBF 301,794,286 B, header 2026-09-15T20:20:37Z, SHA256 `cdf2a963…`, GATE 65,120 / TRAILHEAD 348 / PARKING 39,405 / ROAD 1,195,090, prepare 641.9 s; AZ SSURGO 3,903 mapunits / 51 survey areas, vintage 2025-08-28):
+
+| Tile | Profile | States | Fire | Access | Starts |
+|---|---|---|---|---|---:|
+| `n35_w111` (Mogollon-basin madrean edge) | madrean 100% | AZ 100% | VERIFIED_EMPTY | AVAILABLE, 2 pts | 0 |
+| `n46_w119` (Columbia Plateau) | coldBasins 98.6% | WA 99.9% | AVAILABLE (42) | AVAILABLE, 74 pts | 14 |
+| `n33_w112` (Sonoran desert + SR boundary) | warmDesert 75.1% + SR 24.9% | AZ 100% | AVAILABLE (92) | AVAILABLE, 1,875 pts | 234 |
+
+`n35_w111` honestly demonstrates the madrean edge: pinyon-juniper/grassland cells with zero ponderosa signal, zero mapped MTBS perimeters (explicit VERIFIED_EMPTY), and no ranked access — the barrowsii target scores nothing there because the habitat gate does its job. `n33_w112` is the sparse-desert QA tile with 234 starts from urban-fringe desert parks — mapped access with no invented biology.
+
+### Manual QA (Tasks 23, 32)
+
+Inspected desktop + 390 px mobile (screenshots + JSON in /tmp/rev13-*): **Columbia Plateau coldBasins** search — Columbia Plateau Trail with a MEDIUM mapped start and zero ranked species (MODELED_SPARSE, correct wording); **Sonoran warmDesert** search — Desert Breeze Park with a HIGH mapped parking start `osm:way:125558947`, 713 radius-filtered access points, zero ranked species, restricted case (Apache Park, `access=private`) and the modeled-sparse semantics visible rather than "unsupported". Existing SR/interior/California/PNW/Southeast regressions pass in the suite.
+
+### Tests (Task 31)
+
+`tests/fruiting-forecast-national.spec.js` grew to 18 tests: the Southwest Task-Zero split (madrean monsoon rim/plateau, Columbia coldBasins, Mojave/Sonoran warmDesert, code-18 Wyoming Basin resolution), madrean monsoon ordering (August vs April, ponderosa gate vs basin floor, elevation belt), and the MODELED_SPARSE UI distinction (zero ranked species with the explicit modeled wording, never "Unsupported"). Updated: conus interstate targets (the SR/madrean border sectors now carry barrowsii in the configuration), adapter coverage counts (47 complete tiles incl. the three Southwest canaries; southernRockies bbox count 16 with the AZ canaries; fire verified-empty 9 with `n35_w111`), planner profile set/maturities. Full sweep: **114 browser tests passed (1 opt-in live skipped)**, adapters 53, publication 6, access 16, release 10, planner 8.
+
+### National coverage and remaining biology (Tasks 26–27)
+
+Recomputed: **13 profiles — 11 MODELED (PNW, Southern Rockies, Interior Mountains, Northern Forests, Hardwood, Appalachians, Southeast, California, Sierra Nevada, Madrean, plus 2 MODELED_SPARSE: Cold Western Basins, Warm Deserts), 1 UNSUPPORTED (Great Plains, 262 tiles)**. Complete tiles: **47 of 940**; published 87. Modeled-sparse lessons recorded for the Great Plains pass (Task 27): a researched low-opportunity profile publishes `maturity:'MODELED_SPARSE'` with an empty roster and a specific `sparseNote`; empty rosters are acceptable; the UI explains them with the modeled-sparse wording and keeps evidence visible.
+
+### Production projection and hosting gate (Tasks 28–29)
+
+Measured after this pass: **250 live Parquet assets (0 dead), 5,148 modern eligible starts, static fruiting-forecast bytes 36.4 MB, manifest 717 KB**. National projection unchanged in shape: ~378 MB median (p25–p75 ≈ 255–660 MB), ~3,760 assets, ~40 state PBFs (recorded samples ME 90.9 MB → CA 1,328.4 MB), ~940 DEM downloads (~52 GB transient), serial build ~130–200 h multi-session. The hosting gate rule stands (p75 + 25% headroom vs 750 MB — not triggered); the CA 1.33 GB raw PBF confirms raw/prepared sources stay off the published site.
+
+**Exact next pass: Great Plains** (262 tiles) — the final biological gap, using the modeled-sparse semantics documented this pass. After it: the national GIS production run. **Currently 12 of 13 profiles resolved biologically (11 MODELED incl. 2 sparse, 1 UNSUPPORTED), 47/940 tiles complete — NOT launch-ready.**
+
 ## Revision 12 — California Task Zero split, Mediterranean + Sierra Nevada profiles (2026-09-16)
 
 Started from `e212123`. **Full CONUS biological + GIS coverage remains the launch requirement**, and no launch is recommended this pass. The pass audited the six-code `california` aggregation before modeling it (Task Zero), split it into two biological profiles on mushroom evidence, reassigned the Klamath/North Coast to the PNW, added four California FIA host signals additively, and implemented five PROVISIONAL targets across the two new profiles.
@@ -741,7 +801,7 @@ Earlier `e1ccb64`-era notes:
 - tests/test_fruiting_bulk_adapters.py: 53 deterministic tests (coverage through the revision-12 California canaries) for adapter contracts, the cache manifest/checksum/corruption path, the Soil Data Access and package soil paths (normalized contract, batched point join, ambiguity, explicit failure/empty, gSSURGO/FileGDB and gNATSGO/GeoPackage packaging equivalence), DEM release resolution, habitat composition with optional sources absent, state-scoped SDA preparation with independent caches/restart reuse and a failing refresh that cannot invalidate another state, exact cross-state mukey inclusion, failure/retry of a batched point query, property identity, legacy-tile backward compatibility, and the committed two-state release (component/layer completeness, real SSURGO values with explicit gaps, conservative jurisdiction, cross-tile MTBS identity, release-scope manifest assertions, PNW release component/layer completeness with the explicit ocean VERIFIED_EMPTY, Oregon soil provenance, the hemlock signal, the three-state coverage dimensions, the EPA-derived PNW release equality with per-tile roles/shares, and regional cross-tile access identity).
 - tests/test_fruiting_pnw_release.py: 10 deterministic release-tool tests (selection algorithm on synthetic shares, determinism, real-selection == published release, plan measurement basis, honest missing-cache state, journal resume digests).
 - tests/test_fruiting_tile_publish.py: 5 publication tests (incremental integrity/empty/failure, completeness components, coverage dimensions, profile-roster drift guard against the browser mapping, and coverage refresh on publication).
-- junk-drawer.json and footer: 2026.09.16.2 (revision 12 split California into Mediterranean + Sierra Nevada profiles with the Klamath→PNW reassignment and four additive FIA host signals; revision 11 modeled the coherent interiorMountains core; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
+- junk-drawer.json and footer: 2026.09.16.4 (revision 13 split the Southwest into madrean/coldBasins/warmDesert with MODELED_SPARSE semantics and the code-18 fix; revision 12 split California into Mediterranean + Sierra Nevada with the Klamath→PNW reassignment; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
 
 ## Rebuild commands
 

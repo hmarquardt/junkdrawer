@@ -261,6 +261,10 @@ FOREST_SIGNAL_CLASSES = {
     "tanoak_laurel_signal": (940,),
     "redwood_signal": (340,),
     "california_mixed_conifer_signal": (370,),
+    # Southwestern display evidence: pinyon-juniper woodland (180) is exposed
+    # for habitat context only. No implemented target weights it — tree presence
+    # alone does not establish mushroom habitat.
+    "pinyon_juniper_signal": (180,),
 }
 
 # Land-cover evidence derived from the pinned Annual NLCD class legend. The
@@ -1685,7 +1689,7 @@ def main() -> None:
     state.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
 
     access_prepare = prepare_sub.add_parser("access", help="Prepare a Geofabrik state PBF once (requires osmium, shapely and pyproj)")
-    access_prepare.add_argument("--state", required=True, choices=["CO", "OR", "NM", "WA", "MI", "ME", "FL", "GA", "ID", "MT", "WY", "CA"])
+    access_prepare.add_argument("--state", required=True, choices=["CO", "OR", "NM", "WA", "MI", "ME", "FL", "GA", "ID", "MT", "WY", "CA", "AZ", "NV"])
     access_prepare.add_argument("--snapshot", default="latest")
     access_prepare.add_argument("--refresh", action="store_true")
     access_prepare.add_argument("--pbf", type=Path, default=None)

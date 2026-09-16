@@ -55,7 +55,7 @@ def _projected(geom, transformer):
 
 def re_iter_profiles(html):
     import re
-    return re.finditer(r"([a-zA-Z]+):\{name:'([^']+)',maturity:'(MODELED|PROVISIONAL|UNSUPPORTED|PROVISIONAL_FORECAST|VALIDATED)'", html)
+    return re.finditer(r"([a-zA-Z]+):\{name:'([^']+)',maturity:'(MODELED_SPARSE|MODELED|PROVISIONAL|UNSUPPORTED|PROVISIONAL_FORECAST|VALIDATED)'", html)
 
 
 def load_geography():

@@ -88,18 +88,21 @@ class Planner(unittest.TestCase):
     def test_coverage_separates_gis_production_from_biology(self):
         cov = self.coverage
         self.assertEqual(set(cov['profiles']), {'pnw', 'california', 'sierraNevada', 'interiorMountains',
-                                                'southernRockies', 'southwest', 'northernForests', 'hardwood',
+                                                'madrean', 'coldBasins', 'warmDesert',
+                                                'southernRockies', 'northernForests', 'hardwood',
                                                 'appalachians', 'southeast', 'plains'})
         self.assertEqual(cov['profiles']['pnw']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['northernForests']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['southeast']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['california']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['sierraNevada']['biologyMaturity'], 'PROVISIONAL')
+        self.assertEqual(cov['profiles']['madrean']['biologyMaturity'], 'PROVISIONAL')
+        self.assertEqual(cov['profiles']['coldBasins']['biologyMaturity'], 'MODELED_SPARSE')
+        self.assertEqual(cov['profiles']['warmDesert']['biologyMaturity'], 'MODELED_SPARSE')
         self.assertEqual(cov['profiles']['interiorMountains']['biologyMaturity'], 'PROVISIONAL')
-        self.assertEqual(cov['profiles']['southwest']['biologyMaturity'], 'UNSUPPORTED')
         self.assertEqual(cov['profiles']['plains']['biologyMaturity'], 'UNSUPPORTED')
         self.assertEqual(cov['profiles']['pnw']['tilesGisComplete'], 19)
-        self.assertEqual(cov['tilesGisComplete'], 32)  # 28 + the four California canaries
+        self.assertEqual(cov['tilesGisComplete'], 35)  # 28 + 4 California + 3 Southwest canaries
         # GIS-complete coverage under an unsupported profile must stay small and honest.
         self.assertLess(cov['tilesGisComplete'], cov['relevantLandTiles'])
         self.assertIn('not finished national mushroom coverage', cov['coverageSemantics'])

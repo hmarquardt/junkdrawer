@@ -378,3 +378,99 @@ test('No cross-taxon contamination: California taxa are distinct from PNW/SR/int
   expect(r.pnwHasCalifornicus).toBe(false);
   expect(errors).toEqual([]);
 });
+test('Southwest Task Zero: madrean/coldBasins/warmDesert split and code-18 completeness',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    const at=(lat,lon)=>{const bio=b.resolveBiology(lat,lon);return {profileId:bio.profileId,maturity:bio.maturity,code:bio.ecoregionCode,ids:b.regionalSpecies(bio).map(s=>s.id)}};
+    // Code 18 Wyoming Basin resolves intentionally (was silently unassigned).
+    const wyomingBasin=at(42.0,-108.5);
+    return {madreanRim:at(35.5,-111.5),plateau:at(36.0,-111.5),columbiaPlateau:at(46.8,-119.2),
+      wyomingBasin,mvojave:at(35.5,-116.5),sonoran:at(32.5,-112.5),
+      profiles:Object.keys(b.profiles),
+      madreanTargets:Object.keys(b.profiles.madrean.targets),
+      coldBasinsMaturity:b.profiles.coldBasins.maturity,
+      warmDesertMaturity:b.profiles.warmDesert.maturity,
+      coldSparse:(b.profiles.coldBasins.sparseNote||'').slice(0,40),
+      warmSparse:(b.profiles.warmDesert.sparseNote||'').slice(0,40)};
+  });
+  // Monsoon highlands: madrean with barrowsii.
+  for(const zone of [r.madreanRim,r.plateau]){
+    expect(zone.profileId).toBe('madrean');
+    expect(zone.maturity).toBe('PROVISIONAL');
+    expect(zone.ids).toEqual(['boleteBarrowsii']);
+  }
+  // Cold basins: modeled sparse, zero ranked targets, explicit note.
+  expect(r.columbiaPlateau.profileId).toBe('coldBasins');
+  expect(r.columbiaPlateau.maturity).toBe('MODELED_SPARSE');
+  expect(r.columbiaPlateau.ids).toEqual([]);
+  expect(r.coldBasinsMaturity).toBe('MODELED_SPARSE');
+  expect(r.coldSparse).toContain('cold xeric');
+  // Warm deserts: modeled sparse.
+  for(const zone of [r.mvojave,r.sonoran]){
+    expect(zone.profileId).toBe('warmDesert');
+    expect(zone.maturity).toBe('MODELED_SPARSE');
+    expect(zone.ids).toEqual([]);
+  }
+  expect(r.warmDesertMaturity).toBe('MODELED_SPARSE');
+  // Code 18 Wyoming Basin resolves intentionally (cold basins).
+  expect(r.wyomingBasin.profileId).toBe('coldBasins');
+  expect(r.wyomingBasin.maturity).toBe('MODELED_SPARSE');
+  // 13 profiles; no silent southwest catch-all remains.
+  expect(r.profiles).not.toContain('southwest');
+  expect(r.profiles).toContain('madrean');
+  expect(r.profiles).toContain('coldBasins');
+  expect(r.profiles).toContain('warmDesert');
+  expect(errors).toEqual([]);
+});
+test('Madrean monsoon ordering: July-August barrowsii, ponderosa host, elevation belt',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__,t=__FRUITING_FORECAST_TEST__;
+    const sp=b.regionalSpecies(b.resolveBiology(35.5,-111.5)).find(s=>s.id==='boleteBarrowsii');
+    const ponderosa={available:true,sampleCells:24,forest:{cover:.6,deciduous:.03,open:.08,canopy:.45,evergreen:.62,dominantClass:'ponderosa_pine'},
+      hosts:{ponderosaPine:.75,californiaMixedConifer:.3,spruceFir:.15,lodgepolePine:.1,pinyonJuniper:.3,mappedCoverage:.92},
+      soil:{},terrain:{},confidence:{cellCoverage:1,hostQuality:.7,soilCoverage:.85}};
+    const basin={available:true,sampleCells:24,forest:{cover:.05,deciduous:0,open:.85,canopy:.04,evergreen:.06,dominantClass:'shrubland'},
+      hosts:{ponderosaPine:0,californiaMixedConifer:0,spruceFir:0,lodgepolePine:0,pinyonJuniper:.15,mappedCoverage:.9},
+      soil:{},terrain:{},confidence:{cellCoverage:1,hostQuality:.6,soilCoverage:.8}};
+    const zone=(h,elevM)=>({point:{searchRadius:25},elevation:elevM,habitat:h,
+      metrics:{rain14:2.8,rain7:1.9,rain10:2.4,rain30:4.5,daysSinceRain:2,wetDays14:7,soilMoisture:.22,soilTemp:20,airTemp:26,humidity:55,vpd:.7,wind:8,et07:.35}});
+    const august=t.scoreSpecies(sp,zone(ponderosa,2100),null,new Date(2026,7,10));
+    const april=t.scoreSpecies(sp,zone(ponderosa,2100),null,new Date(2026,3,10));
+    const basinAugust=t.scoreSpecies(sp,zone(basin,2100),null,new Date(2026,7,10));
+    const highElev=t.scoreSpecies(sp,zone(ponderosa,3200),null,new Date(2026,7,10));
+    return {august:august.score,april:april.score,basin:basinAugust.score,highElev:highElev.score,
+      sci:b.baseTaxa.boleteBarrowsii.scientific,inat:b.baseTaxa.boleteBarrowsii.inat,
+      provenance:b.profiles.madrean.targets.boleteBarrowsii.provenance.barrowsii.slice(0,40)};
+  });
+  expect(r.august).toBeGreaterThan(r.april+10);  // monsoon season vs dry spring
+  expect(r.august).toBeGreaterThan(r.basin+10);  // ponderosa host gate vs basin floor
+  expect(r.highElev).toBeLessThanOrEqual(r.august); // above the ponderosa belt never scores higher
+  expect(r.sci).toBe('Boletus barrowsii');
+  expect(r.inat).toBe(129328);
+  expect(r.provenance).toContain('Thiers');
+  expect(errors).toEqual([]);
+});
+test('MODELED_SPARSE is distinct from UNSUPPORTED in the analysis UI',async({page})=>{
+  const errors=await open(page);
+  // Sonoran desert floor: modeled sparse, no ranked species, explicit wording.
+  await page.route('https://api.open-meteo.com/v1/forecast**',r=>{const u=new URL(r.request().url());const lat=u.searchParams.get('latitude').split(',').map(Number),lon=u.searchParams.get('longitude').split(',').map(Number);const rows=lat.map((v,i)=>({latitude:v,longitude:lon[i],elevation:200,timezone:'America/Phoenix',daily:{time:dates(),precipitation_sum:dates().map(()=>0),temperature_2m_max:dates().map(()=>40),temperature_2m_min:dates().map(()=>26),et0_fao_evapotranspiration:dates().map(()=>.5)},hourly:{time:hours(),temperature_2m:hours().map(()=>38),relative_humidity_2m:hours().map(()=>20),dew_point_2m:hours().map(()=>5),precipitation:hours().map(()=>0),soil_temperature_0cm:hours().map(()=>35),soil_moisture_0_to_1cm:hours().map(()=>.05),vapour_pressure_deficit:hours().map(()=>3),wind_speed_10m:hours().map(()=>6)}}));return r.fulfill({json:rows.length===1?rows[0]:rows})});
+  function dates(){const d=[];for(let i=-30;i<=7;i++)d.push(new Date(2026,7,i+10).toISOString().slice(0,10));return d}
+  function hours(){const h=[];for(let i=-30*24;i<=7*24;i++)h.push(new Date(2026,7,10,i).toISOString().slice(0,13)+':00');return h}
+  await page.route('https://api.inaturalist.org/**',r=>r.fulfill({json:{total_results:0,results:[]}}));
+  await page.addInitScript(()=>window.__FF_TEST_FAST__=true);
+  await page.locator('#radiusSelect').selectOption('10');
+  await page.locator('#locationInput').fill('32.5, -112.5');
+  await page.locator('#analyzeBtn').click();
+  await expect(page.locator('#status')).toContainText('Analysis ready',{timeout:120000});
+  const text=await page.locator('#topBet').textContent();
+  const state=await page.evaluate(()=>{const a=__FRUITING_FORECAST_TEST__.getState().analysis;return {profile:a.biology&&a.biology.profileId,maturity:a.biology&&a.biology.maturity,ranked:a.ranked.length,targets:(a.speciesConfiguration||[]).length}});
+  expect(text).toContain('Modeled · sparse');
+  expect(text).toContain('no mushroom target currently clears the evidence and forecastability bar');
+  expect(text).not.toContain('Unsupported');
+  expect(state.profile).toBe('warmDesert');
+  expect(state.maturity).toBe('MODELED_SPARSE');
+  expect(state.ranked).toBe(0);
+  expect(errors).toEqual([]);
+});

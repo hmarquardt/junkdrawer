@@ -65,6 +65,8 @@ NATIONAL_CANARY_OCEAN_TILES = ('n45_w070', 'n32_w084')
 INTERIOR_CANARY_TILES = ('n47_w116', 'n44_w115', 'n43_w110')
 # Revision-12 California canaries (Mediterranean + Sierra Nevada profiles).
 CALIFORNIA_CANARY_TILES = ('n38_w122', 'n36_w121', 'n39_w121', 'n36_w119')
+# Revision-13 Southwest canaries (madrean monsoon + modeled-sparse basins/deserts).
+SOUTHWEST_CANARY_TILES = ('n35_w111', 'n46_w119', 'n33_w112')
 # Tiles whose access evidence composes more than one prepared OSM state.
 PNW_SHARED_STATE_TILES = ('n45_w122', 'n45_w123', 'n46_w123', 'n46_w124')
 # Minimum real soil evidence observed per PNW tile (land share varies with ocean).
@@ -808,15 +810,15 @@ class PublishedColoradoTiles(unittest.TestCase):
             self.assertEqual(sum(stat[key] for key in ('populated', 'verifiedEmpty', 'unbuilt', 'failed')), tile_count, layer)
             # Only the ocean-heavy PNW coast tile declares an explicit verified
             # empty (no mapped MTBS perimeter); every other layer has none.
-            self.assertEqual(stat['verifiedEmpty'], len(PNW_OCEAN_TILES) + len(NATIONAL_CANARY_OCEAN_TILES) if layer == 'fire' else 0, layer)
-        release_tiles = len(AVAILABLE_TILES) + len(NATIONAL_CANARY_TILES) + len(INTERIOR_CANARY_TILES) + len(CALIFORNIA_CANARY_TILES)
+            self.assertEqual(stat['verifiedEmpty'], len(PNW_OCEAN_TILES) + len(NATIONAL_CANARY_OCEAN_TILES) + 1 if layer == 'fire' else 0, layer)
+        release_tiles = len(AVAILABLE_TILES) + len(NATIONAL_CANARY_TILES) + len(INTERIOR_CANARY_TILES) + len(CALIFORNIA_CANARY_TILES) + len(SOUTHWEST_CANARY_TILES)
         self.assertGreaterEqual(summary['habitat']['available'], release_tiles)
         self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], release_tiles)
         self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], release_tiles)
         self.assertEqual(summary['habitat']['components']['soil']['AVAILABLE'], release_tiles)
         self.assertEqual(summary['habitat']['components']['soil']['UNBUILT'], 0)
         self.assertGreaterEqual(summary['fire']['populated'], len(AVAILABLE_TILES) - len(PNW_OCEAN_TILES))
-        self.assertEqual(summary['fire']['verifiedEmpty'], len(PNW_OCEAN_TILES) + len(NATIONAL_CANARY_OCEAN_TILES))
+        self.assertEqual(summary['fire']['verifiedEmpty'], len(PNW_OCEAN_TILES) + len(NATIONAL_CANARY_OCEAN_TILES) + 1)
         for tile in self.manifest['tiles']:
             asset = tile.get('habitat') or {}
             if asset.get('status') in {'AVAILABLE', 'PARTIAL'}:
@@ -919,7 +921,7 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
         self.assertIn('Southern Rockies', coverage)
         self.assertNotIn('955', coverage)
         self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])),
-                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES + INTERIOR_CANARY_TILES + CALIFORNIA_CANARY_TILES))
+                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES + INTERIOR_CANARY_TILES + CALIFORNIA_CANARY_TILES + SOUTHWEST_CANARY_TILES))
         # Administrative, ecological and layer dimensions stay separate and derived.
         self.assertEqual(sorted(self.manifest['summary']['publishedTiles']), sorted(
             tile['id'] for tile in self.manifest['tiles']
@@ -927,7 +929,7 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
                    for key in ('habitat', 'publicLands', 'accessPoints', 'fireHistory'))))
         self.assertGreaterEqual(self.manifest['summary']['states'].get('NM', 0), len(NEW_MEXICO_TILES))
         self.assertGreaterEqual(self.manifest['summary']['states'].get('CO', 0), len(COLORADO_TILES))
-        self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('southernRockies'), len(RELEASE_TILES))
+        self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('southernRockies'), len(RELEASE_TILES) + 2)  # AZ canary bboxes touch code 23
         self.assertGreaterEqual(self.manifest['summary']['states'].get('OR', 0), len(PNW_OREGON_TILES))
         # Klamath (78) addresses two California canary bboxes since revision 12.
         self.assertEqual(self.manifest['summary']['ecologicalProfiles'].get('pnw'), len(PNW_TILES) + 2)
@@ -1160,7 +1162,7 @@ class PacificNorthwestRelease(unittest.TestCase):
         summary = self.manifest['summary']
         # Klamath (code 78) belongs to pnw since revision 12: the two California
         # canary bboxes touching the Klamath coast raise the bbox count by two.
-        self.assertEqual(summary['ecologicalProfiles'].get('pnw'), len(PNW_TILES) + 2)
+        self.assertEqual(summary['ecologicalProfiles'].get('pnw'), len(PNW_TILES) + 2)  # Klamath + CA canary bboxes
         # Both production states are covered; bbox-based state counts legitimately
         # exceed tile counts because shared-boundary tiles intersect both states'
         # boundary bounding boxes.
@@ -1168,9 +1170,9 @@ class PacificNorthwestRelease(unittest.TestCase):
         self.assertGreaterEqual(summary['states'].get('WA', 0), len(PNW_WASHINGTON_TILES))
         # The Klamath reassignment also surfaces as pnw addressing on the two
         # California canary bboxes; everything else stays the derived roster.
-        self.assertEqual(summary['ecologicalProfiles'].get('pnw'), len(PNW_TILES) + 2)
+        self.assertEqual(summary['ecologicalProfiles'].get('pnw'), len(PNW_TILES) + 2)  # Klamath + CA canary bboxes
         self.assertEqual(sorted(summary['coverageTiles']),
-                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES + INTERIOR_CANARY_TILES + CALIFORNIA_CANARY_TILES))
+                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES + INTERIOR_CANARY_TILES + CALIFORNIA_CANARY_TILES + SOUTHWEST_CANARY_TILES))
 
     def test_legacy_tiles_lack_the_hemlock_column(self):
         tile = self.tiles['n37_w088']['habitat']
