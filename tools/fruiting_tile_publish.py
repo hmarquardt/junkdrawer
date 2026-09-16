@@ -50,7 +50,7 @@ def _bbox_intersects(a, b):
 ECO_PROFILE_GROUPS = {
     'pnw': [1, 2, 3, 4, 77, 78], 'california': [6, 7, 8, 85],
     'sierraNevada': [5], 'interiorMountains': [9, 11, 15, 16, 17, 19, 41],
-    'southernRockies': [21, 23], 'southwest': [10, 12, 13, 14, 20, 22, 24, 79, 80, 81],
+    'southernRockies': [21, 23], 'madrean': [20, 22, 79], 'coldBasins': [10, 12, 13, 18, 80], 'warmDesert': [14, 24, 81],
     'northernForests': [48, 49, 50, 51, 58, 59, 82, 83, 84],
     'hardwood': [40, 45, 47, 52, 53, 54, 55, 56, 57, 61, 62, 63, 64, 72, 74],
     'appalachians': [36, 37, 38, 39, 66, 67, 68, 69, 70, 71],
