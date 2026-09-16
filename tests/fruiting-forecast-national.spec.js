@@ -153,3 +153,115 @@ test('Appalachians/Ozarks reuse is the audited explicit decision, not an acciden
   expect(r.ids.length).toBe(7);
   expect(errors).toEqual([]);
 });
+test('Northern Rockies / Interior Mountains resolves as a coherent modeled profile',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    const at=(lat,lon)=>{const bio=b.resolveBiology(lat,lon);return {profileId:bio.profileId,maturity:bio.maturity,code:bio.ecoregionCode,ecosystem:bio.ecoregionName,ids:b.regionalSpecies(bio).map(s=>s.id)}};
+    return {idPanhandle:at(47.5,-116.5),idBatholith:at(44.2,-115.5),wyoming:at(43.5,-110.4),
+      northCascades:at(48.6,-121.4),sierra:at(37.5,-119.4),azNm:at(35.35,-111.7)};
+  });
+  for(const zone of [r.idPanhandle,r.idBatholith,r.wyoming]){
+    expect(zone.profileId).toBe('interiorMountains');
+    expect(zone.maturity).toBe('PROVISIONAL');
+    expect(zone.ids).toEqual(['morelBurn','matsutakeMurrillianum']);
+  }
+  // Task-Zero reassignments: North Cascades -> PNW, Sierra -> california, AZ/NM mountains -> southernRockies.
+  expect(r.northCascades.profileId).toBe('pnw');
+  expect(r.sierra.profileId).toBe('california');
+  expect(r.azNm.profileId).toBe('southernRockies');
+  expect(r.azNm.ids).toEqual(['porcini','chanterelleRoseocanus','morelNatural','morelBurn']);
+  // A sky-island point inside EPA 23 resolves the monsoon profile.
+  expect(errors).toEqual([]);
+});
+test('Interior morel burn target uses its own regional parameters with declared gaps',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    const t=b.profiles.interiorMountains.targets.morelBurn;
+    const sr=b.profiles.southernRockies.targets.morelBurn;
+    return {months:t.months,shoulder:t.shoulder,elevation:t.elevationFt,elevationSoft:t.elevationSoftFt,
+      elevationProvenance:(t.elevationProvenance||'').slice(0,80),
+      requiresDisturbance:t.requiresDisturbance,cap:t.evidenceGapCap,snowmelt:t.snowmelt.status,
+      srMonths:sr.months,srElevation:sr.elevationFt,
+      sameObject:t===sr,
+      provenanceRegion:t.provenance.region.slice(0,60),
+      severity:t.provenance.severity.slice(0,60)};
+  });
+  expect(r.months).toEqual([6,7,8]);          // interior progression, not the SR calendar
+  expect(r.srMonths).toEqual([6,7]);          // Southern Rockies burn calendar stays its own
+  expect(r.elevation).toEqual([4000,8500]);   // northern belts run lower
+  expect(r.elevationSoft).toBe(2500);
+  expect(r.elevationProvenance).toContain('proxy');
+  expect(r.requiresDisturbance).toBe(true);
+  expect(r.cap).toBe(25);
+  expect(r.snowmelt).toBe('UNBUILT');
+  expect(r.sameObject).toBe(false);           // separate regional model, not a shared object
+  expect(r.provenanceRegion).toContain('PNW-GTR-710');
+  expect(r.severity).toContain('severity');
+  expect(errors).toEqual([]);
+});
+test('Interior disturbance behavior: no mapped burn caps the target; burn evidence drives ordering',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__,t=__FRUITING_FORECAST_TEST__;
+    const bio=b.resolveBiology(44.2,-115.5);
+    const sp=b.regionalSpecies(bio).find(s=>s.id==='morelBurn');
+    const habitat={available:true,sampleCells:24,forest:{cover:.72,deciduous:.06,open:.04,canopy:.6,evergreen:.7,dominantClass:'spruce_fir'},
+      hosts:{spruceFir:.75,firSpruceMountainHemlock:.6,lodgepolePine:.5,douglasFir:.4,aspenBirch:.1,ponderosaPine:.2,mappedCoverage:.92},
+      soil:{},terrain:{},confidence:{cellCoverage:1,hostQuality:.7,soilCoverage:.9}};
+    const metrics={rain14:1.6,rain7:1.1,rain10:1.4,rain30:2.4,daysSinceRain:5,wetDays14:5,soilMoisture:.28,soilTemp:52,airTemp:60,humidity:60,vpd:.7,wind:7,et07:.3};
+    const noFire={reason:'No mapped MTBS perimeter applies to this sector'};
+    const burn={status:'AVAILABLE',reason:'Mapped prior-year perimeter',perimeterId:'TEST',fireYear:2025,severity:null};
+    const withBurn=t.scoreSpecies(sp,{point:{searchRadius:25},elevation:1900,habitat,metrics,disturbance:burn},null,new Date(2026,6,15));
+    const withoutBurn=t.scoreSpecies(sp,{point:{searchRadius:25},elevation:1900,habitat,metrics,disturbance:noFire},null,new Date(2026,6,15));
+    const wrongSeason=t.scoreSpecies(sp,{point:{searchRadius:25},elevation:1900,habitat,metrics,disturbance:burn},null,new Date(2026,10,15));
+    return {withBurn:withBurn.score,withBurnBand:withBurn.band,withoutBurn:withoutBurn.score,withoutBurnBand:withoutBurn.band,
+      withoutBurnCapped:withoutBurn.score<=25,wrongSeason:worseSeason(wrongSeason.score)};
+    function worseSeason(x){return x}
+  });
+  expect(r.withoutBurnCapped).toBe(true);       // evidence-gap cap with no qualifying burn
+  expect(r.withBurn).toBeGreaterThan(r.withoutBurn); // mapped prior-year burn raises the target
+  expect(errors).toEqual([]);
+});
+test('Interior matsutake ordering: autumn season, interior hosts, elevation band',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__,t=__FRUITING_FORECAST_TEST__;
+    const sp=b.regionalSpecies(b.resolveBiology(44.2,-115.5)).find(s=>s.id==='matsutakeMurrillianum');
+    const habitat={available:true,sampleCells:24,forest:{cover:.68,deciduous:.05,open:.05,canopy:.55,evergreen:.65,dominantClass:'lodgepole_pine'},
+      hosts:{lodgepolePine:.7,douglasFir:.5,spruceFir:.4,firSpruceMountainHemlock:.3,ponderosaPine:.2,mappedCoverage:.92},
+      soil:{},terrain:{},confidence:{cellCoverage:1,hostQuality:.7,soilCoverage:.9}};
+    const metrics=rain=>({rain14:rain,rain7:rain*.7,rain10:rain*.9,rain30:rain*1.6,daysSinceRain:5,wetDays14:5,soilMoisture:.26,soilTemp:14,airTemp:16,humidity:55,vpd:.6,wind:6,et07:.3});
+    const zone=elevM=>({point:{searchRadius:25},elevation:elevM,habitat,metrics:metrics(1.4)});
+    const sept=t.scoreSpecies(sp,zone(1600),null,new Date(2026,8,20));
+    const winter=t.scoreSpecies(sp,zone(1600),null,new Date(2026,11,20));
+    const noHost=t.scoreSpecies(sp,{point:{searchRadius:25},elevation:1600,habitat:{...habitat,hosts:{lodgepolePine:0,douglasFir:0,spruceFir:0,firSpruceMountainHemlock:0,ponderosaPine:0,mappedCoverage:.9}},metrics:metrics(1.4)},null,new Date(2026,8,20));
+    const wrongElev=t.scoreSpecies(sp,zone(2900),null,new Date(2026,8,20));
+    return {sept:sept.score,winter:winter.score,noHost:noHost.score,wrongElev:wrongElev.score,
+      missing:sept.missing,provenance:b.profiles.interiorMountains.targets.matsutakeMurrillianum.provenance.region.slice(0,50)};
+  });
+  expect(r.sept).toBeGreaterThan(r.winter);     // autumn fruiting, frost ends the season
+  expect(r.sept).toBeGreaterThan(r.noHost);     // interior lodgepole/Douglas-fir hosts matter
+  expect(r.sept).toBeGreaterThan(r.wrongElev);  // band follows interior belts
+  expect(r.provenance).toContain('GTR-412');
+  expect(errors).toEqual([]);
+});
+test('Interior boundaries: rubriceps stays south, PNW targets stay west, sky islands stay monsoon',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    const at=(lat,lon)=>{const bio=b.resolveBiology(lat,lon);return {profileId:bio.profileId,ids:b.regionalSpecies(bio).map(s=>s.id)}};
+    return {interior:at(44.2,-115.5),colorado:at(39.48,-106.05),pnw:at(45.52,-122.68),azNm:at(35.35,-111.7),
+      interiorTargets:b.profiles.interiorMountains.targets,
+      srMorelBurn:b.profiles.southernRockies.targets.morelBurn,
+      imMorelBurn:b.profiles.interiorMountains.targets.morelBurn};
+  });
+  expect(r.interior.profileId).toBe('interiorMountains');
+  expect(r.interior.ids).toEqual(['morelBurn','matsutakeMurrillianum']);
+  expect(r.interior.ids).not.toContain('porcini');           // B. rubriceps never transfers north
+  expect(r.interior.ids).not.toContain('chanterelleFormosus'); // PNW maritime targets never transfer east
+  expect(r.imMorelBurn).not.toBe(r.srMorelBurn);             // distinct regional models
+  expect(r.azNm.profileId).toBe('southernRockies');          // AZ/NM mountains -> monsoon profile
+  expect(errors).toEqual([]);
+});

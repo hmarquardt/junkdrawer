@@ -61,6 +61,8 @@ AVAILABLE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES + PNW_TILES))
 NATIONAL_CANARY_TILES = ('n45_w085', 'n45_w070', 'n30_w084', 'n32_w084')
 # Their wet tiles declare explicit verified-empty fire.
 NATIONAL_CANARY_OCEAN_TILES = ('n45_w070', 'n32_w084')
+# Revision-11 interior canaries (Northern Rockies / Interior Mountains).
+INTERIOR_CANARY_TILES = ('n47_w116', 'n44_w115', 'n43_w110')
 # Tiles whose access evidence composes more than one prepared OSM state.
 PNW_SHARED_STATE_TILES = ('n45_w122', 'n45_w123', 'n46_w123', 'n46_w124')
 # Minimum real soil evidence observed per PNW tile (land share varies with ocean).
@@ -805,7 +807,7 @@ class PublishedColoradoTiles(unittest.TestCase):
             # Only the ocean-heavy PNW coast tile declares an explicit verified
             # empty (no mapped MTBS perimeter); every other layer has none.
             self.assertEqual(stat['verifiedEmpty'], len(PNW_OCEAN_TILES) + len(NATIONAL_CANARY_OCEAN_TILES) if layer == 'fire' else 0, layer)
-        release_tiles = len(AVAILABLE_TILES) + len(NATIONAL_CANARY_TILES)
+        release_tiles = len(AVAILABLE_TILES) + len(NATIONAL_CANARY_TILES) + len(INTERIOR_CANARY_TILES)
         self.assertGreaterEqual(summary['habitat']['available'], release_tiles)
         self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], release_tiles)
         self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], release_tiles)
@@ -915,7 +917,7 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
         self.assertIn('Southern Rockies', coverage)
         self.assertNotIn('955', coverage)
         self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])),
-                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES))
+                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES + INTERIOR_CANARY_TILES))
         # Administrative, ecological and layer dimensions stay separate and derived.
         self.assertEqual(sorted(self.manifest['summary']['publishedTiles']), sorted(
             tile['id'] for tile in self.manifest['tiles']
@@ -1155,7 +1157,7 @@ class PacificNorthwestRelease(unittest.TestCase):
         self.assertGreaterEqual(summary['states'].get('OR', 0), len(PNW_OREGON_TILES))
         self.assertGreaterEqual(summary['states'].get('WA', 0), len(PNW_WASHINGTON_TILES))
         self.assertEqual(sorted(summary['coverageTiles']),
-                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES))
+                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES + INTERIOR_CANARY_TILES))
 
     def test_legacy_tiles_lack_the_hemlock_column(self):
         tile = self.tiles['n37_w088']['habitat']

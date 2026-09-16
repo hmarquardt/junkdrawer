@@ -158,7 +158,11 @@ test('PNW biology never leaks into neighboring unsupported profiles',async({page
   expect(r.pnw.ids).toHaveLength(5);
   expect(r.indiana.ids).toHaveLength(7);
   expect(r.colorado.ids).toEqual(['porcini','chanterelleRoseocanus','morelNatural','morelBurn']);
-  for(const zone of ['interiorOregon','california','plains']){
+  // Eastern Cascades now belongs to the modeled interior profile: it receives
+  // exactly the interior targets and never PNW biology.
+  expect(r.interiorOregon.profileId).toBe('interiorMountains');
+  expect(r.interiorOregon.ids).toEqual(['morelBurn','matsutakeMurrillianum']);
+  for(const zone of ['california','plains']){
     expect(r[zone].ids).toHaveLength(0);
     expect(r[zone].ids).not.toContain('chanterelleFormosus');
   }
@@ -180,10 +184,11 @@ test('a radius crossing the PNW boundary scores every sector with its own profil
     const zone=(id)=>(a.zones.find(z=>z.id===id)||{scores:[]});
     const zoneIds=Object.keys(a.zoneBiology);
     const profiles=zoneIds.map(k=>[k,a.zoneBiology[k].profileId]);
+    const zoneScores={};
+    for(const k of zoneIds)zoneScores[k]={profileId:a.zoneBiology[k].profileId,scores:zone(k).scores.map(s=>s.speciesId)};
     return {center:a.biology.profileId,profiles,sectorBiologyCount:a.sectorBiologyCount,
       targets:a.speciesConfiguration.map(x=>x.id),
-      pnwZoneScores:zoneIds.filter(k=>a.zoneBiology[k].profileId==='pnw').map(k=>zone(k).scores.map(s=>s.speciesId)),
-      otherZoneScores:zoneIds.filter(k=>a.zoneBiology[k].profileId!=='pnw').map(k=>zone(k).scores.map(s=>s.speciesId)),
+      zoneScores,
       meta:document.querySelector('#analysisMeta').textContent};
   });
   expect(r.center).toBe('pnw');
@@ -191,10 +196,22 @@ test('a radius crossing the PNW boundary scores every sector with its own profil
   expect(r.profiles.map(p=>p[1])).toContain('pnw');
   expect(r.profiles.map(p=>p[1])).not.toEqual(r.profiles.map(()=>'pnw'));
   expect(r.targets).toEqual(['chanterelleFormosus','chanterelleSubalbidus','matsutakeMurrillianum','craterelleNeotubaeformis','morelBurn']);
-  expect(r.pnwZoneScores.length).toBeGreaterThan(0);
-  for(const scores of r.pnwZoneScores)expect(scores).toEqual(expect.arrayContaining(['chanterelleFormosus','matsutakeMurrillianum','craterelleNeotubaeformis']));
-  // Sectors in a neighboring profile score nothing rather than inheriting PNW target sets.
-  for(const scores of r.otherZoneScores)expect(scores).toEqual([]);
+  const pnwZones=Object.entries(r.zoneScores).filter(([,v])=>v.profileId==='pnw');
+  expect(pnwZones.length).toBeGreaterThan(0);
+  for(const [,z] of pnwZones)expect(z.scores).toEqual(expect.arrayContaining(['chanterelleFormosus','matsutakeMurrillianum','craterelleNeotubaeformis']));
+  // Unsupported sectors score nothing rather than inheriting PNW target sets;
+  // modeled non-PNW sectors (Eastern Cascades -> interiorMountains) score only
+  // their own interior targets.
+  for(const [,z] of Object.entries(r.zoneScores)){
+    if(z.profileId==='pnw')continue;
+    if(z.profileId==='interiorMountains'){
+      expect(z.scores).toEqual(expect.arrayContaining(['morelBurn','matsutakeMurrillianum']));
+      expect(z.scores).not.toContain('chanterelleFormosus');
+      expect(z.scores).not.toContain('porcini');
+    }else{
+      expect(z.scores).toEqual([]);
+    }
+  }
   expect(r.meta).toContain('regional models across sectors');
   expect(errors).toEqual([]);
 });

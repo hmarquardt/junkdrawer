@@ -330,6 +330,8 @@ const ACCESS_TILES=['n39_w106','n40_w106',...PNW_TILES];
 const RELEASE_TILES=[...NEW_MEXICO_TILES,...COLORADO_TILES,...PNW_TILES].sort();
 // Revision-10 national canaries (Northern Forests + Southeast vertical stack).
 const NATIONAL_CANARY_TILES=['n45_w085','n45_w070','n30_w084','n32_w084'];
+// Revision-11 interior canaries (Northern Rockies / Interior Mountains).
+const INTERIOR_CANARY_TILES=['n47_w116','n44_w115','n43_w110'];
 test('bounded Southern Rockies release declares complete habitat with real soil and matching digests',async({page})=>{
   const errors=[];
   page.on('pageerror',e=>errors.push(e.message));
@@ -360,7 +362,7 @@ test('bounded Southern Rockies release declares complete habitat with real soil 
     const westernCounts=await t.aboutManifestCounts(manifest);
     return {release,tiles,westernCounts,summary:manifest.summary.layers.habitat,coverageTiles:manifest.summary.coverageTiles};
   },RELEASE_TILES);
-  expect(result.coverageTiles).toEqual([...RELEASE_TILES,...NATIONAL_CANARY_TILES].sort());
+  expect(result.coverageTiles).toEqual([...RELEASE_TILES,...NATIONAL_CANARY_TILES,...INTERIOR_CANARY_TILES].sort());
   for(const id of RELEASE_TILES){
     const tile=result.release[id];
     expect(tile.missing).toBe(false);
@@ -406,30 +408,35 @@ test('release summary derives bounded PNW production coverage without conflating
   await page.route('https://tile.openstreetmap.org/**',r=>r.abort());
   await page.goto(`http://127.0.0.1:${artifactPort}/fruiting-forecast.html`,{waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>window.__FRUITING_FORECAST_TEST__);
-  const result=await page.evaluate(async(PNW_TILES)=>{
+  const result=await page.evaluate(async(TILE_SET)=>{
     const t=window.__FRUITING_FORECAST_TEST__;
     const manifest=await t.gisManifest(true);
     const s=manifest.summary;
     return {coverageTiles:s.coverageTiles,publishedTiles:s.publishedTiles,profiles:s.ecologicalProfiles,states:s.states,
       habitat:s.layers.habitat,access:s.layers.access,fire:s.layers.fire,publicLand:s.layers['public-land'],
-      pnwTiles:(manifest.tiles||[]).filter(x=>PNW_TILES.includes(x.id))
+      pnwTiles:(manifest.tiles||[]).filter(x=>TILE_SET.includes(x.id))
         .map(x=>({id:x.id,habitat:x.habitat.status,pl:x.publicLands.status,fire:x.fireHistory.status,access:x.accessPoints.status,cells:x.habitat.cells,components:x.habitat.components}))};
-  }, PNW_TILES);
-  // Derived dimensions, not hand-maintained numbers: 37 complete release tiles
-  // (14 Southern Rockies + 19 PNW + the 4 revision-10 national canaries).
-  expect(result.coverageTiles.length).toBe(37);
+  }, [...PNW_TILES,...INTERIOR_CANARY_TILES]);
+  // Derived dimensions, not hand-maintained numbers: 40 complete release tiles
+  // (14 Southern Rockies + 19 PNW + 4 revision-10 + 3 revision-11 canaries).
+  expect(result.coverageTiles.length).toBe(40);
   expect(result.profiles.pnw).toBe(19);
   expect(result.profiles.northernForests).toBe(2);
+  // Profile counts are the documented bbox-approximate addressing dimension:
+  // published-tile bboxes that touch interiorMountains ecoregion bboxes.
+  expect(result.profiles.interiorMountains).toBe(13);
   expect(result.states.MI).toBeGreaterThanOrEqual(1);
   expect(result.states.ME).toBeGreaterThanOrEqual(1);
   expect(result.states.FL).toBeGreaterThanOrEqual(1);
+  expect(result.states.ID).toBeGreaterThanOrEqual(2);
+  expect(result.states.WY).toBeGreaterThanOrEqual(1);
   expect(result.states.OR).toBeGreaterThanOrEqual(14);
   expect(result.states.WA).toBeGreaterThanOrEqual(11);
-  expect(result.habitat.available).toBe(37);
-  expect(result.publicLand.available).toBe(37);
-  expect(result.access.available).toBe(25); // 19 PNW + 2 Colorado canaries + 4 national canaries
+  expect(result.habitat.available).toBe(40);
+  expect(result.publicLand.available).toBe(40);
+  expect(result.access.available).toBe(28); // 19 PNW + 2 Colorado + 4 national + 3 interior canaries
   expect(result.fire.verifiedEmpty).toBe(8); // wet westside/ocean tiles declare it explicitly
-  expect(result.fire.available).toBe(29);
+  expect(result.fire.available).toBe(32);
   for(const tile of result.pnwTiles){
     expect(tile.habitat).toBe('AVAILABLE');
     expect(tile.cells).toBe(400);

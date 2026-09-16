@@ -94,11 +94,11 @@ class Planner(unittest.TestCase):
         self.assertEqual(cov['profiles']['northernForests']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['southeast']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['california']['biologyMaturity'], 'UNSUPPORTED')
-        self.assertEqual(cov['profiles']['interiorMountains']['biologyMaturity'], 'UNSUPPORTED')
+        self.assertEqual(cov['profiles']['interiorMountains']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['southwest']['biologyMaturity'], 'UNSUPPORTED')
         self.assertEqual(cov['profiles']['plains']['biologyMaturity'], 'UNSUPPORTED')
         self.assertEqual(cov['profiles']['pnw']['tilesGisComplete'], 19)
-        self.assertEqual(cov['tilesGisComplete'], 25)  # 19 PNW + 2 Colorado canaries + 4 national canaries
+        self.assertEqual(cov['tilesGisComplete'], 28)  # 19 PNW + 2 Colorado + 4 national + 3 interior canaries
         # GIS-complete coverage under an unsupported profile must stay small and honest.
         self.assertLess(cov['tilesGisComplete'], cov['relevantLandTiles'])
         self.assertIn('not finished national mushroom coverage', cov['coverageSemantics'])

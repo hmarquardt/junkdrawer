@@ -1,5 +1,78 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 11 — Task Zero audit, coherent Northern Rockies / Interior Mountains profile (2026-09-15)
+
+Started from `92eca10`. **Full CONUS biological + GIS coverage remains the launch requirement**, and no launch is recommended this pass. The pass did what revision 10 deferred: it audited whether the historical `interiorMountains` EPA aggregation was biologically coherent BEFORE building biology on it, corrected the crosswalk where it was not, and implemented the coherent core as a real PROVISIONAL profile with interior evidence rather than transferred PNW/Southern-Rockies parameters.
+
+### Task Zero — the interiorMountains aggregation audit
+
+The historical roster placed ten EPA Level III codes in one profile: 5 (Sierra Nevada), 9 (Eastern Cascades Slopes and Foothills), 11 (Blue Mountains), 15 (Northern Rockies), 16 (Idaho Batholith), 17 (Middle Rockies), 19 (Wasatch and Uinta Mountains), 23 (Arizona/New Mexico Mountains), 41 (Canadian Rockies), 77 (North Cascades). Audited against the held source documents (PNW-GTR-710, PNW-GTR-412, PNW-GTR-576) and USDA tree-distribution material, the roster is NOT one biological profile:
+
+| Code | EPA name | Regime | Relationship | Decision |
+|---|---|---|---|---|
+| 15, 16, 41 | Northern Rockies, Idaho Batholith, Canadian Rockies | Interior snowmelt conifer (Picea/Abies, lodgepole, Douglas-fir) | the coherent core | **stay** |
+| 17 | Middle Rockies (WY/MT) | same regime, lower/drier east slope | core-compatible (GTR-710 Interior West chapter includes it) | **stay** |
+| 19 | Wasatch/Uinta | same regime, southern extension | core-compatible | **stay** |
+| 11 | Blue Mountains | interior conifer, documented in GTR-710 harvest geography | **stay** |
+| 9 | Eastern Cascades foothills | rain-shadow ponderosa/lodgepole belt; GTR-710 documents the eastern-Cascades morel harvest | **stay** |
+| 5 | Sierra Nevada | Mediterranean snowpack; **GTR-710 explicitly defines the Interior West as "east of the Sierra Nevada range"** | belongs to California | **moved to `california`** |
+| 77 | North Cascades | maritime-influenced Cascades; PNW targets are documented there | belongs to the PNW | **moved to `pnw`** |
+| 23 | Arizona/New Mexico Mountains | monsoon-driven sky islands; the B. rubriceps source covers "southern Rocky Mountains / Southwest" | monsoon profile | **moved to `southernRockies`** |
+
+Answer to the audit question: **no single defensible profile ever covered all ten codes; after reassignment the remaining seven codes ARE one coherent interior-mountain region** and the profile count stays 10. Both rosters (browser `ECO_PROFILE_GROUPS` and the publisher copy) carry the change with the drift guard passing, the planner recomputed, and every affected boundary pinned by test. Crosswalk v3: `interiorMountains` [9,11,15,16,17,19,41], `pnw` [1,2,3,4,77], `california` [6,7,8,78,85,5], `southernRockies` [21,23].
+
+### Implemented biology (Tasks 2–14)
+
+Research recorded in `biology-research.json` (39 sources, 25 candidates). The negative findings are as valuable as the positive ones:
+
+- **`morelBurn` (interior) — PROVISIONAL_FORECAST, implemented.** GTR-710 documents commercial harvests throughout the northern Rockies (Bitterroot/Kootenai; the 2000 Valley Complex fire) and harvesters following prior-summer burns across eastern OR/WA, Idaho and Montana "moving upward in elevation as the summer advances"; McFarlane, Pilz & Weber 2005 document Idaho/Montana high-elevation gray morels on prior-summer burns in Picea/Abies forest. Interior model: months [6,7,8] shoulders [5,9] (June–August interior progression — deliberately NOT the Southern Rockies [6,7] or PNW [5,6] calendars), elevation 4,000–8,500 ft labeled an explicit harvest-progression/host-belt proxy (the Colorado 8,000–12,000 ft band is NOT transferred; northern belts run lower), requiresDisturbance with the shared prior-year burn response and the same evidenceGapCap 25, spruce-fir/lodgepole/Douglas-fir/aspen hosts. Snowmelt stays `UNBUILT` with the timing carried by season/elevation/temperature as declared proxies — never called "snowmelt". MTBS severity is never scored (no per-perimeter class exists; McFarlane's moderate-intensity direction is cited qualitatively only).
+- **`matsutakeMurrillianum` (interior) — PROVISIONAL_FORECAST, implemented.** GTR-412 documents matsutake harvest from Oregon, Washington AND Idaho (Schlosser & Blatner 1995), states the inland distribution continues through the Rocky Mountains into high-elevation pine and fir forests, and lists inland lodgepole pine among reported associates; Trudell et al. 2017 fixes the modern taxon. Interior model: months [9,10] shoulders [8,11], hosts lodgepole/Douglas-fir/spruce-fir, autumn soil-temperature direction (~19 C initiation, ~10 C cessation) cited as the studied zones' numbers, not an interior calibration; elevation 3,500–9,000 ft declared a host-belt proxy.
+- **Chanterelle: RESEARCH_ONLY.** PNW-GTR-576 records the rainbow chanterelle's documented range as Oregon, Washington and British Columbia (likely also California) — the report does NOT establish Idaho/Montana/Rocky Mountain populations, and Engelmann spruce presence is tree ecology, not mushroom range. The Colorado target keeps its own weaker-evidence declaration; the interior does not repeat that transfer.
+- **King boletes: RESEARCH_ONLY.** Arora & Frank 2014 describe `B. rubriceps` as abundant in the southern Rocky Mountains/Southwest with the exact northern range limit unresolved. Interior king boletes stay an unresolved edulis-sensu-lato complex. `B. rubriceps` is never silently transferred north; promotion needs (resolved species concept + regional phenology) recorded.
+- **Natural montane morels: RESEARCH_ONLY.** GTR-710 documents massive morel fruiting where insects kill trees without fire (McLain 2000 white-fir case) — but no national dataset represents tree mortality, so a model would lean on nothing measurable. Identified promotion path: a national tree-mortality dataset.
+- **Oyster/Hericium/hedgehog/lobster: RESEARCH_ONLY** (no sourced interior host/phenology base).
+
+The implemented roster is deliberately two strong targets rather than eight weak ones. Host-signal audit (Task 5): the existing FIA signals (spruce/fir 120, fir/spruce/mountain-hemlock 260, lodgepole 280, ponderosa 220, Douglas-fir 200, aspen/birch 900) genuinely represent the interior host set; western larch, grand fir, western white pine and whitebark pine exist in the FIA product but have no exposed signal — declared unweighted in `INTERIOR_HABITAT_NOTE` rather than substituted by generic evergreen cover (no schema change needed this pass; identified additive need).
+
+### Interior canaries (Tasks 15–17)
+
+Built through the planner `run --tiles` path in **187.7 s, zero failures**; new state sources prepared once (ID PBF 128,720,679 B, MT 100,259,404 B, WY 93,630,055 B — all `*-latest` extracts headered 2026-09-15T20:20:37Z, SHA256 recorded; SSURGO ID 10,536 mapunits/57 survey areas, MT 16,931/70, WY 8,309/43; vintages 2025-08-28…2025-09-05):
+
+| Tile | Profile share | States | Fire | Access | Starts |
+|---|---|---|---|---|---:|
+| `n47_w116` (Selkirk/Coeur d'Alene–Bitterroot) | interiorMountains 100% | ID 39.7 + MT 60.3 | AVAILABLE, 28 perimeters | AVAILABLE, 34 pts | 13 |
+| `n44_w115` (Idaho Batholith / Sawtooth) | interiorMountains 100% | ID 100% | AVAILABLE, 42 perimeters | AVAILABLE, 85 pts | 43 |
+| `n43_w110` (Yellowstone / Middle Rockies) | interiorMountains 69.7% | WY 100% | AVAILABLE, 25 perimeters | AVAILABLE, 38 pts | 12 |
+
+`n47_w116` exercises cross-state access/soil composition (ID+MT); `n44_w115` is the burn-morel QA tile (42 mapped perimeters in Idaho Batholith fire country); `n43_w110` is the Middle-Rockies boundary tile. Burn QA (Task 17): the browser caps `morelBurn` at the evidence-gap floor when no qualifying perimeter applies and scores the disturbance component when one does (test-pinned); absence of MTBS remains non-evidence.
+
+### Boundary regressions (Tasks 18–20)
+
+- **Interior ↔ PNW**: the North Cascades reassignment is pinned by test — a North Cascades point resolves `pnw` and PNW targets, an Eastern-Cascades point resolves `interiorMountains` and interior targets; a PNW-edge radius scores each sector with its own profile (Eastern Cascades sectors now receive interior targets, never PNW ids).
+- **Interior ↔ Southern Rockies**: `B. rubriceps` stays `southernRockies`-only; the two `morelBurn` regional models are distinct objects with distinct calendars and elevation bands.
+- **Interior ↔ Southwest**: the AZ/NM mountains reassignment is pinned — a San Francisco Peaks point resolves `southernRockies` (monsoon profile), matching the B. rubriceps source geography.
+- No silent fallback anywhere: unsupported sectors (plains, southwest, california) return zero species.
+
+### National coverage and matrix (Tasks 21–22)
+
+Recomputed after the crosswalk change: `interiorMountains` 113 intersecting tiles (coherent), `pnw` 44, `california` 49, `southernRockies` 64, `southwest` 202, `plains` 262, `hardwood` 209, `appalachians` 98, `southeast` 132, `northernForests` 127 (bbox-approximate addressing; land area unchanged). Modeled profiles: **7 of 10** (PNW, Southern Rockies incl. AZ/NM mountains, Northern Forests, Hardwood, Appalachians, Southeast, Interior Mountains). Unsupported: California Mediterranean (49 tiles), Southwest/Arid Interior (202), Great Plains (262). The permanent national canary matrix gains three interior representatives: `44.2,-115.5` (Idaho Batholith), `47.4,-115.7` (northern ID/MT), `43.5,-110.4` (Middle Rockies boundary) alongside the revision-10 entries.
+
+### Tests (Task 30)
+
+`tests/fruiting-forecast-national.spec.js` grew to 11 tests: interior resolution (ID panhandle/Batholith/Wyoming), Task-Zero reassignments (North Cascades→pnw, Sierra→california, sky islands→southernRockies), the interior morelBurn regional parameters (months/elevation/proxy provenance/distinct-object assertions), disturbance capping and burn ordering, matsutake season/host/elevation ordering, and the three boundary rules. PNW boundary tests rewritten for the new Eastern-Cascades ownership with per-sector target isolation. Conus summary updated for 40 complete tiles (28 access, 32+8 fire) and ID/MT/WY coverage. Full sweep: **111 browser tests passed (1 opt-in live skipped)**, adapters 53, publication 6, access 16, release 10, planner 8.
+
+### Manual QA (Task 31)
+
+Inspected desktop + 390 px mobile (screenshots + JSON in /tmp/rev11-*): **northern Idaho/Montana** search — Coeur d'Alene NF with Revett Lake Trailhead `osm:node:131190691` (HIGH), interior targets only; **Idaho Batholith** — Sawtooth NRA with HIGH mapped parking `osm:way:970696531`, 52 access points, the interior Burn Morels target visible with UNKNOWN_VERIFY independent; restricted case (Sawtooth conservation easement, `access=private`, no start) and UNMAPPED case ("does not mean the property is inaccessible") both verified; **interior/PNW boundary** search loads the shared tile and scores sectors per profile. Existing Oregon/Washington PNW and Colorado Southern Rockies regressions pass in the suite.
+
+### National production readiness and hosting (Tasks 24–25)
+
+No national run was executed. The planner `run --tiles` path (used by all four interior canaries) is the national workhorse; it prepares state sources once, composes per-tile state sets from the planner's own geography, journals per label, and resumes. Measured again after the pass: **222 live Parquet assets, 4,541 modern eligible starts, static fruiting-forecast bytes ≈ 30.3 MB, manifest 616 KB, zero dead assets**. Revised CONUS projection (modern-tile medians unchanged by the pass): ~378 MB median published Parquet (p25–p75 ≈ 255–660 MB) across ~3,760 assets — within practical Pages headroom but close enough that the split-hosting decision should be made before the national production run, using the recorded per-state PBF sizes (ME 90.9 MB → FL 656.6 MB) for the ~40-state cache estimate (~10–15 GB) and ~940 DEM downloads (~52 GB transient).
+
+### Remaining profiles and exact next task (Tasks 22–23)
+
+**3 of 10 profiles remain UNSUPPORTED.** Recommended order: **1. California Mediterranean** (49 tiles; dense population; distinct climate; needs its own sourced targets — the golden-chanterelle species complex, black trumpets, candy cap; highest user value per tile); **2. Southwest / Arid Interior** (202 tiles; monsoon ecology; moderate reuse of the SR monsoon model after the sky-island reassignment); **3. Great Plains** (262 tiles; thinnest evidence and lowest relevance; many tiles will be honest VERIFIED_EMPTY forests-void). Exact next biological profile: **California Mediterranean**. After it, the national GIS production run (multi-session, planner-driven) and the remaining two profiles complete the launch gate: currently **7/10 profiles MODELED, 40/940 tiles complete — NOT launch-ready.**
+
 ## Revision 10 — CONUS planner, Northern Forests + Southeast profiles, national canaries (2026-09-15)
 
 Started from `153a95d`. **This revision supersedes revision 9's product-direction statement that the project should not scale toward CONUS: the launch requirement is now full CONUS coverage, both GIS and biological, and no launch is recommended while major ecological regions remain biologically unsupported.** Biology stays PROVISIONAL and no missing evidence is fabricated; the Northern Forests and Southeast profiles were researched and implemented as genuine regional models, not aliases of the hardwood models. The production architecture is unchanged.
@@ -595,7 +668,7 @@ Earlier `e1ccb64`-era notes:
 - tests/test_fruiting_bulk_adapters.py: 53 deterministic tests for adapter contracts, the cache manifest/checksum/corruption path, the Soil Data Access and package soil paths (normalized contract, batched point join, ambiguity, explicit failure/empty, gSSURGO/FileGDB and gNATSGO/GeoPackage packaging equivalence), DEM release resolution, habitat composition with optional sources absent, state-scoped SDA preparation with independent caches/restart reuse and a failing refresh that cannot invalidate another state, exact cross-state mukey inclusion, failure/retry of a batched point query, property identity, legacy-tile backward compatibility, and the committed two-state release (component/layer completeness, real SSURGO values with explicit gaps, conservative jurisdiction, cross-tile MTBS identity, release-scope manifest assertions, PNW release component/layer completeness with the explicit ocean VERIFIED_EMPTY, Oregon soil provenance, the hemlock signal, the three-state coverage dimensions, the EPA-derived PNW release equality with per-tile roles/shares, and regional cross-tile access identity).
 - tests/test_fruiting_pnw_release.py: 10 deterministic release-tool tests (selection algorithm on synthetic shares, determinism, real-selection == published release, plan measurement basis, honest missing-cache state, journal resume digests).
 - tests/test_fruiting_tile_publish.py: 5 publication tests (incremental integrity/empty/failure, completeness components, coverage dimensions, profile-roster drift guard against the browser mapping, and coverage refresh on publication).
-- junk-drawer.json and footer: 2026.09.15.5 (revision 9 extended the bounded PNW release to Washington; revision 8 published the Oregon production release; revision 6 added the Pacific Northwest profile; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
+- junk-drawer.json and footer: 2026.09.15.7 (revision 11 modeled the coherent interiorMountains core with the Task-Zero crosswalk correction; revision 10 added the CONUS planner, Northern Forests and Southeast; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
 
 ## Rebuild commands
 
