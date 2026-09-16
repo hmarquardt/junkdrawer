@@ -1674,7 +1674,7 @@ def main() -> None:
     state.add_argument("--cache", type=Path, default=Path("/tmp/fruiting-forecast-gis-sources"))
 
     access_prepare = prepare_sub.add_parser("access", help="Prepare a Geofabrik state PBF once (requires osmium, shapely and pyproj)")
-    access_prepare.add_argument("--state", required=True, choices=["CO", "OR", "NM", "WA"])
+    access_prepare.add_argument("--state", required=True, choices=["CO", "OR", "NM", "WA", "MI", "ME", "FL", "GA"])
     access_prepare.add_argument("--snapshot", default="latest")
     access_prepare.add_argument("--refresh", action="store_true")
     access_prepare.add_argument("--pbf", type=Path, default=None)

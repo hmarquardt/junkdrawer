@@ -1,5 +1,102 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 10 — CONUS planner, Northern Forests + Southeast profiles, national canaries (2026-09-15)
+
+Started from `153a95d`. **This revision supersedes revision 9's product-direction statement that the project should not scale toward CONUS: the launch requirement is now full CONUS coverage, both GIS and biological, and no launch is recommended while major ecological regions remain biologically unsupported.** Biology stays PROVISIONAL and no missing evidence is fabricated; the Northern Forests and Southeast profiles were researched and implemented as genuine regional models, not aliases of the hardwood models. The production architecture is unchanged.
+
+### National tile planner (Task 1–3)
+
+New `tools/fruiting_conus_plan.py` — deterministic, offline, derived entirely from pinned repository geography:
+
+- `plan --scope conus|... --profile P --state XX` enumerates every one-degree CONUS tile in the pinned catalog and computes, per tile: land share (tile ∩ union of pinned states — the legacy catalog land flag is deliberately NOT trusted, because it misses coastal production tiles like `n42_w125`), per-state area shares, per-EPA-profile area shares, dominant profile, the profile maturity parsed live from the browser file (never hardcoded), current publication and per-layer statuses, the soil/PBF states required (state share ≥ 5%), DEM prepared status (when a source cache is given), and manifest-derived byte estimates.
+- `coverage` produces the national coverage matrix; `projection` scales measured per-tile distributions; `run --tiles` executes the PNW two-phase build machinery for explicit tile lists (per-tile soil states from the planner's own geography, access states from the prepared-state geometry rule).
+- Planner runtime ≈ 1.2 s for all of CONUS; 8 deterministic tests pin determinism, shares, coverage, filters and the projection.
+
+**Measured national coverage (2026-09-15):** 940 relevant CONUS land tiles; 73 published; 25 with the complete four-layer stack (19 PNW + 2 Colorado access canaries + 4 new national canaries); 332 tiles intersect multiple profiles and 291 multiple states — multi-state/multi-profile tiles are first-class, never resolved from tile centers.
+
+| profile | tiles ∩ | GIS complete | biology |
+|---|---:|---:|---|
+| pnw | 33 | 19 | PROVISIONAL (production) |
+| southernRockies | 33 | 2 | PROVISIONAL (production) |
+| northernForests | 92 | 2 | PROVISIONAL (canaries) |
+| southeast | 144 | 5 | PROVISIONAL (canaries) |
+| hardwood | 197 | 0 | PROVISIONAL (legacy eastern) |
+| appalachians | 98 | 0 | PROVISIONAL (reuses hardwood — audited) |
+| interiorMountains | 158 | 0 | UNSUPPORTED |
+| california | 26 | 0 | UNSUPPORTED |
+| southwest | 191 | 0 | UNSUPPORTED |
+| plains | 248 | 0 | UNSUPPORTED |
+
+Land area by profile (EPSG:5070, km²): plains 1,883,194 · southwest 1,316,482 · hardwood 1,173,321 · southeast 934,056 · interiorMountains 658,373 · appalachians 642,732 · northernForests 612,621 · southernRockies 145,361 · pnw 144,513 · california 138,712. Approximate full-coverage tile equivalents: plains ~169, southwest ~119, hardwood ~106, interiorMountains ~60, southeast ~84, northernForests ~55, appalachians ~58.
+
+### National source-load projection (Tasks 3–4)
+
+From the manifest's own AVAILABLE-layer distributions (habitat median 14.4 KB, public land 145.4 KB, fire 195.1 KB, access 47.3 KB per tile): full CONUS published Parquet ≈ **378 MB median (p25–p75 ≈ 255–660 MB)** across ~3,760 assets, ~940 DEM downloads (~52 GB transient), soil + PBF preparation for ~40 states (recorded state PBF samples: ME 90.9 MB, OR 253.6 MB, WA 363.1 MB, MI 313.1 MB, GA 356.1 MB, CO 381.5 MB, FL 656.6 MB — scale by state area), PAD-US + MTBS ~2 hosted queries per tile (cached per tile, restart-safe).
+
+**Bottleneck audit (evidence-based):** the per-tile pipeline itself is proven and restart-safe; the material constraints are (1) serial wall-clock — measured ~8–13 min/tile including DEM download → roughly 130–200 serial hours for 940 tiles, requiring multi-session journaled batches (supported); (2) hosted-service volume — PAD-US/MTBS ~2,000 query pairs (cached, but rate/timing behavior at scale is unmeasured); (3) GitHub Pages — the projected 380–660 MB static payload approaches the practical ~1 GB site limit, so full-CONUS hosting likely needs a split (repository data now is 27.7 MB and fine); (4) manifest size — 585 KB at 77 published tiles grows roughly linearly (~7 MB at 1,000 tiles) — still fetchable, keep the current design (Task 25: no speculative optimization). SDA and Geofabrik showed no limits at canary scale; TNM resolution behaved identically across four states. Nothing else is a demonstrated bottleneck.
+
+### Crosswalk correction (demonstrated defect, fixed)
+
+Activating the Southeast profile exposed a frozen-crosswalk defect: EPA codes 77 (North Cascades), 78 (Klamath Mountains) and 85 (Southern California coast) were mapped into `southeast` — harmless while Southeast was UNSUPPORTED, but a silent wrong-biology fallback now. Corrected in both the browser and publisher rosters (drift guard re-verified): 78/85 → `california`, 77 → `interiorMountains`. All adjacency expectations updated (`n42_w123`'s Klamath adjacency now records `california`).
+
+### Northern Forests / Great Lakes (Tasks 6–12)
+
+Research recorded in `biology-research.json` (MushroomExpert/Kuo cibarius-complex source, NAMA, existing GTR sources; iNat as supporting evidence only). Every existing eastern taxon was audited for the north rather than inherited: morel CORE with a later northern calendar ([4,5,6], snowmelt declared UNBUILT as an honest missing driver), chanterelle CORE as the northeastern `Cantharellus cibarius` species complex (stayed at Cantharellus spp. rather than claiming one species), chicken CORE, oyster CORE with the cold calendar retained and cooler bands, maitake/hericium PRESENT (oak/beech dependent), puffball MARGINAL. Northern-specific candidates stayed RESEARCH_ONLY where the stack cannot support them: lobster (Russulaceae hosts unrepresentable), hedgehogs (regional species concept unresolved), black trumpets (separate from the implemented winter craterelle), and eastern matsutake `Tricholoma magnivelare` — recorded with the identified data need (an additive red/jack-pine FIA signal column) before any forecast. No Western taxonomy is transferred; `T. murrillianum` remains PNW-only.
+
+Profile implemented as `northernForests` PROVISIONAL with 7 targets, cooler temperature bands, later months, declared snowmelt gap, and regional provenance. Tests: region resolution for the Great Lakes and New England, roster, later morel calendar, snowmelt declaration, season/habitat/host ordering, hardwood non-inheritance, per-sector boundaries.
+
+### Southeast / Coastal Plain (Tasks 13–19)
+
+Research recorded (Kuo lateritius/tabescens pages verified live; Buyck & Hofstetter 2011 complex discussion via the Kuo record; Antonín et al. 2017 Desarmillaria revision; iNat taxa 143270 and 1238700). The eastern roster audit produced a genuine taxonomic split and one new forecastable target:
+
+- **`chanterelleLateritius` (NEW, CORE)** — the southeastern oak chanterelle `Cantharellus lateritius` (iNat 143270), distinct from the northeastern cibarius complex; oak-hickory host signal, warm-season bands, July onset per Kuo; pine-association weight declared as a 15-weight gap because southern pine FIA classes have no host signal (identified data need, not fabricated).
+- **`honeyRingless` (NEW, CORE)** — ringless honey mushroom, `Desarmillaria caespitosa` per iNaturalist 1238700 (traditionally Armillaria tabescens; Antonín et al. 2017 revised the complex), with the Great-Lakes-to-Texas hardwood-root ecology and late-summer flush per Kuo.
+- morel MARGINAL with the months-earlier coastal calendar ([2,3,4]); chicken CORE with the warm window and the Laetiporus persicinus note; oyster CORE with the winter calendar ([10..3]); maitake/hericium PRESENT; puffball PRESENT.
+
+Profile implemented as `southeast` PROVISIONAL with 8 targets. Tests: resolution, taxonomy split, MARGINAL morel semantics, warm/winter ordering, honey season ordering, pine-gap declaration, boundary suppression against plains/appalachians.
+
+### National canaries (Tasks 11, 18, 23)
+
+Four new vertical-stack canaries built through the planner `run --tiles` path in **467.6 s, zero failures** — new state sources prepared once each (MI 313,108,736 B PBF/10,664 mapunits; ME 90,850,339 B/1,864; FL 656,564,714 B/3,884; GA 356,086,452 B/5,059; all `*-latest` extracts headered 2026-09-15T20:20:37Z; soil vintages 2025-08-28…2025-09-05):
+
+| Tile | Profile share | States | Habitat | PL | Fire | Access | Starts |
+|---|---|---|---|---|---|---|---:|
+| `n45_w085` (northern Michigan) | northernForests 71.8% | MI 75.1% | AVAILABLE | 336 properties | AVAILABLE (1) | AVAILABLE, 359 pts | 55 |
+| `n45_w070` (northern Maine) | northernForests 100% | ME 100% | AVAILABLE | 119 | VERIFIED_EMPTY | AVAILABLE, 73 pts | 27 |
+| `n30_w084` (Apalachicola/FL-GA) | southeast 99.4% | FL 63.5, GA 35.6 | AVAILABLE | 201 | AVAILABLE (119) | AVAILABLE, 62 pts | 3 |
+| `n32_w084` (SW Georgia) | southeast 90.8% | GA 100% | AVAILABLE | 230 | VERIFIED_EMPTY | AVAILABLE, 95 pts | 15 |
+
+Per-tile soil provenance was corrected to exactly each tile's own states (a union leak was caught in review and rebuilt). Manual QA (screenshots + JSON): northern Michigan search resolves all 7 Northern Forests targets with a MEDIUM mapped start (Arlington Park `osm:way:513691961`); Apalachicola search resolves all 8 Southeast targets with a HIGH trailhead (Aucilla WMA `osm:node:5979001929`); boundary searches (northern Wisconsin → NF-modeled/no-GIS, central Texas plains → UNSUPPORTED/no-GIS) state their situation explicitly with no fallback. All UNKNOWN_VERIFY independent of access. 390 px mobile verified.
+
+**National canary matrix (the permanent regression spine):** PNW `45.5,-123.6` · Southern Rockies `39.48,-106.05` · Northern Forests `45.5,-84.8` + `45.1,-89.7` (model-only) · Southeast `30.5,-84.2` + `32.5,-84.0` (model-only) · Hardwood `38.3553,-87.5675` · Appalachians `36.5,-83.2` · California `38.5,-122.7` (UNSUPPORTED — no fallback) · Interior Mountains `44.0,-114.5` (UNSUPPORTED) · Southwest `33.5,-112.1` (UNSUPPORTED) · Plains `38.5,-100.5` (UNSUPPORTED).
+
+### Appalachians / Ozarks audit (Task 20)
+
+Audited, not automatically split: the profile deliberately shares the hardwood `HARDWOOD_MODELS` object (asserted by test so the reuse stays a documented decision), and the Ozark/Appalachian region has no sourced regional override that would change months, hosts or weather response under the current evidence base. The profile name remains meaningful as EPA geography. No material defect demonstrated → left alone this pass; flagged for revisit if Appalachian-specific literature (elevational phenology) is researched later.
+
+### Decisions: occurrence prior and snowmelt (Tasks 26–27)
+
+- **Historical occurrence prior: deferred.** Regional biology plus live iNaturalist observations already supply presence plausibility for applicability; a fixed-version GBIF/iNat prior would improve confidence weighting but is not required for honest national coverage, and absence must never become a penalty (existing principle). Kept as a declared `historicalPrior: UNBUILT` field on every target.
+- **Snowmelt: deferred with declared proxies.** No national snowmelt dataset exists in the stack; Northern Forests and mountain morel targets declare `snowmelt: UNBUILT` and use explicitly-labeled engineering temperature bands rather than pretending elevation or soil temperature is measured snowmelt. A SNOTEL/NOAA-based national snowmelt interface is recorded as the identified future enhancement, not a launch blocker.
+
+### Tests (Task 31)
+
+`tests/fruiting-forecast-national.spec.js` (6 browser tests): NF/SE resolution, audited rosters, later/earlier calendars, snowmelt declaration, taxonomy split, MARGINAL semantics, season/habitat/host/winter orderings, cross-profile suppression without fallback, and the Appalachians reuse decision. `tests/test_fruiting_conus_plan.py` (8 tests): planner determinism, geometry-derived relevance (coastal tiles included), multi-state/multi-profile shares, Klamath crosswalk correction, browser-parsed maturity, manifest-driven statuses, profile/state filters, GIS-vs-biology coverage separation, measured-distribution projection. Updated: conus places rosters, PNW release adjacency (Klamath→california), adapter coverage/verified-empty counts (+2 canary verified-empty fire tiles). Full suite: **106 browser tests passed (1 opt-in live skipped)**, adapters 53, publication 6, access 16, release 10, planner 8.
+
+### Remaining unsupported profiles and priority (Tasks 21–22)
+
+Four profiles remain UNSUPPORTED: California Mediterranean, Northern Rockies / Interior Mountains, Southwest / Arid Interior, Great Plains. **CONUS is not biologically complete and must not be announced as such.**
+
+Recommended implementation order, from measured area/leverage: **1. Northern Rockies / Interior Mountains** (658,373 km²; highest model reuse — SR montane conifer and PNW taxa genera with the eastern matsutake and red/jack-pine data need; 158 tiles); **2. California Mediterranean** (138,712 km²; dense population, distinct climate, needs its own sourced targets — golden chanterelle complex, black trumpets, candy cap; 26 tiles); **3. Southwest / Arid Interior** (1,316,482 km²; monsoon-driven ecology, low model reuse; 191 tiles); **4. Great Plains** (1,883,194 km²; least mushroom-hunting relevance and thinnest evidence; 248 tiles, likely many VERIFIED_EMPTY access/fire tiles). Exact next profile: **Northern Rockies / Interior Mountains**.
+
+### CONUS launch gate (Task 28)
+
+A CONUS launch may be recommended only when: (1) **Biology** — all 10 macro-profiles are MODELED (or carry a narrowly justified, documented exception); (2) **GIS** — every meaningful CONUS land tile has habitat/public-land/fire/access processed with real per-layer statuses (verified-empty is acceptable; UNBUILT is not); (3) **State preparation** — every required state has versioned, checksummed SSURGO and OSM PBF sources; (4) **Browser** — any CONUS location resolves its ecological profile, a regionally appropriate target set and explicit evidence coverage, with unsupported-profile fallback impossible; (5) **Honesty** — no fabricated thresholds, no inherited calendars, declared gaps preserved; (6) **Performance** — searches stay tile-local, warm searches reuse cache; (7) **QA** — the permanent national canary matrix passes end-to-end. Current status: 6/10 profiles modeled, 25/940 tiles complete, 6 state source sets prepared — **the project is NOT launch-ready, and the next pass targets the remaining biological profiles, not another isolated state release.**
+
+### Updated data-lake metrics (Task 29)
+
+After revision 10: **210 live Parquet assets** (0 dead), **77 published tiles, 37 complete release tiles, 9 published states/territories of modern production (CO/NM/OR/WA/MI/ME/FL/GA + legacy IN)**, **4,473 eligible mapped starts across the 21 modern access tiles** (plus 3,526 legacy Indiana access rows kept for backward compatibility); static fruiting-forecast bytes ≈ 27.9 MB; manifest 585 KB; 36 research sources / 19 research candidates (11 implemented PROVISIONAL targets + 5 regional-profile rosters); source systems: FIA forest type groups, USGS 3DEP, MRLC NLCD/TCC, NRCS SSURGO-SDA (8 state tables), PAD-US, MTBS, Census states, EPA Level III, OpenStreetMap/Geofabrik (8 state PBFs), Open-Meteo, iNaturalist. Cold canary searches fetch 1–9 tiles (0.4–7.9 MB, 12–35 requests); warm repeats fetch zero.
+
 ## Revision 9 — western Washington extension (2026-09-15)
 
 Started from `058c7b0`. Same rules as revision 8: biology, species, coefficients and geography definitions frozen; no CONUS; the production contract extends, it is not redesigned. Oregon's published artifacts are untouched except where a boundary tile gains cross-state access evidence (below).

@@ -283,26 +283,41 @@ def _access_states_for_tile(tile_id, prepared_states, tolerance=0.01):
     return sorted(needed)
 
 
+def _prepared_access_states(access_cache):
+    """Every READY prepared OSM state in the access cache, for tile-list runs."""
+    from fruiting_bulk_adapters import load_cache_manifest
+    manifest = load_cache_manifest(access_cache).get('sources', {})
+    return sorted(key.split(':')[1] for key, entry in manifest.items()
+                  if key.startswith('osm_access:') and entry.get('status') == 'READY')
+
+
 def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources'),
         access_cache=None, out=Path('/tmp/ff-pnw-norm'), only=None, resume=False,
-        core_pct=CORE_PCT, halo_pct=HALO_PCT, state_share=STATE_SHARE, access_states=None):
+        core_pct=CORE_PCT, halo_pct=HALO_PCT, state_share=STATE_SHARE, access_states=None,
+        tiles=None, soil_states=None):
+    """Build the derived state release — or, when `tiles` is given, an explicit
+    tile list (the national planner's run path): the same two-phase machinery,
+    the same per-tile isolation, with the journal keyed by the run label."""
     started = time.monotonic()
+    run_label = 'tiles' if tiles else state_code
     access_cache = Path(access_cache) if access_cache else Path(source_cache)
     source_cache, out = Path(source_cache), Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    journal_path = out / f'pnw-release-journal-{state_code}.json'
+    journal_path = out / f'pnw-release-journal-{run_label}.json'
     journal = _journal(journal_path)
-    access_cache_manifest = None
 
-    shares_all = shares_for_tiles(state_code)
-    tiles, eligible = select_tiles(shares_all, core_pct, halo_pct, state_share)
+    if tiles:
+        tiles = sorted(dict.fromkeys(t.strip() for t in tiles if t.strip()))
+    else:
+        shares_all = shares_for_tiles(state_code)
+        tiles, eligible = select_tiles(shares_all, core_pct, halo_pct, state_share)
     if only:
         wanted = {t.strip() for t in only.split(',') if t.strip()}
         missing = wanted - set(tiles)
         if missing:
             raise SystemExit(f'Tiles not in the derived release: {sorted(missing)}')
         tiles = sorted(wanted)
-    print(f'Derived {len(tiles)} release tiles for {state_code}: {", ".join(tiles)}', flush=True)
+    print(f'{run_label} run tiles ({len(tiles)}): {", ".join(tiles)}', flush=True)
 
     from fruiting_bulk_adapters import (build_fire, build_habitat, build_public_land,
                                         load_cache_manifest, prepare_national, prepare_state,
@@ -313,9 +328,27 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
     #    READY entry is reused and never re-downloaded.
     print('preparing national sources (reused when already READY)', flush=True)
     prepare_national(source_cache, ['forest-type', 'land-cover', 'canopy', 'states'])
-    print(f'preparing {state_code} soil (reused when already READY)', flush=True)
-    prepare_state(source_cache, state_code)
+    soil_states_for_tile = None
+    if tiles:
+        # Tile-list runs prepare soil for every state the tiles actually contain;
+        # the membership rule composes per-point soil at build time.
+        from fruiting_conus_plan import build_tiles
+        planned = {row['id']: row for row in build_tiles()}
+        missing = [t for t in tiles if t not in planned]
+        if missing:
+            raise SystemExit(f'Not relevant CONUS land tiles: {missing}')
+        needed_states = sorted({code for t in tiles for code in planned[t]['soilStatesRequired']})
+        if not needed_states:
+            raise SystemExit('No soil states resolved for the requested tiles; check the tile IDs')
+        for code in needed_states:
+            print(f'preparing {code} soil (reused when already READY)', flush=True)
+            prepare_state(source_cache, code)
+    else:
+        print(f'preparing {state_code} soil (reused when already READY)', flush=True)
+        prepare_state(source_cache, state_code)
     prepared_states = [state_code] + [s.strip().upper() for s in (access_states or '').split(',') if s.strip()]
+    if tiles:
+        prepared_states = _prepared_access_states(access_cache)
     prepared_states = sorted(dict.fromkeys(prepared_states))
     for code in prepared_states:
         entry = load_cache_manifest(access_cache).get('sources', {}).get('osm_access:' + code)
@@ -345,7 +378,10 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
         tile_started = time.monotonic()
         try:
             prepare_tile(source_cache, tile)
-            soil = soil_inputs(source_cache, [state_code], tile)
+            states_for_soil = (soil_states.split(',') if soil_states else
+                               ([code for code in prepared_states if code in (planned.get(tile) or {}).get('soilStatesRequired', [state_code])]
+                                if tiles else [state_code]))
+            soil = soil_inputs(source_cache, states_for_soil, tile)
             results = {
                 'habitat': build_habitat(tile, source_cache, out, soil_prepared=soil),
                 'public-land': build_public_land(tile, source_cache, out),
@@ -387,7 +423,7 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
         _save_journal(journal_path, journal)
 
     blocked = [t for t in tiles if t not in coverage and journal.get(t, {}).get('habitat', {}).get('sha256')]
-    summary = {'state': state_code, 'tiles': tiles,
+    summary = {'state': run_label, 'tiles': tiles,
                'habitatComplete': sorted(t for t in tiles if journal.get(t, {}).get('habitat', {}).get('sha256')),
                'accessComplete': sorted(t for t in tiles if journal.get(t, {}).get('access', {}).get('sha256')),
                'habitatFailed': sorted(t for t in tiles if journal.get(t, {}).get('habitat', {}).get('error')),

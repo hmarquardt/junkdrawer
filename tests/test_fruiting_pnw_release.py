@@ -129,8 +129,8 @@ class Plan(unittest.TestCase):
         self.assertGreater(shares['n44_w123']['pnwSharePct'], shares['n44_w122']['pnwSharePct'])
         self.assertIn('interiorMountains', shares['n44_w122']['adjacentProfiles'],
                       'the eastern halo must record its unsupported interior adjacency')
-        self.assertIn('southeast', shares['n42_w123']['adjacentProfiles'],
-                      'the southern core must record its Klamath adjacency')
+        self.assertIn('california', shares['n42_w123']['adjacentProfiles'],
+                      'the southern core must record its Klamath adjacency (Klamath is a california-profile code)')
 
     def test_washington_plan_reports_shared_and_new_tiles(self):
         plan = pnw_release.build_plan('WA')

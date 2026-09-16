@@ -32,7 +32,8 @@ from fruiting_bulk_adapters import (_sha256, load_cache_manifest, save_cache_man
                                    tile_bbox, write_parquet)
 
 VERSION = 'osm-access-v1'
-STATES = {'CO': 'colorado', 'OR': 'oregon', 'NM': 'new-mexico', 'WA': 'washington'}
+STATES = {'CO': 'colorado', 'OR': 'oregon', 'NM': 'new-mexico', 'WA': 'washington',
+          'MI': 'michigan', 'ME': 'maine', 'FL': 'florida', 'GA': 'georgia'}
 ATTRIBUTION = '© OpenStreetMap contributors'
 LICENSE = 'https://www.openstreetmap.org/copyright'
 TAGS = ('name operator access motor_vehicle vehicle foot bicycle surface smoothness tracktype '

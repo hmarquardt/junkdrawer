@@ -57,6 +57,10 @@ RELEASE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES))
 # Every tile whose habitat declares all components AVAILABLE.
 ACCESS_TILES = tuple(sorted(('n39_w106', 'n40_w106') + PNW_TILES))
 AVAILABLE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES + PNW_TILES))
+# Revision-10 national canaries: Northern Forests and Southeast vertical-stack tiles.
+NATIONAL_CANARY_TILES = ('n45_w085', 'n45_w070', 'n30_w084', 'n32_w084')
+# Their wet tiles declare explicit verified-empty fire.
+NATIONAL_CANARY_OCEAN_TILES = ('n45_w070', 'n32_w084')
 # Tiles whose access evidence composes more than one prepared OSM state.
 PNW_SHARED_STATE_TILES = ('n45_w122', 'n45_w123', 'n46_w123', 'n46_w124')
 # Minimum real soil evidence observed per PNW tile (land share varies with ocean).
@@ -800,14 +804,15 @@ class PublishedColoradoTiles(unittest.TestCase):
             self.assertEqual(sum(stat[key] for key in ('populated', 'verifiedEmpty', 'unbuilt', 'failed')), tile_count, layer)
             # Only the ocean-heavy PNW coast tile declares an explicit verified
             # empty (no mapped MTBS perimeter); every other layer has none.
-            self.assertEqual(stat['verifiedEmpty'], len(PNW_OCEAN_TILES) if layer == 'fire' else 0, layer)
-        self.assertGreaterEqual(summary['habitat']['available'], len(AVAILABLE_TILES))
-        self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], len(AVAILABLE_TILES))
-        self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], len(AVAILABLE_TILES))
-        self.assertEqual(summary['habitat']['components']['soil']['AVAILABLE'], len(AVAILABLE_TILES))
+            self.assertEqual(stat['verifiedEmpty'], len(PNW_OCEAN_TILES) + len(NATIONAL_CANARY_OCEAN_TILES) if layer == 'fire' else 0, layer)
+        release_tiles = len(AVAILABLE_TILES) + len(NATIONAL_CANARY_TILES)
+        self.assertGreaterEqual(summary['habitat']['available'], release_tiles)
+        self.assertEqual(summary['habitat']['components']['canopy']['AVAILABLE'], release_tiles)
+        self.assertEqual(summary['habitat']['components']['landCover']['AVAILABLE'], release_tiles)
+        self.assertEqual(summary['habitat']['components']['soil']['AVAILABLE'], release_tiles)
         self.assertEqual(summary['habitat']['components']['soil']['UNBUILT'], 0)
         self.assertGreaterEqual(summary['fire']['populated'], len(AVAILABLE_TILES) - len(PNW_OCEAN_TILES))
-        self.assertEqual(summary['fire']['verifiedEmpty'], len(PNW_OCEAN_TILES))
+        self.assertEqual(summary['fire']['verifiedEmpty'], len(PNW_OCEAN_TILES) + len(NATIONAL_CANARY_OCEAN_TILES))
         for tile in self.manifest['tiles']:
             asset = tile.get('habitat') or {}
             if asset.get('status') in {'AVAILABLE', 'PARTIAL'}:
@@ -909,7 +914,8 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
         coverage = self.manifest['summary']['coverage']
         self.assertIn('Southern Rockies', coverage)
         self.assertNotIn('955', coverage)
-        self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])), sorted(AVAILABLE_TILES))
+        self.assertEqual(sorted(self.manifest['summary'].get('coverageTiles', [])),
+                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES))
         # Administrative, ecological and layer dimensions stay separate and derived.
         self.assertEqual(sorted(self.manifest['summary']['publishedTiles']), sorted(
             tile['id'] for tile in self.manifest['tiles']
@@ -1148,7 +1154,8 @@ class PacificNorthwestRelease(unittest.TestCase):
         # boundary bounding boxes.
         self.assertGreaterEqual(summary['states'].get('OR', 0), len(PNW_OREGON_TILES))
         self.assertGreaterEqual(summary['states'].get('WA', 0), len(PNW_WASHINGTON_TILES))
-        self.assertEqual(sorted(summary['coverageTiles']), sorted(AVAILABLE_TILES))
+        self.assertEqual(sorted(summary['coverageTiles']),
+                         sorted(AVAILABLE_TILES + NATIONAL_CANARY_TILES))
 
     def test_legacy_tiles_lack_the_hemlock_column(self):
         tile = self.tiles['n37_w088']['habitat']
