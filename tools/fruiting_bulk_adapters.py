@@ -1499,7 +1499,11 @@ def build_fire(tile_id: str, cache: Path, out: Path, min_year: int = 1984, timeo
         "spatialRel": "esriSpatialRelIntersects",
         "outFields": MTBS["outFields"],
         "returnGeometry": "true",
-        "resultRecordCount": 2000,
+        # Some perimeter-heavy tiles make ArcGIS fail while serializing one
+        # large GeoJSON response. Small, stable pages return the same records
+        # and keep restart/retry behavior bounded.
+        "orderByFields": "objectid",
+        "resultRecordCount": 50,
     }, cache, f"mtbs_{tile_id}", timeout), tile_id)
     retrieved = time.strftime("%Y-%m-%d")
     rows = []
