@@ -107,8 +107,7 @@ Wrangler 4.133.0 exposes no object-list command; the orphan audit covers that in
 not unseen out-of-band writes. Do not claim an exhaustive bucket orphan listing or delete orphans.
 
 Batch-1 scope and evidence live under `data/fruiting-forecast/production/`.
-Use `uv run --with osmium --with rasterio --with shapely --with pyproj --with duckdb
---with requests tools/fruiting_batch1.py run --scope data/fruiting-forecast/production/batch1-scope.json
+Use `uv run tools/fruiting_batch1.py run --scope data/fruiting-forecast/production/batch1-scope.json
 --chunk N` (one shell line) for a serial ten-tile checkpoint, resuming the journal under
 `/tmp/ff-batch1-normalized`. Only this frozen Batch-1 scope is authorized by that command.
 National/soil cache is `/tmp/ffsrc`; OSM cache is `/tmp/fruiting-forecast-gis-sources`.

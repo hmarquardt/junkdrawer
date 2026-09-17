@@ -402,6 +402,9 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
     for tile in phase_a:
         tile_started = time.monotonic()
         try:
+            import shutil
+            if shutil.disk_usage(source_cache).free<4*1024**3:
+                raise SystemExit('Less than 4 GiB free; stopped safely before tile download')
             from fruiting_bulk_adapters import dem_path
             dem=dem_path(source_cache,tile)
             dem_existed=dem.exists()
@@ -434,9 +437,13 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
             journal.setdefault(tile, {})['habitat'] = {'error': str(exc)}
             print(f'FAILED {tile} phase A: {exc}', flush=True)
         _save_journal(journal_path, journal)
-        if os.environ.get('FF_RECLAIM_DEM')=='1' and not journal[tile]['habitat'].get('error') and not dem_existed and dem.exists():
+        if os.environ.get('FF_RECLAIM_DEM')=='1' and not journal[tile]['habitat'].get('error') and (tile not in json.loads(os.environ['FF_PRESERVE_DEMS']) if 'FF_PRESERVE_DEMS' in os.environ else not dem_existed) and dem.exists():
             reclaimed=dem.stat().st_size
             dem.unlink()
+            from fruiting_bulk_adapters import save_cache_manifest, usgs_dem_tile_id
+            cache_meta=load_cache_manifest(source_cache)
+            cache_meta['sources']['3dep_1arcsecond:'+usgs_dem_tile_id(tile)]['status']='RECLAIMED'
+            save_cache_manifest(source_cache,cache_meta)
             emit('dem-reclaimed',tile=tile,bytes=reclaimed)
 
     # 3. Phase B: access proof for every tile whose habitat is complete (the

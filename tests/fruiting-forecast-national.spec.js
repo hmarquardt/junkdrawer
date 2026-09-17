@@ -1,4 +1,5 @@
 const {test,expect}=require('@playwright/test');
+require('./fruiting-local-manifest.cjs')(test);
 const path=require('path');
 test.use({channel:'chrome'});
 async function open(page){

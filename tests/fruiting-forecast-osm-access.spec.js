@@ -1,4 +1,5 @@
 const {test,expect}=require('@playwright/test');
+require('./fruiting-local-manifest.cjs')(test);
 const {spawn}=require('child_process');
 const fs=require('fs');
 const port=19000+(process.pid%5000), base=`http://127.0.0.1:${port}`;

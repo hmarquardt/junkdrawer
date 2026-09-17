@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["duckdb", "requests", "shapely", "pyproj", "rasterio", "osmium", "pyshp"]
+# ///
 """Freeze planner-derived prepared-input Batch 1 and run serial checkpoint chunks.
 
 Never prepares new states. Uses the existing CONUS release pipeline. A frozen
@@ -28,6 +32,7 @@ def derive(source, access):
             'sourceCache':str(source),'accessCache':str(access),'coverageBefore':coverage(rows),
             'readyStates':sorted({s for r in eligible for s in r['soilStatesRequired']}),
             'eligibleTiles':len(eligible),'alreadyComplete':len(eligible)-len(requested),
+            'preexistingDemTiles':[r['id'] for r in rows if r['demPrepared']],
             'tiles':[r['id'] for r in requested], 'layerWork':dict(Counter(k for r in requested for k,v in r['layerStatus'].items() if v not in {'AVAILABLE','VERIFIED_EMPTY'})),
             'stateTileCounts':dict(Counter(s for r in eligible for s in r['soilStatesRequired']))}
 
@@ -44,6 +49,7 @@ def main():
     if a.command=='plan':
         if a.scope.exists():raise SystemExit('Refusing to overwrite frozen scope')
         atomic_json(a.scope,derive(a.source_cache,a.access_cache));return
+    import rasterio, shapefile, osmium  # Fail before any download if tooling is incomplete.
     scope=json.loads(a.scope.read_text());tiles=scope['tiles'][a.chunk*a.checkpoint_size:(a.chunk+1)*a.checkpoint_size]
     if not tiles:raise SystemExit('No tiles in requested chunk')
     current=derive(Path(scope['sourceCache']),Path(scope['accessCache']))
@@ -51,6 +57,7 @@ def main():
     if shutil.disk_usage(a.out.parent).free<8*1024**3:raise SystemExit('Less than 8 GiB free; stopping before downloads')
     a.out.mkdir(parents=True,exist_ok=True)
     os.environ['FF_RECLAIM_DEM']='1'
+    os.environ['FF_PRESERVE_DEMS']=json.dumps(scope.get('preexistingDemTiles',[]))
     os.environ['FF_METRICS_PATH']=str(a.out/'metrics.jsonl')
     from fruiting_pnw_release import run
     import threading
@@ -68,5 +75,8 @@ def main():
     stop.set();watcher.join()
     result.update(startedAt=start,endedAt=time.time(),chunk=a.chunk)
     atomic_json(a.out/f'chunk-{a.chunk:03d}.json',result)
+    published={t['id']:t for t in json.loads((DATA/'manifest.json').read_text())['tiles']}
+    incomplete=[t for t in tiles if any(published.get(t,{}).get(k,{}).get('status') not in {'AVAILABLE','VERIFIED_EMPTY'} for k in ('habitat','publicLands','fireHistory','accessPoints'))]
+    if incomplete:raise SystemExit('Checkpoint incomplete; preserved for resume: '+','.join(incomplete))
 
 if __name__=='__main__':main()

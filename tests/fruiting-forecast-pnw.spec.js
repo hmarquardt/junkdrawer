@@ -1,4 +1,5 @@
 const {test,expect}=require('@playwright/test');
+require('./fruiting-local-manifest.cjs')(test);
 const path=require('path');
 const {spawn}=require('child_process');
 test.use({channel:'chrome'});
@@ -165,7 +166,9 @@ test('PNW biology never leaks into neighboring unsupported profiles',async({page
   // California is now modeled: it receives its own targets and never PNW ids.
   expect(r.california.profileId).toBe('california');
   expect(r.california.ids).toEqual(['chanterelleCalifornicus','craterellusCalicornucopioides','lactariusRubidus','morel']);
-  expect(r.plains.ids).toHaveLength(0);
+  // plains is now modeled: morelAmericana + giantPuffball, never PNW ids
+  expect(r.plains.profileId).toBe('plains');
+  expect(r.plains.ids).toEqual(['morelAmericana','giantPuffball']);
   expect(r.plains.ids).not.toContain('chanterelleFormosus');
   // Southern Rockies targets stay out of the Pacific Northwest and vice versa.
   expect(r.pnw.ids).not.toContain('porcini');

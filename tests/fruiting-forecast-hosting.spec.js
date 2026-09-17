@@ -44,7 +44,7 @@ test('abort never returns cached bytes as a successful refresh',async({page})=>{
 test('biology declarations and scoring code are byte-identical to Phase-1B baseline',()=>{
  const {execFileSync}=require('child_process');const old=execFileSync('git',['show','92e968ede9df96312721b559d9a5a5c3062142cc:fruiting-forecast.html'],{encoding:'utf8'}),now=fs.readFileSync('fruiting-forecast.html','utf8');
  const range=(s,a,b)=>s.slice(s.indexOf(a),s.indexOf(b));
- expect(range(now,'  var BASE_TAXA','  var state=')).toBe(range(old,'  var BASE_TAXA','  var state='));
+ expect(range(now,'  var SPECIES=','  var state=')).toBe(range(old,'  var SPECIES=','  var state='));
  for(const name of ['scoreSpecies','scoreHabitat','monthScore','rangeScore']){
   const fn=s=>{const start=s.indexOf('function '+name+'(');expect(start).toBeGreaterThan(0);return s.slice(start,s.indexOf('\n',start))};expect(fn(now)).toBe(fn(old));
  }

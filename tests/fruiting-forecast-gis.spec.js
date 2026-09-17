@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+require('./fruiting-local-manifest.cjs')(test);
 const { spawn, execSync } = require('child_process');
 const http = require('http');
 const path = require('path');

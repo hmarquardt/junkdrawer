@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+require('./fruiting-local-manifest.cjs')(test);
 const path = require('path');
 
 const url = `file://${path.resolve(process.cwd(), 'fruiting-forecast.html')}`;
