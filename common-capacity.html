@@ -1842,8 +1842,8 @@ table.lda tbody td:nth-child(2),table.lda tbody td:nth-child(3){font-variant-num
 </section>
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.17.2" bump="Update this version whenever this file changes in a commit." -->
-<footer class="jf" data-junkdrawer-deploy-footer data-deploy-version="2026.09.17.2">
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.17.3" bump="Update this version whenever this file changes in a commit." -->
+<footer class="jf" data-junkdrawer-deploy-footer data-deploy-version="2026.09.17.3">
   <div class="wrap">
     <p style="max-width:62em;margin:0 auto 14px">
       <strong style="color:var(--ink-2)">Common Capacity</strong> &middot; <em>Risk is real. Control is a choice.</em><br>
@@ -1861,7 +1861,7 @@ table.lda tbody td:nth-child(2),table.lda tbody td:nth-child(3){font-variant-num
       <a class="btn sm" href="#top">Back to top</a>
     </div>
     <p style="margin-top:16px">
-      &copy; 2026 Hank Marquardt &middot; Common Capacity &middot; version 2026.09.17.2
+      &copy; 2026 Hank Marquardt &middot; Common Capacity &middot; version 2026.09.17.3
     </p>
   </div>
 </footer>
@@ -1899,9 +1899,15 @@ var META = {
   buildLabel: "17 September 2026",
   memberDataUpdated: "2026-09-03",
   committeeDataUpdated: "2026-09-16",
+  /* The Congress the embedded member roster represents, as an integer. The "Your Congress"
+     resolver compares this against the Congress named in the Census Bureau's current
+     district layer, so that a roster which has fallen behind a new Congress is never used
+     to name an officeholder. Update this together with MEMBERS. */
+  congressSession: 119,
   notes: [
     "2026-09-17 — finish pass. Added the personalized 'Your Congress' resolver (browser geolocation resolved to a congressional district through the U.S. Census Bureau geocoder over JSONP, with an explicit manual fallback), grouped the responsive navigation panel into labelled clusters, and removed the analytics collector so a normal page load makes no outbound request at all.",
     "2026-09-17 — finish pass, second revision. A failed location lookup now opens the manual chooser instead of only describing it; Reset local data also clears the saved state and district; and the composer no longer discards typed text: switching recipient rewrites only the greeting line, while a rebuild from a generation control says so in a notice.",
+    "2026-09-17 — release gate. Added META.congressSession (119) and a transition guard: the resolver now reads the Congress number out of the Census layer name and, if it differs from the embedded roster, refuses to match automatically and offers the manual path. META.congressSession was previously only described in a comment and did not exist. No change to the normal 119th-Congress path.",
     "2026-09-16 — initial build. Policy landscape verified against primary sources on this date.",
     "2026-09-16 — verification pass. Corrected the Altair 8800 price baseline ($439 kit / $621 assembled, not $395); linked specific primary and peer-reviewed records in place of generic source homepages (OSTP nucleic acid screening framework, METR study, A-Lab, GraphCast, Stigler, SBA regulatory-cost study, the Bernstein litigation record, and the 2006 EC2 launch announcement); added the three newest members' verified official sites and contact pages; clarified that the FRONTIER Act's lead cosponsor is not its sponsor.",
     "Update MEMBERS from the congress-legislators dataset, POLICY from Congress.gov and agency sites, and bump both the file version and the footer date."
@@ -3192,9 +3198,11 @@ function restoreComposer() {
    The resolver does not hard-code that: it finds the congressional layer by name
    pattern (for example "119th Congressional Districts") and reads the district from
    the layer's GEOID. When a new Congress is seated the layer name changes by itself
-   and this code keeps working. META.congressSession records which Congress the
-   embedded member dataset was built from, and should be updated with that dataset so
-   the two stay in step.
+   and this code keeps working — but the embedded MEMBERS roster does not, so the
+   Congress number is read out of the layer name and compared with META.congressSession.
+   On a mismatch the resolver refuses to match automatically and offers the manual path,
+   because district lines may have been redrawn. META.congressSession and MEMBERS must
+   be updated together.
 */
 var CENSUS = {
   endpoint: "https://geocoding.geo.census.gov/geocoder/geographies/coordinates",
@@ -3259,7 +3267,12 @@ function censusDistrictFrom(geos) {
   /* Delegate districts (the District of Columbia reports 98) and at-large (00) both
      mean "no numbered district". The directory stores those seats as district 0. */
   if (d >= 90) d = 0;
-  return { state: st, district: d, layer: cdKey };
+  /* The layer is named for the Congress whose district lines it draws, e.g.
+     "119th Congressional Districts". Recording that number lets the caller refuse to
+     match a district against a member roster built for a different Congress. */
+  var congress = parseInt((cdKey.match(/^(\d+)/) || [])[1], 10);
+  if (isNaN(congress)) congress = null;
+  return { state: st, district: d, layer: cdKey, congress: congress };
 }
 
 /* JSONP loader with a hard timeout, so the interface can never spin forever. */
@@ -3540,7 +3553,8 @@ var YC_FAIL_TEXT = {
   timeout_service: "The Census Bureau's geocoder did not answer within the time allowed. Your coordinates were discarded. Choose your state manually, or try again.",
   nogeo: "The Census Bureau returned a point it could not place inside a congressional district &mdash; this happens near coastlines and in some territories. Choose your state manually, and use the official House lookup if you need to confirm the district.",
   malformed: "The Census Bureau replied in a form this page could not read, so no district was identified. Your coordinates were discarded. Choose your state manually, or try again.",
-  nomatch: "A district was resolved, but it is not matched in this page's embedded directory. Your two Senators are shown, and the full directory below lists every office."
+  nomatch: "A district was resolved, but it is not matched in this page's embedded directory. Your two Senators are shown, and the full directory below lists every office.",
+  stale_session: "The Census Bureau's current district lines describe a newer Congress than the member directory embedded in this page. District numbers can be redrawn between Congresses, so automatic matching has been stopped rather than risk naming the wrong officeholder. Choose your state manually below \u2014 your two Senators are unaffected and are still correct \u2014 and use the official House lookup to confirm your district. The directory is being updated for the new Congress."
 };
 
 function ycGeoFlow() {
@@ -3569,6 +3583,16 @@ function ycGeoFlow() {
         found = censusDistrictFrom(payload && payload.result && payload.result.geographies);
       } catch (e) { found = null; }
       if (!found) { ycSetStatus(YC_FAIL_TEXT.nogeo, "err"); ycShowManual(true); return; }
+      /* Transition guard. The Census layer names the Congress whose district lines it
+         draws. If that is not the Congress the embedded roster was built from, the roster
+         is behind and district numbers may have been redrawn — so matching would risk
+         naming the wrong officeholder. Stop, say so calmly, and hand over the manual path
+         rather than guess. The normal path (both 119) is untouched by this. */
+      if (found.congress && META.congressSession && found.congress !== META.congressSession) {
+        ycSetStatus(YC_FAIL_TEXT.stale_session, "warn");
+        ycShowManual(true);
+        return;
+      }
       applyLocation(found.state, found.district);
       var rep = repFor(found.state, found.district);
       if (!rep) {

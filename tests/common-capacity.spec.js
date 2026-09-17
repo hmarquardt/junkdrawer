@@ -920,3 +920,46 @@ test('the mobile menu opens, closes on Escape and on selection, and yields at th
   await expect(page.locator('#navToggle')).toBeHidden();
   await expect(page.locator('nav.top')).toBeVisible();
 });
+
+test('a Census layer from a newer Congress is refused instead of matched to a stale roster', async ({page})=>{
+  /* Transition guard: district lines can be redrawn between Congresses, so a layer named
+     for the 120th must not be matched against a roster built for the 119th. */
+  await mockGeolocation(page,39.0639,-107.5505);
+  await mockCensus(page,{state:'CO',geoid:'0803',layer:'120th Congressional Districts'});
+  await page.goto(URL);
+  await page.waitForTimeout(600);
+  await locate(page);
+
+  // It must not name a member from the 119th roster for a 120th district.
+  await expect(page.locator('#ycStatus')).toContainText(/newer Congress|automatic matching has been stopped/i);
+  await expect(page.locator('#ycStatus')).toHaveAttribute('data-tone','warn');
+  expect(await page.locator('.yc-card').count(),'no member may be matched across Congresses').toBe(0);
+  await expect(page.locator('#ycManual')).toBeVisible();
+  // Nothing was persisted as this visitor's representation.
+  expect(await storedBlob(page)).not.toContain('location');
+  // The manual path still works and still reaches both Senators.
+  await page.locator('#ycState').selectOption('CO');
+  await page.waitForTimeout(300);
+  expect(await page.locator('.yc-card').count()).toBe(2);
+
+  // The normal path is unchanged: a 119th layer still resolves automatically.
+  await page.unroute(CENSUS_GLOB);
+  await mockCensus(page,{state:'CO',geoid:'0803'});
+  await page.goto(URL);
+  await page.waitForTimeout(600);
+  await locate(page);
+  expect(await page.locator('.yc-card').count()).toBe(3);
+  await expect(page.locator('#ycStatus')).toContainText('Located.');
+});
+
+test('the embedded roster declares which Congress it represents, so the guard can compare', async ()=>{
+  /* The page script is an IIFE, so META is not reachable from page.evaluate. Assert on
+     the source that the property exists inside META and is an integer the guard can use. */
+  const html=fs.readFileSync('common-capacity.html','utf8');
+  const meta=html.slice(html.indexOf('var META = {'), html.indexOf('var META = {')+1200);
+  const m=/congressSession:\s*(\d+)/.exec(meta);
+  expect(m,'META must declare congressSession as an integer').not.toBeNull();
+  expect(Number(m[1])).toBeGreaterThanOrEqual(119);
+  // And the resolver must actually read it, or the property is decorative.
+  expect(html).toMatch(/found\.congress\s*!==\s*META\.congressSession/);
+});
