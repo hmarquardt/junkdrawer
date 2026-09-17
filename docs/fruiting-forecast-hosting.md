@@ -1,7 +1,7 @@
 # Fruiting Forecast production data hosting
 
-Verified 2026-09-17 from `main` at `84b29580e0ffadd4d8f1c6ee1a27a753a817d34b`.
-**Data-origin readiness: YES.** Application integration and GIS production are separate subsequent work.
+Infrastructure initially verified 2026-09-17 from `main` at `84b29580e0ffadd4d8f1c6ee1a27a753a817d34b`.
+**Data-origin readiness: YES.** Phase 1B integrates remote assets; see the publication section and production reports for current progress.
 
 ## Infrastructure
 
@@ -75,27 +75,46 @@ Use relative keys already present in the manifest (e.g. `habitat/n30_w084-<diges
 
 Measured `CF-Cache-Status: DYNAMIC`: browser cache metadata works, but Cloudflare edge caching of `.parquet` is not proven/enabled by this pass. If edge caching is desired, configure a narrowly scoped cache eligibility rule for the four immutable path prefixes and verify HIT/Range/CORS afterward. This is an optional optimization, not a direct-R2 delivery blocker.
 
-## DNS and manual application-domain work
+## Domain boundary (Phase 1B)
 
-| Host | Observed state |
-| --- | --- |
-| `hanksjunkdrawer.com` | Proxied Cloudflare A responses `104.21.60.225`, `172.67.201.245`; HTTPS 522 |
-| `www.hanksjunkdrawer.com` | Same public proxy addresses; HTTPS 525 |
-| `data.hanksjunkdrawer.com` | Same proxy addresses; working R2 custom domain and HTTPS |
+Application and manifest: `https://hmarquardt.github.io/junkdrawer/`.
+Production Parquet: `https://data.hanksjunkdrawer.com/`.
+`data.hanksjunkdrawer.com` is the only vanity-domain hostname currently used by Fruiting Forecast.
+Apex/www migration is outside this project's scope and is not a launch requirement.
+No apex/www DNS or GitHub Pages custom-domain changes were made in Phase 1B.
 
-The OAuth session has zone-read but no ordinary DNS read/write permission: `/zones/{zone_id}/dns_records?per_page=100` returned 403/code 10000. Thus underlying apex/www records are hidden behind Cloudflare proxying; **continued Namecheap parking cannot be confirmed or excluded**. No ordinary DNS records were changed. R2 managed its own custom-domain attachment.
+## Publication and recovery (Phase 1B)
 
-GitHub Pages at `https://hmarquardt.github.io/junkdrawer/` returns 200. No local CNAME or Pages workflow is present; deployed `/junkdrawer/CNAME` returns 404. `gh api repos/hmarquardt/junkdrawer/pages` cannot authenticate (gh has no login), and unauthenticated REST returns 404. Actual Pages settings/custom-domain ownership remain unverified; this is why the app domain was not changed automatically.
+The production manifest now declares `assetBaseUrl`; only Parquet resolves against it.
+Legacy fixtures without it retain app-relative resolution. Cache identity is unchanged;
+SHA/length are checked on cached bytes, and a failed refresh can use a verified cached copy.
+The old tile-level schema-1 URLs shadowed by `tile.habitat` were removed at cutover;
+no effective asset URL, digest or bytes changed.
 
-Manual app-domain migration, independent of the ready R2 origin:
+`tools/fruiting_remote.py migrate --report /tmp/migration.json` uploads existing live assets
+serially through Wrangler, verifying full public bytes before proceeding. `audit --report
+/tmp/audit.json` performs a fresh full GET/hash audit. `hydrate --report /tmp/hydration.json`
+restores missing local Parquet from R2 for production-data tests and local GIS tooling.
+No GitHub Pages Parquet dependency is required for hydration. Ordinary mocked browser
+and publisher unit tests remain independent of R2.
 
-1. Inspect repository Settings → Pages, confirm the current publishing source, and set/verify `hanksjunkdrawer.com` as this repository's custom domain. Follow GitHub's domain-verification guidance; enable HTTPS once provisioned.
-2. In Cloudflare DNS, inspect and replace only obsolete apex/web records. Desired DNS-only A records for `@`: `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`; CNAME `www` → `hmarquardt.github.io` (no repository path). Remove conflicting web A/AAAA/CNAME parking records only after inspection. GitHub's configured canonical domain supplies the www redirect.
-3. Preserve the R2-managed `data` record, all MX/TXT mail records and registrar nameservers. Verify both app hosts, certificate issuance, and redirects after the migration.
+`tools/fruiting_tile_publish.py` inherits the manifest's asset base. Its ordering is
+local structural validation → immutable local object → remote upload → full remote
+length/SHA verification → atomic manifest update. A kernel-held flock serializes publication
+and is released on crash. Valid existing remote objects skip PUT; collisions fail.
+The local `.r2-inventory.jsonl` records intent before PUT and verification afterward.
+Wrangler 4.133.0 exposes no object-list command; the orphan audit covers that inventory,
+not unseen out-of-band writes. Do not claim an exhaustive bucket orphan listing or delete orphans.
 
-Addresses and procedure checked against [current GitHub documentation](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site).
-
-Public mail DNS remains: priorities 10 for `eforward1`, `eforward2`, `eforward3`; 15 for `eforward4`; 20 for `eforward5`, all under `registrar-servers.com`. TXT/SPF: `v=spf1 include:spf.efwd.registrar-servers.com ~all`. Nothing in mail configuration was modified.
+Batch-1 scope and evidence live under `data/fruiting-forecast/production/`.
+Use `uv run --with osmium --with rasterio --with shapely --with pyproj --with duckdb
+--with requests tools/fruiting_batch1.py run --scope data/fruiting-forecast/production/batch1-scope.json
+--chunk N` (one shell line) for a serial ten-tile checkpoint, resuming the journal under
+`/tmp/ff-batch1-normalized`. Only this frozen Batch-1 scope is authorized by that command.
+National/soil cache is `/tmp/ffsrc`; OSM cache is `/tmp/fruiting-forecast-gis-sources`.
+New tile DEMs are reclaimed only after Phase-A publication and the journal commit; access
+consumes normalized layers and does not depend on the DEM. Reusable national/state sources
+and pre-existing DEMs are preserved. Fewer than 8 GiB free stops a chunk before downloads.
 
 ## Authentication for future publication
 
