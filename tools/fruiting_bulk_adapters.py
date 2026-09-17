@@ -1501,8 +1501,10 @@ def build_fire(tile_id: str, cache: Path, out: Path, min_year: int = 1984, timeo
         "returnGeometry": "true",
         # Some perimeter-heavy tiles make ArcGIS fail while serializing one
         # large GeoJSON response. Small, stable pages return the same records
-        # and keep restart/retry behavior bounded.
+        # and keep restart/retry behavior bounded. The service-side geometry
+        # offset matches the five-decimal precision persisted below.
         "orderByFields": "objectid",
+        "maxAllowableOffset": 0.00001,
         "resultRecordCount": 50,
     }, cache, f"mtbs_{tile_id}", timeout), tile_id)
     retrieved = time.strftime("%Y-%m-%d")
