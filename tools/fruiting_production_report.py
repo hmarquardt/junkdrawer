@@ -39,7 +39,7 @@ def report(scope_path,work):
     for t in m['tiles']:
         if t['id'] not in by_id or not all(v in {'AVAILABLE','VERIFIED_EMPTY'} for v in by_id[t['id']]['layerStatus'].values()):continue
         size=sum(t.get(k,{}).get('bytes',0) for k in LAYERS);sizes.append(size);regions[by_id[t['id']]['dominantProfile']].append(size)
-    size_stats=distribution(sizes);regional_projection=sum(statistics.mean(regions[r['dominantProfile']]) if regions[r['dominantProfile']] else statistics.mean(sizes) for r in rows)
+    size_stats=distribution(sizes);regional_projection=sum(statistics.mean(regions[r['dominantProfile']]) if regions.get(r['dominantProfile']) else statistics.mean(sizes) for r in rows)
     layer_seconds={k:distribution(v) for k,v in stages.items()}
     estimate_per_tile=sum(statistics.median(stages[k]) if stages[k] else 0 for k in ['dem','soil','habitat','public-land','fire','access','publish-A','publish-B'])
     ready_remaining=Counter(s for r in rows if r['id'] not in scope['tiles'] and not all(v in {'AVAILABLE','VERIFIED_EMPTY'} for v in r['layerStatus'].values()) for s in r['soilStatesRequired'])
