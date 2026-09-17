@@ -16,6 +16,7 @@ import tempfile
 import threading
 import unittest
 import zipfile
+from unittest.mock import patch
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from functools import partial
 
@@ -78,6 +79,16 @@ PNW_TILE_MIN_SOIL = {'n42_w123': 200, 'n42_w125': 100, 'n43_w123': 200, 'n43_w12
 
 
 class AdapterContracts(unittest.TestCase):
+    def test_mtbs_query_bounds_complex_geojson_without_changing_stored_precision(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(bulk, '_esri_geojson', return_value=[]) as query, \
+                patch.object(bulk, 'write_parquet'):
+            bulk.build_fire('n33_w110', Path(tmp), Path(tmp))
+        params = query.call_args.args[1]
+        self.assertEqual(params['orderByFields'], 'objectid')
+        self.assertEqual(params['resultRecordCount'], 50)
+        self.assertEqual(params['maxAllowableOffset'], 10 ** -5)
+
     def test_forest_group_legend_is_authoritative_and_never_fabricates(self):
         spruce = bulk.forest_group_record(120)
         self.assertEqual(spruce['forest_group'], 'spruce_fir')
