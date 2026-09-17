@@ -78,6 +78,24 @@ PNW_TILE_MIN_SOIL = {'n42_w123': 200, 'n42_w125': 100, 'n43_w123': 200, 'n43_w12
                      'n47_w123': 200, 'n47_w124': 200, 'n47_w125': 100, 'n48_w123': 200}
 
 
+def require_hydrated_production_assets(manifest):
+    """Production artifact assertions are opt-in on a fresh clone.
+
+    Parquet lives in R2 and is ignored by git. Unit adapter contracts above stay
+    offline; these release-data classes run after `fruiting_remote.py hydrate`.
+    """
+    missing = []
+    for tile in manifest['tiles']:
+        for key in ('habitat', 'publicLands', 'fireHistory', 'accessPoints'):
+            url = (tile.get(key) or {}).get('url')
+            if url and not (DATA / url).exists():
+                missing.append(url)
+    if missing:
+        raise unittest.SkipTest(
+            f'{len(missing)} production Parquet assets are not hydrated; run '
+            'uv run tools/fruiting_remote.py hydrate --report /tmp/ff-hydrate.json')
+
+
 class AdapterContracts(unittest.TestCase):
     def test_mtbs_query_bounds_complex_geojson_without_changing_stored_precision(self):
         with tempfile.TemporaryDirectory() as tmp, \
@@ -695,6 +713,7 @@ class PublishedColoradoTiles(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = json.loads((DATA / 'manifest.json').read_text())
+        require_hydrated_production_assets(cls.manifest)
         cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
         cls.con = duckdb.connect()
 
@@ -871,6 +890,7 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = json.loads((DATA / 'manifest.json').read_text())
+        require_hydrated_production_assets(cls.manifest)
         cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
         cls.con = duckdb.connect()
 
@@ -951,6 +971,7 @@ class TwoStateRelease(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = json.loads((DATA / 'manifest.json').read_text())
+        require_hydrated_production_assets(cls.manifest)
         cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
         cls.con = duckdb.connect()
 
@@ -1045,6 +1066,7 @@ class PacificNorthwestRelease(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = json.loads((DATA / 'manifest.json').read_text())
+        require_hydrated_production_assets(cls.manifest)
         cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
         cls.con = duckdb.connect()
 
