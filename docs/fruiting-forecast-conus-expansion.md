@@ -1,5 +1,93 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 14 — Great Plains Task Zero, biology complete, national-production-ready (2026-09-16)
+
+Started from `940d3a8`. **CONUS biological coverage is complete at PROVISIONAL/MODELED_SPARSE maturity. The project is still NOT launch-ready because national GIS production remains incomplete.**
+
+### Great Plains Task Zero (Tasks Zero-A through Zero-E)
+
+A crosswalk audit found **code 60 (Northern Allegheny Plateau) silently misassigned to `plains`** — EPA places it in the Northwestern Forested Mountains / Northern Forests supergroup; the pinned geometry names it "Northern Allegheny Plateau" (upstate NY/northern PA northern-hardwood country). **Fixed: 60 → `northernForests`** (which already carries the adjacent Eastern Great Lakes Lowlands code 83). Codes 32 (Texas Blackland Prairies) and 33 (East Central Texas Plains) were audited explicitly and retained in plains: they are prairie/open-land ecologies at the transition, with the modeled-sparse behavior carrying non-wooded cells honestly. The southern plains (29 Cross Timbers, 30 Edwards Plateau, 31 Southern Texas Plains) were audited and retained: real oak/juniper woodland exists but no target clears the plains-oak evidence bar (RESEARCH_ONLY recorded).
+
+### Implemented targets (Tasks 1–11)
+
+**`morelAmericana` (plains CORE, PROVISIONAL)** — Morchella americana (Kuo et al. 2012; iNat 462132) is the accepted modern identity for the plains white morel; the historical M. esculenta name is not used. Nebraska Game & Parks and Kansas State Extension document river-bottom/wooded-ravine hunting with recently dead elm and cottonwood associations and a spring warm-moist window (mid-April through May, later north). The exposed FIA Elm/Ash/Cottonwood group (700) carries the host; bur-oak prairie-edge weight is declared approximate. Habitat-gated to mapped riparian/woodland cells — the prairie floor scores nothing by design.
+
+**`giantPuffball` (plains CORE, PROVISIONAL)** — Calvatia gigantea (iNat 57692) spans the eastern/central plains meadows/pastures; the western C. booniana (iNat 69818) is a distinct taxon and is NOT modeled. Habitat is meadows/pastures/lawns/open woods via NLCD grassland (71) + pasture/hay (81) with open woodland edges; **cultivated cropland (82) is deliberately excluded** from the pasture signal because pasture does not equal cropland. This is the first open-habitat target in the roster; the `pasture` field was added to the habitat aggregation to distinguish pasture/meadow from generic open land. Dense forest scores nothing (no open habitat).
+
+**RESEARCH_ONLY:** C. booniana (cold-basin range documentation needed), plains riparian Pleurotus (the same cottonwood-signal barrier documented in revision 13), plains river-bottom chicken/hericium (occurrence without mappable broad-host ecology), Cross Timbers/Edwards Plateau oak-country targets (no target-level plains-oak evidence).
+
+### National coverage (Tasks 26–27)
+
+Machine-derived from the browser roster parser (not hand-maintained prose):
+
+| Profile | Maturity | Targets |
+|---|---|---|
+| pnw | PROVISIONAL | 5 |
+| california | PROVISIONAL | 4 |
+| sierraNevada | PROVISIONAL | 2 |
+| interiorMountains | PROVISIONAL | 2 |
+| southernRockies | PROVISIONAL | 4 |
+| madrean | PROVISIONAL | 1 |
+| northernForests | PROVISIONAL | 7 |
+| hardwood | PROVISIONAL | 7 |
+| appalachians | PROVISIONAL | 7 |
+| southeast | PROVISIONAL | 8 |
+| plains | PROVISIONAL | 2 |
+| coldBasins | MODELED_SPARSE | 0 |
+| warmDesert | MODELED_SPARSE | 0 |
+
+**Total: 13 profiles. MODELED (PROVISIONAL): 11. MODELED_SPARSE: 2. UNSUPPORTED: 0. Biologically resolved: 13/13. Biology-complete CONUS: yes.**
+
+### National canary matrix finalized (Task 28)
+
+Every profile has at least one permanent canary coordinate pinned by the national spec:
+
+| Profile | Canary coordinate | Expected maturity | Expected targets or sparse |
+|---|---|---|---|
+| pnw | 47.6,-123.5 | PROVISIONAL | 5 targets |
+| california | 38.5,-122.7 | PROVISIONAL | 4 targets |
+| sierraNevada | 37.7,-119.5 | PROVISIONAL | 2 targets |
+| interiorMountains | 44.2,-115.5 | PROVISIONAL | 2 targets |
+| southernRockies | 39.48,-106.05 | PROVISIONAL | 4 targets |
+| madrean | 35.5,-111.5 | PROVISIONAL | 1 target |
+| northernForests | 46.5,-89.5 | PROVISIONAL | 7 targets |
+| hardwood | 38.3553,-87.5675 | PROVISIONAL | 7 targets |
+| appalachians | 36.5,-83.2 | PROVISIONAL | 7 targets |
+| southeast | 31.5,-83.5 | PROVISIONAL | 8 targets |
+| plains | 38.5,-100.5 | PROVISIONAL | 2 targets |
+| coldBasins | 46.8,-119.2 | MODELED_SPARSE | 0 targets |
+| warmDesert | 33.5,-112.1 | MODELED_SPARSE | 0 targets |
+
+### National GIS production plan — dry run (Tasks 30–32)
+
+A fresh `plan --scope conus` records: **940 relevant land tiles, 47 complete, 893 remaining** (893 habitat builds, 893 public-land builds, 893 fire builds, 893 access builds), **~40 states requiring SSURGO + PBF preparation** (12 already READY: CO/NM/OR/WA/MI/ME/FL/GA/ID/MT/WY/CA), **~893 DEM downloads (~52 GB transient)**, ~378 MB median projected published Parquet (p25–p75 ≈ 255–660 MB).
+
+**Batch plan (deterministic, restartable via the planner `run --tiles` journal):** partition remaining tiles by state-source readiness — batch 1: states already prepared (CO/NM/OR/WA/MI/ME/FL/GA/ID/MT/WY/CA ≈ 180 tiles); batch 2: new states east of the Mississippi (OH/IN/IL/IA/NE/KS/MO/AR/LA/MS/AL/GA/TN/KY/IN/WV/VA/NC/SC/FL panhandle ≈ 350 tiles); batch 3: remaining northeastern + plains states (NY/PA/NJ/DE/MD/CT/RI/MA/NH/VT/ME/ND/SD/OK/TX ≈ 360 tiles). Each batch: prepare state sources once → Phase A (habitat/pl/fire) → Phase B (access). Deterministic tile order via the planner.
+
+**Concurrency (Task 32):** fully serial recommended for the first production batch. The publisher uses an exclusive manifest lock (serialized publication is safe); SDA and hosted services showed no throttle in bounded tests but the volume at national scale is unmeasured; parallel DEM downloads are safe but the disk-write contention on the shared normalized-output directory is the binding constraint. Revisit after batch 1.
+
+**Service-load characterization (Task 33):** 12 state PAD-US + MTBS + SDA query sets completed across revisions with no throttling observed. No 429/503 responses recorded in any canary batch. "None observed in bounded test" — not "no limit exists."
+
+**Disk budget (Task 37):** raster cache ~7 GB (4 national products already present), state PBF cache ~10–12 GB for 40 states, prepared OSM tables ~4–5 GB, SSURGO ~1 GB, DEM downloads ~52 GB transient (deletable after habitat build), normalized tile staging ~50 MB, published data ~400 MB. **Working-set disk ≈ 70 GB; comfortable free-space recommendation ≈ 100 GB.**
+
+**Failure/resume drill (Task 38):** the revision-13 Southwest canary batch was interrupted mid-tile during testing and resumed cleanly (journal + previously published tile preserved; state sources reused; manifest valid). The production machinery has been proven restartable across 5 prior revision batches.
+
+**Hosting gate (Task 34):** p75 ≈ 660 MB; + 25% headroom = **825 MB, crossing the 750 MB threshold**. A static-data split (app on GitHub Pages, immutable Parquet on static object storage/CDN) should be designed before the national production run begins. Do not execute the split yet; design it as the first task of the national-production pass.
+
+### Tests (Task 41)
+
+`tests/fruiting-forecast-national.spec.js` grew to 22 tests: the Great Plains Task-Zero resolution (Flint Hills, Nebraska rivers, High Plains, Sand Hills — all plains), code-60 disposition (resolves northernForests at the Allegheny Plateau coordinate), riparian morel habitat gating (May riparian > September > prairie floor), open-habitat puffball ordering (September pasture > April; pasture ≠ cropland; dense woods scores nothing), plains boundaries (eastern plains ↔ hardwood, high plains ↔ coldBasins, northern plains ↔ northernForests, Texas Blackland stays plains), and the biology-complete assertion (the formerly "unsupported" High Plains point now resolves to modeled plains). Updated: conus places roster (plains modeled; warmDesert/coldBasins sparse; the "Colorado analysis" wording), bounded-release (47 complete tiles), release-summary (sierraNevada 4, interiorMountains 14, fire verified-empty 9). Full sweep: **118 browser tests passed (1 opt-in live skipped)**, adapters 53, publication 6, access 16, release 10, planner 8.
+
+### Metrics (Task 29)
+
+250 live Parquet assets (0 dead); 5,148 modern eligible starts; 87 published tiles; static 36.4 MB; manifest 717 KB; 54 research sources / 44 research candidates. DuckDB-Wasm + IndexedDB/OPFS roles unchanged.
+
+### Remaining work and exact next pass
+
+**Biology: COMPLETE.** All 13 profiles have been audited and carry either real target models or explicit modeled-sparse conclusions. The national canary matrix is pinned. **The project is NOT launch-ready because national GIS production remains incomplete: 47 of 940 tiles have the full four-layer stack.**
+
+**Exact next pass: national GIS production.** First task: design and implement the static-data hosting split (p75 gate triggered). Then: execute the batch plan (batch 1 → batch 2 → batch 3) using the planner `run --tiles` path with the existing journal/resume machinery.
+
 ## Revision 13 — Southwest Task Zero, modeled-sparse semantics, madrean monsoon profile (2026-09-16)
 
 Started from `067aa7b`. **Full CONUS biological + GIS coverage remains the launch requirement**, and no launch is recommended this pass. The pass audited the historical ten-code `southwest` bucket (Task Zero), resolved the code-18 omission, split the bucket into three biological profiles, introduced MODELED_SPARSE semantics, implemented the Madrean monsoon profile with `Boletus barrowsii`, and built three Southwest canaries.
@@ -801,7 +889,7 @@ Earlier `e1ccb64`-era notes:
 - tests/test_fruiting_bulk_adapters.py: 53 deterministic tests (coverage through the revision-12 California canaries) for adapter contracts, the cache manifest/checksum/corruption path, the Soil Data Access and package soil paths (normalized contract, batched point join, ambiguity, explicit failure/empty, gSSURGO/FileGDB and gNATSGO/GeoPackage packaging equivalence), DEM release resolution, habitat composition with optional sources absent, state-scoped SDA preparation with independent caches/restart reuse and a failing refresh that cannot invalidate another state, exact cross-state mukey inclusion, failure/retry of a batched point query, property identity, legacy-tile backward compatibility, and the committed two-state release (component/layer completeness, real SSURGO values with explicit gaps, conservative jurisdiction, cross-tile MTBS identity, release-scope manifest assertions, PNW release component/layer completeness with the explicit ocean VERIFIED_EMPTY, Oregon soil provenance, the hemlock signal, the three-state coverage dimensions, the EPA-derived PNW release equality with per-tile roles/shares, and regional cross-tile access identity).
 - tests/test_fruiting_pnw_release.py: 10 deterministic release-tool tests (selection algorithm on synthetic shares, determinism, real-selection == published release, plan measurement basis, honest missing-cache state, journal resume digests).
 - tests/test_fruiting_tile_publish.py: 5 publication tests (incremental integrity/empty/failure, completeness components, coverage dimensions, profile-roster drift guard against the browser mapping, and coverage refresh on publication).
-- junk-drawer.json and footer: 2026.09.16.4 (revision 13 split the Southwest into madrean/coldBasins/warmDesert with MODELED_SPARSE semantics and the code-18 fix; revision 12 split California into Mediterranean + Sierra Nevada with the Klamath→PNW reassignment; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
+- junk-drawer.json and footer: 2026.09.16.5 (revision 14 modeled Great Plains — riparian M. americana + open-habitat C. gigantea — and fixed the code-60 crosswalk defect, completing CONUS biology at 13 profiles/0 UNSUPPORTED; scoring model version is FF-1.7.0 and the biology contract version is 2026.09.15.1).
 
 ## Rebuild commands
 

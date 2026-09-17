@@ -277,18 +277,23 @@ LAND_COVER_CLASSES = NLCD_LANDCOVER["legend"]
 LAND_COVER_FOREST = {41, 42, 43, 90}
 LAND_COVER_DECIDUOUS = {41}
 LAND_COVER_OPEN = {71, 81, 82}
+# Pasture/meadow evidence for open-habitat targets: grassland/herbaceous (71) and
+# pasture/hay (81). Cultivated crops (82) are deliberately EXCLUDED — cropland is
+# never substituted for pasture/meadow mushroom habitat.
+LAND_COVER_PASTURE = {71, 81}
 
 
 def land_cover_record(code: int | None) -> dict:
     """Map a raw Annual NLCD class value to row fields. Unknown codes stay missing."""
     if code is None or code not in LAND_COVER_CLASSES:
         return {"land_class": None, "forest": None, "deciduous": None, "open_land": None,
-                "evergreen": None, "mixed_forest": None, "wetland": None}
+                "pasture": None, "evergreen": None, "mixed_forest": None, "wetland": None}
     return {
         "land_class": LAND_COVER_CLASSES[code],
         "forest": 1.0 if code in LAND_COVER_FOREST else 0.0,
         "deciduous": 1.0 if code in LAND_COVER_DECIDUOUS else 0.0,
         "open_land": 1.0 if code in LAND_COVER_OPEN else 0.0,
+        "pasture": 1.0 if code in LAND_COVER_PASTURE else 0.0,
         "evergreen": 1.0 if code == 42 else 0.0,
         "mixed_forest": 1.0 if code == 43 else 0.0,
         "wetland": 1.0 if code in {90, 95} else 0.0,
@@ -1291,6 +1296,7 @@ def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGRE
             "forest_mapped": record["forest_mapped"],
             "deciduous": cover["deciduous"] if land_cover_ready else None,
             "open_land": cover["open_land"] if land_cover_ready else None,
+            "pasture": cover["pasture"] if land_cover_ready else None,
             "canopy": canopy_fraction(None if canopy_percent is None else canopy_percent[index]),
             "elevation_ft": meters_to_feet(elevations_m[index]),
             "drainage_class": soil_columns["drainage_class"][index],

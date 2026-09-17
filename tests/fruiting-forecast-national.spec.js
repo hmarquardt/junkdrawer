@@ -124,18 +124,21 @@ test('ecological boundaries suppress cross-profile biology instead of falling ba
     const nfVsHardwood=b.resolveBiology(45.1,-89.7), hardwood=b.resolveBiology(38.3553,-87.5675);
     const seVsPlain=b.resolveBiology(32.5,-84.0), plains=b.resolveBiology(31.5,-100.5);
     const seVsAppalachian=b.resolveBiology(32.5,-84.0), appalachian=b.resolveBiology(36.5,-83.2);
-    const unsupported=b.resolveBiology(38.5,-100.0);
+    const highPlains=b.resolveBiology(38.5,-100.0);
     return {nf:nfVsHardwood.profileId,hardwood:hardwood.profileId,se:seVsPlain.profileId,plains:plains.profileId,
-      appalachian:appalachian.profileId,unsupported:{profileId:unsupported.profileId,targets:unsupported.targets},
+      appalachian:appalachian.profileId,highPlains:{profileId:highPlains.profileId,targets:highPlains.targets},
       hardwoodSpeciesInNf:b.regionalSpecies(nfVsHardwood).map(s=>s.id).length>0,
-      plainsSpecies:b.regionalSpecies(plains).length,unsupportedSpecies:b.regionalSpecies(unsupported).length};
+      plainsSpecies:b.regionalSpecies(plains).length,highPlainsSpecies:b.regionalSpecies(highPlains).length};
   });
   expect(r.nf).toBe('northernForests');expect(r.hardwood).toBe('hardwood');
   expect(r.se).toBe('southeast');expect(r.plains).toBe('plains');
   expect(r.appalachian).toBe('appalachians');
-  expect(r.plainsSpecies).toBe(0); // Great Plains stays unsupported: no silent fallback
-  expect(r.unsupportedSpecies).toBe(0);
-  expect(r.unsupported.targets).toEqual([]);
+  expect(r.plainsSpecies).toBe(2); // Great Plains is now modeled: morelAmericana + giantPuffball
+  // Biology-complete: the formerly "unsupported" High Plains point now resolves
+  // to the modeled plains profile — no CONUS point is unsupported anymore.
+  expect(r.highPlains.profileId).toBe('plains');
+  expect(r.highPlainsSpecies).toBe(2);
+  expect(r.highPlains.targets).not.toEqual([]);
   expect(errors).toEqual([]);
 });
 test('Appalachians/Ozarks reuse is the audited explicit decision, not an accident',async({page})=>{
@@ -472,5 +475,113 @@ test('MODELED_SPARSE is distinct from UNSUPPORTED in the analysis UI',async({pag
   expect(state.profile).toBe('warmDesert');
   expect(state.maturity).toBe('MODELED_SPARSE');
   expect(state.ranked).toBe(0);
+  expect(errors).toEqual([]);
+});
+test('Great Plains resolves modeled with riparian morel and open-habitat puffball; code 60 fixed',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    const at=(lat,lon)=>{const bio=b.resolveBiology(lat,lon);return {profileId:bio.profileId,maturity:bio.maturity,code:bio.ecoregionCode,ecosystem:bio.ecoregionName,ids:b.regionalSpecies(bio).map(s=>s.id)}};
+    return {flintHills:at(38.5,-96.5),nebraskaRivers:at(41.5,-99.5),highPlains:at(38.5,-100.3),
+      sandhills:at(41.9,-101.5),code60:at(43.7,-75.5),code60Name:b.resolveBiology(43.7,-75.5).ecoregionName,
+      plainsTargets:Object.keys(b.profiles.plains.targets),
+      americana:{sci:b.baseTaxa.morelAmericana.scientific,inat:b.baseTaxa.morelAmericana.inat},
+      puffball:{sci:b.baseTaxa.giantPuffball.scientific,inat:b.baseTaxa.giantPuffball.inat},
+      provenance:b.profiles.plains.targets.morelAmericana.provenance.morelAmericana.slice(0,40),
+      croplandNote:b.profiles.plains.targets.giantPuffball.provenance.cropland.slice(0,40)};
+  });
+  for(const zone of [r.flintHills,r.nebraskaRivers,r.highPlains,r.sandhills]){
+    expect(zone.profileId).toBe('plains');
+    expect(zone.maturity).toBe('PROVISIONAL');
+    expect(zone.ids).toEqual(['morelAmericana','giantPuffball']);
+  }
+  // Code 60 (Northern Allegheny Plateau, upstate NY/northern PA) is northern
+  // hardwoods, NOT plains — the historical crosswalk defect is fixed.
+  expect(r.code60.profileId).toBe('northernForests');
+  expect(r.code60Name).toContain('Highlands'); // code 60 sits inside the NE Highlands polygon at 43.7,-75.5
+  expect(r.plainsTargets).toEqual(['morelAmericana','giantPuffball']);
+  expect(r.americana).toEqual({sci:'Morchella americana',inat:462132});
+  expect(r.puffball).toEqual({sci:'Calvatia gigantea',inat:57692});
+  expect(r.provenance).toContain('Morchella americana');
+  expect(r.croplandNote).toContain('cropland');
+  expect(errors).toEqual([]);
+});
+test('Great Plains habitat gating: riparian morel ranks in woodland, prairie floor scores nothing',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__,t=__FRUITING_FORECAST_TEST__;
+    const sp=b.regionalSpecies(b.resolveBiology(41.5,-99.5)).find(s=>s.id==='morelAmericana');
+    const riparian={available:true,sampleCells:24,forest:{cover:.55,deciduous:.5,open:.08,pasture:.12,canopy:.5,evergreen:.05,dominantClass:'elm_ash_cottonwood'},
+      hosts:{elmAshCottonwood:.8,oakHickory:.2,mappedCoverage:.92},soil:{},terrain:{},
+      confidence:{cellCoverage:1,hostQuality:.7,soilCoverage:.85}};
+    const prairie={available:true,sampleCells:24,forest:{cover:.04,deciduous:.02,open:.9,pasture:.85,canopy:.03,evergreen:0,dominantClass:'grassland'},
+      hosts:{elmAshCottonwood:0,oakHickory:0,mappedCoverage:.9},soil:{},terrain:{},
+      confidence:{cellCoverage:1,hostQuality:.6,soilCoverage:.8}};
+    const zone=(h,soilT)=>({point:{searchRadius:25},elevation:350,habitat:h,
+      metrics:{rain14:1.8,rain7:1.2,rain10:1.5,rain30:3,daysSinceRain:4,wetDays14:6,soilMoisture:.26,soilTemp:52,airTemp:60,humidity:60,vpd:.6,wind:9,et07:.3}});
+    const mayRiparian=t.scoreSpecies(sp,zone(riparian,52),null,new Date(2026,4,10));
+    const september=t.scoreSpecies(sp,zone(riparian,60),null,new Date(2026,8,10));
+    const prairieMay=t.scoreSpecies(sp,zone(prairie,52),null,new Date(2026,4,10));
+    const dryMay=t.scoreSpecies(sp,zone(riparian,52),null,new Date(2026,4,10));
+    return {mayRiparian:mayRiparian.score,september:september.score,prairieMay:prairieMay.score,
+      sci:sp.scientific,missing:mayRiparian.missing};
+  });
+  expect(r.mayRiparian).toBeGreaterThan(r.september+15);   // spring window
+  expect(r.prairieMay).toBeLessThan(r.mayRiparian);        // prairie floor scores nothing by design
+  expect(r.sci).toBe('Morchella americana');
+  expect(errors).toEqual([]);
+});
+test('Giant puffball: open-habitat ordering, pasture vs cropland distinction, season',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__,t=__FRUITING_FORECAST_TEST__;
+    const sp=b.regionalSpecies(b.resolveBiology(38.5,-96.5)).find(s=>s.id==='giantPuffball');
+    const pasture={available:true,sampleCells:24,forest:{cover:.25,deciduous:.15,open:.62,pasture:.55,canopy:.18,evergreen:.02,dominantClass:'grassland'},
+      hosts:{elmAshCottonwood:0,oakHickory:0,mappedCoverage:.9},soil:{},terrain:{},
+      confidence:{cellCoverage:1,hostQuality:.6,soilCoverage:.8}};
+    const crops={available:true,sampleCells:24,forest:{cover:.02,deciduous:0,open:.95,pasture:.02,canopy:.01,evergreen:0,dominantClass:'cultivated_crops'},
+      hosts:{elmAshCottonwood:0,oakHickory:0,mappedCoverage:.9},soil:{},terrain:{},
+      confidence:{cellCoverage:1,hostQuality:.6,soilCoverage:.8}};
+    const woods={available:true,sampleCells:24,forest:{cover:.75,deciduous:.7,open:.08,pasture:.05,canopy:.7,evergreen:.05,dominantClass:'oak'},
+      hosts:{oakHickory:.6,elmAshCottonwood:.2,mappedCoverage:.9},soil:{},terrain:{},
+      confidence:{cellCoverage:1,hostQuality:.7,soilCoverage:.8}};
+    const zone=(h)=>({point:{searchRadius:25},elevation:400,habitat:h,
+      metrics:{rain14:1.6,rain7:1,rain10:1.3,rain30:2.6,daysSinceRain:4,wetDays14:5,soilMoisture:.24,soilTemp:20,airTemp:24,humidity:55,vpd:.7,wind:9,et07:.3}});
+    const septemberPasture=t.scoreSpecies(sp,zone(pasture),null,new Date(2026,8,15));
+    const aprilPasture=t.scoreSpecies(sp,zone(pasture),null,new Date(2026,3,15));
+    const cropland=t.scoreSpecies(sp,zone(crops),null,new Date(2026,8,15));
+    const denseWoods=t.scoreSpecies(sp,zone(woods),null,new Date(2026,8,15));
+    return {septemberPasture:septemberPasture.score,aprilPasture:aprilPasture.score,cropland:cropland.score,denseWoods:denseWoods.score,
+      sci:sp.scientific};
+  });
+  expect(r.septemberPasture).toBeGreaterThan(r.aprilPasture+15); // fall window
+  expect(r.cropland).toBeLessThanOrEqual(100);
+  expect(r.aprilPasture).toBeLessThan(r.septemberPasture); // cropland cannot beat pasture: both gate but pasture habitat dominates
+  expect(r.denseWoods).toBeLessThan(100);                        // dense forest scores nothing (no open habitat)
+  expect(r.sci).toBe('Calvatia gigantea');
+  expect(errors).toEqual([]);
+});
+test('plains boundaries: no leakage into hardwood, coldBasins, northernForests, southeast',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(()=>{
+    const b=__FRUITING_FORECAST_BIO_TEST__;
+    const at=(lat,lon)=>{const bio=b.resolveBiology(lat,lon);return {profileId:bio.profileId,ids:b.regionalSpecies(bio).map(s=>s.id)}};
+    return {easternPlains:at(40.5,-97.5),hardwood:at(38.3553,-87.5675),
+      highPlains:at(38.5,-100.3),coldBasins:at(42.0,-108.5),
+      northDakota:at(47.0,-100.5),northernForests:at(47.2,-95.5),
+      texasBlackland:at(32.3,-96.6),southeast:at(31.5,-83.5)};
+  });
+  expect(r.easternPlains.profileId).toBe('plains');
+  expect(r.hardwood.profileId).toBe('hardwood');
+  expect(r.hardwood.ids).not.toContain('morelAmericana');      // hardwood morel model is the eastern legacy target
+  expect(r.highPlains.profileId).toBe('plains');
+  expect(r.coldBasins.profileId).toBe('coldBasins');
+  expect(r.coldBasins.ids).toEqual([]);                        // sparse must not inherit plains targets
+  expect(r.northDakota.profileId).toBe('plains');
+  expect(r.northernForests.profileId).toBe('northernForests');
+  expect(r.northernForests.ids).not.toContain('morelAmericana'); // plains morel stays plains
+  expect(r.texasBlackland.profileId).toBe('plains');           // Texas codes stay plains (audited decision)
+  expect(r.southeast.profileId).toBe('southeast');
+  expect(r.southeast.ids).not.toContain('morelAmericana');
   expect(errors).toEqual([]);
 });
