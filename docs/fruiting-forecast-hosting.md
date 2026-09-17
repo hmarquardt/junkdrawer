@@ -11,18 +11,18 @@ Infrastructure initially verified 2026-09-17 from `main` at `84b29580e0ffadd4d8f
 - Direct custom domain `data.hanksjunkdrawer.com`: enabled, ownership **active**, SSL **active**, minimum TLS 1.2.
 - Public `r2.dev` access remains disabled. No Worker, backend, token, or additional bucket created.
 - App, manifest, small JSON/config/provenance and app assets remain on the static application host.
-- Future Parquet contract: `https://data.hanksjunkdrawer.com/` + existing relative content-addressed `habitat/`, `pl/`, `fire/`, `ap/` paths. No manifest or application edits in this pass.
-- No national planner, GIS production, state preparation, DEM download, or existing dataset migration was run. Biology is unchanged.
+- Production Parquet contract: `https://data.hanksjunkdrawer.com/` + relative content-addressed `habitat/`, `pl/`, `fire/`, `ap/` paths. The app and manifest remain on GitHub Pages.
+- Phase 1B migrated and verified the pre-existing live objects before setting `manifest.assetBaseUrl`. Batch-1 measurements and final counts are recorded under `data/fruiting-forecast/production/`. Biology remains unchanged.
 
 ## Current browser implementation
 
-In `fruiting-forecast.html`, `GIS_BASE` is still `data/fruiting-forecast/`.
-`gisManifest()` fetches its manifest there and caches it in IndexedDB for one hour.
-`gisAssetBytes()` uses ordinary GET + `arrayBuffer()`, validates declared length and SHA-256 when WebCrypto is available, then calls `registerFileBuffer()` for DuckDB-Wasm 1.30.0 queries. Habitat, public land, fire and access all use this path. No network HEAD or Range is required by this application path.
+`GIS_BASE` remains `data/fruiting-forecast/`, so `gisManifest()` and collecting-rule JSON stay on the GitHub Pages application host. Only Parquet paths resolve against optional `manifest.assetBaseUrl`; manifests and fixtures without that field retain the original same-origin behavior. URL joining normalizes the base trailing slash and rejects non-relative asset keys. There is no provider-specific browser logic or credential.
 
-Its IndexedDB key includes logical asset ID, dataset version, relative URL and digest; it is **not digest-only**, and does not currently include the host/base URL. Cache lifetime is 30 days, with the shared re-creatable cache bounded to 64 records. A base-origin change can reuse identical cached content if the relative path/version/digest remain stable. Legacy `gisTileBytes()` keys use tile ID + digest/size, validate length but not SHA; the current habitat path uses `gisAssetBytes()` instead. Collecting-rule JSON has a separate seven-day cache and must stay on the app host.
+`gisAssetBytes()` performs ordinary GET + `arrayBuffer()`, validates declared length and SHA-256, then supplies the verified local buffer to DuckDB-Wasm 1.30.0. Habitat, public land, fire and access all use this path. A network HEAD or Range request is not required by the production application path.
 
-DuckDB attempts `opfs://fruiting-forecast-gis.duckdb`, with transient DuckDB + IndexedDB bytes as fallback. Coverage processing still walks selected tiles and obtains their bytes; opening OPFS is not proof of verified offline table reuse. No remote URL registration exists in production code. Keep these semantics intact during the later asset-base integration.
+The IndexedDB key continues to include logical asset ID, dataset version, relative URL and digest, without the host. Cache lifetime remains 30 days and the re-creatable cache remains bounded to 64 records. Therefore verified identical bytes survive the GitHub Pages-to-R2 origin move. Cached bytes are revalidated before use; a failed remote GET can use a previously verified cached copy, while an uncached failure retains missing/unavailable semantics. Collecting-rule JSON keeps its independent seven-day app-host cache.
+
+DuckDB attempts `opfs://fruiting-forecast-gis.duckdb`, with transient DuckDB + IndexedDB bytes as fallback. Production still registers verified local buffers rather than handing DuckDB an unverified remote URL. Direct remote DuckDB SQL was separately proven during infrastructure qualification.
 
 ## CORS
 
@@ -40,7 +40,7 @@ Cloudflare's [CORS documentation](https://developers.cloudflare.com/r2/buckets/c
 
 ## Measured delivery evidence
 
-Only `_test/hosting-20260917.parquet` was uploaded: a synthetic two-row, 373-byte Parquet, then deleted after verification. No GIS bytes were uploaded.
+The infrastructure canary was `_test/hosting-20260917.parquet`, a synthetic two-row, 373-byte Parquet deleted after verification. Phase 1B subsequently migrated production GIS objects through the separately documented upload/verify/manifest workflow; current counts are in `production/migration.json` and `production/batch1-report.json`.
 
 | Check | Actual result |
 | --- | --- |
@@ -63,7 +63,7 @@ The tiny direct-URL query used full GET, not a Range request. This proves direct
 
 ## Immutable upload contract
 
-For future content-addressed Parquet, set object metadata at upload:
+For content-addressed Parquet, the publisher sets object metadata at upload:
 
 ```sh
 npx wrangler r2 object put "fruiting-forecast-data/$ASSET_KEY" --remote \
@@ -71,7 +71,7 @@ npx wrangler r2 object put "fruiting-forecast-data/$ASSET_KEY" --remote \
   --cache-control 'public, max-age=31536000, immutable'
 ```
 
-Use relative keys already present in the manifest (e.g. `habitat/n30_w084-<digest>.parquet`), verify full SHA-256/length before publishing manifest references, and never overwrite an immutable key with different bytes. Do not set Content-Encoding unless the whole object actually uses that transport encoding. Parquet's internal compression is not HTTP Content-Encoding. Mutable manifest/config files remain on the application host and must not get immutable caching.
+It uses relative keys (e.g. `habitat/n30_w084-<digest>.parquet`), verifies full SHA-256/length before publishing manifest references, and never overwrites an immutable key with different bytes. It does not set Content-Encoding merely because Parquet columns are compressed internally. Mutable manifest/config files remain on the application host and do not receive immutable caching.
 
 Measured `CF-Cache-Status: DYNAMIC`: browser cache metadata works, but Cloudflare edge caching of `.parquet` is not proven/enabled by this pass. If edge caching is desired, configure a narrowly scoped cache eligibility rule for the four immutable path prefixes and verify HIT/Range/CORS afterward. This is an optional optimization, not a direct-R2 delivery blocker.
 
