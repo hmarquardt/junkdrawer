@@ -333,6 +333,8 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
         tiles = sorted(wanted)
     print(f'{run_label} run tiles ({len(tiles)}): {", ".join(tiles)}', flush=True)
 
+    from fruiting_metrics import stage, emit
+    from fruiting_remote import ensure_local, remote_bytes
     from fruiting_bulk_adapters import (build_fire, build_habitat, build_public_land,
                                         load_cache_manifest, prepare_national, prepare_state,
                                         prepare_tile, soil_inputs, tile_bbox)
@@ -378,9 +380,18 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
     # 2. Phase A: habitat + public land + fire, published per tile so habitat
     #    completeness (and coverageTiles) precedes the access proof pass. Tiles
     #    already published complete are never rebuilt by another state's run.
-    phase_a = [t for t in tiles
-               if (published_tiles.get(t, {}).get('habitat') or {}).get('status') != 'AVAILABLE'
-               and not (resume and (journal.get(t, {}).get('habitat') and _published_matches(t, journal[t]['habitat'], 'habitat')))]
+    def layer_ready(t, key):
+        asset=(published_tiles.get(t, {}).get(key) or {})
+        if asset.get('status') not in {'AVAILABLE','VERIFIED_EMPTY'} or not asset.get('url'):
+            return False
+        if key=='habitat' and (not asset.get('components') or any(v!='AVAILABLE' for v in asset['components'].values())):
+            return False
+        if manifest.get('assetBaseUrl'):
+            body,_=remote_bytes(asset,manifest['assetBaseUrl'])
+            if body is None: return False
+        ensure_local(asset,DATA,manifest.get('assetBaseUrl') or 'https://data.hanksjunkdrawer.com/')
+        return True
+    phase_a = [t for t in tiles if not all(layer_ready(t,k) for k in ('habitat','publicLands','fireHistory'))]
     for t in tiles:
         if t not in phase_a:
             journal.setdefault(t, {}).setdefault('habitat', {})
@@ -391,17 +402,30 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
     for tile in phase_a:
         tile_started = time.monotonic()
         try:
-            prepare_tile(source_cache, tile)
+            from fruiting_bulk_adapters import dem_path
+            dem=dem_path(source_cache,tile)
+            dem_existed=dem.exists()
+            with stage(tile,'dem'):
+                prepare_tile(source_cache, tile)
             states_for_soil = (soil_states.split(',') if soil_states else
-                               ([code for code in prepared_states if code in (planned.get(tile) or {}).get('soilStatesRequired', [state_code])]
-                                if tiles else [state_code]))
-            soil = soil_inputs(source_cache, states_for_soil, tile)
-            results = {
-                'habitat': build_habitat(tile, source_cache, out, soil_prepared=soil),
-                'public-land': build_public_land(tile, source_cache, out),
-                'fire': build_fire(tile, source_cache, out),
-            }
-            failures = _publish(ROOT, [tile], ['habitat', 'public-land', 'fire'], out)
+                               (planned[tile]['soilStatesRequired'] if tiles else [state_code]))
+            with stage(tile,'soil'):
+                soil = soil_inputs(source_cache, states_for_soil, tile)
+            results={}
+            for layer,builder in [('habitat',lambda:build_habitat(tile, source_cache, out, soil_prepared=soil)),
+                                  ('public-land',lambda:build_public_land(tile,source_cache,out)),
+                                  ('fire',lambda:build_fire(tile,source_cache,out))]:
+                from fruiting_tile_publish import LAYERS
+                artifact=out/LAYERS[layer][0]/(tile+'.parquet')
+                side=artifact.with_suffix('.parquet.json')
+                with stage(tile,layer):
+                    if resume and artifact.exists() and side.exists():
+                        # Structural validation occurs at publication; keep interrupted builds.
+                        results[layer]=json.loads(side.read_text())
+                        emit('reuse-normalized',tile=tile,layer=layer)
+                    else: results[layer]=builder()
+            with stage(tile,'publish-A'):
+                failures = _publish(ROOT, [tile], ['habitat', 'public-land', 'fire'], out)
             if failures:
                 raise RuntimeError(f'{failures} publication failures for {tile}')
             journal[tile] = {'habitat': {'sha256': _published_sha256(tile, 'habitat'),
@@ -410,6 +434,10 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
             journal.setdefault(tile, {})['habitat'] = {'error': str(exc)}
             print(f'FAILED {tile} phase A: {exc}', flush=True)
         _save_journal(journal_path, journal)
+        if os.environ.get('FF_RECLAIM_DEM')=='1' and not journal[tile]['habitat'].get('error') and not dem_existed and dem.exists():
+            reclaimed=dem.stat().st_size
+            dem.unlink()
+            emit('dem-reclaimed',tile=tile,bytes=reclaimed)
 
     # 3. Phase B: access proof for every tile whose habitat is complete (the
     #    access builder requires the tile to be inside the release coverage).
@@ -417,15 +445,21 @@ def run(state_code='OR', source_cache=Path('/tmp/fruiting-forecast-gis-sources')
     #    geographically reach the tile.
     manifest = json.loads((DATA / 'manifest.json').read_text())
     coverage = set(manifest['summary'].get('coverageTiles', []))
-    phase_b = [t for t in tiles if t in coverage and not (resume and (journal.get(t, {}).get('access') and _published_matches(t, journal[t]['access'], 'accessPoints')))]
+    published_tiles={t['id']:t for t in manifest['tiles']}
+    phase_b = [t for t in tiles if t in coverage and not layer_ready(t,'accessPoints')]
+    for t in tiles:
+        if t in coverage and t not in phase_b:
+            journal.setdefault(t,{})['access']={'sha256':_published_sha256(t,'accessPoints'),'previouslyPublished':True}
     if phase_b:
         print(f'phase B (access): {", ".join(phase_b)}', flush=True)
     for tile in phase_b:
         tile_started = time.monotonic()
         tile_access_states = _access_states_for_tile(tile, prepared_states)
         try:
-            build_access(access_cache, tile_access_states, tile, out)
-            failures = _publish(ROOT, [tile], ['access'], out)
+            with stage(tile,'access'):
+                build_access(access_cache, tile_access_states, tile, out)
+            with stage(tile,'publish-B'):
+                failures = _publish(ROOT, [tile], ['access'], out)
             if failures:
                 raise RuntimeError(f'{failures} publication failures for {tile}')
             journal.setdefault(tile, {})['access'] = {'sha256': _published_sha256(tile, 'accessPoints'),

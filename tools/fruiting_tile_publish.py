@@ -1,4 +1,4 @@
-"""Incremental publication of normalized bulk-source tiles (no network calls).
+"""Incremental publication of normalized bulk-source tiles (optional verified remote publication).
 
 Adapters must provide one normalized Parquet and a provenance sidecar per tile:
 <source-dir>/<habitat|pl|ap|fire>/<tile>.parquet[.json]. Sidecar requires datasetVersion,
@@ -198,14 +198,14 @@ def publish_tiles(root, tids, layers, source_dir, output=None, resume=False):
     """
     output = output or root/'data/fruiting-forecast'
     output.mkdir(parents=True,exist_ok=True)
-    # Exclusive lock prevents concurrent manifest lost updates. Remove only after
-    # verifying the recorded PID is no longer running following hard interruption.
-    lock=output/'.publish.lock'
-    fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
-    os.write(fd,str(os.getpid()).encode());os.close(fd)
+    # Kernel-released exclusive lock prevents manifest lost updates across crashes.
+    from fruiting_remote import publication_lock, ensure_remote
+    lock=publication_lock(output)
+    lock.__enter__()
     try:
         path=output/'manifest.json'
         manifest=json.loads(path.read_text()) if path.exists() else {'schemaVersion':4,'tiles':[]}
+        remote=manifest.get('assetBaseUrl')
         entries={t['id']:t for t in manifest['tiles']}
         con=duckdb.connect()
         failures=0
@@ -223,7 +223,7 @@ def publish_tiles(root, tids, layers, source_dir, output=None, resume=False):
                     if meta.get('status') not in {'AVAILABLE','PARTIAL','VERIFIED_EMPTY'} or not meta.get('datasetVersion') or not meta.get('sourceUrl'):
                         raise ValueError('Source must declare version, URL and coverage status')
                     digest=hashlib.sha256(source.read_bytes()).hexdigest()
-                    if resume and old.get('sha256')==digest and old.get('datasetVersion')==meta['datasetVersion'] and old.get('status')==meta['status'] and (output/old.get('url','missing')).is_file():
+                    if not remote and resume and old.get('sha256')==digest and old.get('datasetVersion')==meta['datasetVersion'] and old.get('status')==meta['status'] and (output/old.get('url','missing')).is_file():
                         if hashlib.sha256((output/old['url']).read_bytes()).hexdigest()==digest: continue
                     columns={row[0] for row in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(source)]).fetchall()}
                     if not required<=columns: raise ValueError('Missing normalized columns: '+str(sorted(required-columns)))
@@ -233,7 +233,12 @@ def publish_tiles(root, tids, layers, source_dir, output=None, resume=False):
                     # Content-addressed output keeps old manifest assets valid until commit.
                     target=output/sub/(tid+'-'+digest[:16]+'.parquet')
                     target.parent.mkdir(parents=True,exist_ok=True)
-                    tmp=target.with_suffix('.tmp');shutil.copyfile(source,tmp);os.replace(tmp,target)
+                    if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest()!=digest:
+                        raise ValueError('Immutable local object collision: '+str(target))
+                    if not target.exists():
+                        tmp=target.with_suffix('.tmp');shutil.copyfile(source,tmp);os.replace(tmp,target)
+                    if remote:
+                        ensure_remote(target, {'url':target.relative_to(output).as_posix(),'bytes':target.stat().st_size,'sha256':digest}, origin=remote, inventory=output/'.r2-inventory.jsonl')
                     entry[key]={**meta,'url':target.relative_to(output).as_posix(),count_key:count,'bytes':target.stat().st_size,'sha256':digest}
                 except Exception as exc:
                     failures+=1
@@ -253,7 +258,7 @@ def publish_tiles(root, tids, layers, source_dir, output=None, resume=False):
         print(f'Published/checkpointed {len(tids)} tiles × {len(layers)} layers; {failures} failures')
         return failures
     finally:
-        lock.unlink()
+        lock.__exit__(None,None,None)
 
 
 def main(root):

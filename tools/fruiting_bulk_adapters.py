@@ -73,6 +73,33 @@ from pathlib import Path
 import duckdb
 import requests
 
+def service_request(method, url, **kwargs):
+    """Bounded serial retries for transient hosted-service failures."""
+    import random
+    from email.utils import parsedate_to_datetime
+    from fruiting_metrics import emit
+    start = time.monotonic()
+    for attempt in range(5):
+        response = None
+        try:
+            response = getattr(requests, method)(url, **kwargs)
+            if response.status_code not in {408, 429, 500, 502, 503, 504}:
+                emit('service', url=url, seconds=time.monotonic()-start, retries=attempt, status=response.status_code)
+                return response
+            response.raise_for_status()
+        except requests.RequestException:
+            status = response.status_code if response is not None else 0
+            emit('service-retry', url=url, attempt=attempt+1, status=status)
+            if attempt == 4: raise
+            after = response.headers.get('Retry-After', '') if response is not None else ''
+            try: delay = float(after)
+            except ValueError:
+                try: delay = max(0, parsedate_to_datetime(after).timestamp()-time.time())
+                except (ValueError, TypeError): delay = 0
+            time.sleep(max(delay, 2**(attempt+1)+random.random()))
+    raise RuntimeError('Service retries exhausted')
+
+
 ROOT = Path(__file__).resolve().parents[1]
 STEP_DEGREES = 0.05
 CACHE_MANIFEST = "source-manifest.json"
@@ -436,7 +463,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _download(url: str, destination: Path, expected_sha256: str | None = None, resume: bool = True) -> str:
+def _download_once(url: str, destination: Path, expected_sha256: str | None = None, resume: bool = True) -> str:
     """Download once, resuming a partial file when the server supports it.
 
     The `.part` file is never treated as ready. The pinned SHA256 is verified
@@ -471,6 +498,25 @@ def _download(url: str, destination: Path, expected_sha256: str | None = None, r
                          f"The mismatched partial was kept as {tmp.name}.mismatch and is NOT ready.")
     tmp.replace(destination)
     return digest
+
+
+def _download(url, destination, expected_sha256=None, resume=True):
+    import random
+    from fruiting_metrics import emit
+    started = time.monotonic()
+    before = destination.with_suffix(destination.suffix+'.part').stat().st_size if destination.with_suffix(destination.suffix+'.part').exists() else 0
+    for attempt in range(5):
+        try:
+            result = _download_once(url, destination, expected_sha256, resume)
+            emit('download', url=url, bytes=max(0,destination.stat().st_size-before), seconds=time.monotonic()-started, retries=attempt)
+            return result
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            status = getattr(e,'code',0)
+            if status and status not in {408,429,500,502,503,504}: raise
+            emit('download-retry',url=url,status=status,attempt=attempt+1)
+            if attempt == 4: raise
+            after = getattr(e,'headers',{}).get('Retry-After','0')
+            time.sleep(max(float(after) if str(after).isdigit() else 0,2**(attempt+1)+random.random()))
 
 
 def cache_manifest_path(cache: Path) -> Path:
@@ -583,7 +629,7 @@ def list_dem_releases(tile_id: str, timeout: int = 120) -> list[str]:
     resolve its own release instead of assuming one date nationwide.
     """
     usgs = usgs_dem_tile_id(tile_id)
-    response = requests.get(dem_release_listing_url(tile_id), timeout=timeout)
+    response = service_request('get', dem_release_listing_url(tile_id), timeout=timeout)
     response.raise_for_status()
     root = ElementTree.fromstring(response.content)
     namespace = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
@@ -864,7 +910,7 @@ def normalize_soil_attribute(row: dict) -> dict:
 
 def _sda_query(query: str, timeout: int = 300) -> list[list]:
     """One authoritative SDA query. Returns the raw Table (first row is the header)."""
-    response = requests.post(SDA_ENDPOINT, json={"query": query, "format": "JSON+COLUMNNAME"}, timeout=timeout)
+    response = service_request('post', SDA_ENDPOINT, json={"query": query, "format": "JSON+COLUMNNAME"}, timeout=timeout)
     response.raise_for_status()
     try:
         body = response.json()
@@ -1389,7 +1435,7 @@ def _esri_geojson(query: str, params: dict, cache: Path, cache_key: str, timeout
     while True:
         payload = {**params, "f": "geojson", "outSR": 4326,
                    "resultRecordCount": page, "resultOffset": offset}
-        response = requests.get(query, params=payload, timeout=timeout)
+        response = service_request('get', query, params=payload, timeout=timeout)
         response.raise_for_status()
         body = response.json()
         if body.get("error"):

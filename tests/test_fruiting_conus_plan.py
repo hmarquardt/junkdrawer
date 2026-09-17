@@ -68,7 +68,7 @@ class Planner(unittest.TestCase):
         plains = [r for r in self.rows if r['dominantProfile'] == 'plains']
         self.assertTrue(plains)
         for row in plains:
-            self.assertEqual(row['biology'], 'UNSUPPORTED', row['id'])
+            self.assertEqual(row['biology'], 'PROVISIONAL', row['id'])
 
     def test_layer_status_and_publication_come_from_the_manifest(self):
         self.assertTrue(self.by_id['n44_w123']['published'])
@@ -100,7 +100,7 @@ class Planner(unittest.TestCase):
         self.assertEqual(cov['profiles']['coldBasins']['biologyMaturity'], 'MODELED_SPARSE')
         self.assertEqual(cov['profiles']['warmDesert']['biologyMaturity'], 'MODELED_SPARSE')
         self.assertEqual(cov['profiles']['interiorMountains']['biologyMaturity'], 'PROVISIONAL')
-        self.assertEqual(cov['profiles']['plains']['biologyMaturity'], 'UNSUPPORTED')
+        self.assertEqual(cov['profiles']['plains']['biologyMaturity'], 'PROVISIONAL')
         self.assertEqual(cov['profiles']['pnw']['tilesGisComplete'], 19)
         self.assertEqual(cov['tilesGisComplete'], 35)  # 28 + 4 California + 3 Southwest canaries
         # GIS-complete coverage under an unsupported profile must stay small and honest.

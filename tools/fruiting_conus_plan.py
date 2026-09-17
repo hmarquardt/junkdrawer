@@ -124,7 +124,7 @@ def tile_states_and_profiles(tile_geom, state_areas, profile_areas, transformer)
     return state_shares, profile_shares
 
 
-def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_land=1.0):
+def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_land=1.0, access_cache=None):
     """Enumerate tiles with derived state/profile shares and publication status."""
     profiles, state_geoms, catalog = load_geography()
     maturity = _profile_maturity_map()
@@ -139,6 +139,10 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
         from fruiting_bulk_adapters import load_cache_manifest
         cache_sources = load_cache_manifest(source_cache).get('sources', {})
 
+    access_sources = cache_sources
+    if access_cache:
+        from fruiting_bulk_adapters import load_cache_manifest
+        access_sources = load_cache_manifest(Path(access_cache)).get('sources', {})
     rows = []
     for entry in catalog['tiles']:
         lat, lon = int(entry['id'][1:3]), -int(entry['id'][5:8])
@@ -168,7 +172,7 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
         required_states = sorted(code for code, share in state_shares.items() if share >= SOURCE_STATE_SHARE)
         dem_key = f'3dep_1arcsecond:n{lat + 1:02d}w{abs(lon):03d}'
         dem = (cache_sources.get(dem_key) or {}).get('status', 'unknown')
-        pbf_ready = all((cache_sources.get('osm_access:' + code) or {}).get('status') == 'READY'
+        pbf_ready = all((access_sources.get('osm_access:' + code) or {}).get('status') == 'READY'
                         for code in required_states)
         soil_ready = all((cache_sources.get('ssurgo_sda:' + code) or {}).get('status') == 'READY'
                          for code in required_states)
@@ -270,6 +274,7 @@ def main():
     plan_p.add_argument('--profile', default=None)
     plan_p.add_argument('--state', default=None)
     plan_p.add_argument('--source-cache', type=Path, default=None)
+    plan_p.add_argument('--access-cache', type=Path, default=None)
     plan_p.add_argument('--limit', type=int, default=None, help='Truncate tile list output for humans')
     plan_p.add_argument('--out', type=Path, default=None, help='Write full JSON to a file')
     cov = sub.add_parser('coverage')
@@ -284,7 +289,7 @@ def main():
         print(json.dumps(coverage(), indent=2))
         return
     if args.command == 'plan':
-        rows = build_tiles(profile=args.profile, state=args.state, source_cache=args.source_cache)
+        rows = build_tiles(profile=args.profile, state=args.state, source_cache=args.source_cache, access_cache=args.access_cache)
         manifest = json.loads((DATA / 'manifest.json').read_text())
         result = {'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                   'scope': args.scope, 'profileFilter': args.profile, 'stateFilter': args.state,
