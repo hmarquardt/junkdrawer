@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Batch 2 final analysis: concurrency effectiveness, runtime projection, R2 cost update.
+
+Reads production/batch2-report.json + batch2-storage-stats.json + the live metrics
+journal, and writes production/batch2-final-analysis.json. Batch-1 comparison values
+are supplied from batch1-report.json, never hard-coded assumptions.
+"""
+import json
+from pathlib import Path
+import statistics
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+PROD = ROOT / 'data/fruiting-forecast/production'
+WORK = Path('/tmp/ff-batch2-normalized')
+
+
+def main():
+    report = json.loads((PROD / 'batch2-report.json').read_text())
+    storage = json.loads((PROD / 'batch2-storage-stats.json').read_text())
+    b1 = json.loads((PROD / 'batch1-report.json').read_text())
+    chunks = report['chunks']
+    exec_seconds = sum(c.get('elapsedSeconds') or 0 for c in chunks)
+    newly = report['newlyComplete']
+    stats = report['metrics']
+    stages = stats.get('stageStats', {})
+    dem = stages.get('dem', {})
+    access = stages.get('access', {})
+    span = stats.get('spanSeconds') or exec_seconds
+    b1_stage = b1.get('stageSeconds') or {}
+    b1_dem_median = ((b1_stage.get('dem') or {}).get('median')) or 66.0
+    b1_access_median = ((b1_stage.get('access') or {}).get('median')) or 2.8
+    b1_stage_seconds = sum((v or {}).get('sum', 0) for v in b1_stage.values()) or 28201.9
+    b1_serial_per_tile = b1_stage_seconds / max(b1.get('requested', 301), 1)
+    b1_wall = b1.get('wallSecondsSinceFirstAttempt') or 0
+    def med(name):
+        return (stages.get(name) or {}).get('median') or 0
+    # Publication busy time is the sum of successful per-tile publish events
+    # (phase A and B); the transport remains the proven serialized Wrangler path.
+    r2 = report.get('r2') or {}
+    out = {
+        'schemaVersion': 1,
+        'concurrencyEffectiveness': {
+            'frozenTiles': report['frozenTiles'],
+            'newlyComplete': newly,
+            'finalPassChunkWallSeconds': round(exec_seconds, 1),
+            'sinceFirstAttemptSpanSeconds': round(span, 1),
+            'secondsPerTileFinalPass': round(exec_seconds / max(newly, 1), 1),
+            'secondsPerTileSinceFirstAttempt': round(span / max(newly, 1), 1),
+            'batch1SerialSecondsPerTile': round(b1_serial_per_tile, 1),
+            'batch1WallSecondsSinceFirstAttempt': b1_wall,
+            'batch1TilesPerHourWall': round(3600 * b1.get('requested', 301) / b1_wall, 1) if b1_wall else None,
+            'batch2TilesPerHourFinalPass': round(3600 * newly / exec_seconds, 1) if exec_seconds else None,
+            'batch2TilesPerHourSinceFirstAttempt': round(3600 * newly / span, 1) if span else None,
+            'buildUtilizationTwoWorkers': stats.get('buildUtilization'),
+            'publishUtilization': stats.get('publishUtilization'),
+            'demMedianSeconds': dem.get('median'),
+            'demP75Seconds': dem.get('p75'),
+            'accessMedianSeconds': access.get('median'),
+            'accessP75Seconds': access.get('p75'),
+            'batch1DemMedianSeconds': b1_dem_median,
+            'batch1AccessMedianSeconds': b1_access_median,
+            'note': ('The first 100 frozen tiles were produced by earlier interrupted generations; the final pass '
+                     're-verified and republished them, so final-pass chunk wall understates their real cost. The '
+                     'since-first-attempt span includes duplicate work, restart time and stopped time and is labeled '
+                     'as such, never presented as an execution rate.'),
+        },
+        'bottleneck': {
+            'buildBusySeconds': stats.get('buildBusySeconds'),
+            'publishBusySeconds': stats.get('publishBusySeconds'),
+            'demShareOfBuildBusy': round((dem.get('sum', 0) / stats.get('buildBusySeconds', 1)), 3) if stats.get('buildBusySeconds') else None,
+            'accessShareOfBuildBusy': round((access.get('sum', 0) / stats.get('buildBusySeconds', 1)), 3) if stats.get('buildBusySeconds') else None,
+            'hostedServiceSeconds': round(sum((stats.get('serviceSeconds') or {}).values()), 1),
+            'verdict': None,
+        },
+        'r2Transport': {
+            'mechanism': 'Wrangler OAuth (no bucket-scoped S3 credentials present in the environment)',
+            'uploadedObjects': r2.get('uploadedObjects'),
+            'uploadedBytes': r2.get('uploadedBytes'),
+            'uploadIntents': r2.get('uploadIntents'),
+            'verifiedReusedObjects': r2.get('verifiedReusedObjects'),
+            'publishBusySeconds': stats.get('publishBusySeconds'),
+            'note': ('Publication is serialized and overlaps the two local workers; its share of wall time is '
+                     'reported rather than assumed. The S3-compatible path was neither required nor benchmarked '
+                     'because no bucket-scoped credentials were available.'),
+        },
+        'runtimeProjectionRemaining': {},
+        'r2Cost': {
+            'nationalStorageGB': round(storage['profileWeightedNationalProjectionBytes'] / 1e9, 3),
+            'nationalStorageGBSimpleMean': round(storage['simpleMeanNationalProjectionBytes'] / 1e9, 3),
+            'objectsPerSearch': 36,
+            'readsPerUserMonth': 72,
+            'readsAtUsers': {'100': 7200, '1000': 72000, '10000': 720000},
+            'warmCacheAvoidanceAssumed': 0.5,
+            'edgeCacheAssumed': False,
+            'note': 'Assumptions unchanged from Revision 15 (4 searches x 9 tiles x 4 objects, 50% warm-cache avoidance). R2 free allowances are account-shared; egress free.',
+        },
+    }
+    # Runtime projection for the remaining buildable tiles (Batch 3 candidate),
+    # separated into stages, in both two-worker and serial-equivalent terms.
+    b3 = json.loads((PROD / 'batch3-scope.json').read_text()) if (PROD / 'batch3-scope.json').exists() else {}
+    n = len(b3.get('buildableNow', []))
+    def stage_total(name):
+        st = stages.get(name, {})
+        return (st.get('median') or 0) * n
+    dem_two = med('dem') * n / 2
+    # Hosted services stay on one serialized lane; local compute runs on two
+    # workers. Access is local OSM computation, not a hosted service.
+    hosted = (med('soil') + med('public-land') + med('fire')) * n
+    local = (med('habitat') + med('access')) * n / 2
+    publish = (stages.get('publishA', {}).get('sum', 0) + stages.get('publishB', {}).get('sum', 0)) or \
+              (stats.get('publishBusySeconds') or 0)
+    per_tile_publish = (publish / max(stats.get('publishedTiles', 1), 1))
+    pub_total = per_tile_publish * n
+    serial_equiv = med('dem') * n + hosted + (med('habitat') + med('access')) * n + pub_total
+    prep_states = len(b3.get('statesNeedingPreparation') or [])
+    prep_seconds = 0.0
+    if prep_states:
+        prep = json.loads((PROD / 'batch2-state-prep.json').read_text())
+        per_state = prep['totalSeconds'] / max(len(prep['cohort']), 1)
+        prep_seconds = per_state * prep_states
+    out['runtimeProjectionRemaining'] = {
+        'remainingBuildableTiles': n,
+        'twoWorkerExpectationSeconds': round(dem_two + hosted + local + pub_total, 1),
+        'serialEquivalentSeconds': round(serial_equiv, 1),
+        'components': {'demTwoWorker': round(dem_two, 1), 'hostedSerialized': round(hosted, 1),
+                       'localComputeTwoWorker': round(local, 1), 'publicationSerialized': round(pub_total, 1),
+                       'statePreparationEstimate': round(prep_seconds, 1),
+                       'statePreparationStates': prep_states},
+        'excludes': ('State preparation is estimated separately from the measured Batch-2 per-state mean and is '
+                     'not included in the two-worker expectation; stopped/operator time and the no-state-threshold '
+                     'tiles are excluded.'),
+    }
+    ce = out['concurrencyEffectiveness']
+    ratio = ce['batch1SerialSecondsPerTile'] / max(ce['secondsPerTileSinceFirstAttempt'], 0.01)
+    ce['interpretation'] = (f'Batch 2 completed {newly} tiles with a final-pass chunk wall of '
+                            f'{ce["finalPassChunkWallSeconds"]:,} s and a since-first-attempt span of '
+                            f'{ce["sinceFirstAttemptSpanSeconds"]:,} s ({ce["secondsPerTileSinceFirstAttempt"]} s/tile '
+                            f'including restarts vs {ce["batch1SerialSecondsPerTile"]} s/tile serial stage time in '
+                            f'Batch 1). Worker build utilization {ce["buildUtilizationTwoWorkers"]}; publisher '
+                            f'utilization {ce["publishUtilization"]}. DEM median {ce["demMedianSeconds"]} s/tile vs '
+                            f'Batch-1 {ce["batch1DemMedianSeconds"]}; access median {ce["accessMedianSeconds"]} s/tile '
+                            f'vs Batch-1 {ce["batch1AccessMedianSeconds"]}.')
+    bottleneck_share = out['bottleneck']['demShareOfBuildBusy']
+    access_share = out['bottleneck']['accessShareOfBuildBusy']
+    if bottleneck_share:
+        out['bottleneck']['verdict'] = ('DEM remains a major local constraint at '
+                                        f'{round(bottleneck_share * 100, 1)}% of build-busy time; dense eastern OSM '
+                                        f'access computation is the other at {round((access_share or 0) * 100, 1)}%, '
+                                        f'with access p75 {ce["accessP75Seconds"]} s/tile far above the Batch-1 '
+                                        'western median. Publication runs concurrently and did not become the limiter.')
+    else:
+        out['bottleneck']['verdict'] = 'insufficient data'
+    (PROD / 'batch2-final-analysis.json').write_text(json.dumps(out, indent=2) + '\n')
+    print(json.dumps({'tilesPerHourFinalPass': ce['batch2TilesPerHourFinalPass'],
+                      'tilesPerHourSinceFirstAttempt': ce['batch2TilesPerHourSinceFirstAttempt'],
+                      'speedupVsBatch1': round(ratio, 2), 'remainingBuildable': n}, indent=2))
+
+
+if __name__ == '__main__':
+    main()

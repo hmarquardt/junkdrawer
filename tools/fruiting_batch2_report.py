@@ -52,6 +52,7 @@ def main():
     metrics = WORK / 'metrics.jsonl'
     stats = {'retries': {}, 'demDownloadedBytes': 0, 'demReclaimedBytes': 0,
              'minFreeDiskBytes': None, 'peakDemCacheBytes': 0}
+    batch_started_at = None
     if metrics.exists():
         sys.path.insert(0, str(ROOT / 'tools'))
         import fruiting_stage_stats as S
@@ -60,6 +61,31 @@ def main():
         with contextlib.redirect_stdout(buf):
             S.main(str(metrics))
         stats = json.loads(buf.getvalue())
+        for line in metrics.read_text().splitlines():
+            try:
+                batch_started_at = json.loads(line).get('at')
+                break
+            except ValueError:
+                continue
+    # R2 transport accounting from the append-only publisher ledger, scoped to
+    # this batch by the first recorded metrics event (never a bucket listing).
+    inv_path = DATA / '.r2-inventory.jsonl'
+    uploaded, uploaded_bytes, intents, reused = {}, {}, 0, 0
+    if inv_path.exists():
+        for line in inv_path.read_text().splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if batch_started_at and (e.get('at') or 0) < batch_started_at:
+                continue
+            if e.get('event') == 'upload-intent':
+                intents += 1
+            if e.get('event') == 'verified' and e.get('url'):
+                if e.get('uploaded'):
+                    uploaded[e['url']] = e.get('bytes', 0)
+                else:
+                    reused[e['url']] = e.get('bytes', 0)
     audit = PROD / 'remote-audit.json'
     report = {
         'schemaVersion': 1,
@@ -80,7 +106,10 @@ def main():
         'frozenRemaining': sorted(frozen - {t['id'] for t in done_frozen}),
         'nationalComplete': len(complete),
         'nationalRemaining': 940 - len(complete),
-        'r2': {'activeObjects': len(refs), 'activeBytes': sum(b for b, _ in refs.values())},
+        'r2': {'activeObjects': len(refs), 'activeBytes': sum(b for b, _ in refs.values()),
+               'uploadedObjects': len(uploaded), 'uploadedBytes': sum(uploaded.values()),
+               'uploadIntents': intents, 'verifiedReusedObjects': len(reused),
+               'ledgerScope': 'publisher upload-intent ledger since the first Batch-2 metrics event; not a bucket listing'},
         'metrics': stats,
         'remoteAudit': json.loads(audit.read_text()) if audit.exists() else None,
         'resume': {'command': 'uv run tools/fruiting_batch2.py run --scope data/fruiting-forecast/production/batch2-scope.json --chunk <n>',
