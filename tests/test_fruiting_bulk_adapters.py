@@ -55,8 +55,10 @@ PNW_TILES = tuple(sorted(set(PNW_OREGON_TILES) | set(PNW_WASHINGTON_TILES)))
 PNW_OCEAN_TILES = ('n43_w125', 'n46_w123', 'n46_w124', 'n47_w123', 'n47_w125', 'n48_w123')
 # The bounded Southern Rockies release (Colorado + northern New Mexico).
 RELEASE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES))
-# Every tile whose habitat declares all components AVAILABLE.
-ACCESS_TILES = tuple(sorted(('n39_w106', 'n40_w106') + PNW_TILES))
+# The bounded release tiles whose access layer is now published. Batch 1 filled
+# the remaining Colorado release access objects; New Mexico is outside its
+# prepared-state scope and retains the explicit UNBUILT access gap.
+ACCESS_TILES = tuple(sorted(COLORADO_TILES + PNW_TILES))
 AVAILABLE_TILES = tuple(sorted(COLORADO_TILES + NEW_MEXICO_TILES + PNW_TILES))
 # Revision-10 national canaries: Northern Forests and Southeast vertical-stack tiles.
 NATIONAL_CANARY_TILES = ('n45_w085', 'n45_w070', 'n30_w084', 'n32_w084')
@@ -288,6 +290,18 @@ class SoilAdapter(unittest.TestCase):
 
     ATTRIBUTE_HEADER = ["mukey", "musym", "areasymbol", "saverest", "drclassdcd", "aws025wta", "aws050wta",
                         "flodfreqdcd", "hydgrpdcd", "slopegraddcp"]
+
+    def test_sda_maintenance_page_is_retried(self):
+        maintenance = bulk.requests.Response()
+        maintenance.status_code = 200
+        maintenance._content = b'<html>Site is under daily maintenance. Please try after 12:45 AM CST.</html>'
+        healthy = bulk.requests.Response()
+        healthy.status_code = 200
+        healthy._content = b'{"Table":[["mukey"],["1"]]}'
+        with patch.object(bulk.requests, 'post', side_effect=[maintenance, healthy]) as post:
+            with patch.object(bulk.time, 'sleep'):
+                self.assertEqual(bulk._sda_query('SELECT 1'), [["mukey"], ["1"]])
+        self.assertEqual(post.call_count, 2)
 
     def _package(self, root: Path) -> Path:
         import rasterio

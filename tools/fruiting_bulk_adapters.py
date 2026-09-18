@@ -78,15 +78,19 @@ def service_request(method, url, **kwargs):
     import random
     from email.utils import parsedate_to_datetime
     from fruiting_metrics import emit
+    transient_response = kwargs.pop("transient_response", None)
     start = time.monotonic()
     for attempt in range(5):
         response = None
         try:
             response = getattr(requests, method)(url, **kwargs)
-            if response.status_code not in {408, 429, 500, 502, 503, 504}:
+            transient_body = transient_response is not None and transient_response(response)
+            if response.status_code not in {408, 429, 500, 502, 503, 504} and not transient_body:
                 emit('service', url=url, seconds=time.monotonic()-start, retries=attempt, status=response.status_code)
                 return response
-            response.raise_for_status()
+            if not transient_body:
+                response.raise_for_status()
+            raise requests.RequestException("transient hosted-service response", response=response)
         except requests.RequestException:
             status = response.status_code if response is not None else 0
             emit('service-retry', url=url, attempt=attempt+1, status=status)
@@ -910,7 +914,14 @@ def normalize_soil_attribute(row: dict) -> dict:
 
 def _sda_query(query: str, timeout: int = 300) -> list[list]:
     """One authoritative SDA query. Returns the raw Table (first row is the header)."""
-    response = service_request('post', SDA_ENDPOINT, json={"query": query, "format": "JSON+COLUMNNAME"}, timeout=timeout)
+    response = service_request(
+        'post', SDA_ENDPOINT,
+        json={"query": query, "format": "JSON+COLUMNNAME"}, timeout=timeout,
+        transient_response=lambda candidate: (
+            "daily maintenance" in candidate.text.lower()
+            or "please try after" in candidate.text.lower()
+        ),
+    )
     response.raise_for_status()
     try:
         body = response.json()
