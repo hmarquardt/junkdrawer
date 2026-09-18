@@ -74,8 +74,8 @@ def main():
         'medianBytesPerTile': int(statistics.median(per_tile)),
         'p25': pct(per_tile, 0.25), 'p75': pct(per_tile, 0.75), 'p90': pct(per_tile, 0.90),
         'layerTotals': dict(sorted(per_layer.items())),
-        'profileTileStats': {p: {'completeTiles': v[1], 'bytes': v[2], 'meanBytesPerTile': int(v[2] / v[1]) if v[1] else None}
-                             for p, v in sorted(per_profile.items())},
+        'profileTileStats': {str(p): {'completeTiles': v[1], 'bytes': v[2], 'meanBytesPerTile': int(v[2] / v[1]) if v[1] else None}
+                             for p, v in sorted(per_profile.items(), key=lambda kv: str(kv[0]))},
         'profileWeightedNationalProjectionBytes': int(weighted),
         'simpleMeanNationalProjectionBytes': int(simple),
         'simpleMeanBasisTiles': simple_n,
