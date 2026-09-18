@@ -1,5 +1,39 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 15 — R2 cutover and National GIS Batch 1 complete (2026-09-18)
+
+Started from `92e968ede9df96312721b559d9a5a5c3062142cc`. The production data split is complete and **National GIS Batch 1 only** has completed. The application and manifest remain at `https://hmarquardt.github.io/junkdrawer/`; immutable content-addressed Parquet is served directly from R2 at `https://data.hanksjunkdrawer.com/`. There is no Worker, backend, VM, API service or database server. `data.hanksjunkdrawer.com` is the only vanity-domain hostname used by Fruiting Forecast; moving the application to an apex or `www` vanity domain is outside the project architecture.
+
+### Migration and client integration
+
+The manifest now declares the provider-neutral `assetBaseUrl`, while relative asset records, manifest JSON and collecting-rule JSON remain app-hosted. Manifests without an asset base retain same-origin behavior for tests and historical fixtures. Cache identity remains logical asset + dataset version + relative URL + digest, so a host migration does not invalidate identical verified bytes. Length and SHA-256 validation remain mandatory. A failed remote read may use a previously verified cache entry; an uncached failure stays unavailable and never becomes neutral or fake biological evidence.
+
+Before cutover, **250 live objects / 28,189,181 bytes** were uploaded under their existing keys and fetched in full for verification. One bounded interruption proved resume behavior: a valid remote object was recognized before PUT, and manifest publication still followed local validation → immutable upload → full remote verification → atomic manifest update → journal. The final active manifest references **1,427 objects / 138,601,703 bytes**. The final audit fetched and validated all 1,427: 0 missing, 0 corrupt, 0 publisher-ledger remote orphans. Seventeen local-only content-addressed artifacts were reported and retained for explicit maintenance. Wrangler cannot list the bucket exhaustively, so remote-orphan scope is the append-only publisher ledger. Production Parquet has been removed from tracked git and is ignored; local release-data tests can hydrate it from R2. Small fixtures, manifest, configuration and provenance remain versioned.
+
+Real Chrome against the deployed GitHub Pages application passed cold/warm DuckDB-Wasm lookups for newly completed PNW, California, Southern Rockies, Plains, cold-basin and warm-desert tiles. Parquet came only from R2; CORS, digest/length checks and SQL passed with no console/page errors. Cold lookups made three or four immutable-object requests and immediate warm lookups made zero additional Parquet requests. Suggested starts remained limited to eligible, unrestricted mapped OSM evidence. Hosting origin alone did not change scores.
+
+### Batch 1 scope and result
+
+The planner, rather than a historical hand list, froze **301 incomplete tiles** from **336 eligible** tiles; 35 were already complete. Derived prepared-state scope: **AZ, CA, CO, FL, GA, ID, ME, MI, MT, OR, WA, WY**. The historical NM assumption was not forced when it was absent from the planner's ready eligible set. Required work was 292 habitat, 292 public-land, 292 fire-history and 301 access layers. Execution was fully serial in 31 restartable checkpoints.
+
+**Result: 301/301 newly complete. National coverage is 336/940, with 604 remaining.** Total elapsed clock was **70,058.6 s (19 h 27 m 39 s)** including safe stopped time; successful stage time was 28,201.9 s. DEM dominated (19,066.5 s, median 66.0 s/tile, p75 89.1). Downloads were 290 objects / 13,585,638,384 bytes, with 13,647,282,109 bytes reclaimed after dependent publication. Peak additional DEM cache was 494,513,115 bytes; minimum observed free disk was 12,649,365,504 bytes and the observed volume-use swing peaked at 4,904,349,696 bytes.
+
+Batch 1 uploaded **1,177 R2 objects / 110,412,522 bytes**. Wrangler upload time was 3,102.3 s and verification time 705.9 s. There were 15 bounded HTTP-500 retries from one MTBS geometry request, and **no 429 throttling was observed**. The deterministic pagination/precision fix passed regression and production. SDA's scheduled maintenance interrupted one chunk and resumed cleanly; 49°N no-intersection responses now preserve unknown soil cells. No failure left the manifest pointing at an absent object.
+
+### Revised projections and next production design
+
+The 336 complete-tile sample totals 136,020,076 four-layer bytes: mean 404,822 bytes/tile, median 304,788, p25 148,991, p75 508,178 and p90 887,298. The profile-weighted national projection is **328.9 MB**; simple-mean projection is 380.5 MB; measured p25/p75 scenarios are 140.1–477.7 MB. Fire contributes 83.46 MB, public land 36.03 MB, access 13.73 MB and habitat 5.38 MB.
+
+The revised serial projection is **23.54 h for all 940 tiles** at summed stage medians and **15.12 h for the remaining 604**; p75 projections are 31.20 h total / 20.05 h remaining. Future state preparation is not measured and is excluded. R2 cost modeling assumes four searches/user/month × nine tiles × four objects with 50% warm-cache avoidance: 7,200 / 72,000 / 720,000 monthly Class B reads for 100 / 1,000 / 10,000 users. Projected 0.329 GB storage and these reads fit the documented R2 free allowances in isolation, though the allowances are account-shared. No edge cache was assumed. `CF-Cache-Status: DYNAMIC` does not justify a Worker; a narrow immutable-Parquet cache rule is optional only if later request measurements warrant it.
+
+Batch 2 should use at most **two concurrent DEM/local-compute workers**, while SDA and other hosted-service calls, R2 uploads, manifest writes and checkpoints remain serialized. The final planner state yields a coherent central/eastern candidate of 309 tiles and 295 later tiles; `production/remaining-batches.json` records the state cohort and selection rule. The Batch-2 pass must prepare that cohort, rerun the planner and freeze the exact list. Scoped bucket-only R2 S3 credentials may reduce the measured Wrangler-per-object overhead if the same immutable upload/full-verification ordering is retained; current OAuth remains valid for interactive work.
+
+### Biology and authorization boundary
+
+Biology remained frozen and unchanged: **13 profiles, 11 PROVISIONAL, 2 MODELED_SPARSE, 0 UNSUPPORTED**. No profile roster, maturity, taxon, crosswalk, calendar, host model, weather model, score weight or permanent canary changed.
+
+The next authorized production pass is **National GIS Batch 2 only**. Batch 2 has not started. This revision does not authorize Batch 3 or the full remainder.
+
 ## Revision 14 — Great Plains Task Zero, biology complete, national-production-ready (2026-09-16)
 
 Started from `940d3a8`. **CONUS biological coverage is complete at PROVISIONAL/MODELED_SPARSE maturity. The project is still NOT launch-ready because national GIS production remains incomplete.**

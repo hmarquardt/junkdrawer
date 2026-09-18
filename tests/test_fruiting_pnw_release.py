@@ -130,8 +130,9 @@ class Plan(unittest.TestCase):
         # The union of existing and new tiles is always the whole derived release.
         self.assertEqual(sorted(set(plan['newTiles']) | set(plan['existingTiles'])), sorted(plan['tiles']))
         self.assertTrue({'n43_w123', 'n44_w124'} <= set(plan['existingTiles']))
-        # The Klamath correction raised n42_w124 to core: derived future work.
-        self.assertEqual(plan['newTiles'], ['n42_w124'])
+        # Batch 1 completed the former Klamath follow-up tile as well.
+        self.assertEqual(plan['newTiles'], [])
+        self.assertIn('n42_w124', plan['existingTiles'])
         shares = plan['shares']
         self.assertGreater(shares['n44_w123']['pnwSharePct'], shares['n44_w122']['pnwSharePct'])
         self.assertIn('interiorMountains', shares['n44_w122']['adjacentProfiles'],
@@ -143,8 +144,7 @@ class Plan(unittest.TestCase):
 
     def test_washington_plan_reports_shared_and_new_tiles(self):
         plan = pnw_release.build_plan('WA')
-        # The published Washington roster is complete; the North Cascades
-        # correction derives four additional future-work tiles.
+        # Batch 1 completed the published Washington and North Cascades roster.
         self.assertEqual(sorted(set(plan['newTiles']) | set(plan['existingTiles'])), sorted(plan['tiles']))
         self.assertTrue(set(plan['newTiles']) <= {'n47_w121', 'n48_w120', 'n48_w121', 'n48_w122'})
         self.assertTrue({'n45_w122', 'n45_w123'} <= set(plan['existingTiles']))
