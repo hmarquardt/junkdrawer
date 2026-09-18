@@ -1,11 +1,11 @@
 # Batch 1 production checkpoint
 
-Chunk 16 verified; 170 / 301 requested tiles complete.
-National four-layer coverage: 205 / 940.
-Remaining national tiles: 735.
+Chunk 17 verified; 180 / 301 requested tiles complete.
+National four-layer coverage: 215 / 940.
+Remaining national tiles: 725.
 
-Remote live objects: 903; bytes: 102474976.
-Elapsed since first attempt: 8.64 hours.
+Remote live objects: 943; bytes: 107229586.
+Elapsed since first attempt: 8.93 hours.
 No Batch 2 execution. Biology unchanged. Full stage/resource measurements are in batch1-report.json.
 
-To resume: uv run tools/fruiting_batch1.py run --scope data/fruiting-forecast/production/batch1-scope.json --chunk 17
+To resume: uv run tools/fruiting_batch1.py run --scope data/fruiting-forecast/production/batch1-scope.json --chunk 18
