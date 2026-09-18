@@ -34,7 +34,13 @@ from fruiting_bulk_adapters import (_sha256, load_cache_manifest, save_cache_man
 VERSION = 'osm-access-v1'
 STATES = {'CO': 'colorado', 'OR': 'oregon', 'NM': 'new-mexico', 'WA': 'washington',
           'MI': 'michigan', 'ME': 'maine', 'FL': 'florida', 'GA': 'georgia',
-          'ID': 'idaho', 'MT': 'montana', 'WY': 'wyoming', 'CA': 'california', 'AZ': 'arizona', 'NV': 'nevada'}
+          'ID': 'idaho', 'MT': 'montana', 'WY': 'wyoming', 'CA': 'california', 'AZ': 'arizona', 'NV': 'nevada',
+          # National GIS Batch 2 cohort (Geofabrik US state extracts).
+          'AL': 'alabama', 'AR': 'arkansas', 'IA': 'iowa', 'IL': 'illinois', 'IN': 'indiana',
+          'KS': 'kansas', 'KY': 'kentucky', 'LA': 'louisiana', 'MN': 'minnesota', 'MO': 'missouri',
+          'MS': 'mississippi', 'NC': 'north-carolina', 'NE': 'nebraska', 'OH': 'ohio',
+          'SC': 'south-carolina', 'TN': 'tennessee', 'VA': 'virginia', 'WI': 'wisconsin',
+          'WV': 'west-virginia'}
 ATTRIBUTION = '© OpenStreetMap contributors'
 LICENSE = 'https://www.openstreetmap.org/copyright'
 TAGS = ('name operator access motor_vehicle vehicle foot bicycle surface smoothness tracktype '

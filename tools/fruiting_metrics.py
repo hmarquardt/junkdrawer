@@ -2,15 +2,19 @@
 import contextlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
+
+# Batch-2 two-worker runs append from multiple threads; keep each line atomic.
+_EMIT_LOCK = threading.Lock()
 
 def emit(kind, **fields):
     target = os.environ.get('FF_METRICS_PATH')
     if target:
         path = Path(target)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open('a') as f:
+        with _EMIT_LOCK, path.open('a') as f:
             f.write(json.dumps({'kind': kind, 'at': time.time(), **fields})+'\n')
             f.flush()
 

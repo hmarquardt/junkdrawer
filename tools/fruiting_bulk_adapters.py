@@ -63,6 +63,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -527,6 +528,20 @@ def cache_manifest_path(cache: Path) -> Path:
     return cache / CACHE_MANIFEST
 
 
+# Batch-2 two-worker synchronization:
+#  * CACHE_LOCK guards cache-manifest read-modify-write cycles so concurrent
+#    tile preparations never lose each other's records.
+#  * SDA_LOCK serializes every Soil Data Access request (the Batch-1 contract:
+#    hosted soil service access stays strictly serial across workers).
+#  * HOSTED_LOCK serializes the other hosted per-tile services (PAD-US ArcGIS,
+#    MTBS ArcGIS) whose concurrent access was never demonstrated safe. DEM
+#    downloads (USGS TNM) are deliberately NOT under this lock: overlapping
+#    their 60-second median latency is the entire purpose of two workers.
+CACHE_LOCK = threading.RLock()
+SDA_LOCK = threading.RLock()
+HOSTED_LOCK = threading.RLock()
+
+
 def load_cache_manifest(cache: Path) -> dict:
     path = cache_manifest_path(cache)
     if path.exists():
@@ -571,8 +586,13 @@ def _archive_path(cache: Path, source: dict) -> Path:
 
 def _record(cache: Path, manifest: dict, key: str, entry: dict) -> dict:
     entry = {"validatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **entry}
+    # Thread-safe (Batch-2 two-worker runs): re-read the on-disk manifest under
+    # the cache lock so a concurrent tile's record is never lost to a stale copy.
+    with CACHE_LOCK:
+        current = load_cache_manifest(cache)
+        current.setdefault("sources", {})[key] = entry
+        save_cache_manifest(cache, current)
     manifest.setdefault("sources", {})[key] = entry
-    save_cache_manifest(cache, manifest)
     return entry
 
 
@@ -913,15 +933,19 @@ def normalize_soil_attribute(row: dict) -> dict:
 
 
 def _sda_query(query: str, timeout: int = 300, allow_empty: bool = False) -> list[list]:
-    """One authoritative SDA query. Returns the raw Table (first row is the header)."""
-    response = service_request(
-        'post', SDA_ENDPOINT,
-        json={"query": query, "format": "JSON+COLUMNNAME"}, timeout=timeout,
-        transient_response=lambda candidate: (
-            "daily maintenance" in candidate.text.lower()
-            or "please try after" in candidate.text.lower()
-        ),
-    )
+    """One authoritative SDA query. Returns the raw Table (first row is the header).
+
+    Requests are serialized process-wide (SDA_LOCK): Batch 2 keeps the hosted
+    soil service strictly serial even with two tile workers."""
+    with SDA_LOCK:
+        response = service_request(
+            'post', SDA_ENDPOINT,
+            json={"query": query, "format": "JSON+COLUMNNAME"}, timeout=timeout,
+            transient_response=lambda candidate: (
+                "daily maintenance" in candidate.text.lower()
+                or "please try after" in candidate.text.lower()
+            ),
+        )
     response.raise_for_status()
     try:
         body = response.json()
@@ -1502,9 +1526,13 @@ def _geometry_bounds(geometry: dict) -> tuple[float, float, float, float] | None
 
 
 def build_fire(tile_id: str, cache: Path, out: Path, min_year: int = 1984, timeout: int = 180) -> dict:
-    """Clip the pinned MTBS burned-area service to one tile. Severity stays null (see MTBS['caveat'])."""
+    """Clip the pinned MTBS burned-area service to one tile. Severity stays null (see MTBS['caveat']).
+
+    The ArcGIS query is serialized process-wide (HOSTED_LOCK): concurrent access
+    was never demonstrated safe, so Batch-2 workers take turns on this service."""
     west, south, east, north = tile_bbox(tile_id)
-    features = clip_to_tile(_esri_geojson(MTBS["query"], {
+    with HOSTED_LOCK:
+        features = clip_to_tile(_esri_geojson(MTBS["query"], {
         "where": f"YEAR >= {min_year}",
         "geometry": esri_envelope(tile_bbox(tile_id)),
         "geometryType": "esriGeometryEnvelope",
@@ -1519,7 +1547,7 @@ def build_fire(tile_id: str, cache: Path, out: Path, min_year: int = 1984, timeo
         "orderByFields": "objectid",
         "maxAllowableOffset": 0.00001,
         "resultRecordCount": 50,
-    }, cache, f"mtbs_{tile_id}", timeout), tile_id)
+        }, cache, f"mtbs_{tile_id}", timeout), tile_id)
     retrieved = time.strftime("%Y-%m-%d")
     rows = []
     for feature in features:
@@ -1639,9 +1667,13 @@ def pad_property_type(name: str, manager: str) -> str:
 
 
 def build_public_land(tile_id: str, cache: Path, out: Path, timeout: int = 240) -> dict:
-    """Clip the pinned PAD-US public-access service to one tile, retaining state jurisdiction."""
+    """Clip the pinned PAD-US public-access service to one tile, retaining state jurisdiction.
+
+    The ArcGIS query is serialized process-wide (HOSTED_LOCK): concurrent access
+    was never demonstrated safe, so Batch-2 workers take turns on this service."""
     west, south, east, north = tile_bbox(tile_id)
-    features = clip_to_tile(_esri_geojson(PADUS["query"], {
+    with HOSTED_LOCK:
+        features = clip_to_tile(_esri_geojson(PADUS["query"], {
         "where": "1=1",
         "geometry": esri_envelope(tile_bbox(tile_id)),
         "geometryType": "esriGeometryEnvelope",
@@ -1651,7 +1683,7 @@ def build_public_land(tile_id: str, cache: Path, out: Path, timeout: int = 240) 
         "returnGeometry": "true",
         "maxAllowableOffset": 0.00025,
         "resultRecordCount": 2000,
-    }, cache, f"padus_v2_{tile_id}", timeout), tile_id)
+        }, cache, f"padus_v2_{tile_id}", timeout), tile_id)
     resolve_state = _state_lookup(cache)
     from shapely.geometry import box as shapely_box, mapping as shapely_mapping, shape as shapely_shape
     from shapely.validation import make_valid
