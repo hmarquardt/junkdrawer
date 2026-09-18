@@ -207,31 +207,47 @@ class Batch2Runner:
             if phase == 'A':
                 from fruiting_bulk_adapters import (build_fire, build_habitat, build_public_land,
                                                     prepare_tile, soil_inputs)
-                states_for_soil = self.planned[tile]['soilStatesRequired']
-                with stage(tile, 'dem'):
-                    prepare_tile(SOURCE_CACHE, tile)
-                with stage(tile, 'soil'):
-                    soil = soil_inputs(SOURCE_CACHE, states_for_soil, tile)
-                results = {}
-                for layer, builder in [
-                        ('habitat', lambda: build_habitat(tile, SOURCE_CACHE, self.out, soil_prepared=soil)),
-                        ('public-land', lambda: build_public_land(tile, SOURCE_CACHE, self.out)),
-                        ('fire', lambda: build_fire(tile, SOURCE_CACHE, self.out))]:
-                    from fruiting_tile_publish import LAYERS
+                from fruiting_tile_publish import LAYERS
+
+                def have(layer):
                     artifact = self.out / LAYERS[layer][0] / (tile + '.parquet')
-                    side = artifact.with_suffix('.parquet.json')
-                    with stage(tile, layer):
-                        if artifact.exists() and side.exists():
-                            results[layer] = json.loads(side.read_text())
-                            emit('reuse-normalized', tile=tile, layer=layer)
-                        else:
-                            results[layer] = builder()
+                    return artifact.exists() and artifact.with_suffix('.parquet.json').exists()
+
+                results = {}
+                if all(have(l) for l in ('habitat', 'public-land', 'fire')):
+                    # Resume fast path: normalized artifacts survived a previous run;
+                    # never re-download a reclaimed DEM just to re-verify a checkpoint.
+                    for layer in ('habitat', 'public-land', 'fire'):
+                        emit('reuse-normalized', tile=tile, layer=layer)
+                else:
+                    states_for_soil = self.planned[tile]['soilStatesRequired']
+                    with stage(tile, 'dem'):
+                        prepare_tile(SOURCE_CACHE, tile)
+                    with stage(tile, 'soil'):
+                        soil = soil_inputs(SOURCE_CACHE, states_for_soil, tile)
+                    for layer, builder in [
+                            ('habitat', lambda: build_habitat(tile, SOURCE_CACHE, self.out, soil_prepared=soil)),
+                            ('public-land', lambda: build_public_land(tile, SOURCE_CACHE, self.out)),
+                            ('fire', lambda: build_fire(tile, SOURCE_CACHE, self.out))]:
+                        artifact = self.out / LAYERS[layer][0] / (tile + '.parquet')
+                        side = artifact.with_suffix('.parquet.json')
+                        with stage(tile, layer):
+                            if artifact.exists() and side.exists():
+                                results[layer] = json.loads(side.read_text())
+                                emit('reuse-normalized', tile=tile, layer=layer)
+                            else:
+                                results[layer] = builder()
                 emit('tile-built', tile=tile, phase=phase, seconds=round(time.monotonic() - started, 1))
                 self.publish_queue.put(('A', tile))
             else:
                 from fruiting_osm_access import build as build_access
-                with stage(tile, 'access'):
-                    build_access(ACCESS_CACHE, self.access_states_for(tile), tile, self.out)
+                from fruiting_tile_publish import LAYERS
+                artifact = self.out / LAYERS['access'][0] / (tile + '.parquet')
+                if artifact.exists() and artifact.with_suffix('.parquet.json').exists():
+                    emit('reuse-normalized', tile=tile, layer='access')
+                else:
+                    with stage(tile, 'access'):
+                        build_access(ACCESS_CACHE, self.access_states_for(tile), tile, self.out)
                 emit('tile-built', tile=tile, phase=phase, seconds=round(time.monotonic() - started, 1))
                 self.publish_queue.put(('B', tile))
             with self.stats_lock:
@@ -307,7 +323,9 @@ class Batch2Runner:
         pub.join()
         disk_stop.set()
         elapsed = time.time() - start
-        # Verify the checkpoint against current manifest truth.
+        # Verify the checkpoint against current manifest truth: re-read from disk;
+        # the serialized publisher mutated it after this process read it earlier.
+        manifest = json.loads((DATA / 'manifest.json').read_text())
         published = {t['id']: t for t in manifest['tiles']}
         incomplete = [t for t in tiles if any(
             published.get(t, {}).get(k, {}).get('status') not in {'AVAILABLE', 'VERIFIED_EMPTY'}
