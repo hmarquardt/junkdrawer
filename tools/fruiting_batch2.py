@@ -156,10 +156,10 @@ class Batch2Runner:
         from fruiting_metrics import emit
         while True:
             item = self.publish_queue.get()
+            phase, tile = item if item is not None else (None, None)
             try:
                 if item is None:
                     return
-                phase, tile = item
                 layers = ['habitat', 'public-land', 'fire'] if phase == 'A' else ['access']
                 t0 = time.time()
                 failures = _publish(ROOT, [tile], layers, self.out)
@@ -179,23 +179,37 @@ class Batch2Runner:
                     if phase == 'A':
                         self.reclaim_dem(tile)
                 self.save_journal()
+            except BaseException as exc:
+                # A publisher exception must not kill the lane; the tile stays
+                # incomplete and the checkpoint verification fails safely.
+                with self.stats_lock:
+                    self.stats['publishFailures'] += 1
+                self.journal.setdefault(tile or 'unknown', {})['publishError'] = {'error': repr(exc)}
+                self.save_journal()
+                print(f'PUBLISH ERROR {tile}: {exc!r}', flush=True)
             finally:
                 self.publish_queue.task_done()
 
     def builder(self, work, phase):
-        """One tile at a time; hosted non-DEM services serialize on module locks."""
-        try:
-            while True:
-                try:
-                    tile = work.get_nowait()
-                except queue.Empty:
-                    return
+        """One tile at a time; hosted non-DEM services serialize on module locks.
+
+        A failed tile is recorded and the worker continues with the next tile;
+        the chunk still reports it as incomplete so a resume re-runs it. The
+        queue is always drained (task_done in finally), so one tile failure can
+        never hang the checkpoint."""
+        while True:
+            try:
+                tile = work.get_nowait()
+            except queue.Empty:
+                return
+            try:
                 self.build_tile(tile, phase)
+            except BaseException as exc:
+                print(f'TILE FAILED {tile} phase {phase}: {exc!r}', flush=True)
+                with self.stats_lock:
+                    self.stats['tileFailures'] += 1
+            finally:
                 work.task_done()
-        except Exception as exc:  # A dead worker must not hang the run.
-            print('WORKER DIED:', repr(exc), flush=True)
-            with self.stats_lock:
-                self.stats['workerDeaths'] += 1
 
     def build_tile(self, tile, phase):
         from fruiting_metrics import emit, stage

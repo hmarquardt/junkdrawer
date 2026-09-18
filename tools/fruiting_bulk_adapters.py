@@ -1462,6 +1462,51 @@ def build_habitat(tile_id: str, cache: Path, out: Path, step: float = STEP_DEGRE
     }
     write_parquet(out / "habitat" / f"{tile_id}.parquet", rows, HABITAT_COLUMNS, meta)
     return {**meta, "cells": len(rows), "tile": tile_id}
+# ArcGIS-hosted services (PAD-US, MTBS) publish a documented large-geometry
+# quota: 60 non-cacheable requests per minute. ArcGIS reports quota breaches as
+# HTTP 200 with an `error` body, so `service_request` cannot see them. Requests
+# are already serialized by HOSTED_LOCK; this pacer adds a minimum spacing so
+# two tile workers cannot burn the quota back-to-back, and `_esri_page` retries
+# any body-level 429/5xx with bounded backoff and the service's own retry hint.
+_ARCGIS_MIN_INTERVAL = 1.1  # ~54 requests/minute, under the 60/minute quota
+_ARCGIS_LAST = [0.0]
+_ARCGIS_PACE_LOCK = threading.Lock()
+
+
+def _arcgis_pace():
+    with _ARCGIS_PACE_LOCK:
+        wait = _ARCGIS_MIN_INTERVAL - (time.monotonic() - _ARCGIS_LAST[0])
+        if wait > 0:
+            time.sleep(wait)
+        _ARCGIS_LAST[0] = time.monotonic()
+
+
+def _esri_page(query: str, payload: dict, timeout: int) -> dict:
+    """One ArcGIS page with body-level transient handling.
+
+    ArcGIS answers quota/transient failures with HTTP 200 and an `error` object;
+    the HTTP-status retry inside service_request never fires for those. Retry a
+    bounded number of times, honoring a `Retry after N sec` hint when supplied."""
+    import random
+    from fruiting_metrics import emit
+    for attempt in range(5):
+        _arcgis_pace()
+        response = service_request('get', query, params=payload, timeout=timeout)
+        response.raise_for_status()
+        body = response.json()
+        error = body.get("error") or {}
+        if not error:
+            return body
+        code = error.get("code")
+        if code not in {429, 500, 502, 503, 504} or attempt == 4:
+            raise ValueError(f"Source query failed: {error}")
+        hint = re.search(r"Retry after (\d+)", " ".join(str(d) for d in (error.get("details") or [])))
+        delay = int(hint.group(1)) + 1 if hint else 2 ** (attempt + 1)
+        emit('service-retry', url=query, attempt=attempt + 1, status=code)
+        time.sleep(delay + random.random())
+    raise RuntimeError('ArcGIS retries exhausted')
+
+
 def _esri_geojson(query: str, params: dict, cache: Path, cache_key: str, timeout: int = 120) -> list[dict]:
     """One authoritative vector query, cached per tile. No per-point service calls."""
     cached = cache / f"{cache_key}.geojson.json"
@@ -1472,11 +1517,7 @@ def _esri_geojson(query: str, params: dict, cache: Path, cache_key: str, timeout
     while True:
         payload = {**params, "f": "geojson", "outSR": 4326,
                    "resultRecordCount": page, "resultOffset": offset}
-        response = service_request('get', query, params=payload, timeout=timeout)
-        response.raise_for_status()
-        body = response.json()
-        if body.get("error"):
-            raise ValueError(f"Source query failed: {body['error']}")
+        body = _esri_page(query, payload, timeout)
         batch = body.get("features") or []
         features.extend(batch)
         if len(batch) < page:
