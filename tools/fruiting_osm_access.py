@@ -25,6 +25,14 @@ import osmium
 from pyproj import Transformer
 import requests
 from shapely.geometry import Point, box, mapping, shape
+from shapely.validation import make_valid as _make_valid
+
+
+def _valid(geom):
+    """Validity repair for source geometries (Batch 2: an invalid PAD-US/OSM ring
+    crashed phase B with a GEOS side-location conflict). Repairs topology only;
+    never adds, moves or invents mapped evidence."""
+    return geom if geom.is_valid else _make_valid(geom)
 from shapely.ops import transform
 from shapely.strtree import STRtree
 
@@ -376,7 +384,7 @@ class PropertyIndex:
 class RoadIndex:
     def __init__(self, records, project):
         self.records = records
-        self.geometries = [transform(project, shape(r['geometry'])) for r in records]
+        self.geometries = [transform(project, _valid(shape(r['geometry']))) for r in records]
         self.tree = STRtree(self.geometries)
         self._connected = {}
 
@@ -401,7 +409,7 @@ def read_local(path, bbox):
     tile = box(*bbox)
     for ident, osm_type, osm_id, kind, tags, geometry in rows:
         g = json.loads(geometry)
-        if shape(g).intersects(tile):
+        if _valid(shape(g)).intersects(tile):
             result.append({'id': ident, 'osm_type': osm_type, 'osm_id': osm_id, 'kind': kind,
                            'tags': json.loads(tags), 'geometry': g})
     return result
@@ -445,8 +453,8 @@ def build(cache, states, tile_id, out, root=Path(__file__).resolve().parents[1])
                 if ownership in {'PRIVATE', 'LIKELY_PRIVATE'}:
                     continue
                 entry = grouped.setdefault(pid, {'property_id': pid, 'property_name': name, 'geoms': []})
-                entry['geoms'].append(shape(json.loads(geometry)))
-    properties = PropertyIndex([(r, transform(project, unary_union(r['geoms']))) for r in grouped.values()])
+                entry['geoms'].append(_valid(shape(json.loads(geometry))))
+    properties = PropertyIndex([(r, transform(project, _valid(unary_union(r['geoms'])))) for r in grouped.values()])
     candidates, roads, sources = {}, {}, []
     for state in states:
         entry = load_cache_manifest(cache)['sources'].get('osm_access:' + state.upper())
@@ -454,15 +462,15 @@ def build(cache, states, tile_id, out, root=Path(__file__).resolve().parents[1])
         sources.append({k: v for k, v in entry.items() if k not in {'files', 'directory'}})
         candidates.update({r['id']: r for r in read_local(folder / 'candidates.parquet', bbox) if in_tile(r, bbox)})
         roads.update({r['id']: r for r in read_local(folder / 'roads.parquet', halo)})
-    index = RoadIndex(list(roads.values()), project)
+    index = RoadIndex(list(roads.values()), project)  # RoadIndex validates internally
     source_version = VERSION + ':' + ':'.join(s['sha256'][:16] for s in sources)
     normalized = [normalize(r, index, properties, project, source_version) for r in sorted(candidates.values(), key=lambda x: x['id'])]
     barriers = [r for r in candidates.values() if r['kind'] == 'GATE' and restrictions(r['tags'], True)]
     for row in normalized:
         if not row['start_eligible'] or not row['road_id']:
             continue
-        road_geom = transform(project, shape(roads[row['road_id']]['geometry']))
-        start_geom = transform(project, shape(json.loads(row['geometry_json'])))
+        road_geom = transform(project, _valid(shape(roads[row['road_id']]['geometry'])))
+        start_geom = transform(project, _valid(shape(json.loads(row['geometry_json']))))
         blocked = [r for r in barriers if transform(project, shape(r['geometry'])).distance(start_geom) <= 100
                    and transform(project, shape(r['geometry'])).distance(road_geom) <= 3]
         if blocked:
