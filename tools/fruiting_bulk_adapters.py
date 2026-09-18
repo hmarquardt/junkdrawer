@@ -912,7 +912,7 @@ def normalize_soil_attribute(row: dict) -> dict:
 # ─ Soil: Soil Data Access (SSURGO tabular + batched point lookup) ─────
 
 
-def _sda_query(query: str, timeout: int = 300) -> list[list]:
+def _sda_query(query: str, timeout: int = 300, allow_empty: bool = False) -> list[list]:
     """One authoritative SDA query. Returns the raw Table (first row is the header)."""
     response = service_request(
         'post', SDA_ENDPOINT,
@@ -927,6 +927,8 @@ def _sda_query(query: str, timeout: int = 300) -> list[list]:
         body = response.json()
     except ValueError as exc:
         raise ValueError(f"Soil Data Access returned non-JSON: {response.text[:200]}") from exc
+    if allow_empty and body == {}:
+        return []
     if "Table" not in body:
         raise ValueError(f"Soil Data Access rejected the query: {str(body)[:300]}")
     return body["Table"] or []
@@ -973,7 +975,7 @@ def fetch_sda_point_mukeys(points: list[tuple[float, float]], timeout: int = 300
     ambiguous: dict[str, list[int]] = {}
     chunk = 400
     for start in range(0, len(points), chunk):
-        table = _sda_query(sda_point_query(points[start:start + chunk]), timeout=timeout)
+        table = _sda_query(sda_point_query(points[start:start + chunk]), timeout=timeout, allow_empty=True)
         if len(table) < 2:
             continue
         grouped: dict[str, list[int]] = {}

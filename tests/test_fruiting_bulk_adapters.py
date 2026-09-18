@@ -303,6 +303,16 @@ class SoilAdapter(unittest.TestCase):
                 self.assertEqual(bulk._sda_query('SELECT 1'), [["mukey"], ["1"]])
         self.assertEqual(post.call_count, 2)
 
+    def test_sda_empty_point_result_preserves_unknown_soil(self):
+        empty = bulk.requests.Response()
+        empty.status_code = 200
+        empty._content = b'{}'
+        with patch.object(bulk.requests, 'post', return_value=empty):
+            self.assertEqual(bulk.fetch_sda_point_mukeys([(49.5, -106.5)]),
+                             {"mukeys": {}, "ambiguous": {}})
+            with self.assertRaisesRegex(ValueError, 'rejected the query'):
+                bulk._sda_query('state preparation query')
+
     def _package(self, root: Path) -> Path:
         import rasterio
         from rasterio.transform import from_origin
@@ -335,7 +345,7 @@ class SoilAdapter(unittest.TestCase):
             [300, '4', 'CO002', '9/2/2025 5:15:13 PM', 'Well drained', None, '12.0', 'None', 'A', '9'],
         ]
 
-        def fake_query(query: str, timeout: int = 300):
+        def fake_query(query: str, timeout: int = 300, **kwargs):
             if 'CROSS APPLY' in query:
                 ids = re.findall(r"\('([\d.\-_]+)','point", query)
                 table = [["point_id", "mukey"]]
@@ -360,7 +370,7 @@ class SoilAdapter(unittest.TestCase):
             [350, '11', 'NM001', '7/1/2025 1:00:00 PM', 'Somewhat poorly drained', None, '9.0', 'Rare', 'D', '3'],
         ]
 
-        def fake_query(query: str, timeout: int = 300):
+        def fake_query(query: str, timeout: int = 300, **kwargs):
             calls.append(query)
             if 'CROSS APPLY' in query:
                 ids = re.findall(r"\('([\d.\-_]+)','point", query)
@@ -509,7 +519,7 @@ class SoilAdapter(unittest.TestCase):
                 bulk._sda_query = original
 
     def _fake_other_state_sda(self):
-        def fake_query(query: str, timeout: int = 300):
+        def fake_query(query: str, timeout: int = 300, **kwargs):
             if 'CROSS APPLY' in query:
                 ids = re.findall(r"\('([\d.\-_]+)','point", query)
                 table = [["point_id", "mukey"]]
@@ -526,7 +536,7 @@ class SoilAdapter(unittest.TestCase):
             original = bulk._sda_query
             healthy = self._fake_multi_state_sda([])
 
-            def flaky(query, timeout=300):
+            def flaky(query, timeout=300, **kwargs):
                 if 'CROSS APPLY' in query and mode['value'] == 'fail':
                     raise RuntimeError('point query unavailable')
                 return healthy(query, timeout)
