@@ -37,6 +37,7 @@ def main():
     m = report['metrics']
     ce = analysis['concurrencyEffectiveness']
     rp = analysis['runtimeProjectionRemaining']
+    rsp = analysis.get('resumedPass') or {}
     ready_new = [c for c in prep['cohort'] if prep['states'][c]['soil'].get('status') == 'READY'
                  and prep['states'][c]['access'].get('status') == 'READY']
     reused = [c for c in prep['cohort'] if prep['states'][c]['soil'].get('reused')
@@ -92,8 +93,10 @@ def main():
         f"- Newly complete: **{report['newlyComplete']} / {report['frozenTiles']}** frozen tiles; "
         f"{len(report['frozenRemaining'])} remaining in the frozen set ({', '.join(report['frozenRemaining']) or 'none'}).",
         f"- Hosted-service retries observed: {m.get('retries') or 'none'} "
-        f"({m.get('hostedRetryCount', 0)} retry events total). No failed request produced neutral or invented "
-        'evidence; missing stayed missing.',
+        f"({m.get('hostedRetryCount', 0)} in-process retry events across the whole Batch-2 journal). One ArcGIS "
+        'body-level 429 occurred before the pacing/retry fix; it killed a worker and hung the queue, the fix '
+        'landed, and the tile rebuilt successfully with no further 429. No failed request produced neutral or '
+        'invented evidence, and missing stayed missing.',
         '- Two real defects surfaced under Batch-2 load and were fixed without touching biology: (1) an invalid '
         'source ring crashed the OSM access phase with a GEOS side-location conflict on a KY/TN boundary tile; the '
         'adapter now repairs topology at every load site (`make_valid`), which changes geometry validity only, '
@@ -120,10 +123,10 @@ def main():
         f"{report['r2'].get('uploadIntents')} upload intents, "
         f"{report['r2'].get('verifiedReusedObjects')} objects verified and reused without re-upload. Scope: "
         f"{report['r2'].get('ledgerScope')}.",
-        f"- Active manifest: **{audit['manifestReferences']} objects / {audit['manifestBytes']:,} bytes**.",
-        f"- Final remote audit: {audit['remoteValid']} remotely valid, {audit['remoteMissing']} missing, "
-        f"{audit['remoteInvalid']} invalid, {audit['localOnly']} local-only (reported, not deleted), "
-        f"{audit['remoteOrphans']} publisher-ledger remote orphans.",
+        f"- Active manifest: **{audit['references']} objects / {audit['bytes']:,} bytes**.",
+        f"- Final remote audit: {len(audit['valid'])} remotely valid, {len(audit['missing'])} missing, "
+        f"{len(audit['invalid'])} invalid, {len(audit['localOnly'])} local-only (reported, not deleted), "
+        f"{len(audit['remoteOrphans'])} publisher-ledger remote orphans; clean = {audit['clean']}.",
         f"- Audit scope is precise: {audit['inventoryScope']}. Wrangler cannot exhaustively list the bucket, so "
         'this is not a claim that the bucket contains no other objects.',
         '- Publication transport remained the proven Wrangler OAuth path. No bucket-scoped R2 S3 credentials were '
@@ -136,14 +139,21 @@ def main():
         f"{ce['newlyComplete']} tiles (**{ce['secondsPerTileFinalPass']} s/tile**). The full since-first-attempt "
         f"span was **{ce['sinceFirstAttemptSpanSeconds']:,} s** (**{ce['secondsPerTileSinceFirstAttempt']} s/tile**), "
         'including earlier interrupted generations, duplicate work and stopped time; it is not an execution rate.',
-        f"- Batch 1 ran 301 tiles in {ce['batch1WallSecondsSinceFirstAttempt']:,} s wall "
+        f"- Batch 1 ran 301 tiles in {ce['batch1WallSecondsSinceFirstAttempt']:,.0f} s wall "
         f"({ce['batch1TilesPerHourWall']} tiles/hour including stopped time) at "
         f"{ce['batch1SerialSecondsPerTile']} s/tile of fully serial stage time. Batch 2 completed "
         f"{ce['batch2TilesPerHourFinalPass']} tiles/hour in the final pass and "
         f"{ce['batch2TilesPerHourSinceFirstAttempt']} tiles/hour since first attempt.",
+        f"- Resumed pass (chunks 10-27, the contiguous run that finished the list): {rsp.get('tiles')} tiles in "
+        f"{rsp.get('wallSeconds'):,.0f} s ({rsp.get('tilesPerHour')} tiles/hour); per-tile stage-sum median "
+        f"{rsp.get('perTileStageSumMedianSeconds')} s; **serial-stage speedup {rsp.get('serialStageSpeedup')}x** "
+        f"(sum of per-tile stage seconds / wall seconds); two-worker build utilization "
+        f"{rsp.get('buildUtilizationTwoWorkers')}; publisher utilization {rsp.get('publishUtilization')}; "
+        f"{rsp.get('demDownloads')} DEM downloads / {rsp.get('demDownloadedBytes'):,} bytes in "
+        f"{rsp.get('demDownloadSeconds'):,.0f} s; {rsp.get('retryEvents')} retry events.",
         f"- DEM median {m['stageStats']['dem']['median']} s/tile (p75 {m['stageStats']['dem']['p75']}) vs Batch-1 "
-        f"serial median {ce['batch1DemMedianSeconds']} s/tile. Access median {ce['accessMedianSeconds']} s/tile "
-        f"(p75 {ce['accessP75Seconds']}) vs Batch-1 {ce['batch1AccessMedianSeconds']} s/tile: dense eastern OSM "
+        f"serial median {ce['batch1DemMedianSeconds']:.1f} s/tile. Access median {ce['accessMedianSeconds']} s/tile "
+        f"(p75 {ce['accessP75Seconds']}) vs Batch-1 {ce['batch1AccessMedianSeconds']:.1f} s/tile: dense eastern OSM "
         'access computation is materially heavier than the western Batch-1 tiles.',
         f"- Concurrency effectiveness: {ce['interpretation']}",
         f"- Bottleneck analysis: {analysis['bottleneck']['verdict']}",
@@ -167,8 +177,9 @@ def main():
         f"access {mb(layer['accessPoints'])} MB. Profile-weighted national projection "
         f"**{mb(storage['profileWeightedNationalProjectionBytes'])} MB**; simple-mean "
         f"{mb(storage['simpleMeanNationalProjectionBytes'])} MB.",
-        f"- Remaining runtime: two-worker expectation **{rp['twoWorkerExpectationSeconds'] / 3600:.2f} h** for the "
-        f"{rp['remainingBuildableTiles']} currently buildable tiles, serial-equivalent "
+        f"- Remaining runtime (the {rp['remainingBuildableTiles']} state-blocked tiles that become buildable once the "
+        f"17 unprepared states are prepared): two-worker expectation **{rp['twoWorkerExpectationSeconds'] / 3600:.2f} h** "
+        f"(p75 stages {rp.get('twoWorkerP75ExpectationSeconds', 0) / 3600:.2f} h), serial-equivalent "
         f"{rp['serialEquivalentSeconds'] / 3600:.2f} h. Components: DEM {rp['components']['demTwoWorker'] / 3600:.2f} h, "
         f"hosted {rp['components']['hostedSerialized'] / 3600:.2f} h, local compute "
         f"{rp['components']['localComputeTwoWorker'] / 3600:.2f} h, publication "
@@ -185,9 +196,11 @@ def main():
         '',
         '### Batch-3 recommendation',
         '',
-        f"- Next pass would be **National GIS Batch 3**: {len(b3['buildableNow'])} buildable tiles, requiring "
-        f"preparation of {len(b3['statesNeedingPreparation'])} additional states "
-        f"({', '.join(b3['statesNeedingPreparation'])}).",
+        f"- Next pass would be **National GIS Batch 3**: {b3['stateBlockedTiles']['count']} state-blocked tiles "
+        f"(0 buildable until state preparation runs), requiring preparation of "
+        f"{len(b3['statesNeedingPreparation'])} additional states "
+        f"({', '.join(b3['statesNeedingPreparation'])}). Operational grouping: the same ten-tile checkpoint cadence "
+        f"(about {(b3['stateBlockedTiles']['count'] + 9) // 10} checkpoints), state preparation strictly before any build.",
         f"- Two workers are recommended again (the same bounded two-worker scheduler, one serialized hosted lane, "
         f"one serialized publisher). Measured bottleneck: {analysis['bottleneck']['verdict']}",
         '- Batch-2 evidence argues for keeping the phased A/B execution but measuring an A/B pipeline in Batch 3: '

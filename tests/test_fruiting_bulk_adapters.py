@@ -880,12 +880,15 @@ class PublishedColoradoTiles(unittest.TestCase):
                 self.assertTrue(asset.get('sha256'))
                 self.assertGreater(asset.get('cells') or 0, 0)
 
-    def test_legacy_indiana_tiles_remain_readable_without_the_new_columns(self):
-        legacy = self.tiles['n37_w088']['habitat']
+    def test_legacy_tiles_remain_readable_without_the_new_columns(self):
+        # n37_w107 is a still-legacy New Mexico tile: the Batch-2 rebuild did not
+        # touch it, so it keeps the pre-hemlock schema. n37_w088 was used here
+        # before Batch 2 rebuilt it as a modern tile; the intent is unchanged.
+        legacy = self.tiles['n37_w107']['habitat']
         columns, records = self.rows_of(legacy)
-        for column in ('land_class', 'forest', 'canopy', 'elevation_ft', 'oak_hickory_signal'):
+        for column in ('land_class', 'forest', 'canopy', 'elevation_ft', 'oak_hickory_signal', 'evergreen'):
             self.assertIn(column, columns)
-        for column in ('evergreen', 'mixed_forest', 'wetland'):
+        for column in ('hemlock_sitka_spruce_signal', 'western_oak_signal', 'redwood_signal'):
             self.assertNotIn(column, columns)
         self.assertGreater(len(records), 0)
         # A union that prefers names keeps both schemas readable; missing western fields are NULL.
@@ -1230,7 +1233,7 @@ class PacificNorthwestRelease(unittest.TestCase):
         self.assertTrue(set(AVAILABLE_TILES + NATIONAL_CANARY_TILES + INTERIOR_CANARY_TILES + CALIFORNIA_CANARY_TILES + SOUTHWEST_CANARY_TILES) <= set(summary['coverageTiles']))
 
     def test_legacy_tiles_lack_the_hemlock_column(self):
-        tile = self.tiles['n37_w088']['habitat']
+        tile = self.tiles['n37_w107']['habitat']
         table = self.con.execute('SELECT * FROM read_parquet(?)', [str(DATA / tile['url'])])
         columns = [description[0] for description in table.description]
         self.assertNotIn('hemlock_sitka_spruce_signal', columns)

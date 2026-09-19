@@ -100,7 +100,11 @@ def main():
     # Runtime projection for the remaining buildable tiles (Batch 3 candidate),
     # separated into stages, in both two-worker and serial-equivalent terms.
     b3 = json.loads((PROD / 'batch3-scope.json').read_text()) if (PROD / 'batch3-scope.json').exists() else {}
-    n = len(b3.get('buildableNow', []))
+    # Batch 3 is the state-blocked remainder: after the 17 unprepared states are
+    # prepared, every one of those tiles becomes buildable. The 30
+    # no-state-threshold tiles are a planner/runner design question and are not
+    # projected here.
+    n = len(b3.get('buildableNow', [])) + (b3.get('stateBlockedTiles') or {}).get('count', 0)
     def stage_total(name):
         st = stages.get(name, {})
         return (st.get('median') or 0) * n
@@ -109,9 +113,20 @@ def main():
     # workers. Access is local OSM computation, not a hosted service.
     hosted = (med('soil') + med('public-land') + med('fire')) * n
     local = (med('habitat') + med('access')) * n / 2
-    publish = (stages.get('publishA', {}).get('sum', 0) + stages.get('publishB', {}).get('sum', 0)) or \
-              (stats.get('publishBusySeconds') or 0)
-    per_tile_publish = (publish / max(stats.get('publishedTiles', 1), 1))
+    # Per-tile publication is measured from the publish events themselves (the
+    # stage journal has no publish stages); medians keep duplicate attempts from
+    # inflating the forward projection.
+    pub_a, pub_b = [], []
+    metrics_path = WORK / 'metrics.jsonl'
+    if metrics_path.exists():
+        for line in metrics_path.read_text().splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get('kind') == 'publish' and not e.get('failures'):
+                (pub_a if e.get('phase') == 'A' else pub_b).append(e.get('seconds') or 0)
+    per_tile_publish = (statistics.median(pub_a) if pub_a else 0) + (statistics.median(pub_b) if pub_b else 0)
     pub_total = per_tile_publish * n
     serial_equiv = med('dem') * n + hosted + (med('habitat') + med('access')) * n + pub_total
     prep_states = len(b3.get('statesNeedingPreparation') or [])
@@ -124,6 +139,13 @@ def main():
         'remainingBuildableTiles': n,
         'twoWorkerExpectationSeconds': round(dem_two + hosted + local + pub_total, 1),
         'serialEquivalentSeconds': round(serial_equiv, 1),
+        'twoWorkerP75ExpectationSeconds': round(
+            (stages.get('dem', {}).get('p75') or 0) * n / 2
+            + ((stages.get('soil', {}).get('p75') or 0) + (stages.get('public-land', {}).get('p75') or 0)
+               + (stages.get('fire', {}).get('p75') or 0)) * n
+            + ((stages.get('habitat', {}).get('p75') or 0) + (stages.get('access', {}).get('p75') or 0)) * n / 2
+            + ((sorted(pub_a)[min(len(pub_a) - 1, int(len(pub_a) * 0.75))] if pub_a else 0)
+               + (sorted(pub_b)[min(len(pub_b) - 1, int(len(pub_b) * 0.75))] if pub_b else 0)) * n, 1),
         'components': {'demTwoWorker': round(dem_two, 1), 'hostedSerialized': round(hosted, 1),
                        'localComputeTwoWorker': round(local, 1), 'publicationSerialized': round(pub_total, 1),
                        'statePreparationEstimate': round(prep_seconds, 1),
@@ -132,6 +154,49 @@ def main():
                      'not included in the two-worker expectation; stopped/operator time and the no-state-threshold '
                      'tiles are excluded.'),
     }
+    # Resumed-pass concurrency measurement: the contiguous chunks the final
+    # authoritative run executed (chunk 10 onward), measured from its own start.
+    resumed = [c for c in chunks if (c.get('chunk') or 0) >= 10 and c.get('startedAt')]
+    if resumed:
+        t0 = min(c['startedAt'] for c in resumed)
+        t1 = max(c.get('endedAt') or 0 for c in resumed)
+        wall = t1 - t0
+        tiles_n = sum(len(c.get('requested') or []) for c in resumed)
+        metrics_path = WORK / 'metrics.jsonl'
+        import collections
+        sel = []
+        if metrics_path.exists():
+            for line in metrics_path.read_text().splitlines():
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if (e.get('at') or 0) >= t0:
+                    sel.append(e)
+        stage_by_tile = collections.defaultdict(float)
+        for e in sel:
+            if e.get('kind') == 'stage' and e.get('success'):
+                stage_by_tile[e['tile']] += e['seconds']
+        build_busy = sum(e.get('seconds') or 0 for e in sel if e.get('kind') == 'tile-built')
+        pub_busy = sum(e.get('seconds') or 0 for e in sel
+                       if e.get('kind') == 'publish' and not e.get('failures'))
+        dem = [e for e in sel if e.get('kind') == 'download' and 'Elevation/1/TIFF' in (e.get('url') or '')]
+        out['resumedPass'] = {
+            'chunks': len(resumed), 'tiles': tiles_n, 'wallSeconds': round(wall, 1),
+            'tilesPerHour': round(3600 * tiles_n / wall, 1) if wall else None,
+            'perTileStageSumMedianSeconds': round(statistics.median(stage_by_tile.values()), 1) if stage_by_tile else None,
+            'perTileStageSumMeanSeconds': round(sum(stage_by_tile.values()) / len(stage_by_tile), 1) if stage_by_tile else None,
+            'serialStageSpeedup': round(sum(stage_by_tile.values()) / wall, 2) if wall else None,
+            'buildUtilizationTwoWorkers': round(build_busy / wall / 2, 3) if wall else None,
+            'publishUtilization': round(pub_busy / wall, 3) if wall else None,
+            'demDownloads': len(dem), 'demDownloadedBytes': sum(e.get('bytes', 0) for e in dem),
+            'demDownloadSeconds': round(sum(e.get('seconds') or 0 for e in dem), 1),
+            'retryEvents': len([e for e in sel if e.get('kind') in {'service-retry', 'download-retry'}]),
+            'serviceCalls': len([e for e in sel if e.get('kind') == 'service']),
+            'note': ('The resumed pass is the contiguous run that finished the frozen list. Serial stage speedup is '
+                     'the sum of per-tile stage seconds divided by wall seconds; a value near 2.0 would mean two '
+                     'workers hid essentially all serial work.'),
+        }
     ce = out['concurrencyEffectiveness']
     ratio = ce['batch1SerialSecondsPerTile'] / max(ce['secondsPerTileSinceFirstAttempt'], 0.01)
     ce['interpretation'] = (f'Batch 2 completed {newly} tiles with a final-pass chunk wall of '
@@ -140,8 +205,8 @@ def main():
                             f'including restarts vs {ce["batch1SerialSecondsPerTile"]} s/tile serial stage time in '
                             f'Batch 1). Worker build utilization {ce["buildUtilizationTwoWorkers"]}; publisher '
                             f'utilization {ce["publishUtilization"]}. DEM median {ce["demMedianSeconds"]} s/tile vs '
-                            f'Batch-1 {ce["batch1DemMedianSeconds"]}; access median {ce["accessMedianSeconds"]} s/tile '
-                            f'vs Batch-1 {ce["batch1AccessMedianSeconds"]}.')
+                            f'Batch-1 {ce["batch1DemMedianSeconds"]:.1f}; access median {ce["accessMedianSeconds"]} '
+                            f's/tile vs Batch-1 {ce["batch1AccessMedianSeconds"]:.1f}.')
     bottleneck_share = out['bottleneck']['demShareOfBuildBusy']
     access_share = out['bottleneck']['accessShareOfBuildBusy']
     if bottleneck_share:

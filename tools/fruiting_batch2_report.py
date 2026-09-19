@@ -70,7 +70,7 @@ def main():
     # R2 transport accounting from the append-only publisher ledger, scoped to
     # this batch by the first recorded metrics event (never a bucket listing).
     inv_path = DATA / '.r2-inventory.jsonl'
-    uploaded, uploaded_bytes, intents, reused = {}, {}, 0, 0
+    uploaded, intents, reused = {}, 0, {}
     if inv_path.exists():
         for line in inv_path.read_text().splitlines():
             try:
@@ -100,7 +100,8 @@ def main():
         'readyStates': scope['readyStates'],
         'statePrep': prep,
         'chunks': [{'chunk': i, 'requested': c.get('requested'), 'incomplete': c.get('incomplete'),
-                    'elapsedSeconds': c.get('elapsedSeconds'), 'stats': c.get('stats')}
+                    'elapsedSeconds': c.get('elapsedSeconds'), 'startedAt': c.get('startedAt'),
+                    'endedAt': c.get('endedAt'), 'stats': c.get('stats')}
                    for i, c in enumerate(chunk_records)],
         'newlyComplete': len(done_frozen),
         'frozenRemaining': sorted(frozen - {t['id'] for t in done_frozen}),
