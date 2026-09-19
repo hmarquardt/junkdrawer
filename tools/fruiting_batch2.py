@@ -80,7 +80,7 @@ def derive(cohort):
     }
 
 
-def cmd_prepare(states):
+def cmd_prepare(states, out=None):
     """Serialized, restartable state preparation: SDA soil then OSM access PBF."""
     results = {}
     for code in states:
@@ -96,7 +96,7 @@ def cmd_prepare(states):
                                    ('status', 'reused', 'sourceUrl', 'bytes', 'normalizedBytes', 'error')}
         print(f"{code} access: {access.get('status')} ({time.time()-t1:.1f}s)", flush=True)
         results[code]['seconds'] = round(time.time() - t0, 1)
-    atomic_json(PROD / 'batch2-state-prep.json', {
+    atomic_json(out or (PROD / 'batch2-state-prep.json'), {
         'schemaVersion': 1, 'cohort': states, 'states': results,
         'totalSeconds': round(sum(v['seconds'] for v in results.values()), 1)})
     failed = [c for c in states if results[c]['soil'].get('status') != 'READY'
@@ -401,6 +401,8 @@ def main():
     sub = p.add_subparsers(dest='command', required=True)
     prep = sub.add_parser('prepare')
     prep.add_argument('--states', required=True)
+    prep.add_argument('--out', type=Path, default=None,
+                      help='state-prep report path (default: production/batch2-state-prep.json)')
     plan = sub.add_parser('plan')
     plan.add_argument('--cohort', default='')
     plan.add_argument('--out', type=Path, default=PROD / 'batch2-scope.json')
@@ -411,7 +413,7 @@ def main():
     run_p.add_argument('--out', type=Path, default=OUT)
     a = p.parse_args()
     if a.command == 'prepare':
-        cmd_prepare([s.strip().upper() for s in a.states.split(',') if s.strip()])
+        cmd_prepare([s.strip().upper() for s in a.states.split(',') if s.strip()], a.out)
     elif a.command == 'plan':
         cmd_plan([s.strip().upper() for s in a.cohort.split(',') if s.strip()], a.out)
     else:
