@@ -11,6 +11,7 @@ checkpoint, and the serialized publisher lane survives an exception.
 import importlib.util
 import json
 import queue
+import sys
 import tempfile
 import threading
 import unittest
@@ -18,6 +19,8 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# fruiting_batch2 imports sibling tools by module name; make them importable.
+sys.path.insert(0, str(ROOT / 'tools'))
 spec = importlib.util.spec_from_file_location('fruiting_batch2', ROOT / 'tools/fruiting_batch2.py')
 batch2 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(batch2)

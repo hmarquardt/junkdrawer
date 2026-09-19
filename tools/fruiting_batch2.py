@@ -46,7 +46,8 @@ def complete(row):
 
 
 def derive(cohort):
-    """Planner truth: eligible incomplete tiles whose required states are prepared."""
+    """Planner truth: normalized-relevant incomplete tiles whose required states are prepared."""
+    from fruiting_conus_plan import normalization_summary
     rows = build_tiles(source_cache=SOURCE_CACHE, access_cache=ACCESS_CACHE)
     ready_soil = {k.split(':')[1] for k, v in load_cache_manifest(SOURCE_CACHE).get('sources', {}).items()
                   if k.startswith('ssurgo_sda:') and v.get('status') == 'READY'}
@@ -55,12 +56,14 @@ def derive(cohort):
     eligible = [r for r in rows if r['soilStatesRequired'] and r['soilPrepared'] and r['pbfPrepared']]
     requested = [r for r in eligible if not complete(r)]
     blocked = [r for r in rows if r.get('stateResolution') == 'blocked-no-us-cells']
+    normalization = normalization_summary()
     return {
-        'schemaVersion': 1,
+        'schemaVersion': 2,
         'startingCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
         'requestedCohort': cohort,
         'sourceCache': str(SOURCE_CACHE), 'accessCache': str(ACCESS_CACHE),
         'coverageBefore': coverage(rows),
+        'normalization': normalization,
         'readySoilStates': sorted(ready_soil), 'readyPbfStates': sorted(ready_pbf),
         'readyStates': sorted(ready_soil & ready_pbf),
         'eligibleTiles': len(eligible), 'alreadyComplete': len(eligible) - len(requested),
@@ -68,10 +71,15 @@ def derive(cohort):
         'tileDetail': {r['id']: {'soilStatesRequired': r['soilStatesRequired'],
                                  'dominantProfile': r['dominantProfile'],
                                  'stateResolution': r.get('stateResolution'),
-                                 'fallbackStateCellCounts': r.get('fallbackStateCellCounts')}
+                                 'fallbackStateCellCounts': r.get('fallbackStateCellCounts'),
+                                 'normalizedRelevant': r.get('normalizedRelevant'),
+                                 'usLandCells': r.get('usLandCells'),
+                                 'normalizedStates': r.get('normalizedStates')}
                        for r in requested},
         'edgeFallbackTiles': [r['id'] for r in requested if r.get('stateResolution') == 'cell-fallback'],
         'edgeBlockedTiles': [{'id': r['id'], 'reason': r.get('edgeBlockedReason')} for r in blocked],
+        'normalizationExclusions': normalization['exclusions'],
+        'normalizationInclusions': normalization['inclusions'],
         'layerWork': dict(Counter(k for r in requested for k, v in r['layerStatus'].items()
                                   if v not in {'AVAILABLE', 'VERIFIED_EMPTY'})),
         'stateTileCounts': dict(Counter(s for r in eligible for s in r['soilStatesRequired'])),

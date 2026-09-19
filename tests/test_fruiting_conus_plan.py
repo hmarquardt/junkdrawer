@@ -34,15 +34,23 @@ class Planner(unittest.TestCase):
         second = planner.build_tiles()
         self.assertEqual(self.rows, second)
 
-    def test_relevant_land_tiles_are_geometry_derived(self):
-        self.assertGreater(len(self.rows), 900, 'CONUS has roughly a thousand 1-degree land tiles')
-        self.assertLess(len(self.rows), 1000)
+    def test_relevant_tiles_are_evidence_cell_derived(self):
+        """Relevance is normalized evidence, not the legacy coarse area sliver."""
+        self.assertEqual(len(self.rows), 922)
         for tile_id in COASTAL_PUBLISHED:
             self.assertIn(tile_id, self.by_id,
                           'coastal production tiles must not disappear behind a stale land flag')
-        # No tile is included that is essentially all water.
+        # The normalized denominator is exactly the tiles with real U.S. land cells;
+        # the legacy 1%-of-tile-area gate is no longer the admission rule.
         for row in self.rows:
-            self.assertGreaterEqual(row['landSharePct'], 1.0, row['id'])
+            self.assertTrue(row['normalizedRelevant'], row['id'])
+            self.assertGreater(row['usLandCells'], 0, row['id'])
+            self.assertGreater(row['usStateCells'], 0, row['id'])
+        for tile_id in ('n27_w097', 'n29_w089', 'n31_w114', 'n36_w123', 'n38_w075'):
+            row = self.by_id[tile_id]
+            self.assertLess(row['landSharePct'], 1.0,
+                            'the newly relevant tiles are exactly the ones the coarse area gate missed')
+            self.assertGreater(row['usLandCells'], 0, tile_id)
 
     def test_shares_are_multi_state_and_multi_profile_aware(self):
         """Boundary tiles record every state and profile they actually contain."""
@@ -103,18 +111,25 @@ class Planner(unittest.TestCase):
         self.assertEqual(cov['profiles']['plains']['biologyMaturity'], 'PROVISIONAL')
         self.assertGreaterEqual(cov['profiles']['pnw']['tilesGisComplete'], 19)
         self.assertGreaterEqual(cov['tilesGisComplete'], 35)  # 28 + 4 California + 3 Southwest canaries
-        # GIS-complete coverage under an unsupported profile must stay small and honest.
-        self.assertLess(cov['tilesGisComplete'], cov['relevantLandTiles'])
+        # Coverage never exceeds the normalized denominator, and the normalized
+        # denominator is smaller than the historical coarse roster.
+        self.assertLessEqual(cov['tilesGisComplete'], cov['relevantLandTiles'])
+        self.assertEqual(cov['relevantLandTiles'], 922)
+        self.assertEqual(cov['legacyCoarseRosterTiles'], 940)
+        self.assertEqual(cov['normalizedIrrelevantLegacyTiles'], 23)
+        self.assertEqual(cov['newlyRelevantTiles'], 5)
+        self.assertEqual(cov['normalizationAlgorithm'], 'us-land-evidence-cells-v1')
+        self.assertIn('normalized evidence rule', cov['coverageSemantics'])
         self.assertIn('not finished national mushroom coverage', cov['coverageSemantics'])
 
-    def test_zero_state_fallback_resolves_real_us_states(self):
-        """Zero-normal-state edge tiles resolve from actual US sample cells."""
+    def test_zero_state_fallback_resolves_real_us_land_cells(self):
+        """Zero-normal-state edge tiles resolve from the normalized land-cell states."""
         canaries = {
-            'n24_w081': {'FL': 15},            # Florida Keys
-            'n32_w119': {'CA': 7},             # Channel Islands
-            'n42_w081': {'PA': 16},            # Lake Erie shoreline
-            'n47_w090': {'MI': 11, 'MN': 16},  # Lake Superior / Keweenaw
-            'n48_w089': {'MI': 17},            # Isle Royale
+            'n24_w081': {'FL': 1},             # Florida Keys
+            'n32_w119': {'CA': 6},             # Channel Islands
+            'n42_w081': {'PA': 14},            # Lake Erie shoreline
+            'n47_w090': {'MI': 9, 'MN': 15},   # Lake Superior / Keweenaw
+            'n48_w089': {'MI': 11},            # Isle Royale
             'n47_w068': {'ME': 11},            # Downeast coast
         }
         for tile_id, counts in canaries.items():
@@ -122,21 +137,37 @@ class Planner(unittest.TestCase):
             self.assertEqual(row['stateResolution'], 'cell-fallback', tile_id)
             self.assertEqual(row['fallbackStateCellCounts'], counts, tile_id)
             self.assertEqual(row['soilStatesRequired'], sorted(counts), tile_id)
+            self.assertEqual(row['normalizedStates'], counts, tile_id)
             self.assertTrue(row['soilStatesRequired'], 'fallback tiles must resolve a source')
 
-    def test_zero_state_blocked_tiles_are_explicit(self):
-        """Border-sliver tiles with no US sample cell are blocked with a reason."""
-        blocked = ('n45_w073', 'n49_w099', 'n49_w105', 'n49_w116', 'n49_w122')
-        for tile_id in blocked:
-            row = self.by_id[tile_id]
-            self.assertEqual(row['stateResolution'], 'blocked-no-us-cells', tile_id)
-            self.assertEqual(row['soilStatesRequired'], [], tile_id)
-            self.assertEqual(row['fallbackStateCellCounts'], {}, tile_id)
-            self.assertTrue(row['edgeBlockedReason'], tile_id)
-            self.assertIn('no habitat sample cell', row['edgeBlockedReason'].lower(), tile_id)
+    def test_normalized_exclusions_are_explicit_and_zero_cell(self):
+        """Every legacy-roster tile with no U.S. land cell is an explicit exclusion."""
+        excluded = ('n45_w073', 'n49_w099', 'n49_w100', 'n49_w101', 'n49_w102', 'n49_w103',
+                    'n49_w104', 'n49_w105', 'n49_w106', 'n49_w107', 'n49_w108', 'n49_w109',
+                    'n49_w110', 'n49_w111', 'n49_w112', 'n49_w113', 'n49_w114', 'n49_w115',
+                    'n49_w116', 'n49_w119', 'n49_w120', 'n49_w121', 'n49_w122')
+        summary = planner.normalization_summary()
+        records = {item['tile']: item for item in summary['exclusions']}
+        self.assertEqual(sorted(records), sorted(excluded))
+        for tile_id in excluded:
+            self.assertNotIn(tile_id, self.by_id, 'an excluded tile must not be relevant')
+            record = records[tile_id]
+            self.assertEqual(record['stateCells'], 0, tile_id)
+            self.assertEqual(record['landCells'], 0, tile_id)
+            self.assertTrue(record['reason'], tile_id)
+
+    def test_normalization_inclusions_are_present(self):
+        """Tiles the coarse area gate missed but that hold real U.S. land cells."""
+        summary = planner.normalization_summary()
+        included = {item['tile']: item for item in summary['inclusions']}
+        self.assertEqual(sorted(included), ['n27_w097', 'n29_w089', 'n31_w114', 'n36_w123', 'n38_w075'])
+        for tile_id, record in included.items():
+            self.assertIn(tile_id, self.by_id, tile_id)
+            self.assertGreater(record['landCells'], 0, tile_id)
+            self.assertEqual(self.by_id[tile_id]['normalizedStates'], record['states'], tile_id)
 
     def test_every_relevant_tile_resolves_exactly_one_way(self):
-        """National invariant: no relevant tile falls between planner semantics."""
+        """National invariant: no normalized-relevant tile falls between planner semantics."""
         normal = fallback = blocked = 0
         for row in self.rows:
             resolution = row['stateResolution']
@@ -159,8 +190,11 @@ class Planner(unittest.TestCase):
         self.assertEqual(normal + fallback + blocked, len(self.rows))
         self.assertEqual(fallback, self.coverage['tilesFallbackResolved'])
         self.assertEqual(blocked, self.coverage['tilesEdgeBlocked'])
-        self.assertEqual(fallback, 17)
-        self.assertEqual(blocked, 13)
+        # Normalized relevance guarantees an evidence cell, so no relevant row is
+        # blocked and every row carries at least one land cell.
+        self.assertEqual(blocked, 0)
+        self.assertEqual(fallback, 22)
+        self.assertEqual(normal, 900)
 
     def test_fallback_never_imports_foreign_jurisdiction(self):
         """Only pinned US states can ever be a source, fallback included."""
@@ -168,9 +202,12 @@ class Planner(unittest.TestCase):
         for row in self.rows:
             for state in row['soilStatesRequired'] + list((row['fallbackStateCellCounts'] or {})):
                 self.assertIn(state, us_states, row['id'])
-        # A tile entirely inside Canada must not resolve any source.
-        self.assertEqual(self.by_id['n49_w099']['stateResolution'], 'blocked-no-us-cells')
-        self.assertEqual(self.by_id['n49_w122']['stateResolution'], 'blocked-no-us-cells')
+        # Tiles entirely inside Canada are excluded by normalization, never built.
+        self.assertNotIn('n49_w099', self.by_id)
+        self.assertNotIn('n49_w122', self.by_id)
+        # A real border tile with genuine U.S. land cells stays relevant.
+        self.assertEqual(self.by_id['n49_w095']['normalizedStates'], {'MN': 4})
+        self.assertEqual(self.by_id['n49_w096']['normalizedStates'], {'MN': 11})
 
     def test_projection_uses_measured_distributions(self):
         bytes_stats = planner.measured_per_tile_bytes(MANIFEST)

@@ -42,6 +42,29 @@ LAYERS = ('habitat', 'publicLands', 'fireHistory', 'accessPoints')
 SOURCE_STATE_SHARE = 5.0
 # A tile's dominant profile needs at least this share to claim it.
 DOMINANT_PROFILE_SHARE = 50.0
+# Normalized national relevance product (tools/fruiting_relevance.py). The legacy
+# 1:20M+2km-simplified 1%-area roster is historical; current relevance is decided
+# by actual U.S. land evidence cells at the production sample lattice.
+RELEVANCE_PRODUCT = DATA / 'national-relevance-v2.json'
+_RELEVANCE_CACHE = {}
+
+
+def load_relevance(path=None):
+    """Per-tile normalized relevance records, keyed by tile ID."""
+    path = Path(path) if path else RELEVANCE_PRODUCT
+    key = str(path)
+    if key not in _RELEVANCE_CACHE:
+        product = json.loads(path.read_text())
+        _RELEVANCE_CACHE[key] = product
+    return _RELEVANCE_CACHE[key]
+
+
+def normalization_summary(path=None):
+    """Legacy vs normalized denominator plus every reclassification record."""
+    product = load_relevance(path)
+    return {'algorithm': product['algorithm'], 'definition': product['definition'],
+            'sources': product['sources'], 'summary': product['summary'],
+            'exclusions': product['exclusions'], 'inclusions': product['inclusions']}
 
 
 def shape_of(geometry):
@@ -152,8 +175,15 @@ def tile_states_and_profiles(tile_geom, state_areas, profile_areas, transformer)
 
 
 def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_land=1.0, access_cache=None):
-    """Enumerate tiles with derived state/profile shares and publication status."""
+    """Enumerate normalized-relevant tiles with derived state/profile shares.
+
+    Relevance is the normalized evidence rule (`national-relevance-v2.json`): at
+    least one production sample-cell center on U.S. terrestrial land. The legacy
+    1%-of-tile-area coarse gate is historical only; `min_land` is accepted for
+    call-site compatibility but no longer admits or rejects a tile.
+    """
     profiles, state_geoms, catalog = load_geography()
+    relevance = load_relevance()['tiles']
     maturity = _profile_maturity_map()
     manifest = json.loads((DATA / 'manifest.json').read_text())
     published = {t['id']: t for t in manifest['tiles']}
@@ -173,11 +203,12 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
     rows = []
     prepared_states = None
     for entry in catalog['tiles']:
+        relevance_record = relevance.get(entry['id'])
+        if not relevance_record or not relevance_record.get('relevant'):
+            continue
         lat, lon = int(entry['id'][1:3]), -int(entry['id'][5:8])
         tile = _projected(box(lon, lat, lon + 1, lat + 1), transformer)
-        # States are disjoint, so the pinned-geometry land share is the sum of
-        # state intersections — the catalog's legacy land flag is not trusted
-        # (it misses coastal tiles the production release already publishes).
+        # Coarse shares remain as diagnostics; they no longer decide relevance.
         state_shares = {}
         state_area = 0.0
         total = tile.area
@@ -189,8 +220,6 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
                 if share >= 1.0:
                     state_shares[code] = round(share, 1)
         land_share = state_area / total * 100
-        if land_share < min_land:
-            continue
         profile_shares = {name: round(tile.intersection(g).area / total * 100, 1)
                           for name, g in profile_u.items() if tile.intersects(g)}
         profile_shares = {name: share for name, share in profile_shares.items() if share >= 1.0}
@@ -199,25 +228,24 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
         layer_status = {layer: (tile_entry.get(layer) or {}).get('status', 'UNBUILT') for layer in LAYERS}
         required_states = sorted(code for code, share in state_shares.items() if share >= SOURCE_STATE_SHARE)
         # Zero-normal-state fallback: only tiles the normal rule resolves to no
-        # state at all are reconsidered, and only from actual US sample cells.
+        # state at all are reconsidered, and only from the normalized product's
+        # actual U.S. land evidence cells (same 500k boundary + NLCD land mask
+        # that decides national relevance).
         state_resolution = 'normal'
         fallback_cell_counts = None
         edge_blocked_reason = None
         if not required_states:
-            if prepared_states is None:
-                from shapely.prepared import prep as _prep
-                prepared_states = {code: _prep(geom) for code, geom in state_geoms.items()}
-            fallback_cell_counts = fallback_states_from_cells(entry['id'], state_geoms, prepared_states)
+            fallback_cell_counts = dict(sorted((relevance_record.get('states') or {}).items()))
             if fallback_cell_counts:
                 required_states = sorted(fallback_cell_counts)
                 state_resolution = 'cell-fallback'
             else:
+                # Unreachable for a normalized-relevant row: relevance requires at
+                # least one land evidence cell. Kept explicit for future products.
                 state_resolution = 'blocked-no-us-cells'
                 edge_blocked_reason = (
-                    'No habitat sample cell center falls inside any US state. The tile is '
-                    'foreign-dominated (international border or coast) and its >=1% planner land share is a '
-                    '1:20M cartographic-boundary simplification sliver with no US land to source; building it '
-                    'would publish foreign-only evidence as coverage.')
+                    'Normalized relevance admitted the tile but the product records no U.S. land evidence '
+                    'cells; refusing to build until the relevance product and state sources agree.')
         dem_key = f'3dep_1arcsecond:n{lat + 1:02d}w{abs(lon):03d}'
         dem = (cache_sources.get(dem_key) or {}).get('status', 'unknown')
         pbf_ready = all((access_sources.get('osm_access:' + code) or {}).get('status') == 'READY'
@@ -243,6 +271,10 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
             'pbfPrepared': pbf_ready,
             'demPrepared': dem == 'READY',
             'demStatus': dem,
+            'normalizedRelevant': True,
+            'usLandCells': relevance_record.get('landCells'),
+            'usStateCells': relevance_record.get('stateCells'),
+            'normalizedStates': relevance_record.get('states'),
         })
     if profile:
         rows = [r for r in rows if r['profileShares'].get(profile, 0) >= 1.0]
@@ -277,10 +309,16 @@ def coverage(rows=None, scope='conus'):
         }
     multi_profile = sum(1 for r in rows if len(r['profileShares']) > 1)
     multi_state = sum(1 for r in rows if len(r['stateShares']) > 1)
+    product = load_relevance()
+    normalized_summary = product['summary']
     return {
         'scope': scope,
         'landAreaKm2': int(land_area),
         'relevantLandTiles': len(rows),
+        'legacyCoarseRosterTiles': normalized_summary.get('legacyCoarseRosterTiles'),
+        'normalizedIrrelevantLegacyTiles': normalized_summary.get('normalizedIrrelevantLegacyTiles'),
+        'newlyRelevantTiles': normalized_summary.get('newlyRelevantTiles'),
+        'normalizationAlgorithm': product.get('algorithm'),
         'tilesPublished': sum(1 for r in rows if r['published']),
         'tilesGisComplete': sum(1 for r in rows if all(r['layerStatus'][layer] in {'AVAILABLE', 'PARTIAL', 'VERIFIED_EMPTY'} for layer in LAYERS)),
         'tilesMultipleProfiles': multi_profile,
@@ -290,7 +328,9 @@ def coverage(rows=None, scope='conus'):
         'profiles': per_profile,
         'coverageSemantics': ('GIS coverage counts tiles with real per-layer publication status; biological '
                               'coverage is the pinned EPA profile maturity declared by the browser. A GIS-complete '
-                              'tile under an UNSUPPORTED profile is not finished national mushroom coverage.'),
+                              'tile under an UNSUPPORTED profile is not finished national mushroom coverage. '
+                              'Relevance is the normalized evidence rule (at least one 0.05-degree sample-cell '
+                              'center on U.S. terrestrial land); the 940-tile coarse roster is historical.'),
     }
 
 
