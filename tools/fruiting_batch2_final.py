@@ -181,9 +181,11 @@ def main():
         pub_busy = sum(e.get('seconds') or 0 for e in sel
                        if e.get('kind') == 'publish' and not e.get('failures'))
         dem = [e for e in sel if e.get('kind') == 'download' and 'Elevation/1/TIFF' in (e.get('url') or '')]
+        disk = [e.get('freeBytes') for e in sel if e.get('kind') == 'disk' and e.get('freeBytes')]
         out['resumedPass'] = {
             'chunks': len(resumed), 'tiles': tiles_n, 'wallSeconds': round(wall, 1),
             'tilesPerHour': round(3600 * tiles_n / wall, 1) if wall else None,
+            'minFreeDiskBytes': min(disk) if disk else None,
             'perTileStageSumMedianSeconds': round(statistics.median(stage_by_tile.values()), 1) if stage_by_tile else None,
             'perTileStageSumMeanSeconds': round(sum(stage_by_tile.values()) / len(stage_by_tile), 1) if stage_by_tile else None,
             'serialStageSpeedup': round(sum(stage_by_tile.values()) / wall, 2) if wall else None,

@@ -162,11 +162,13 @@ def main():
         f"{analysis['r2Transport']['verifiedReusedObjects']} objects verified and reused without re-upload, "
         f"publish lane busy {analysis['r2Transport']['publishBusySeconds']:,} s "
         f"({ce['publishUtilization']} utilization). {analysis['r2Transport']['note']}",
-        f"- Resource floors: minimum free disk {m.get('minFreeDiskBytes'):,} bytes; peak DEM cache "
+        f"- Resource floors: minimum free disk {m.get('minFreeDiskBytes'):,} bytes across the whole Batch-2 journal "
+        f"(observed during the interrupted earlier generations, which ran concurrently); the final authoritative "
+        f"resumed pass never went below {rsp.get('minFreeDiskBytes'):,} bytes. Peak DEM cache "
         f"{m.get('peakDemCacheBytes'):,} bytes; DEM downloads {m.get('demDownloads')} / "
         f"{m.get('demDownloadedBytes'):,} bytes; DEM bytes reclaimed "
-        f"{m.get('demReclaimedBytes'):,}. The documented minimum-free-space guard stayed in force and was never "
-        'lowered.',
+        f"{m.get('demReclaimedBytes'):,}. The documented minimum-free-space guards (8 GiB preflight, 4 GiB stop) "
+        'stayed in force and were never lowered or triggered.',
         '',
         '### Projections',
         '',
