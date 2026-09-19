@@ -195,6 +195,10 @@ NLCD_TCC = {
     "dataset": "NLCD Tree Canopy Cover (CONUS), v2021-4",
     "productPage": "https://www.mrlc.gov/data/nlcd-2021-tree-canopy-cover-conus",
     "url": "https://www.mrlc.gov/downloads/sciweb1/shared/mrlc/data-bundles/nlcd_tcc_conus_2021_v2021-4.zip",
+    # The MRLC URL 404'd during final production (site reorg); the official USGS
+    # ScienceBase attachment of the same product serves the identical pinned bytes
+    # (SHA-256 verified). Used only when the primary URL fails.
+    "recoveryUrl": "https://www.sciencebase.gov/catalog/file/get/649595e9d34ef77fcb01dca3?name=nlcd_tcc_conus_2021_v2021-4.zip",
     "archiveName": "nlcd_tcc_conus_2021_v2021-4.zip",
     "cacheAliases": ["nlcd_tcc_2021.zip"],
     "member": "nlcd_tcc_conus_2021_v2021-4.tif",
@@ -610,7 +614,13 @@ def prepare_national(cache: Path, names: list[str] | None = None) -> dict:
             raise SystemExit(f"Unknown national source: {name} (choose from {', '.join(registry)})")
         archive = _archive_path(cache, source)
         if not archive.exists():
-            digest = _download(source["url"], archive, expected_sha256=source.get("sha256"))
+            try:
+                digest = _download(source["url"], archive, expected_sha256=source.get("sha256"))
+            except (urllib.error.HTTPError, urllib.error.URLError):
+                recovery = source.get("recoveryUrl")
+                if not recovery:
+                    raise
+                digest = _download(recovery, archive, expected_sha256=source.get("sha256"))
         else:
             digest = _sha256(archive)
         if source.get("sha256") and digest != source["sha256"]:
