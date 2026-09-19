@@ -62,6 +62,7 @@ def main():
             S.main(str(a.metrics))
         stats = json.loads(buf.getvalue())
     audit = PROD / 'remote-audit.json'
+    tests = json.loads((PROD / 'batch3-tests.json').read_text()) if (PROD / 'batch3-tests.json').exists() else None
     report = {
         'schemaVersion': 1,
         'startingCommit': scope.get('startingCommit'),
@@ -83,6 +84,26 @@ def main():
         'edgeBlockedRemaining': scope.get('edgeBlockedTiles', []),
         'r2': {'activeObjects': len(refs), 'activeBytes': sum(b for b, _ in refs.values())},
         'metrics': stats,
+        'tests': tests,
+        'nationalCompletion': {
+            'complete': len(complete),
+            'relevant': 940,
+            'remaining': 940 - len(complete),
+            'launchReadyFromGis': len(complete) == 940,
+            'blockedTiles': scope.get('edgeBlockedTiles', []),
+            'blockedNote': ('The remaining tiles contain no US land at habitat sample-cell resolution; their '
+                            '>=1% planner land share is a 1:20M cartographic-boundary simplification sliver at the '
+                            '45/49-degree international border. They are explicitly blocked, never built from '
+                            'foreign-only evidence.'),
+        },
+        'unresolvedIssues': [
+            '13 border-artifact tiles remain blocked; a bounded follow-up design task should decide between a finer '
+            'state boundary and an explicit relevance reclassification.',
+            'Pre-existing complete border tiles (for example the Montana n49 row) carry the same zero-US-cell '
+            'characteristic; a normalization pass should treat them consistently with the 13.',
+            'MRLC removed the pinned canopy URL during this pass; the exact bytes were recovered from the official '
+            'USGS ScienceBase attachment and SHA-256 verified. The registry now records the recovery URL.',
+        ],
         'remoteAudit': json.loads(audit.read_text()) if audit.exists() else None,
         'resume': {'command': 'bash /tmp/ff-batch3-resume.sh <nextChunk>',
                    'nextChunk': len(chunks),

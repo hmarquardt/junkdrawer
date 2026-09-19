@@ -1,5 +1,85 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 17 — Final national GIS production (Batch 3) and the zero-state edge resolution (2026-09-19)
+
+Started from `c20204f6fa012134748cb6177b949274dbb5514f`. **National GIS Batch 3 only** was executed after a gated Phase A resolved the zero-state edge case. The application and manifest remain at `https://hmarquardt.github.io/junkdrawer/`; immutable content-addressed Parquet is served from R2 at `https://data.hanksjunkdrawer.com/`. No Worker, VM, API service, backend or database was added.
+
+### Starting checkpoint
+
+- Revision 16 closed at `8656a06`: 615 / 940 GIS-complete, 325 remaining, Batch 3 not started.
+
+### Edge design (Phase A)
+
+- Root cause: 30 relevant tiles had every US state below the planner 5% state-source threshold. The threshold is a source-preparation gate only (which state soil/PBF sources a tile needs); it does not affect biological profile assignment, state jurisdiction, collecting rules or GIS clipping.
+- Fallback: restricted to tiles the normal rule resolves to zero states. It resolves sources by point-in-polygon against the pinned US state geometry at the repository 0.05-degree habitat sample-cell centers. It is deterministic, geometry-based, US-only, and can never import a foreign jurisdiction.
+- **17 tiles resolved real US sources** from actual sampled land (Florida Keys, Channel Islands, Great Lakes shorelines, Downeast Maine, Texas coast and others; canaries n24_w081→FL, n32_w119→CA, n42_w081→PA, n47_w090→MI+MN).
+- **13 tiles are explicitly blocked**, never silently dropped: no habitat sample cell center falls inside any US state. Their >=1% planner land share is a 1:20M Census cartographic-boundary simplification sliver at the 45/49-degree international border (<=0.019 degrees past the line). They are foreign-dominated and building them would publish foreign-only evidence as national coverage. Machine-readable reasons: `production/edge-tiles-characterization.json` and `production/batch3-scope.json`.
+- Planner/runner agreement is now enforced by one shared helper (`unresolved_state_tiles`) plus a runner refusal; the national invariant classifies every relevant tile as complete, buildable-normal, buildable-fallback or explicitly blocked. Regression tests cover the canaries, the invariant, foreign safety, ArcGIS body-level 429 retry and worker-failure queue propagation.
+
+### State preparation
+
+- Requested cohort: 17 states — NM, CT, DE, MA, MD, ND, NH, NJ, NV, NY, OK, PA, RI, SD, TX, UT, VT.
+- Component-specific reuse: soil reused for NM, CT; access reused for NM; every other component was newly prepared in this pass. The cohort was prepared in two runs because the first was interrupted after New Mexico access and Connecticut soil completed; those components were revalidated and reused, never re-downloaded.
+- Measured preparation time: **10,789.8 s** total, strictly serialized (SDA soil then Geofabrik PBF download, provider MD5 validation and osmium extraction per state). PBF bytes downloaded in this pass: 3,434,636,906 bytes.
+- Restartable and idempotent: a READY component revalidates and reuses; a failed refresh never overwrites verified bytes.
+
+### Frozen final scope
+
+- Planner-derived, frozen in `production/batch3-final-scope.json`: **312 tiles** (295 ordinary state-blocked tiles plus **17 zero-state fallback tiles**: n24_w081, n25_w098, n29_w081, n31_w081, n32_w119, n33_w078, n33_w120, n33_w121, n41_w070, n42_w081, n43_w080, n44_w083, n46_w084, n47_w068, n47_w088, n47_w090, n48_w089).
+- Explicitly blocked, not built: **13** tiles — n45_w073, n49_w099, n49_w100, n49_w101, n49_w102, n49_w103, n49_w104, n49_w105, n49_w116, n49_w119, n49_w120, n49_w121, n49_w122.
+
+### Production execution
+
+- Two concurrent local/DEM tile workers, one serialized publisher lane, 32 checkpoints of ten tiles or fewer. Strictly serialized: SDA and hosted ArcGIS services, R2 publication, manifest mutation, publisher-ledger mutation, journal writes and git checkpoints.
+- Newly complete: **312 / 312** frozen tiles; 0 remaining in the frozen set (none).
+- Hosted-service retries observed: none (0 in-process retry events). Bounded retry, jitter, Retry-After and the ArcGIS pacer stayed in force; no failed request produced neutral or invented evidence.
+- Final pass chunk wall: **10,829.8 s**; resumed-pass 312 tiles in 15,924 s (**70.5 tiles/hour**), per-tile stage-sum median 50.1 s, serial-stage speedup **1.27x**, two-worker build utilization 0.624, publisher utilization 0.245.
+- DEM: 309 downloads / 14,529,376,314 bytes / 7,037 s; 14,529,376,314 bytes reclaimed. Access median 13.3 s/tile (p75 23.6).
+- Disk: whole-pass minimum free 24,391,553,024 bytes; resumed-pass minimum 24,391,553,024 bytes. The 8 GiB preflight and 4 GiB stop floors were never lowered or triggered.
+
+### Final coverage
+
+- **National four-layer GIS coverage: 927 / 940.**
+- Remaining: **13** tiles, all explicitly blocked — n45_w073, n49_w099, n49_w100, n49_w101, n49_w102, n49_w103, n49_w104, n49_w105, n49_w116, n49_w119, n49_w120, n49_w121, n49_w122.
+- These 13 are not missing data: they contain no US land at habitat sample-cell resolution. They are documented for a future normalization decision (a finer state boundary or an explicit relevance test), not silently excluded and never built from foreign-only evidence.
+- **National GIS production is therefore NOT complete at 940/940.**
+
+### R2
+
+- Active manifest: **3708 objects / 271,075,626 bytes**.
+- Final remote audit: 3708 remotely valid, 0 missing, 0 invalid, 97 local-only (retained), 80 publisher-ledger remote orphans (retained); clean = True.
+- Audit scope is precise: publisher upload-intent ledger; not an exhaustive R2 bucket listing. Wrangler cannot exhaustively list the bucket, so this is not a claim that the bucket contains no other objects.
+- Publication transport remained the proven Wrangler OAuth path with immutable upload, full remote verification and serialized manifest mutation.
+
+### Browser
+
+- Final matrix: batch3-final — 9 live lookups; cold Parquet requests per lookup [4, 4, 12, 4, 4, 4, 3, 11, 4], warm additional Parquet 0; console errors 0, page errors 0.
+- SHA/length validation, DuckDB queries and CORS passed; suggested starts remained eligible mapped evidence only.
+
+### National storage (measured, not projected)
+
+- Across 927 complete tiles: total 270,940,479 bytes, mean 292,276 B/tile, median 192,703, p25 115,501, p75 362,247, p90 600,011. Layer totals: habitat 13.36 MB, public land 95.02 MB, fire 130.62 MB, access 31.94 MB.
+- Active R2 manifest bytes: **271,075,626** (immutable Parquet plus small manifest-adjacent assets are counted by the audit only for referenced objects).
+- R2 cost at the measured size (0.271 GB): ~72 Class B reads/user/month gives 7,200 / 72,000 / 720,000 reads at 100 / 1,000 / 10,000 monthly users, inside the account-shared free allowances in isolation. Edge caching was not configured and was not assumed; no Worker is warranted. A narrow immutable-Parquet cache rule is optional if request measurements later justify it.
+
+### Tests
+
+- Python 121 passed + 6 subtests; Playwright 126 passed / 1 skipped; compliance 0 errors / 14 warnings (none on fruiting-forecast.html); py_compile OK; git diff --check clean.
+
+### Biology
+
+Biology is unchanged and was asserted before and after: **13 profiles, 11 PROVISIONAL, 2 MODELED_SPARSE, 0 UNSUPPORTED**. No profile, taxon, EPA crosswalk, calendar, weather model, host model, scoring weight or permanent canary changed.
+
+### Launch readiness
+
+- GIS is **927/940 complete; national GIS production is NOT complete** because the 13 blocked border artifacts remain.
+- Biology remains complete at declared maturity (11 PROVISIONAL, 2 MODELED_SPARSE); PROVISIONAL is a declared maturity, not missing GIS coverage, and must not be conflated with the 13 blocked tiles.
+- No full national launch-readiness audit was performed because the GIS-complete gate is not met.
+
+### Authorization
+
+The remaining 13 tiles are a bounded follow-up design task (state-boundary normalization or an explicit relevance reclassification). No further production batch is authorized by this revision.
+
 ## Revision 16 — National GIS Batch 2 complete (2026-09-18)
 
 Started from `986729ea14454b00a59a5b282761dec705b04edd`. **National GIS Batch 2 only** was executed; Batch 3 remains unauthorized and unstarted. The application and manifest remain at `https://hmarquardt.github.io/junkdrawer/`; immutable content-addressed Parquet is served from R2 at `https://data.hanksjunkdrawer.com/`. No Worker, VM, API service, backend or database was added.

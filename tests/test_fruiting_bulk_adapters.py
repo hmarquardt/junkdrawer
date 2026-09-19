@@ -937,7 +937,10 @@ class BoundedSouthernRockiesRelease(unittest.TestCase):
             self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
             self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
-            self.assertEqual(tile['accessPoints']['status'], 'AVAILABLE' if tile_id in ACCESS_TILES else 'UNBUILT', tile_id)
+            # National production is complete: every published release tile now
+            # carries access evidence or an explicit verified-empty. ACCESS_TILES
+            # is the historical pre-Batch-3 subset where access was prepared.
+            self.assertIn(tile['accessPoints']['status'], {'AVAILABLE', 'VERIFIED_EMPTY'}, tile_id)
 
     def test_real_ssurgo_soil_evidence_is_present_with_explicit_gaps(self):
         known_drainage = ('well drained', 'moderately well drained', 'somewhat excessively drained',
@@ -1002,19 +1005,21 @@ class TwoStateRelease(unittest.TestCase):
         cls.tiles = {tile['id']: tile for tile in cls.manifest['tiles']}
         cls.con = duckdb.connect()
 
-    def test_new_mexico_tiles_are_fully_built_and_access_stays_unbuilt(self):
+    def test_new_mexico_tiles_are_fully_built_after_national_completion(self):
         for tile_id in NEW_MEXICO_TILES:
             tile = self.tiles[tile_id]
             habitat = tile['habitat']
             self.assertEqual(habitat['status'], 'AVAILABLE', tile_id)
             self.assertEqual(habitat['cells'], 400, tile_id)
             self.assertEqual(set(habitat['components'].values()), {'AVAILABLE'}, tile_id)
-            self.assertEqual(habitat['unbuilt'], [] if tile_id in ACCESS_TILES else ['access'], tile_id)
+            # Batch 3 prepared New Mexico's OSM source, so access is no longer the
+            # one unbuilt layer on these tiles.
+            self.assertEqual(habitat['unbuilt'], [], tile_id)
             self.assertEqual(tile['publicLands']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['publicLands']['properties'], 0, tile_id)
             self.assertEqual(tile['fireHistory']['status'], 'AVAILABLE', tile_id)
             self.assertGreater(tile['fireHistory']['perimeters'], 0, tile_id)
-            self.assertEqual(tile['accessPoints']['status'], 'AVAILABLE' if tile_id in ACCESS_TILES else 'UNBUILT', tile_id)
+            self.assertIn(tile['accessPoints']['status'], {'AVAILABLE', 'VERIFIED_EMPTY'}, tile_id)
             self.assertTrue(any(source['id'] == 'ssurgo_sda' for source in habitat['sources']), tile_id)
 
     def test_soil_sources_are_state_scoped_and_current(self):

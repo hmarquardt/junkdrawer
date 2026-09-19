@@ -36,7 +36,8 @@ def main():
     nat = analysis['nationalStorage']
     complete = cov['nationalComplete']
     remaining = cov['nationalRemaining']
-    blocked = report.get('edgeBlockedRemaining') or []
+    blocked_raw = report.get('edgeBlockedRemaining') or []
+    blocked = [b['id'] if isinstance(b, dict) else b for b in blocked_raw]
     fallback = report.get('edgeFallbackTiles') or []
     prepared_new = [c for c in prep['cohort']
                     if not prep['states'][c]['soil'].get('reused') or not prep['states'][c]['access'].get('reused')]
@@ -45,7 +46,7 @@ def main():
     total_pbf = sum((prep['states'][c]['access'].get('bytes') or 0) for c in prep['cohort'])
     layer = nat['layerTotals']
     lines = [
-        '## Revision 17 — Final national GIS production (Batch 3) and the zero-state edge resolution (2026-09-18)',
+        '## Revision 17 — Final national GIS production (Batch 3) and the zero-state edge resolution (2026-09-19)',
         '',
         f"Started from `{report['startingCommit']}`. **National GIS Batch 3 only** was executed after a gated "
         'Phase A resolved the zero-state edge case. The application and manifest remain at '
@@ -82,8 +83,9 @@ def main():
         '',
         f"- Requested cohort: 17 states — {', '.join(prep['cohort'])}.",
         f"- Component-specific reuse: soil reused for {', '.join(reused_soil) or 'none'}; access reused for "
-        f"{', '.join(reused_access) or 'none'}; the remaining components were newly prepared "
-        f"({len(prepared_new)} states had at least one component prepared in this pass).",
+        f"{', '.join(reused_access) or 'none'}; every other component was newly prepared in this pass. The cohort "
+        'was prepared in two runs because the first was interrupted after New Mexico access and Connecticut soil '
+        'completed; those components were revalidated and reused, never re-downloaded.',
         f"- Measured preparation time: **{prep['totalSeconds']:,} s** total, strictly serialized (SDA soil then "
         f"Geofabrik PBF download, provider MD5 validation and osmium extraction per state). PBF bytes downloaded "
         f"in this pass: {total_pbf:,} bytes.",
