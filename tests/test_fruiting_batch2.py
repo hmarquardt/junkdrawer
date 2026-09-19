@@ -41,6 +41,8 @@ class StubRunner(batch2.Batch2Runner):
         self.stats_lock = threading.Lock()
         self.fail = set(fail)
         self.built = []
+        self.prepared_access_states = []
+        self.planned = {}
 
     def build_tile(self, tile, phase):
         if tile in self.fail:
@@ -151,6 +153,42 @@ class PlannerRunnerAgreement(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 batch2.cmd_run(path, 0, 10, Path(tmp))
         self.assertIn('planner/runner disagreement', str(ctx.exception))
+
+
+class AccessStateResolution(unittest.TestCase):
+    """A coastal/delta tile must still resolve its real prepared state source.
+
+    The generalized state polygon can stop short of the Mississippi delta, so the
+    bbox-intersection heuristic alone resolved no state and the access build
+    crashed with IndexError. The runner now unions in the normalized product's
+    land states.
+    """
+
+    def test_normalized_land_state_is_unioned_when_bbox_heuristic_misses(self):
+        import fruiting_pnw_release
+        runner = StubRunner()
+        runner.prepared_access_states = ['LA', 'TX']
+        runner.planned = {'n29_w089': {'normalizedStates': {'LA': 1}}}
+        real = fruiting_pnw_release._access_states_for_tile
+        fruiting_pnw_release._access_states_for_tile = lambda tile, states, tolerance=0.01: []
+        try:
+            self.assertEqual(runner.access_states_for('n29_w089'), ['LA'])
+        finally:
+            fruiting_pnw_release._access_states_for_tile = real
+
+    def test_bbox_states_are_preserved_and_unprepared_states_filtered(self):
+        import fruiting_pnw_release
+        runner = StubRunner()
+        runner.prepared_access_states = ['LA', 'TX']
+        runner.planned = {'n29_w089': {'normalizedStates': {'LA': 1, 'MS': 3}}}
+        real = fruiting_pnw_release._access_states_for_tile
+        fruiting_pnw_release._access_states_for_tile = lambda tile, states, tolerance=0.01: ['TX']
+        try:
+            # TX from the bbox heuristic, LA from the normalized product, MS has no
+            # prepared source and must not be requested.
+            self.assertEqual(runner.access_states_for('n29_w089'), ['LA', 'TX'])
+        finally:
+            fruiting_pnw_release._access_states_for_tile = real
 
 
 if __name__ == '__main__':

@@ -467,6 +467,11 @@ def build(cache, states, tile_id, out, root=Path(__file__).resolve().parents[1])
         sources.append({k: v for k, v in entry.items() if k not in {'files', 'directory'}})
         candidates.update({r['id']: r for r in read_local(folder / 'candidates.parquet', bbox) if in_tile(r, bbox)})
         roads.update({r['id']: r for r in read_local(folder / 'roads.parquet', halo)})
+    if not sources:
+        # A normalized-relevant tile must have at least one prepared state source;
+        # never publish an empty access layer from a source-less build.
+        raise SystemExit(f'No prepared OSM state source resolved for tile {tile_id}; '
+                         'refusing to publish an empty access layer')
     index = RoadIndex(list(roads.values()), project)  # RoadIndex validates internally
     source_version = VERSION + ':' + ':'.join(s['sha256'][:16] for s in sources)
     normalized = [normalize(r, index, properties, project, source_version) for r in sorted(candidates.values(), key=lambda x: x['id'])]

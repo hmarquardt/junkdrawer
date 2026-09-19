@@ -288,8 +288,17 @@ class Batch2Runner:
             raise
 
     def access_states_for(self, tile):
+        """Prepared OSM states whose evidence belongs to this tile.
+
+        The bbox-intersection heuristic can miss a state whose generalized polygon
+        stops short of a coastal/delta tile (Louisiana's bird-foot delta), so the
+        normalized product's land states are unioned in. Both are US-only.
+        """
         from fruiting_pnw_release import _access_states_for_tile
-        return _access_states_for_tile(tile, self.prepared_access_states)
+        prepared = set(self.prepared_access_states)
+        bbox_states = set(_access_states_for_tile(tile, self.prepared_access_states))
+        normalized_states = set(((self.planned.get(tile) or {}).get('normalizedStates') or {}).keys())
+        return sorted((bbox_states | normalized_states) & prepared)
 
     def run_chunk(self, tiles):
         from fruiting_metrics import emit
