@@ -48,7 +48,12 @@ STATES = {'CO': 'colorado', 'OR': 'oregon', 'NM': 'new-mexico', 'WA': 'washingto
           'KS': 'kansas', 'KY': 'kentucky', 'LA': 'louisiana', 'MN': 'minnesota', 'MO': 'missouri',
           'MS': 'mississippi', 'NC': 'north-carolina', 'NE': 'nebraska', 'OH': 'ohio',
           'SC': 'south-carolina', 'TN': 'tennessee', 'VA': 'virginia', 'WI': 'wisconsin',
-          'WV': 'west-virginia'}
+          'WV': 'west-virginia',
+          # Final national Batch 3 cohort (Geofabrik US state extracts).
+          'CT': 'connecticut', 'DE': 'delaware', 'MA': 'massachusetts', 'MD': 'maryland',
+          'ND': 'north-dakota', 'NH': 'new-hampshire', 'NJ': 'new-jersey', 'NY': 'new-york',
+          'OK': 'oklahoma', 'PA': 'pennsylvania', 'RI': 'rhode-island', 'SD': 'south-dakota',
+          'TX': 'texas', 'UT': 'utah', 'VT': 'vermont'}
 ATTRIBUTION = '© OpenStreetMap contributors'
 LICENSE = 'https://www.openstreetmap.org/copyright'
 TAGS = ('name operator access motor_vehicle vehicle foot bicycle surface smoothness tracktype '
