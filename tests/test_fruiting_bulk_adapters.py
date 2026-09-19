@@ -1239,5 +1239,75 @@ class PacificNorthwestRelease(unittest.TestCase):
         self.assertNotIn('hemlock_sitka_spruce_signal', columns)
 
 
+class ArcGisBodyLevelRetry(unittest.TestCase):
+    """ArcGIS reports quota/throttle failures as HTTP 200 with an error body.
+
+    Batch 2 lost a worker to exactly that shape (a body-level 429); the fix is a
+    bounded body-level retry that honors the service's own retry hint.
+    """
+
+    class FakeResponse:
+        def __init__(self, body, status_code=200):
+            self._body = body
+            self.status_code = status_code
+            self.text = json.dumps(body)
+
+        def json(self):
+            return self._body
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f'HTTP {self.status_code}')
+
+    def setUp(self):
+        self.sleeps = []
+        self._real_sleep = bulk.time.sleep
+        bulk.time.sleep = lambda seconds: self.sleeps.append(seconds)
+        self._real_pacer = bulk._ARCGIS_LAST[0]
+        bulk._ARCGIS_LAST[0] = 0.0
+
+    def tearDown(self):
+        bulk.time.sleep = self._real_sleep
+        bulk._ARCGIS_LAST[0] = self._real_pacer
+
+    def test_body_level_429_retries_then_succeeds(self):
+        bodies = [{'error': {'code': 429, 'message': 'Too many large geometry non-cacheable requests',
+                             'details': ['API calls for large geometry quota exceeded (61)! maximum allowed '
+                                         '(60) per Minute. Retry after 60 sec.']}},
+                  {'features': [{'type': 'Feature'}]}]
+        calls = []
+        with patch.object(bulk, 'service_request',
+                          side_effect=lambda *a, **k: (calls.append(k.get('params')), self.FakeResponse(bodies.pop(0)))[1]):
+            body = bulk._esri_page('https://example.test/query', {'f': 'geojson'}, 30)
+        self.assertEqual(body, {'features': [{'type': 'Feature'}]})
+        self.assertEqual(len(calls), 2, 'the body-level 429 must be retried once')
+        self.assertGreaterEqual(self.sleeps[0], 60.0, 'the service retry hint must be honored')
+
+    def test_body_level_500_retries_and_exhaustion_raises(self):
+        bodies = [{'error': {'code': 500, 'message': 'transient'}} for _ in range(5)]
+        with patch.object(bulk, 'service_request',
+                          side_effect=lambda *a, **k: self.FakeResponse(bodies.pop(0))):
+            with self.assertRaises(ValueError):
+                bulk._esri_page('https://example.test/query', {'f': 'geojson'}, 30)
+
+    def test_non_transient_body_error_raises_immediately(self):
+        calls = []
+        with patch.object(bulk, 'service_request',
+                          side_effect=lambda *a, **k: (calls.append(1), self.FakeResponse(
+                              {'error': {'code': 400, 'message': 'bad request'}}))[1]):
+            with self.assertRaises(ValueError):
+                bulk._esri_page('https://example.test/query', {'f': 'geojson'}, 30)
+        self.assertEqual(len(calls), 1, 'a 400 body must not be retried')
+
+    def test_http_200_without_error_returns_immediately(self):
+        calls = []
+        with patch.object(bulk, 'service_request',
+                          side_effect=lambda *a, **k: (calls.append(1), self.FakeResponse({'features': []}))[1]):
+            body = bulk._esri_page('https://example.test/query', {'f': 'geojson'}, 30)
+        self.assertEqual(body, {'features': []})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.sleeps, [])
+
+
 if __name__ == '__main__':
     unittest.main()

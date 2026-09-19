@@ -53,6 +53,33 @@ def _projected(geom, transformer):
     return shp_transform(lambda x, y: transformer.transform(x, y), geom)
 
 
+def fallback_states_from_cells(tile_id, state_geoms, prepared=None):
+    """US states that actually contain at least one habitat sample cell center.
+
+    This is the zero-normal-state fallback and only that: the normal 5% tile-share
+    rule is untouched for every tile it already resolves. Point-in-polygon against
+    the pinned US state geometry at the repository 0.05-degree sample-cell centers
+    is deterministic and geometry-based; `state_geoms` contains US states only, so
+    foreign land can never resolve a source. A center exactly on a state line
+    contributes to every state that contains it, so genuine multi-state edge tiles
+    keep multiple real sources. A tile whose state share is a cartographic-boundary
+    sliver (for example the 1:20M Census geometry extending a few hundred meters
+    past the 45/49-degree border) has zero such centers and resolves zero states.
+    """
+    from fruiting_bulk_adapters import sample_points
+    from shapely.geometry import Point
+    from shapely.prepared import prep
+    if prepared is None:
+        prepared = {code: prep(geom) for code, geom in state_geoms.items()}
+    counts = {}
+    for lat, lon in sample_points(tile_id):
+        point = Point(lon, lat)
+        for code in sorted(prepared):
+            if prepared[code].covers(point):
+                counts[code] = counts.get(code, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def re_iter_profiles(html):
     import re
     return re.finditer(r"([a-zA-Z]+):\{name:'([^']+)',maturity:'(MODELED_SPARSE|MODELED|PROVISIONAL|UNSUPPORTED|PROVISIONAL_FORECAST|VALIDATED)'", html)
@@ -144,6 +171,7 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
         from fruiting_bulk_adapters import load_cache_manifest
         access_sources = load_cache_manifest(Path(access_cache)).get('sources', {})
     rows = []
+    prepared_states = None
     for entry in catalog['tiles']:
         lat, lon = int(entry['id'][1:3]), -int(entry['id'][5:8])
         tile = _projected(box(lon, lat, lon + 1, lat + 1), transformer)
@@ -170,6 +198,26 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
         tile_entry = published.get(entry['id']) or {}
         layer_status = {layer: (tile_entry.get(layer) or {}).get('status', 'UNBUILT') for layer in LAYERS}
         required_states = sorted(code for code, share in state_shares.items() if share >= SOURCE_STATE_SHARE)
+        # Zero-normal-state fallback: only tiles the normal rule resolves to no
+        # state at all are reconsidered, and only from actual US sample cells.
+        state_resolution = 'normal'
+        fallback_cell_counts = None
+        edge_blocked_reason = None
+        if not required_states:
+            if prepared_states is None:
+                from shapely.prepared import prep as _prep
+                prepared_states = {code: _prep(geom) for code, geom in state_geoms.items()}
+            fallback_cell_counts = fallback_states_from_cells(entry['id'], state_geoms, prepared_states)
+            if fallback_cell_counts:
+                required_states = sorted(fallback_cell_counts)
+                state_resolution = 'cell-fallback'
+            else:
+                state_resolution = 'blocked-no-us-cells'
+                edge_blocked_reason = (
+                    'No habitat sample cell center falls inside any US state. The tile is '
+                    'foreign-dominated (international border or coast) and its >=1% planner land share is a '
+                    '1:20M cartographic-boundary simplification sliver with no US land to source; building it '
+                    'would publish foreign-only evidence as coverage.')
         dem_key = f'3dep_1arcsecond:n{lat + 1:02d}w{abs(lon):03d}'
         dem = (cache_sources.get(dem_key) or {}).get('status', 'unknown')
         pbf_ready = all((access_sources.get('osm_access:' + code) or {}).get('status') == 'READY'
@@ -187,6 +235,9 @@ def build_tiles(scope='conus', profile=None, state=None, source_cache=None, min_
             'published': bool(tile_entry),
             'layerStatus': layer_status,
             'soilStatesRequired': required_states,
+            'stateResolution': state_resolution,
+            'fallbackStateCellCounts': fallback_cell_counts,
+            'edgeBlockedReason': edge_blocked_reason,
             'soilPrepared': soil_ready,
             'pbfStatesRequired': required_states,
             'pbfPrepared': pbf_ready,
@@ -234,6 +285,8 @@ def coverage(rows=None, scope='conus'):
         'tilesGisComplete': sum(1 for r in rows if all(r['layerStatus'][layer] in {'AVAILABLE', 'PARTIAL', 'VERIFIED_EMPTY'} for layer in LAYERS)),
         'tilesMultipleProfiles': multi_profile,
         'tilesMultipleStates': multi_state,
+        'tilesFallbackResolved': sum(1 for r in rows if r.get('stateResolution') == 'cell-fallback'),
+        'tilesEdgeBlocked': sum(1 for r in rows if r.get('stateResolution') == 'blocked-no-us-cells'),
         'profiles': per_profile,
         'coverageSemantics': ('GIS coverage counts tiles with real per-layer publication status; biological '
                               'coverage is the pinned EPA profile maturity declared by the browser. A GIS-complete '

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Derive (never execute) the remaining national tiles after Batch 2.
+"""Derive (never execute) the remaining national tiles for the final Batch 3 pass.
 
-Writes production/batch3-scope.json with exact remaining tiles, the blocking
-states per tile, and required state preparation. Also refreshes the batch2/batch3
-summary in production/remaining-batches.json.
+Writes production/batch3-scope.json with exact remaining tiles, the zero-state
+edge fallback/blocked classification, the blocking states per tile, and required
+state preparation. Also refreshes the batch2/batch3 summary in
+production/remaining-batches.json.
 """
 import json
 from collections import Counter
@@ -23,11 +24,14 @@ ACCESS = Path('/tmp/fruiting-forecast-gis-sources')
 
 def main():
     rows = build_tiles(source_cache=SOURCE, access_cache=ACCESS)
+
     def complete(r):
         return all(v in {'AVAILABLE', 'VERIFIED_EMPTY'} for v in r['layerStatus'].values())
+
     remaining = [r for r in rows if not complete(r)]
     buildable = [r for r in remaining if r['soilStatesRequired'] and r['soilPrepared'] and r['pbfPrepared']]
-    nostate = [r for r in remaining if not r['soilStatesRequired']]
+    edge_fallback = [r for r in remaining if r.get('stateResolution') == 'cell-fallback']
+    edge_blocked = [r for r in remaining if r.get('stateResolution') == 'blocked-no-us-cells']
     blocking = {}
     for r in remaining:
         if r['soilStatesRequired'] and not (r['soilPrepared'] and r['pbfPrepared']):
@@ -37,9 +41,12 @@ def main():
     ready_pbf = {k.split(':')[1] for k, v in load_cache_manifest(ACCESS).get('sources', {}).items()
                  if k.startswith('osm_access:') and v.get('status') == 'READY'}
     # Unprepared states only: a blocked tile may co-require states that are
-    # already prepared, and those are not work for the next pass.
-    needed_states = sorted({s for states in blocking.values() for s in states
-                            if s not in ready_soil or s not in ready_pbf})
+    # already prepared, and those are not work for the next pass. Edge-fallback
+    # tiles contribute their resolved fallback states too.
+    blocked_states = {s for states in blocking.values() for s in states}
+    fallback_states = {s for r in edge_fallback for s in r['soilStatesRequired']}
+    needed_states = sorted(s for s in (blocked_states | fallback_states)
+                           if s not in ready_soil or s not in ready_pbf)
     state_counts = Counter(s for states in blocking.values() for s in states)
     out = {
         'schemaVersion': 1,
@@ -47,15 +54,27 @@ def main():
         'coverage': coverage(rows),
         'remainingRelevantTiles': len(remaining),
         'buildableNow': [r['id'] for r in buildable],
-        'noStateThresholdTiles': {
-            'count': len(nostate),
-            'tiles': [r['id'] for r in nostate],
-            'note': ('Tiles whose required states all fall below the planner 5% source threshold. '
-                     'The production runner cannot resolve soil for them (pnw_release: No soil states '
-                     'resolved); building them requires a planner/runner design decision, not a data fix.'),
+        'buildableAfterPreparation': len(buildable) + len(blocking),
+        'stateBlockedTiles': {'count': len(blocking), 'statesPerTile': blocking},
+        'edgeFallbackTiles': {
+            'count': len(edge_fallback),
+            'tiles': [r['id'] for r in edge_fallback],
+            'stateCellCounts': {r['id']: r.get('fallbackStateCellCounts') for r in edge_fallback},
+            'note': ('Zero-normal-state tiles whose real US sample cells resolve one or more pinned US '
+                     'states. The fallback is restricted to tiles the normal 5% rule resolves to zero '
+                     'states and is derived only from actual state geometry at the habitat sample-cell '
+                     'centers; multi-state edge tiles keep every genuine state source.'),
         },
-        'stateBlockedTiles': {'count': len(remaining) - len(buildable) - len(nostate),
-                              'statesPerTile': blocking},
+        'edgeBlockedTiles': {
+            'count': len(edge_blocked),
+            'tiles': [r['id'] for r in edge_blocked],
+            'reasons': {r['id']: r.get('edgeBlockedReason') for r in edge_blocked},
+            'note': ('Zero-normal-state tiles with no habitat sample cell inside any US state. Their '
+                     '>=1% planner land share is a 1:20M Census cartographic-boundary simplification '
+                     'sliver at the 45/49-degree international border (<=0.019 degrees past the line); '
+                     'building them would publish foreign-only evidence as national coverage. They are '
+                     'explicitly blocked, never silently dropped.'),
+        },
         'statesNeedingPreparation': needed_states,
         'allStatesOnBlockedTiles': sorted(state_counts),
         'preparedSoilStates': sorted(ready_soil), 'preparedPbfStates': sorted(ready_pbf),
@@ -69,6 +88,7 @@ def main():
     complete_ids = {r['id'] for r in rows if complete(r)}
     scope2_path = PROD / 'batch2-scope.json'
     completed_batch2 = None
+    frozen = set()
     if scope2_path.exists():
         frozen = set(json.loads(scope2_path.read_text())['tiles'])
         completed_batch2 = len(frozen & complete_ids)
@@ -86,12 +106,15 @@ def main():
     rb['remainingTiles'] = len(remaining)
     rb['batch3'] = {
         'authorized': False,
-        'candidateTiles': len(buildable) + len(blocking),
+        'candidateTiles': len(buildable) + len(blocking) + len(edge_fallback),
         'buildableWithoutPreparation': len(buildable),
         'stateBlockedTiles': len(blocking),
+        'edgeFallbackTiles': len(edge_fallback),
+        'edgeBlockedTiles': len(edge_blocked),
         'newStatePreparation': needed_states,
-        'noStateThresholdTiles': len(nostate),
-        'selection': 'Planner-derived after Batch 2: the state-blocked remainder becomes buildable once the named states are prepared; see batch3-scope.json. Derivation only, not authorization.',
+        'selection': ('Planner-derived after Batch 2 with the zero-state cell fallback: state-blocked tiles plus '
+                      'edge-fallback tiles become buildable once the named states are prepared; edge-blocked '
+                      'tiles stay explicit. See batch3-scope.json. Derivation only, not authorization.'),
     }
     rb['concurrencyRecommendation'] = {
         'tileWorkers': 2,
@@ -106,7 +129,8 @@ def main():
     }
     rb_path.write_text(json.dumps(rb, indent=2) + '\n')
     print(json.dumps({'remaining': len(remaining), 'buildableNow': len(buildable),
-                      'noStateTiles': len(nostate), 'stateBlocked': len(blocking),
+                      'stateBlocked': len(blocking), 'edgeFallback': len(edge_fallback),
+                      'edgeBlocked': len(edge_blocked),
                       'statesNeedingPreparation': needed_states}, indent=2))
 
 

@@ -107,6 +107,71 @@ class Planner(unittest.TestCase):
         self.assertLess(cov['tilesGisComplete'], cov['relevantLandTiles'])
         self.assertIn('not finished national mushroom coverage', cov['coverageSemantics'])
 
+    def test_zero_state_fallback_resolves_real_us_states(self):
+        """Zero-normal-state edge tiles resolve from actual US sample cells."""
+        canaries = {
+            'n24_w081': {'FL': 15},            # Florida Keys
+            'n32_w119': {'CA': 7},             # Channel Islands
+            'n42_w081': {'PA': 16},            # Lake Erie shoreline
+            'n47_w090': {'MI': 11, 'MN': 16},  # Lake Superior / Keweenaw
+            'n48_w089': {'MI': 17},            # Isle Royale
+            'n47_w068': {'ME': 11},            # Downeast coast
+        }
+        for tile_id, counts in canaries.items():
+            row = self.by_id[tile_id]
+            self.assertEqual(row['stateResolution'], 'cell-fallback', tile_id)
+            self.assertEqual(row['fallbackStateCellCounts'], counts, tile_id)
+            self.assertEqual(row['soilStatesRequired'], sorted(counts), tile_id)
+            self.assertTrue(row['soilStatesRequired'], 'fallback tiles must resolve a source')
+
+    def test_zero_state_blocked_tiles_are_explicit(self):
+        """Border-sliver tiles with no US sample cell are blocked with a reason."""
+        blocked = ('n45_w073', 'n49_w099', 'n49_w105', 'n49_w116', 'n49_w122')
+        for tile_id in blocked:
+            row = self.by_id[tile_id]
+            self.assertEqual(row['stateResolution'], 'blocked-no-us-cells', tile_id)
+            self.assertEqual(row['soilStatesRequired'], [], tile_id)
+            self.assertEqual(row['fallbackStateCellCounts'], {}, tile_id)
+            self.assertTrue(row['edgeBlockedReason'], tile_id)
+            self.assertIn('no habitat sample cell', row['edgeBlockedReason'].lower(), tile_id)
+
+    def test_every_relevant_tile_resolves_exactly_one_way(self):
+        """National invariant: no relevant tile falls between planner semantics."""
+        normal = fallback = blocked = 0
+        for row in self.rows:
+            resolution = row['stateResolution']
+            self.assertIn(resolution, {'normal', 'cell-fallback', 'blocked-no-us-cells'}, row['id'])
+            if resolution in {'normal', 'cell-fallback'}:
+                self.assertTrue(row['soilStatesRequired'], row['id'])
+                self.assertTrue(set(row['soilStatesRequired']) <= set(planner.load_geography()[1]), row['id'])
+                if resolution == 'normal':
+                    normal += 1
+                    for state in row['soilStatesRequired']:
+                        self.assertGreaterEqual(row['stateShares'].get(state, 0), planner.SOURCE_STATE_SHARE, row['id'])
+                else:
+                    fallback += 1
+                    self.assertEqual(row['soilStatesRequired'], sorted(row['fallbackStateCellCounts']), row['id'])
+                    for state in row['soilStatesRequired']:
+                        self.assertLess(row['stateShares'].get(state, 0), planner.SOURCE_STATE_SHARE, row['id'])
+            else:
+                blocked += 1
+                self.assertEqual(row['soilStatesRequired'], [], row['id'])
+        self.assertEqual(normal + fallback + blocked, len(self.rows))
+        self.assertEqual(fallback, self.coverage['tilesFallbackResolved'])
+        self.assertEqual(blocked, self.coverage['tilesEdgeBlocked'])
+        self.assertEqual(fallback, 17)
+        self.assertEqual(blocked, 13)
+
+    def test_fallback_never_imports_foreign_jurisdiction(self):
+        """Only pinned US states can ever be a source, fallback included."""
+        us_states = set(planner.load_geography()[1])
+        for row in self.rows:
+            for state in row['soilStatesRequired'] + list((row['fallbackStateCellCounts'] or {})):
+                self.assertIn(state, us_states, row['id'])
+        # A tile entirely inside Canada must not resolve any source.
+        self.assertEqual(self.by_id['n49_w099']['stateResolution'], 'blocked-no-us-cells')
+        self.assertEqual(self.by_id['n49_w122']['stateResolution'], 'blocked-no-us-cells')
+
     def test_projection_uses_measured_distributions(self):
         bytes_stats = planner.measured_per_tile_bytes(MANIFEST)
         proj = planner.projection(self.rows, bytes_stats)

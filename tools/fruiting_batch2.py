@@ -54,6 +54,7 @@ def derive(cohort):
                  if k.startswith('osm_access:') and v.get('status') == 'READY'}
     eligible = [r for r in rows if r['soilStatesRequired'] and r['soilPrepared'] and r['pbfPrepared']]
     requested = [r for r in eligible if not complete(r)]
+    blocked = [r for r in rows if r.get('stateResolution') == 'blocked-no-us-cells']
     return {
         'schemaVersion': 1,
         'startingCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
@@ -65,7 +66,12 @@ def derive(cohort):
         'eligibleTiles': len(eligible), 'alreadyComplete': len(eligible) - len(requested),
         'tiles': [r['id'] for r in requested],
         'tileDetail': {r['id']: {'soilStatesRequired': r['soilStatesRequired'],
-                                 'dominantProfile': r['dominantProfile']} for r in requested},
+                                 'dominantProfile': r['dominantProfile'],
+                                 'stateResolution': r.get('stateResolution'),
+                                 'fallbackStateCellCounts': r.get('fallbackStateCellCounts')}
+                       for r in requested},
+        'edgeFallbackTiles': [r['id'] for r in requested if r.get('stateResolution') == 'cell-fallback'],
+        'edgeBlockedTiles': [{'id': r['id'], 'reason': r.get('edgeBlockedReason')} for r in blocked],
         'layerWork': dict(Counter(k for r in requested for k, v in r['layerStatus'].items()
                                   if v not in {'AVAILABLE', 'VERIFIED_EMPTY'})),
         'stateTileCounts': dict(Counter(s for r in eligible for s in r['soilStatesRequired'])),
@@ -353,11 +359,26 @@ class Batch2Runner:
             raise SystemExit('Checkpoint incomplete; preserved for resume: ' + ','.join(incomplete))
 
 
+def unresolved_state_tiles(scope, tiles):
+    """Tiles whose frozen detail resolves no US state source.
+
+    The planner/runner agreement boundary: the planner must classify every
+    relevant tile as normal, zero-state fallback or explicitly blocked before a
+    tile can appear in a frozen scope. An empty resolution here means the two
+    semantics have drifted and the runner must refuse to build.
+    """
+    return [t for t in tiles if not (scope['tileDetail'].get(t) or {}).get('soilStatesRequired')]
+
+
 def cmd_run(scope_path, chunk, checkpoint_size, out):
     scope = json.loads(scope_path.read_text())
     tiles = scope['tiles'][chunk * checkpoint_size:(chunk + 1) * checkpoint_size]
     if not tiles:
         raise SystemExit('No tiles in requested chunk')
+    unresolved = unresolved_state_tiles(scope, tiles)
+    if unresolved:
+        raise SystemExit('Tiles resolved no state sources (planner/runner disagreement): '
+                         + ','.join(unresolved))
     current = derive(scope.get('requestedCohort', []))
     if not set(scope['readyStates']) <= set(current['readyStates']):
         raise SystemExit('Prepared states changed; preflight again')
