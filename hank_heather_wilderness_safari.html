@@ -967,9 +967,7 @@ footer {
    Public read-only wildlife observation map
    ================================================================ */
 
-const API_BASE = 'https://lab.aismallbizguru.com/api';
-const APP_ID = 'wildlife-field-recorder';
-const READONLY_TOKEN = '-xtFBTyS4DUcWXongsYDLOo2Ul74WoPIjIQNFFHAZBI';
+const API_BASE = 'https://cflab.aismallbizguru.com/api/public/wildlife-safari';
 
 // --- Category styles ---
 const CATEGORY_STYLES = {
@@ -998,7 +996,6 @@ let markerClusterGroup = null;
 let selectedId = null;
 let searchDebounce = null;
 const markersById = {};
-const imageCache = new Map();
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -1066,15 +1063,12 @@ async function loadObservations() {
   listEl.innerHTML = `<div class="loading-wrap"><div class="spinner"></div><p>Loading safari data...</p></div>`;
 
   try {
-    const response = await fetch(`${API_BASE}/${APP_ID}/observations`, {
-      method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + READONLY_TOKEN }
-    });
+    const response = await fetch(`${API_BASE}/observations`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
     const payload = await response.json();
-    const records = payload.records || payload.data || payload || [];
+    const records = payload.observations || [];
     allObservations = normalizeRecords(records);
     filteredObservations = allObservations.slice();
     populateFilters();
@@ -1118,65 +1112,14 @@ function wmoToText(code) {
 
 function normalizeRecords(records) {
   return (Array.isArray(records) ? records : []).map((rec, idx) => {
-    const d = rec.data || rec || {};
-    const files = rec.files || [];
-    const photos = [];
-    const audio = [];
-    (files || []).forEach(f => {
-      const mime = (f.content_type || f.mimeType || f.type || '').toLowerCase();
-      if (mime.startsWith('image/')) photos.push(f);
-      else if (mime.startsWith('audio/')) audio.push(f);
-    });
-    // If data.photo_url exists, push as synthetic photo
-    if (d.photo_url) {
-      photos.push({ url: d.photo_url, mimeType: 'image/jpeg', name: 'photo' });
-    }
-
-    const lat = parseFloat(d.latitude);
-    const lng = parseFloat(d.longitude);
-    const hasGPS = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
-    const created = d.createdAt ? new Date(d.createdAt) : new Date();
-
-    const commonName = d.subjectCommonName || '';
-    const scientificName = d.subjectScientificName || '';
-    const category = d.category || 'unknown';
-
-    // Pull weather from nested weatherRaw.current (Open-Meteo format)
-    const wr = d.weatherRaw || {};
-    const cur = wr.current || {};
-    const units = wr.current_units || {};
-    const tempUnit = (units.temperature_2m || '').toUpperCase();
-    const windUnit = (units.wind_speed_10m || '').toLowerCase();
-    const pressureUnit = (units.pressure_msl || '').toLowerCase();
-
-    let temperatureF = null;
-    let temperatureC = null;
-    if (cur.temperature_2m != null) {
-      if (tempUnit.includes('F')) temperatureF = cur.temperature_2m;
-      else temperatureC = cur.temperature_2m;
-    }
-
-    let windSpeedMph = null;
-    if (cur.wind_speed_10m != null) {
-      windSpeedMph = windUnit.includes('mp/h') || windUnit.includes('mph')
-        ? cur.wind_speed_10m
-        : cur.wind_speed_10m * 0.621371;
-    }
-
-    let pressureHpa = null;
-    let pressureInHg = null;
-    if (cur.pressure_msl != null) {
-      if (pressureUnit.includes('hpa') || pressureUnit.includes('h_pa')) {
-        pressureHpa = cur.pressure_msl;
-        pressureInHg = +(cur.pressure_msl * 0.02953).toFixed(2);
-      } else if (pressureUnit.includes('inhg')) {
-        pressureInHg = cur.pressure_msl;
-        pressureHpa = +(cur.pressure_msl / 0.02953).toFixed(1);
-      } else {
-        pressureHpa = cur.pressure_msl;
-        pressureInHg = +(cur.pressure_msl * 0.02953).toFixed(2);
-      }
-    }
+    const species = rec.species || {};
+    const weather = rec.weather || {};
+    const location = rec.location || {};
+    const lat = Number(location.latitude);
+    const lng = Number(location.longitude);
+    const hasGPS = Number.isFinite(lat) && Number.isFinite(lng);
+    const created = rec.observed_at ? new Date(rec.observed_at) : new Date();
+    const photos = (rec.photos || []).filter(p => p && p.url);
 
     return {
       id: rec.id || `rec-${idx}`,
@@ -1186,29 +1129,29 @@ function normalizeRecords(records) {
       lat: hasGPS ? lat : null,
       lng: hasGPS ? lng : null,
       hasGPS,
-      commonName: commonName || scientificName || 'Unknown species',
-      scientificName: scientificName || '',
-      category,
-      transcript: d.transcript || '',
-      summary: d.summary || '',
-      behavior: d.behavior || '',
-      habitat: d.habitat || '',
-      count: d.count != null ? d.count : null,
-      tags: Array.isArray(d.tags) ? d.tags.filter(Boolean) : [],
+      commonName: species.common || species.scientific || 'Unknown species',
+      scientificName: species.scientific || '',
+      category: rec.category || 'unknown',
+      transcript: '',
+      summary: rec.description || '',
+      behavior: '',
+      habitat: '',
+      count: rec.count != null ? rec.count : null,
+      tags: [],
       weather: {
-        condition: wmoToText(cur.weather_code),
-        temperatureF,
-        temperatureC,
-        humidityPercent: cur.relative_humidity_2m != null ? cur.relative_humidity_2m : null,
-        windSpeedMph,
-        windDirection: d.windDirection || '',
-        pressureHpa,
-        pressureInHg,
-        fetchedAt: d.weatherFetchedAt || ''
+        condition: wmoToText(weather.weather_code),
+        temperatureF: weather.temperature_f != null ? weather.temperature_f : null,
+        temperatureC: weather.temperature_c != null ? weather.temperature_c : null,
+        humidityPercent: weather.humidity_percent != null ? weather.humidity_percent : null,
+        windSpeedMph: weather.wind_speed_mph != null ? weather.wind_speed_mph : null,
+        windDirection: weather.wind_direction || '',
+        pressureHpa: weather.pressure_hpa != null ? weather.pressure_hpa : null,
+        pressureInHg: weather.pressure_in_hg != null ? weather.pressure_in_hg : null,
+        fetchedAt: ''
       },
-      files,
+      files: [],
       photos,
-      audio,
+      audio: [],
       resourceLinks: []
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
@@ -1528,64 +1471,20 @@ function buildWeatherHtml(w) {
   return `<div class="weather-card"><div class="weather-title">Weather at sighting</div><div class="weather-grid">${grid}</div></div>`;
 }
 
-async function fetchImageWithToken(url) {
-  if (imageCache.has(url)) return imageCache.get(url);
-  try {
-    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + READONLY_TOKEN } });
-    if (!res.ok) throw new Error('Image fetch failed: ' + res.status);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    imageCache.set(url, blobUrl);
-    return blobUrl;
-  } catch (e) {
-    console.warn('Failed to load image:', url, e);
-    return url;
-  }
-}
-
-function buildGalleryHtml(photos) {
+async function buildGalleryHtml(photos) {
   if (!photos || photos.length === 0) return '';
-  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const thumbs = photos.map((p, i) => {
-    const url = p.url || p.download_url || p.previewUrl || p.thumbnailUrl || '';
+    const url = p.url || '';
     if (!url) return '';
-    return `<div class="gallery-thumb" data-img-url="${escapeHtml(url)}" onclick="openLightbox('${escapeHtml(url)}')"><img src="${placeholder}" alt="Photo ${i+1}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" /></div>`;
+    return `<div class="gallery-thumb" onclick="openLightbox('${escapeHtml(url)}')"><img src="${escapeHtml(url)}" alt="Photo ${i+1}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" /></div>`;
   }).filter(Boolean).join('');
   if (!thumbs) return '';
-  setTimeout(() => loadGalleryImages(), 0);
   return `<div class="detail-section"><h4>Photos</h4><div class="gallery">${thumbs}</div></div>`;
 }
 
-function loadGalleryImages() {
-  document.querySelectorAll('.gallery-thumb[data-img-url]').forEach(el => {
-    const url = el.dataset.imgUrl;
-    fetchImageWithToken(url).then(blobUrl => {
-      const img = el.querySelector('img');
-      if (img) img.src = blobUrl;
-    });
-  });
-}
-
-function loadCardImages() {
-  document.querySelectorAll('.obs-card-thumb[data-img-url]').forEach(el => {
-    const url = el.dataset.imgUrl;
-    fetchImageWithToken(url).then(blobUrl => {
-      el.src = blobUrl;
-    });
-  });
-}
-
 function openLightbox(url) {
-  const lb = document.getElementById('lightbox');
-  if (imageCache.has(url)) {
-    document.getElementById('lightboxImg').src = imageCache.get(url);
-    lb.classList.add('active');
-  } else {
-    fetchImageWithToken(url).then(blobUrl => {
-      document.getElementById('lightboxImg').src = blobUrl;
-      lb.classList.add('active');
-    });
-  }
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('lightbox').classList.add('active');
 }
 function closeLightbox(e) {
   if (e) e.stopPropagation();
@@ -1613,7 +1512,6 @@ function renderObservations() {
     return;
   }
 
-  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const cards = list.map(obs => {
     const style = getCategoryStyle(obs.category);
     const summary = obs.summary || obs.transcript || '';
@@ -1623,7 +1521,7 @@ function renderObservations() {
       ? (obs.photos[0].url || obs.photos[0].download_url || obs.photos[0].previewUrl || obs.photos[0].thumbnailUrl || '')
       : '';
     const thumb = photoUrl
-      ? `<img class="obs-card-thumb" data-img-url="${escapeHtml(photoUrl)}" src="${placeholder}" alt="" loading="lazy" />`
+      ? `<img class="obs-card-thumb" src="${escapeHtml(photoUrl)}" alt="" loading="lazy" />`
       : '';
     const tagsHtml = obs.tags.length
       ? `<div class="tags-row">${obs.tags.slice(0, 4).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${obs.tags.length > 4 ? '<span class="tag">+' + (obs.tags.length - 4) + '</span>' : ''}</div>`
@@ -1653,7 +1551,6 @@ function renderObservations() {
   }).join('');
 
   container.innerHTML = `<div class="obs-grid">${cards}</div>`;
-  setTimeout(() => loadCardImages(), 0);
 }
 
 function buildObsWeatherLine(w) {
