@@ -129,26 +129,25 @@ footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(
   <main id="tab-analysis" class="grid tab-panel active">
     <section class="card span4">
       <h2>Data Source</h2>
-      <label for="api-base">API base</label>
-      <input id="api-base" value="https://lab.aismallbizguru.com/api">
-      <label for="app-id">App id</label>
-      <input id="app-id" value="wildlife-field-recorder">
-      <div class="split">
-        <div>
-          <label for="obs-resource">Observations</label>
-          <input id="obs-resource" value="observations">
-        </div>
-        <div>
-          <label for="trip-resource">Trips</label>
-          <input id="trip-resource" value="trips">
+      <p class="mini">Private wildlife data from CFLab. Sign in with your CFLab account.</p>
+      <div id="auth-signed-out">
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="Your CFLab password">
+        <div class="toolbar" style="margin-top:10px;">
+          <button id="login-button" class="primary" type="button">Sign in</button>
         </div>
       </div>
-      <label for="token">Bearer token</label>
-      <input id="token" type="password" placeholder="Stored locally in this browser">
+      <div id="auth-signed-in" style="display:none;">
+        <div class="mini">Signed in as <strong id="auth-email"></strong></div>
+        <div class="toolbar" style="margin-top:10px;">
+          <button id="pull-backend" class="primary" type="button">Pull backend</button>
+          <button id="logout-button" type="button">Sign out</button>
+        </div>
+      </div>
       <div class="toolbar" style="margin-top:10px;">
-        <button id="save-settings">Save</button>
-        <button id="pull-backend" class="primary">Pull backend</button>
-        <button id="clear-cache" class="danger">Clear cache</button>
+        <button id="clear-cache" class="danger" type="button">Clear cache</button>
       </div>
       <div id="source-status" class="status" role="status"></div>
     </section>
@@ -261,7 +260,7 @@ footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(
 
 const APP_VERSION = '2026.06.01.1';
 const DB_NAME = 'WildlifePatternLab';
-const LS_KEY = 'wpl_settings_v1';
+const LEGACY_SETTINGS_KEY = 'wpl_settings_v1';
 
 const $ = id => document.getElementById(id);
 const db = new Dexie(DB_NAME);
@@ -277,39 +276,26 @@ db.version(2).stores({
   logs: '++id, timestamp, level'
 });
 
-const defaultSettings = {
-  apiBase: 'https://lab.aismallbizguru.com/api',
-  appId: 'wildlife-field-recorder',
-  observationsResource: 'observations',
-  tripsResource: 'trips',
-  token: ''
-};
+const API_BASE = 'https://cflab.aismallbizguru.com';
+const APP_ID = 'wildlife-field-recorder';
+const OBS_RESOURCE = 'observations';
+const TRIP_RESOURCE = 'trips';
+const SESSION_KEY = 'wpl_session_v1';
+const PAGE_LIMIT = 100;
 
-let settings = loadSettings();
 let observations = [];
 let trips = [];
 let logs = [];
+let currentUser = null;
 
-function loadSettings() {
-  try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') }; }
-  catch(e) { return { ...defaultSettings }; }
+function sessionToken() {
+  try { return sessionStorage.getItem(SESSION_KEY) || ''; } catch(e) { return ''; }
 }
-function saveSettings() {
-  settings = {
-    apiBase: $('api-base').value.trim(),
-    appId: $('app-id').value.trim(),
-    observationsResource: $('obs-resource').value.trim(),
-    tripsResource: $('trip-resource').value.trim(),
-    token: $('token').value.trim()
-  };
-  localStorage.setItem(LS_KEY, JSON.stringify(settings));
-}
-function loadSettingsForm() {
-  $('api-base').value = settings.apiBase;
-  $('app-id').value = settings.appId;
-  $('obs-resource').value = settings.observationsResource;
-  $('trip-resource').value = settings.tripsResource;
-  $('token').value = settings.token;
+function setSessionToken(token) {
+  try {
+    if (token) sessionStorage.setItem(SESSION_KEY, token);
+    else sessionStorage.removeItem(SESSION_KEY);
+  } catch(e) {}
 }
 function setStatus(id, msg, kind) {
   const el = $(id);
@@ -346,8 +332,9 @@ function renderDiagnostics() {
   el.innerHTML = [
     ['Online', navigator.onLine ? 'yes' : 'no'],
     ['Origin', location.origin],
-    ['API base', settings.apiBase || 'unset'],
-    ['Token', settings.token ? 'set (' + settings.token.slice(0, 6) + '...)' : 'not set'],
+    ['Backend', 'CFLab'],
+    ['Session', sessionToken() ? 'active' : 'signed out'],
+    ['User', currentUser ? currentUser.email : 'n/a'],
     ['Observations', observations.length],
     ['Trips', trips.length],
     ['IndexedDB', 'indexedDB' in window ? 'yes' : 'no'],
@@ -373,27 +360,44 @@ function toMillis(v) {
   const d = new Date(v);
   return isNaN(d.getTime()) ? 0 : d.getTime();
 }
-function apiBase() { return (settings.apiBase || '').replace(/\/$/, ''); }
-function authHeaders(extra = {}) { return { Authorization: 'Bearer ' + settings.token, ...extra }; }
 async function httpError(response) {
-  let detail = '';
+  let message = 'HTTP ' + response.status;
+  let code = '';
   try {
     const body = await response.clone().json();
-    if (body && body.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+    if (body && body.error && body.error.message) { message = body.error.message; code = body.error.code || ''; }
+    else if (body && body.detail) message = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
   } catch(e) {
-    try { detail = (await response.text()).slice(0, 240); } catch(_e) {}
+    try { const text = (await response.text()).slice(0, 240); if (text) message = text; } catch(_e) {}
   }
-  return new Error('HTTP ' + response.status + (detail ? ': ' + detail : ''));
+  const error = new Error(message);
+  error.status = response.status;
+  error.code = code;
+  return error;
+}
+async function apiFetch(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  const token = sessionToken();
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const response = await fetch(path, {
+    ...options,
+    headers,
+    mode: 'cors',
+    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  });
+  if (!response.ok) throw await httpError(response);
+  if (response.status === 204) return null;
+  return await response.json();
 }
 async function fetchJsonWithLog(label, url) {
   const started = performance.now();
   logInfo('Request started: ' + label, { url });
   try {
-    const response = await fetch(url, { headers: authHeaders(), mode: 'cors' });
+    const data = await apiFetch(url);
     const ms = Math.round(performance.now() - started);
-    logInfo('Response received: ' + label, { url, status: response.status, ms });
-    if (!response.ok) throw await httpError(response);
-    return await response.json();
+    logInfo('Response received: ' + label, { url, status: 200, ms });
+    return data;
   } catch(e) {
     const ms = Math.round(performance.now() - started);
     const hint = e instanceof TypeError && /fetch/i.test(e.message)
@@ -402,6 +406,27 @@ async function fetchJsonWithLog(label, url) {
     logError('Request failed: ' + label + ': ' + e.message, { url, ms, hint });
     throw e;
   }
+}
+function recordsUrl(resource, after) {
+  const base = API_BASE + '/api/apps/' + APP_ID + '/resources/' + resource + '/records?limit=' + PAGE_LIMIT;
+  return after ? base + '&after=' + encodeURIComponent(after) : base;
+}
+async function fetchCompleteCollection(label, resource) {
+  const collected = [];
+  const seen = new Set();
+  let after = '';
+  for (let page = 0; page < 200; page++) {
+    const payload = await fetchJsonWithLog(label, recordsUrl(resource, after));
+    if (!payload || !Array.isArray(payload.records)) throw new Error('Unexpected response shape for ' + label);
+    collected.push(...payload.records);
+    const next = payload.next_cursor;
+    if (next === null || next === undefined) return collected;
+    if (typeof next !== 'string' || !/^[0-9a-f-]{36}$/i.test(next)) throw new Error('Malformed pagination cursor for ' + label);
+    if (seen.has(next)) throw new Error('Repeated pagination cursor for ' + label);
+    seen.add(next);
+    after = next;
+  }
+  throw new Error('Pagination limit exceeded for ' + label);
 }
 
 function weatherCodeLabel(code) {
@@ -513,36 +538,88 @@ async function saveDataset(obsRows, tripRows, source) {
   logInfo('Dataset saved', { source, observations: obs.length, trips: tripList.length });
   await loadCache();
 }
-async function pullBackend() {
-  saveSettings();
-  if (!settings.token) { setStatus('source-status', 'Enter a backend token first.', 'bad'); logWarn('Pull skipped: missing backend token'); return; }
-  setStatus('source-status', 'Pulling backend records...', 'warn');
+function showAuthState() {
+  const signedIn = !!sessionToken();
+  $('auth-signed-out').style.display = signedIn ? 'none' : 'block';
+  $('auth-signed-in').style.display = signedIn ? 'block' : 'none';
+  $('auth-email').textContent = signedIn && currentUser ? currentUser.email : '';
+  renderDiagnostics();
+}
+async function signIn() {
+  const email = $('login-email').value.trim();
+  const password = $('login-password').value;
+  if (!email || !password) { setStatus('source-status', 'Enter your CFLab email and password.', 'bad'); return; }
+  setStatus('source-status', 'Signing in...', 'warn');
   try {
-    const obsUrl = apiBase() + '/' + settings.appId + '/' + settings.observationsResource;
-    const tripUrl = apiBase() + '/' + settings.appId + '/' + settings.tripsResource;
-    const obsJson = await fetchJsonWithLog('observations', obsUrl);
-    const tripJson = await fetchJsonWithLog('trips', tripUrl);
-    await saveDataset(obsJson.records || obsJson.data || obsJson || [], tripJson.records || tripJson.data || tripJson || [], 'backend');
+    const data = await apiFetch(API_BASE + '/api/auth/login', { method: 'POST', body: { email, password } });
+    setSessionToken(data.token);
+    currentUser = data.user || null;
+    $('login-password').value = '';
+    showAuthState();
+    logInfo('Signed in to CFLab', { is_admin: !!(data.user && data.user.is_admin), memberships: (data.memberships || []).length });
+    setStatus('source-status', 'Signed in. Pull the backend to refresh data.', 'good');
+  } catch(e) {
+    setSessionToken('');
+    currentUser = null;
+    showAuthState();
+    logError('CFLab sign-in failed: ' + e.message);
+    setStatus('source-status', 'Sign-in failed: ' + e.message, 'bad');
+  }
+}
+async function signOut() {
+  try { await apiFetch(API_BASE + '/api/auth/logout', { method: 'POST' }); } catch(e) {}
+  setSessionToken('');
+  currentUser = null;
+  showAuthState();
+  logInfo('Signed out of CFLab');
+  setStatus('source-status', 'Signed out.', 'good');
+}
+async function restoreSession() {
+  if (!sessionToken()) { showAuthState(); return; }
+  try {
+    const me = await apiFetch(API_BASE + '/api/auth/me');
+    currentUser = me.user || null;
+    showAuthState();
+  } catch(e) {
+    setSessionToken('');
+    currentUser = null;
+    showAuthState();
+    if (e.status === 401) setStatus('source-status', 'Session expired. Sign in again.', 'warn');
+  }
+}
+async function pullBackend() {
+  if (!sessionToken()) { setStatus('source-status', 'Sign in with your CFLab account first.', 'bad'); logWarn('Pull skipped: not signed in'); return; }
+  setStatus('source-status', 'Pulling complete collections from CFLab...', 'warn');
+  try {
+    const obsRows = await fetchCompleteCollection('observations', OBS_RESOURCE);
+    const tripRows = await fetchCompleteCollection('trips', TRIP_RESOURCE);
+    await saveDataset(obsRows, tripRows, 'cflab');
     setStatus('source-status', 'Pulled ' + observations.length + ' observations and ' + trips.length + ' trips.', 'good');
   } catch(e) {
-    setStatus('source-status', 'Backend pull failed: ' + e.message, 'bad');
+    setStatus('source-status', 'Backend pull failed: ' + e.message + ' — existing cache kept.', 'bad');
     logError('Backend pull failed: ' + e.message);
+    if (e.status === 401) { setSessionToken(''); currentUser = null; showAuthState(); setStatus('source-status', 'Session expired. Sign in again.', 'warn'); }
   }
 }
 async function testBackend() {
-  saveSettings();
-  if (!settings.token) { logWarn('Backend test skipped: missing token'); return; }
-  setStatus('source-status', 'Testing backend...', 'warn');
+  if (!sessionToken()) { logWarn('Backend test skipped: not signed in'); setStatus('source-status', 'Sign in with your CFLab account first.', 'bad'); return; }
+  setStatus('source-status', 'Testing CFLab...', 'warn');
   try {
-    const healthUrl = apiBase() + '/health';
-    logInfo('Health request started', { url: healthUrl });
-    const health = await fetch(healthUrl, { mode: 'cors' });
-    logInfo('Health response', { status: health.status, body: (await health.text()).slice(0, 180) });
-    const obsJson = await fetchJsonWithLog('observations test', apiBase() + '/' + settings.appId + '/' + settings.observationsResource);
-    const tripJson = await fetchJsonWithLog('trips test', apiBase() + '/' + settings.appId + '/' + settings.tripsResource);
-    logInfo('Backend test complete', { observations: (obsJson.records || []).length, trips: (tripJson.records || []).length });
-    setStatus('source-status', 'Backend test passed. See Logs tab for details.', 'good');
+    const me = await apiFetch(API_BASE + '/api/auth/me');
+    const user = me.user || {};
+    const memberships = (me.memberships || []).filter(m => m.app_id === APP_ID);
+    const hasAccess = !!user.is_admin || memberships.length > 0;
+    logInfo('CFLab authenticated', { administrator: !!user.is_admin, wildlife_memberships: memberships.map(m => m.access) });
+    if (!hasAccess) {
+      logError('CFLab wildlife access missing for this account');
+      setStatus('source-status', 'CFLab connected, but this account has no wildlife project access.', 'bad');
+      return;
+    }
+    const probe = await fetchJsonWithLog('observations probe', recordsUrl(OBS_RESOURCE, ''));
+    logInfo('CFLab wildlife access verified', { probe_records: (probe.records || []).length });
+    setStatus('source-status', 'CFLab connected; wildlife project access confirmed.', 'good');
   } catch(e) {
+    if (e.status === 401) { setSessionToken(''); currentUser = null; showAuthState(); }
     logError('Backend test failed: ' + e.message);
     setStatus('source-status', 'Backend test failed: ' + e.message, 'bad');
   }
@@ -804,7 +881,9 @@ function renderSimilar(target) {
 function wireEvents() {
   window.addEventListener('online', updateOnline);
   window.addEventListener('offline', updateOnline);
-  $('save-settings').addEventListener('click', () => { saveSettings(); setStatus('source-status', 'Settings saved.', 'good'); });
+  $('login-button').addEventListener('click', signIn);
+  $('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+  $('logout-button').addEventListener('click', signOut);
   $('pull-backend').addEventListener('click', pullBackend);
   $('clear-cache').addEventListener('click', async () => {
     if (!confirm('Clear cached analysis data in this browser?')) return;
@@ -849,11 +928,13 @@ async function init() {
     document.body.innerHTML = '<div style="padding:20px;color:white;font:16px system-ui">Dexie failed to load. IndexedDB analysis cache is unavailable.</div>';
     return;
   }
-  loadSettingsForm();
+  try { localStorage.removeItem(LEGACY_SETTINGS_KEY); } catch(e) {}
   wireEvents();
   updateOnline();
+  showAuthState();
   await loadLogs();
   await loadCache();
+  await restoreSession();
   logInfo('Wildlife Pattern Lab ' + APP_VERSION + ' started', { origin: location.origin });
 }
 
