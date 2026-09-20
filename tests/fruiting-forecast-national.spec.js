@@ -478,6 +478,18 @@ test('MODELED_SPARSE is distinct from UNSUPPORTED in the analysis UI',async({pag
   expect(state.ranked).toBe(0);
   expect(errors).toEqual([]);
 });
+test('verified-empty MTBS is mapped evidence with no match, not an unavailable layer',async({page})=>{
+  const errors=await open(page);
+  const r=await page.evaluate(async()=>{
+    const h=__FRUITING_FORECAST_HUNTABILITY_TEST__,b=__FRUITING_FORECAST_BIO_TEST__;
+    const fire=await h.fireRows({query(){throw Error('VERIFIED_EMPTY must not query Parquet')}},{},[{id:'empty',fireHistory:{url:'fire/empty.parquet',status:'VERIFIED_EMPTY',datasetVersion:'mtbs-test',sourceUrl:'https://example.test/mtbs',perimeters:0}}]);
+    const zone=b.zoneDisturbance(fire,{lat:38,lon:-87},10,new Date());
+    return {status:fire.status,count:fire.perimeters.length,zoneStatus:zone.status,reason:zone.reason};
+  });
+  expect(r).toMatchObject({status:'AVAILABLE',count:0,zoneStatus:'MAP_AVAILABLE_NO_MATCH'});
+  expect(r.reason).toContain('No mapped large fire');
+  expect(errors).toEqual([]);
+});
 test('Great Plains resolves modeled with riparian morel and open-habitat puffball; code 60 fixed',async({page})=>{
   const errors=await open(page);
   const r=await page.evaluate(()=>{
