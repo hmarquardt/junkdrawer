@@ -638,14 +638,12 @@
           <input id="apiBaseInput" type="url" autocomplete="off" spellcheck="false" />
         </label>
         <label>
-          Dashboard Token
+          CFLab Admin
           <span class="token-row">
-            <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" />
-            <button class="btn secondary" id="clearTokenBtn" type="button">Clear</button>
-          </span>
-          <span class="remember">
-            <input id="rememberTokenInput" type="checkbox" />
-            Remember token in this browser
+            <input id="loginEmailInput" type="email" autocomplete="username" placeholder="CFLab email" />
+            <input id="loginPasswordInput" type="password" autocomplete="current-password" placeholder="Password" />
+            <button class="btn secondary" id="signInBtn" type="button">Sign in</button>
+            <button class="btn secondary" id="signOutBtn" type="button">Sign out</button>
           </span>
         </label>
         <label>
@@ -684,7 +682,7 @@
       <p class="privacy-note">This dashboard uses anonymous pageview analytics. It does not use cookies or collect form fields.</p>
     </section>
 
-    <div class="message" id="globalMessage">Enter the dashboard token from the VPS, then load the dashboard.</div>
+    <div class="message" id="globalMessage">Sign in with a CFLab admin account, then load the dashboard.</div>
 
     <section class="kpis" aria-label="Key metrics">
       <article class="kpi panel"><div class="label">Pageviews</div><div class="value" id="kpiPageviews">--</div><div class="sub" id="kpiPageviewsSub">Waiting for data</div></article>
@@ -768,7 +766,7 @@
     (function () {
       "use strict";
 
-      var DEFAULT_API_BASE = "https://lab.aismallbizguru.com/api";
+      var DEFAULT_API_BASE = "https://cflab.aismallbizguru.com/api";
       var DEFAULT_SITE_ID = "junkdrawer";
       var DEBUG = new URLSearchParams(window.location.search).get("debug") === "1";
       var SITES = [
@@ -811,9 +809,10 @@
 
       var els = {
         apiBase: document.getElementById("apiBaseInput"),
-        token: document.getElementById("tokenInput"),
-        rememberToken: document.getElementById("rememberTokenInput"),
-        clearToken: document.getElementById("clearTokenBtn"),
+        loginEmail: document.getElementById("loginEmailInput"),
+        loginPassword: document.getElementById("loginPasswordInput"),
+        signIn: document.getElementById("signInBtn"),
+        signOut: document.getElementById("signOutBtn"),
         siteId: document.getElementById("siteIdInput"),
         range: document.getElementById("rangeInput"),
         customRange: document.getElementById("customRange"),
@@ -858,17 +857,14 @@
 
       function init() {
         var today = dateToInput(new Date());
-        els.apiBase.value = storageGet(STORAGE.apiBase) || DEFAULT_API_BASE;
+        var storedBase = storageGet(STORAGE.apiBase);
+        els.apiBase.value = (storedBase && storedBase.indexOf("lab.aismallbizguru.com") === -1) ? storedBase : DEFAULT_API_BASE;
         populateSiteOptions();
         setSelectedSite(getInitialSiteId(), true);
         els.range.value = storageGet(STORAGE.range) || "last7";
         els.from.value = storageGet(STORAGE.from) || today;
         els.to.value = storageGet(STORAGE.to) || today;
-        els.rememberToken.checked = storageGet(STORAGE.rememberToken) === "true";
-        if (els.rememberToken.checked) {
-          state.token = storageGet(STORAGE.token) || "";
-          els.token.value = state.token;
-        }
+        state.token = sessionStorage.getItem("junkstats.dashboard.session") || "";
         applyTheme(storageGet(STORAGE.theme) || "dark");
         updateCustomRange();
         bindEvents();
@@ -879,7 +875,9 @@
         els.load.addEventListener("click", loadDashboard);
         els.refresh.addEventListener("click", loadDashboard);
         els.themeToggle.addEventListener("click", toggleTheme);
-        els.clearToken.addEventListener("click", clearToken);
+        els.signIn.addEventListener("click", signIn);
+        els.signOut.addEventListener("click", signOut);
+        els.loginPassword.addEventListener("keydown", function (event) { if (event.key === "Enter") signIn(); });
         els.range.addEventListener("change", function () {
           updateCustomRange();
           persistSettings();
@@ -891,20 +889,12 @@
           setSelectedSite(els.siteId.value, false);
           clearData();
           renderAll([]);
-          if (els.token.value.trim()) {
+          if (state.token) {
             loadDashboard();
           } else {
             updateConnection("idle", "Site changed");
-            showMessage("Selected " + getSelectedSite().label + ". Enter the dashboard token to load analytics.", false);
+            showMessage("Selected " + getSelectedSite().label + ". Sign in with a CFLab admin account to load analytics.", false);
           }
-        });
-        els.token.addEventListener("input", function () {
-          state.token = els.token.value.trim();
-          persistToken();
-        });
-        els.rememberToken.addEventListener("change", function () {
-          persistSettings();
-          persistToken();
         });
         els.pageSearch.addEventListener("input", function () {
           renderPagesTable();
@@ -931,36 +921,51 @@
         storageSet(STORAGE.range, els.range.value);
         storageSet(STORAGE.from, els.from.value);
         storageSet(STORAGE.to, els.to.value);
-        storageSet(STORAGE.rememberToken, els.rememberToken.checked ? "true" : "false");
       }
 
-      function persistToken() {
-        state.token = els.token.value.trim();
-        if (els.rememberToken.checked && state.token) {
-          storageSet(STORAGE.token, state.token);
-        } else {
-          storageRemove(STORAGE.token);
-        }
+      function signIn() {
+        var email = els.loginEmail.value.trim();
+        var password = els.loginPassword.value;
+        if (!email || !password) { showMessage("Enter your CFLab admin email and password.", true); return; }
+        var base = normalizeApiBase(els.apiBase.value);
+        showMessage("Signing in to CFLab...", false);
+        fetch(base + "/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email, password: password }) })
+          .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          })
+          .then(function (data) {
+            state.token = data.token || "";
+            try { sessionStorage.setItem("junkstats.dashboard.session", state.token); } catch (e) {}
+            els.loginPassword.value = "";
+            showMessage("Signed in. Loading analytics...", false);
+            loadDashboard();
+          })
+          .catch(function (error) {
+            state.token = "";
+            showMessage("CFLab sign-in failed: " + error.message, true);
+          });
       }
 
-      function clearToken() {
+      function signOut() {
+        var token = state.token;
         state.token = "";
-        els.token.value = "";
-        els.rememberToken.checked = false;
-        storageSet(STORAGE.rememberToken, "false");
-        storageRemove(STORAGE.token);
-        showMessage("Dashboard token cleared. Enter a token to load private analytics endpoints.", false);
+        try { sessionStorage.removeItem("junkstats.dashboard.session"); } catch (e) {}
+        if (token) { fetch(normalizeApiBase(els.apiBase.value) + "/auth/logout", { method: "POST", headers: { "Authorization": "Bearer " + token } }).catch(function () {}); }
+        clearData();
+        renderAll([]);
+        updateConnection("idle", "Signed out");
+        showMessage("Signed out. Sign in with a CFLab admin account to load analytics.", false);
       }
 
       function loadDashboard() {
         try {
           persistSettings();
-          persistToken();
 
-          var token = els.token.value.trim();
+          var token = state.token;
           if (!token) {
-            updateConnection("error", "Missing token");
-            showMessage("Missing token. Enter the dashboard token from the VPS to load analytics.", true);
+            updateConnection("error", "Signed out");
+            showMessage("Sign in with a CFLab admin account to load analytics.", true);
             return;
           }
 
@@ -1102,7 +1107,7 @@
           showMessage(getSelectedSite().label + " dashboard loaded. No secrets were put in URLs.", false);
         } else if (failures.some(function (failure) { return failure.status === 401; })) {
           updateConnection("error", "Token rejected");
-          showMessage("Token rejected or missing. Check the dashboard token from the VPS.", true);
+          showMessage("Session rejected or expired. Sign in with a CFLab admin account.", true);
         } else if (failures.length === results.length) {
           updateConnection("error", "Backend unavailable");
           showMessage("Could not reach analytics backend. Check CORS, network access, or backend status.", true);
