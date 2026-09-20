@@ -1,5 +1,99 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 19 — National launch QA (2026-09-20)
+
+### Starting point
+
+This pass started from current `origin/main` at `c0f86a17b33531f007346aeda5eb309584aecea1`. The exact Revision 18 checkpoint `dca63b9e20b4d9b5794ec2e0692728fe892c71f6` remained in history; three later commits were unrelated Wildlife Field Recorder work and were preserved. Revision 18 supplied **922 / 922 normalized relevant CONUS tiles**, 3,688 active immutable objects, 271,077,299 active bytes and dataset `content-db0f839a4352ef82`.
+
+### Confirmed human-testing issue
+
+Salida, Colorado (`38.5347,-105.9989`) resolves EPA Level III 21 and the Southern Rockies profile with four valid regional targets and complete GIS. Under **Beginner-friendly edibles**, all four targets are filtered out because each has `beginner=false`. The renderer previously treated the resulting empty ranking as proof of unsupported biology. A globally selected Specific species absent from a regional roster took the same false path.
+
+### Fix
+
+Analysis records now carry an explicit `filterState`: active focus, requested species when applicable, regional target count, focus-matched target count and `emptyResultReason`. The renderer distinguishes `FILTER_NO_MATCH`, `SPECIES_NOT_MODELED`, `MODELED_SPARSE`, genuine `UNSUPPORTED` and the defensive `NO_RANKABLE_TARGETS` fallback. Salida now explains that regional forecast data exists, names the active mismatch and offers explicit **Best opportunities** and **All supported edibles** recovery actions. It keeps the user's chosen filter until the user acts. Older IndexedDB analyses without the new fields are inferred safely, including empty archived results.
+
+GIS and biology remain separate. A GIS failure retains basic regional scoring; an empty focus retains map/weather/GIS context where available. A second truthful-state defect found during QA was fixed: a `VERIFIED_EMPTY` MTBS object now means the mapped source returned no perimeter, not that the fire layer was unreadable. This still never treats absence of an MTBS large-fire perimeter as proof that no fire occurred.
+
+### National QA matrix
+
+Deployed Chrome exercised the application at the permanent canary for every profile. Open-Meteo and iNaturalist were intercepted deterministically so mutable upstream state could not change the assertions; the deployed application, manifest, R2 objects, SHA/length checks and DuckDB-Wasm queries were real.
+
+| Profile | Maturity | Targets / ranked | GIS | Cold Parquet | Warm Parquet | Suggested Starts checked |
+|---|---|---:|---|---:|---:|---:|
+| pnw | PROVISIONAL | 5 / 5 | enhanced | 4 | 0 | 14 |
+| california | PROVISIONAL | 4 / 4 | enhanced | 4 | 0 | 52 |
+| sierraNevada | PROVISIONAL | 2 / 2 | enhanced | 4 | 0 | 16 |
+| interiorMountains | PROVISIONAL | 2 / 2 | enhanced | 4 | 0 | 5 |
+| southernRockies | PROVISIONAL | 4 / 4 | enhanced | 8 | 0 | 29 |
+| madrean | PROVISIONAL | 1 / 1 | enhanced | 4 | 0 | 15 |
+| northernForests | PROVISIONAL | 7 / 7 | enhanced | 4 | 0 | 3 |
+| hardwood | PROVISIONAL | 7 / 7 | enhanced | 3 | 0 | 2 |
+| appalachians | PROVISIONAL | 7 / 7 | enhanced | 4 | 0 | 2 |
+| southeast | PROVISIONAL | 8 / 8 | enhanced | 4 | 0 | 3 |
+| plains | PROVISIONAL | 2 / 2 | enhanced | 4 | 0 | 2 |
+| coldBasins | MODELED_SPARSE | 0 / 0 | enhanced | 8 | 0 | 2 |
+| warmDesert | MODELED_SPARSE | 0 / 0 | enhanced | 8 | 0 | 73 |
+
+All **13 / 13** resolved their expected profile and maturity. The two sparse profiles rendered intentional **Modeled · sparse** explanations. Two 100-mile boundary matrices (PNW/interior mountains and Madrean/Southern Rockies) retained per-sector profiles and correct species unions; no center-profile leakage was found. The Salida Best, All, Beginner and Specific-species cases all passed, including a persisted Beginner focus carried from a hardwood analysis.
+
+### GIS / R2
+
+The active manifest structurally matches the normalized universe exactly: 922 unique relevant tiles, 3,688 valid content-addressed four-layer declarations and 271,077,299 bytes. There are 3,463 populated declarations and 225 honest `VERIFIED_EMPTY` declarations; none is unbuilt or failed. The full-payload remote audit returned **3,688 valid, 0 missing, 0 invalid, 0 local-invalid** and `clean=true`. It retained 137 local-only objects and 120 publisher-ledger remote orphans. Orphan scope remains the publisher upload-intent ledger because Wrangler cannot exhaustively list the bucket; no object was deleted.
+
+Normalized edge QA passed the Florida Keys, Northwest Angle and Great Lakes canaries. The excluded `49.5,-110.5` artifact returned **No static GIS tiles cover this search area** with zero Parquet requests; adjacent real U.S. land at `48.9,-110.5` loaded GIS. All edge warm repeats made zero additional Parquet requests.
+
+### Browser
+
+The final deployed candidate is app version `2026.09.20.3`, scoring model `FF-1.7.0`, manifest dataset `content-db0f839a4352ef82`, application host `https://hmarquardt.github.io/junkdrawer/` and immutable data origin `https://data.hanksjunkdrawer.com/`. The manifest remained on GitHub Pages; every production Parquet request used R2. There were zero obsolete GitHub Pages Parquet requests, failed requests, console errors, page errors or credential-bearing URLs in the launch matrix.
+
+Desktop QA used 1280×900. Mobile QA used 390×844 and found zero horizontal overflow, a 440 px map, visible search/focus/result controls and 42 px recovery actions. Existing mobile About/settings/property tests also passed. All 13 immediate warm repeats made **zero additional immutable Parquet requests**; this claim applies only to GIS bytes, not mutable weather, observations, geocoding or manifest refreshes.
+
+Measured first load was 0.70 s. Across the 13 canaries, cold analysis was 3.1–35.3 s (median 7.1 s) and warm analysis was 2.7–22.6 s (median 4.7 s). Mutable weather/observation services were mocked; app/CDN/R2/DuckDB work was real. No multi-minute hang, main-thread lockup, runaway request loop or unexplained error occurred.
+
+### Access and collecting
+
+The deployed matrix directly inspected **218** selected `property.suggestedStart` objects. The real Colorado/Oregon canary suite inspected another **963** selections. Every check used the selected object itself and asserted `startEligible=true`, no restriction, HIGH/MEDIUM evidence, finite mapped coordinates, real OSM identity and source URL, permitted location method, source metadata and real association with the property. Violations: **0**.
+
+Property details now label the selected start as an eligible mapped feature with no mapped restriction and separately retain restricted/locked evidence from other access points. Public ownership, mapped access, collecting permission, habitat quality and Suggested Start eligibility remain independent axes. `ALLOWED`, `ALLOWED_WITH_LIMITS`, `PERMIT_REQUIRED`, `PROHIBITED` and `UNKNOWN_VERIFY` paths passed; UNKNOWN never promotes to allowed, prohibitions remain visible, and state-scoped rules do not cross borders.
+
+### Failure behavior
+
+Nine launch failure paths passed: Open-Meteo, iNaturalist, manifest, Parquet with verified-cache fallback, collecting rules, access layer, DuckDB worker/module, basemap and absent/catalog-failed OpenRouter. Missing inputs remain missing. A successful zero-observation query is distinct from an unavailable query; missing fire evidence retains the burn-model cap; no mapped perimeter does not claim no fire; failed rules retain geometry as UNKNOWN_VERIFY; and AI remains optional and cannot mutate deterministic scores or access evidence.
+
+### Tests
+
+- Python: **124 passed, 0 failed, 6 subtests passed** (4 rasterio pending-deprecation warnings).
+- Playwright: **127 passed, 0 failed, 1 skipped** across 128 current tests at the stable two-worker setting. The full sweep completed with 126 passed / 1 skipped; the subsequently added location-state regression passed independently.
+- Direct deployed matrices: 13/13 profiles; 5 normalized-edge lookups; zero console/page errors; zero warm Parquet requests.
+- `py_compile tools/*.py`: passed.
+- Fruiting Forecast compliance audit: 0 errors, 0 warnings.
+- `git diff --check`: clean.
+
+### Findings
+
+- P0: **0 discovered / 0 open**.
+- P1: **1 discovered / 0 open** — false Unsupported state for a modeled region with no filter matches; fixed and regression-tested.
+- P2: **3 discovered / 0 open** — verified-empty fire status, stale progressive-coverage About copy and ambiguous Suggested Start labeling; all fixed and regression-tested.
+- P3: **0 discovered / 0 open**.
+
+Documented non-blocking limitations: most properties remain `UNKNOWN_VERIFY` until a scoped collecting rule matches; the remote-orphan audit is ledger-scoped; the slowest cold canary took 35.3 s. Each is surfaced honestly and none creates a false recommendation or broken common workflow.
+
+### Biology
+
+**Unchanged: YES.** The complete biology/code range is byte-identical to Revision 18: SHA-256 `e4c54561fd2855e124bc82e2d20686e03ead00f9a0c0af81ee88f61fba4eb910` before and after. The state remains 13 profiles, 11 PROVISIONAL, 2 MODELED_SPARSE and 0 UNSUPPORTED within normalized modeled CONUS geography. No profile, taxon, crosswalk, calendar, host model, precipitation model, elevation model, scoring weight or permanent canary changed.
+
+### Domain scope
+
+The application remains at `https://hmarquardt.github.io/junkdrawer/`. Production Parquet remains at `https://data.hanksjunkdrawer.com/`. `data.hanksjunkdrawer.com` is the only vanity-domain hostname used by Fruiting Forecast. There is no Worker, backend, VM, API server or database.
+
+### Launch verdict
+
+**READY WITH DOCUMENTED NON-BLOCKING ISSUES**
+
+No P0 or P1 issue remains. The post-QA human acceptance script is `docs/fruiting-forecast-launch-acceptance.md`.
+
 ## Revision 18 — National relevance normalization and the final denominator (2026-09-19)
 
 Started from Revision 17 at `d05667a`. The normalized national GIS denominator is now **922** tiles, all complete. The legacy coarse roster of 940 was a cartographic artifact of the old relevance geometry; it is preserved as history, not used as the current denominator.

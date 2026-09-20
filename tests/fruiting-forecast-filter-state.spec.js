@@ -120,3 +120,18 @@ test('archived empty analyses without new metadata render safely',async({page})=
   expect(errors.consoleErrors).toEqual([]);
   expect(errors.pageErrors).toEqual([]);
 });
+
+test('location failures stay distinct from regional biology and GIS coverage',async({page})=>{
+  const errors=await open(page);
+  await page.locator('#locationInput').fill('95, -105');
+  await page.locator('#analyzeBtn').click();
+  await expect(page.locator('#status')).toContainText('Coordinates are outside valid latitude/longitude ranges');
+  await page.unroute('https://geocoding-api.open-meteo.com/v1/search**');
+  await page.route('https://geocoding-api.open-meteo.com/v1/search**',r=>r.fulfill({json:{results:[]}}));
+  await page.locator('#locationInput').fill('Definitely Not A Real Place');
+  await page.locator('#analyzeBtn').click();
+  await expect(page.locator('#status')).toContainText('No matching place found');
+  await expect(page.locator('#topBet')).toBeEmpty();
+  expect(errors.consoleErrors).toEqual([]);
+  expect(errors.pageErrors).toEqual([]);
+});
