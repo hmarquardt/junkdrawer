@@ -634,10 +634,10 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
   </div>
 
   <div class="card">
-    <div class="card-title">LabBox Backend</div>
+    <div class="card-title">CFLab Backend</div>
     <label>API base URL</label>
-    <input id="cfg-api-base" value="https://lab.aismallbizguru.com/api" />
-    <label>LabBox app id</label>
+    <input id="cfg-api-base" value="https://cflab.aismallbizguru.com" />
+    <label>CFLab app id</label>
     <input id="cfg-app-id" value="wildlife-field-recorder" />
     <label>Observations resource</label>
     <input id="cfg-obs-resource" value="observations" />
@@ -646,8 +646,21 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
     <label>Safari breadcrumb resource</label>
     <input id="cfg-breadcrumb-resource" value="breadcrumbs" />
     <p style="font-size:0.76rem;color:var(--text-dim);margin:4px 0 0;">Optional bounded location history used to recover context for photos with stripped EXIF.</p>
-    <label>LabBox bearer token</label>
-    <input id="cfg-token" type="password" placeholder="Bearer token" />
+    <div id="cfg-auth-signed-out">
+      <label for="cfg-auth-email">CFLab email</label>
+      <input id="cfg-auth-email" type="email" autocomplete="username" placeholder="you@example.com" />
+      <label for="cfg-auth-password">CFLab password</label>
+      <input id="cfg-auth-password" type="password" autocomplete="current-password" placeholder="Your CFLab password" />
+      <div class="btn-group">
+        <button id="cfg-sign-in" class="btn btn-primary" type="button">Sign in</button>
+      </div>
+    </div>
+    <div id="cfg-auth-signed-in" style="display:none;">
+      <p style="font-size:0.8rem;color:var(--text-dim);margin:4px 0 0;">Signed in as <strong id="cfg-auth-user"></strong></p>
+      <div class="btn-group">
+        <button id="cfg-sign-out" class="btn" type="button">Sign out</button>
+      </div>
+    </div>
     <div class="btn-group">
       <button id="test-backend" class="btn btn-primary">Test connection</button>
     </div>
@@ -793,9 +806,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.10.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.10.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.09.10.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.20.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.20.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.09.20.1
 </footer>
 </div>
 
@@ -803,7 +816,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.09.10.1';
+const APP_VERSION = '2026.09.20.1';
 
 /* ========================
    DB (Dexie)
@@ -1363,7 +1376,7 @@ function openRouterHeaders(extra = {}) {
    State / Settings
    ======================== */
 const defaultSettings = {
-  apiBase: 'https://lab.aismallbizguru.com/api',
+  apiBase: 'https://cflab.aismallbizguru.com',
   appId: 'wildlife-field-recorder',
   observationsResource: 'observations',
   tripsResource: 'trips',
@@ -1414,9 +1427,116 @@ function logError(m) { addLog('error', m); }
 function uuid() { return crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36)+Math.random().toString(36).slice(2)); }
 function fmtDate(d) { return new Date(d).toLocaleString(); }
 function fmtDuration(sec) { const m = Math.floor(sec/60), s = Math.floor(sec%60); return `${m}:${s.toString().padStart(2,'0')}`; }
+const SESSION_KEY = 'wfr_session_v1';
+function sessionToken() {
+  try { return sessionStorage.getItem(SESSION_KEY) || ''; } catch(e) { return ''; }
+}
+function setSessionToken(token) {
+  try {
+    if (token) sessionStorage.setItem(SESSION_KEY, token);
+    else sessionStorage.removeItem(SESSION_KEY);
+  } catch(e) {}
+}
 function apiBase() { return (settings.apiBase || '').replace(/\/$/, ''); }
+function appBase() { return apiBase() + '/api/apps/' + encodeURIComponent(settings.appId); }
+function recordsUrl(resource) { return appBase() + '/resources/' + encodeURIComponent(resource) + '/records'; }
+function recordUrl(resource, recordId) { return recordsUrl(resource) + '/' + encodeURIComponent(recordId); }
+function recordFilesUrl(resource, recordId) { return recordUrl(resource, recordId) + '/files'; }
+function filesUrl() { return appBase() + '/files'; }
 function authHeaders(extra = {}) {
-  return { Authorization: 'Bearer ' + settings.token, ...extra };
+  const token = sessionToken();
+  return token ? { Authorization: 'Bearer ' + token, ...extra } : { ...extra };
+}
+async function authFetch(url, options = {}) {
+  const response = await fetch(url, { ...options, headers: { ...authHeaders(), ...(options.headers || {}) } });
+  return response;
+}
+async function fetchCompleteCollection(resource) {
+  const collected = [];
+  const seen = new Set();
+  let after = '';
+  for (let page = 0; page < 200; page++) {
+    const url = recordsUrl(resource) + '?limit=100' + (after ? '&after=' + encodeURIComponent(after) : '');
+    const r = await authFetch(url);
+    if (!r.ok) throw await httpError(r);
+    const payload = await r.json();
+    if (!payload || !Array.isArray(payload.records)) throw new Error('Unexpected response shape for ' + resource);
+    collected.push(...payload.records);
+    const next = payload.next_cursor;
+    if (next === null || next === undefined) return collected;
+    if (typeof next !== 'string' || !/^[0-9a-f-]{36}$/i.test(next)) throw new Error('Malformed pagination cursor for ' + resource);
+    if (seen.has(next)) throw new Error('Repeated pagination cursor for ' + resource);
+    seen.add(next);
+    after = next;
+  }
+  throw new Error('Pagination limit exceeded for ' + resource);
+}
+function showAuthState() {
+  const signedIn = !!sessionToken();
+  const out = document.getElementById('cfg-auth-signed-out');
+  const signed = document.getElementById('cfg-auth-signed-in');
+  if (out) out.style.display = signedIn ? 'none' : 'block';
+  if (signed) signed.style.display = signedIn ? 'block' : 'none';
+  const user = document.getElementById('cfg-auth-user');
+  if (user) user.textContent = signedIn && currentUser ? currentUser.email : '';
+  const chip = document.getElementById('history-source-chip');
+  if (chip && !signedIn) { chip.textContent = 'Local only — signed out'; chip.className = 'status-chip warn'; chip.style.display = 'inline-block'; }
+}
+async function signIn() {
+  const email = document.getElementById('cfg-auth-email').value.trim();
+  const password = document.getElementById('cfg-auth-password').value;
+  if (!email || !password) { addLog('warn', 'Enter CFLab email and password'); return; }
+  try {
+    const r = await fetch(apiBase() + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+    if (!r.ok) throw await httpError(r);
+    const data = await r.json();
+    setSessionToken(data.token);
+    currentUser = data.user || null;
+    document.getElementById('cfg-auth-password').value = '';
+    showAuthState();
+    logInfo('Signed in to CFLab as ' + (currentUser ? currentUser.email : 'user'));
+    updateQueueChip();
+  } catch(e) {
+    setSessionToken('');
+    currentUser = null;
+    showAuthState();
+    logError('CFLab sign-in failed: ' + e.message);
+  }
+}
+async function signOut() {
+  try { await authFetch(apiBase() + '/api/auth/logout', { method: 'POST' }); } catch(e) {}
+  setSessionToken('');
+  currentUser = null;
+  showAuthState();
+  logInfo('Signed out of CFLab');
+  updateQueueChip();
+}
+async function restoreSession() {
+  if (!sessionToken()) { showAuthState(); return; }
+  try {
+    const r = await authFetch(apiBase() + '/api/auth/me');
+    if (!r.ok) throw await httpError(r);
+    const me = await r.json();
+    currentUser = me.user || null;
+    showAuthState();
+  } catch(e) {
+    if (e.status === 401) { setSessionToken(''); currentUser = null; showAuthState(); logWarn('CFLab session expired; pending captures are kept locally'); }
+  }
+}
+let currentUser = null;
+function handleSyncAuthError(e) {
+  if (e && e.status === 401) {
+    setSessionToken('');
+    currentUser = null;
+    showAuthState();
+    logWarn('CFLab session expired; pending captures are kept locally');
+  }
+}
+async function fetchRecordFiles(resource, recordId) {
+  const r = await authFetch(recordFilesUrl(resource, recordId));
+  if (!r.ok) throw await httpError(r);
+  const payload = await r.json();
+  return Array.isArray(payload.files) ? payload.files : [];
 }
 async function httpError(response) {
   let detail = '';
@@ -1432,7 +1552,9 @@ async function httpError(response) {
     .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [redacted]')
     .replace(/(["']?(?:api[_-]?key|authorization|access[_-]?token|token)["']?\s*[:=]\s*["']?)[^"'\s,}]+/gi, '$1[redacted]')
     .replace(/\bsk-[A-Za-z0-9_-]+/g, '[redacted key]');
-  return new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
+  const error = new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
+  error.status = response.status;
+  return error;
 }
 function weatherCodeLabel(code) {
   const labels = {
@@ -3173,13 +3295,13 @@ function breadcrumbCacheKey(timeEvidence, windowMs) {
  * offset metadata so WFR never guesses using the processing device timezone.
  */
 async function fetchBreadcrumbWindow(timeEvidence, windowMs = BREADCRUMB_QUERY_WINDOW_MS) {
-  if (!settings.token || !settings.apiBase || !settings.appId || !settings.breadcrumbResource) {
+  if (!sessionToken() || !settings.apiBase || !settings.appId || !settings.breadcrumbResource) {
     throw new Error('Safari breadcrumb source is not configured');
   }
   const key = breadcrumbCacheKey(timeEvidence, windowMs);
   if (breadcrumbWindowCache.has(key)) return breadcrumbWindowCache.get(key);
   const pending = (async () => {
-    const url = new URL(`${apiBase()}/${encodeURIComponent(settings.appId)}/${encodeURIComponent(settings.breadcrumbResource)}`);
+    const url = new URL(recordsUrl(settings.breadcrumbResource));
     if (timeEvidence.utcIso) {
       const target = Date.parse(timeEvidence.utcIso);
       url.searchParams.set('start', new Date(target - windowMs).toISOString());
@@ -3284,7 +3406,7 @@ async function getBreadcrumbCandidates(timeEvidence) {
     if (match.status === 'unresolved') match = await fetchOutingProviderMatches(timeEvidence, source, BREADCRUMB_EXPANDED_WINDOW_MS);
     if (match.status === 'resolved' || match.status === 'ambiguous') return match;
   }
-  if (!settings.token || !settings.breadcrumbResource) return { status: 'unresolved', reason: 'No matching WFR outing track; Safari breadcrumb source is not configured' };
+  if (!sessionToken() || !settings.breadcrumbResource) return { status: 'unresolved', reason: 'No matching WFR outing track; Safari breadcrumb source is not configured' };
   // Safari breadcrumbs are optional fallback infrastructure. A missing or
   // unimplemented breadcrumb resource must never surface as a raw HTTP error.
   try {
@@ -5578,7 +5700,7 @@ function renderTripDetailMap(mapId, obsList, photoUrls) {
 async function submitTrip(tripId) {
   const trip = await db.trips.get(tripId);
   if (!trip) return;
-  if (!settings.token) { const err = new Error('No backend token'); logWarn(err.message); throw err; }
+  if (!sessionToken()) { const err = new Error('Not signed in to CFLab'); logWarn(err.message); throw err; }
   if (trip.backendTripId) {
     await applyBackendTripToObservations(trip);
     return;
@@ -5605,8 +5727,9 @@ async function submitTrip(tripId) {
     appVersion: APP_VERSION
   };
   try {
-    const url = `${apiBase()}/${settings.appId}/${settings.tripsResource}`;
-    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload }) });
+    const url = recordsUrl(settings.tripsResource);
+    const remoteId = trip.remoteCreateId || (trip.remoteCreateId = uuid());
+    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload, id: remoteId }) });
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
     trip.backendTripId = data.id || data.data?.id || null;
@@ -5616,6 +5739,7 @@ async function submitTrip(tripId) {
     logInfo('Trip submitted ' + trip.localTripId);
     loadTrips();
   } catch(e) {
+    handleSyncAuthError(e);
     logError('Trip submit failed: ' + e.message);
     throw e;
   }
@@ -5874,7 +5998,7 @@ async function handlePhotoFile(obsLocalId, file) {
     obs.photoLocalIds.push(localPhotoId);
     await db.observations.put(obs);
     logInfo('Photo added ' + localPhotoId);
-    if (obs.backendObservationId && settings.token) await uploadPhoto(photo);
+    if (obs.backendObservationId && sessionToken()) await uploadPhoto(photo);
   } catch(e) {
     logError('Photo save failed: ' + e.message);
   }
@@ -5890,16 +6014,15 @@ async function uploadPhoto(photo) {
     await db.photos.put(photo);
     throw new Error('Photo blob missing');
   }
-  const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
-  const fd = new FormData();
+  const url = filesUrl();
   const ext = photo.mimeType.includes('png') ? '.png' : photo.mimeType.includes('webp') ? '.webp' : '.jpg';
-  fd.append('file', new File([rec.blob], (photo.originalFilename || 'photo') + ext, { type: photo.mimeType }));
+  const baseType = (photo.mimeType || 'image/jpeg').split(';')[0].trim();
   try {
-    const r = await fetch(url, { method: 'POST', headers: authHeaders(), body: fd });
+    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': baseType, 'X-Filename': (photo.originalFilename || 'photo') + ext, 'X-File-Id': photo.localPhotoId, 'X-Record-Id': obs.backendObservationId, 'X-Resource': settings.observationsResource }), body: rec.blob });
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
-    photo.backendFileId = data.id || data.data?.id || null;
-    photo.backendFileUrl = data.url || data.data?.url || null;
+    photo.backendFileId = data.id || null;
+    photo.backendFileUrl = data.download_url || null;
     photo.uploadStatus = 'uploaded';
     photo.uploadError = null;
     await db.photos.put(photo);
@@ -5909,6 +6032,7 @@ async function uploadPhoto(photo) {
     await db.observations.put(obs);
     logInfo('Photo uploaded ' + photo.localPhotoId);
   } catch(e) {
+    handleSyncAuthError(e);
     photo.uploadStatus = 'pending';
     photo.uploadError = e.message;
     await db.photos.put(photo);
@@ -6491,7 +6615,7 @@ captureMapSetEnabled(captureMapPreference(), { persist: false });
    Backend submit
    ======================== */
 async function submitObservation(obs) {
-  if (!settings.token) { const err = new Error('No backend token'); logWarn(err.message); throw err; }
+  if (!sessionToken()) { const err = new Error('Not signed in to CFLab'); logWarn(err.message); throw err; }
   if (!settings.apiBase) { const err = new Error('No API base'); logWarn(err.message); throw err; }
   // Repair recoverable weather BEFORE submitting while online; a backfill
   // failure must not block an otherwise-ready submission.
@@ -6538,8 +6662,9 @@ async function submitObservation(obs) {
     appVersion: APP_VERSION
   };
   try {
-    const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}`;
-    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload }) });
+    const url = recordsUrl(settings.observationsResource);
+    const remoteId = obs.remoteCreateId || (obs.remoteCreateId = uuid());
+    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload, id: remoteId }) });
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
     obs.backendObservationId = data.id || data.data?.id || null;
@@ -6550,15 +6675,14 @@ async function submitObservation(obs) {
     if (obs.audioBlobId && obs.audioSizeBytes > 0) {
       const audioRec = await db.audioBlobs.get(obs.audioBlobId);
       if (audioRec) {
-        const furl = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}/files`;
-        const fd = new FormData();
+        const furl = filesUrl();
         const ext = audioRec.mimeType.includes('mp4') ? '.m4a' : audioRec.mimeType.includes('ogg') ? '.ogg' : audioRec.mimeType.includes('wav') ? '.wav' : '.webm';
-        fd.append('file', new File([audioRec.blob], 'audio' + ext, { type: audioRec.mimeType }));
-        const ar = await fetch(furl, { method: 'POST', headers: authHeaders(), body: fd });
+        const baseType = (audioRec.mimeType || 'application/octet-stream').split(';')[0].trim();
+        const ar = await fetch(furl, { method: 'POST', headers: authHeaders({ 'Content-Type': baseType, 'X-Filename': 'audio' + ext, 'X-File-Id': obs.audioBlobId, 'X-Record-Id': obs.backendObservationId, 'X-Resource': settings.observationsResource }), body: audioRec.blob });
         if (ar.ok) {
           const ad = await ar.json();
-          const fid = ad.id || ad.data?.id;
-          if (fid) { obs.backendFileIds = obs.backendFileIds || []; obs.backendFileIds.push(fid); await db.observations.put(obs); }
+          const fid = ad.id || null;
+          if (fid) { obs.backendFileIds = obs.backendFileIds || []; if (!obs.backendFileIds.includes(fid)) obs.backendFileIds.push(fid); await db.observations.put(obs); }
         } else {
           throw await httpError(ar);
         }
@@ -6570,6 +6694,7 @@ async function submitObservation(obs) {
     logInfo('Observation submitted ' + obs.localId);
     loadProcess(); updateQueueChip();
   } catch(e) {
+    handleSyncAuthError(e);
     obs.submitStatus = 'failed';
     obs.submitError = e.message;
     await db.observations.put(obs);
@@ -6621,7 +6746,7 @@ async function updateBackendObservation(obs, options = {}) {
     appVersion: APP_VERSION
   };
   try {
-    const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}`;
+    const url = recordUrl(settings.observationsResource, obs.backendObservationId);
     const r = await fetch(url, { method: 'PATCH', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: payload }) });
     if (!r.ok) throw await httpError(r);
     if (!weatherSync) {
@@ -6640,6 +6765,7 @@ async function updateBackendObservation(obs, options = {}) {
     logInfo(weatherSync ? 'Weather synced to backend ' + obs.localId : 'Observation updated ' + obs.localId);
     loadProcess(); updateQueueChip();
   } catch(e) {
+    handleSyncAuthError(e);
     if (weatherSync) {
       // Already-submitted observations must never be demoted by a weather
       // sync failure; record only the weather synchronization diagnostic.
@@ -6664,8 +6790,8 @@ async function updateBackendObservation(obs, options = {}) {
    Delete (local + backend)
    ======================== */
 async function deleteObservationBackend(obs) {
-  if (!obs.backendObservationId || !settings.token) return;
-  const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}/${obs.backendObservationId}`;
+  if (!obs.backendObservationId || !sessionToken()) return;
+  const url = recordUrl(settings.observationsResource, obs.backendObservationId);
   try {
     const r = await fetch(url, { method: 'DELETE', headers: authHeaders() });
     if (!r.ok) throw await httpError(r);
@@ -6677,8 +6803,8 @@ async function deleteObservationBackend(obs) {
 }
 
 async function deleteTripBackend(trip) {
-  if (!trip.backendTripId || !settings.token) return;
-  const url = `${apiBase()}/${settings.appId}/${settings.tripsResource}/${trip.backendTripId}`;
+  if (!trip.backendTripId || !sessionToken()) return;
+  const url = recordUrl(settings.tripsResource, trip.backendTripId);
   try {
     const r = await fetch(url, { method: 'DELETE', headers: authHeaders() });
     if (!r.ok) throw await httpError(r);
@@ -6692,7 +6818,7 @@ async function deleteTripBackend(trip) {
 async function deleteObservation(obs) {
   if (!obs) return;
   // Try backend delete if it was submitted
-  if (obs.backendObservationId && settings.token) {
+  if (obs.backendObservationId && sessionToken()) {
     if (navigator.onLine) {
       try { await deleteObservationBackend(obs); } catch(e) {
         if (!confirm('Backend delete failed. Delete local copy only?')) return;
@@ -6716,7 +6842,7 @@ async function deleteObservation(obs) {
 async function deleteTrip(trip) {
   if (!trip) return;
   // Try backend delete if it was submitted
-  if (trip.backendTripId && settings.token) {
+  if (trip.backendTripId && sessionToken()) {
     if (navigator.onLine) {
       try { await deleteTripBackend(trip); } catch(e) {
         if (!confirm('Backend delete failed. Delete local copy only?')) return;
@@ -6819,7 +6945,6 @@ function loadSetup() {
   $('cfg-obs-resource').value = settings.observationsResource;
   $('cfg-trip-resource').value = settings.tripsResource;
   $('cfg-breadcrumb-resource').value = settings.breadcrumbResource;
-  $('cfg-token').value = settings.token;
   $('cfg-or-key').value = settings.llmKey;
   // Model selects hydrate from cache/fallback immediately; a stale catalog
   // refreshes in the background when online. applyModelCatalogToUI() also
@@ -6832,6 +6957,7 @@ function loadSetup() {
   $('cfg-gps-timeout').value = settings.gpsTimeout;
   $('cfg-trip-hours').value = settings.tripWindowHours;
   $('cfg-trip-miles').value = settings.tripWindowMiles;
+  showAuthState();
   refreshStorageStats();
 }
 
@@ -6878,7 +7004,6 @@ function saveFromSetup() {
   settings.observationsResource = $('cfg-obs-resource').value.trim();
   settings.tripsResource = $('cfg-trip-resource').value.trim();
   settings.breadcrumbResource = $('cfg-breadcrumb-resource').value.trim();
-  settings.token = $('cfg-token').value.trim();
   settings.llmKey = $('cfg-or-key').value.trim();
   settings.transModel = $('cfg-trans-model').value.trim();
   settings.textModel = $('cfg-text-model').value.trim();
@@ -6894,48 +7019,54 @@ function saveFromSetup() {
   saveSettings(settings);
 }
 
-[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-breadcrumb-resource'), $('cfg-token'), $('cfg-or-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-vision-model'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
+[$('cfg-api-base'), $('cfg-app-id'), $('cfg-obs-resource'), $('cfg-trip-resource'), $('cfg-breadcrumb-resource'), $('cfg-or-key'), $('cfg-trans-model'), $('cfg-text-model'), $('cfg-vision-model'), $('cfg-max-audio'), $('cfg-auto-stop'), $('cfg-weather-timeout'), $('cfg-gps-high'), $('cfg-gps-timeout'), $('cfg-trip-hours'), $('cfg-trip-miles')].forEach(el => {
   if (!el) return;
   el.addEventListener('change', saveFromSetup);
   if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('input', saveFromSetup);
 });
+
+$('cfg-sign-in').addEventListener('click', signIn);
+$('cfg-auth-password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+$('cfg-sign-out').addEventListener('click', signOut);
 
 $('test-backend').addEventListener('click', async () => {
   const el = $('backend-test-result');
   el.style.display = 'block';
   el.textContent = 'Testing...';
   const results = [];
-  const base = apiBase();
-  results.push('API base: ' + base);
+  results.push('API base: ' + apiBase());
   results.push('App id: ' + settings.appId);
-  results.push('Token: ' + (settings.token ? 'set (' + settings.token.slice(0, 8) + '...)': 'NOT SET'));
+  results.push('Session: ' + (sessionToken() ? 'signed in' : 'signed out'));
+  results.push('Network: ' + (navigator.onLine ? 'online' : 'offline'));
+  if (!sessionToken()) {
+    el.textContent = results.concat('Sign in with a CFLab account to test.').join('\n');
+    return;
+  }
   try {
-    const healthUrl = base + '/health';
-    const hr = await fetch(healthUrl, { headers: settings.token ? authHeaders() : {} });
-    const ht = await hr.text();
-    results.push('Health GET ' + healthUrl + ' => HTTP ' + hr.status + ' | ' + ht.slice(0, 200));
-  } catch(e) { results.push('Health error: ' + e.message); }
-  if (settings.token) {
-    try {
-      const url = `${base}/${settings.appId}/${settings.observationsResource}`;
-      const r = await fetch(url, { headers: authHeaders() });
-      const rt = await r.text();
-      results.push('List obs GET ' + url + ' => HTTP ' + r.status + ' | ' + rt.slice(0, 200));
-      if (r.status === 403 && rt.includes('Insufficient scope')) {
-        results.push('Scope needed: {"' + settings.appId + '":["read","write"]}');
-      }
-    } catch(e) { results.push('List obs error: ' + e.message); }
-    try {
-      const url = `${base}/${settings.appId}/${settings.tripsResource}`;
-      const r = await fetch(url, { headers: authHeaders() });
-      const rt = await r.text();
-      results.push('List trips GET ' + url + ' => HTTP ' + r.status + ' | ' + rt.slice(0, 200));
-      if (r.status === 403 && rt.includes('Insufficient scope')) {
-        results.push('Scope needed: {"' + settings.appId + '":["read","write"]}');
-      }
-    } catch(e) { results.push('List trips error: ' + e.message); }
-  } else {
-    results.push('Skipped resource tests (no token)');
+    const r = await authFetch(apiBase() + '/api/auth/me');
+    if (!r.ok) throw await httpError(r);
+    const me = await r.json();
+    const memberships = (me.memberships || []).filter(m => m.app_id === settings.appId);
+    const authorized = !!(me.user && me.user.is_admin) || memberships.length > 0;
+    results.push('CFLab connected: yes');
+    results.push('User: ' + (me.user && me.user.email ? me.user.email : 'unknown') + (me.user && me.user.is_admin ? ' (admin)' : ''));
+    results.push('Wildlife project access: ' + (authorized ? (memberships.map(m => m.access).join(',') || 'admin') : 'MISSING'));
+    if (authorized) {
+      const obs = await fetchCompleteCollection(settings.observationsResource);
+      const trips = await fetchCompleteCollection(settings.tripsResource);
+      results.push('Observations: ' + obs.length);
+      results.push('Trips: ' + trips.length);
+    }
+    const pending = await db.observations.where('submitStatus').anyOf('local', 'ready', 'failed').count().catch(() => null);
+    results.push('Pending local records: ' + (pending == null ? 'n/a' : pending));
+  } catch(e) {
+    results.push('CFLab error: ' + e.message);
+    if (e.status === 401) {
+      setSessionToken('');
+      currentUser = null;
+      showAuthState();
+      results.push('Session expired; sign in again. Pending captures were not changed.');
+    }
   }
   el.textContent = results.join('\n');
 });
@@ -7692,27 +7823,19 @@ function normalizeServerRecord(item) {
 }
 
 async function fetchServerObservations() {
-  if (!settings.token) return [];
-  const url = `${apiBase()}/${settings.appId}/${settings.observationsResource}`;
+  if (!sessionToken()) return [];
   try {
-    const r = await fetch(url, { headers: authHeaders() });
-    if (!r.ok) throw await httpError(r);
-    const data = await r.json();
-    const arr = extractArrayFromResponse(data).map(normalizeServerRecord);
-    if (arr.length) { logInfo('Server observations fetched: ' + arr.length + ' | first keys: ' + Object.keys(arr[0]).join(', ') + ' | sample id=' + (arr[0].localId || arr[0].id || 'n/a')); }
+    const arr = (await fetchCompleteCollection(settings.observationsResource)).map(normalizeServerRecord);
+    if (arr.length) logInfo('Server observations fetched: ' + arr.length);
     return arr;
   } catch(e) { logWarn('Server observations fetch failed: ' + e.message); return []; }
 }
 
 async function fetchServerTrips() {
-  if (!settings.token) return [];
-  const url = `${apiBase()}/${settings.appId}/${settings.tripsResource}`;
+  if (!sessionToken()) return [];
   try {
-    const r = await fetch(url, { headers: authHeaders() });
-    if (!r.ok) throw await httpError(r);
-    const data = await r.json();
-    const arr = extractArrayFromResponse(data).map(normalizeServerRecord);
-    if (arr.length) { logInfo('Server trips fetched: ' + arr.length + ' | first keys: ' + Object.keys(arr[0]).join(', ') + ' | sample id=' + (arr[0].localTripId || arr[0].id || 'n/a')); }
+    const arr = (await fetchCompleteCollection(settings.tripsResource)).map(normalizeServerRecord);
+    if (arr.length) logInfo('Server trips fetched: ' + arr.length);
     return arr;
   } catch(e) { logWarn('Server trips fetch failed: ' + e.message); return []; }
 }
@@ -7857,6 +7980,7 @@ function flattenObservation(obs) {
     },
     audioBlobId: obs.audioBlobId || null,
     photoLocalIds: obs.photoLocalIds || [],
+    photoCount: obs.photoCount != null ? obs.photoCount : null,
     latitude: obs.latitude,
     longitude: obs.longitude,
     gpsStatus: obs.gpsStatus,
@@ -7979,7 +8103,7 @@ async function loadHistory() {
 
   // Source chip
   const chip = $('history-source-chip');
-  if (!settings.token) { chip.textContent = 'Local only — no token'; chip.className = 'status-chip warn'; chip.style.display = 'inline-block'; }
+  if (!sessionToken()) { chip.textContent = 'Local only — signed out'; chip.className = 'status-chip warn'; chip.style.display = 'inline-block'; }
   else if (serverObs.length === 0 && serverTrips.length === 0) { chip.textContent = 'Local only — server fetch failed or empty'; chip.className = 'status-chip warn'; chip.style.display = 'inline-block'; }
   else { chip.textContent = `Merged: ${localObs.length} local + ${serverObs.length} server obs`; chip.className = 'status-chip ok'; chip.style.display = 'inline-block'; }
 
@@ -8028,7 +8152,8 @@ function renderHistoryObsRows(observations) {
   if (!observations.length) return '<div class="empty" style="padding:8px 0;">No observations</div>';
   return observations.map(o => {
     const hasAudio = o.audioBlobId ? '' : ' disabled';
-    const hasPhotos = o.photoLocalIds.length ? '' : ' disabled';
+    const hasRemotePhotos = !o.photoLocalIds.length && o.backendObservationId && (o.photoCount || 0) > 0;
+    const hasPhotos = (o.photoLocalIds.length || hasRemotePhotos) ? '' : ' disabled';
     const sourceChip = o.source === 'server' ? '<span class="chip info">server</span>' : '';
     return `<div class="history-obs">
       <span class="history-time">${fmtDate(o.timestamp)}</span>
@@ -8037,7 +8162,7 @@ function renderHistoryObsRows(observations) {
       <span class="history-weather">${escapeHtml(o.weather.condition)} · ${escapeHtml(o.weather.tempF)} · ${escapeHtml(o.weather.pressure)}</span>
       <span class="history-transcript" title="${escapeHtml(o.transcript || '')}">${escapeHtml((o.transcript || '').slice(0, 80))}</span>
       <button class="btn btn-small" data-history-play="${escapeHtml(o.id)}"${hasAudio}>▶</button>
-      <button class="btn btn-small" data-history-photos="${escapeHtml(o.id)}"${hasPhotos}>🖼</button>
+      <button class="btn btn-small" data-history-photos="${escapeHtml(o.id)}" data-history-backend="${escapeHtml(o.backendObservationId || '')}"${hasPhotos}>🖼</button>
       ${sourceChip}
     </div>`;
   }).join('');
@@ -8055,7 +8180,7 @@ document.addEventListener('click', async e => {
   const playBtn = e.target.closest('button[data-history-play]');
   if (playBtn) { await playObsAudio(playBtn.dataset.historyPlay); }
   const photoBtn = e.target.closest('button[data-history-photos]');
-  if (photoBtn) { await showHistoryPhotoTooltip(photoBtn, photoBtn.dataset.historyPhotos); }
+  if (photoBtn) { await showHistoryPhotoTooltip(photoBtn, photoBtn.dataset.historyPhotos, photoBtn.dataset.historyBackend); }
 });
 
 $('history-refresh').addEventListener('click', loadHistory);
@@ -8133,24 +8258,42 @@ async function showHistoryTripMap(tripId) {
   }, 50);
 }
 
-async function showHistoryPhotoTooltip(anchorEl, obsLocalId) {
+async function showHistoryPhotoTooltip(anchorEl, obsLocalId, backendObservationId) {
   // Remove any existing tooltip
   const existing = document.querySelector('.history-photo-tooltip');
   if (existing) existing.remove();
 
-  const obs = await db.observations.get(obsLocalId);
-  if (!obs || !obs.photoLocalIds || !obs.photoLocalIds.length) return;
-
   const tooltip = document.createElement('div');
   tooltip.className = 'history-photo-tooltip open';
-  const photos = await db.photos.where('observationLocalId').equals(obsLocalId).toArray();
-  if (!photos.length) { tooltip.remove(); return; }
+  const localObs = await db.observations.get(obsLocalId);
+  const localPhotos = localObs && localObs.photoLocalIds && localObs.photoLocalIds.length
+    ? await db.photos.where('observationLocalId').equals(obsLocalId).toArray()
+    : [];
 
-  for (const p of photos) {
-    const rec = await db.audioBlobs.get(p.blobId);
-    if (rec) {
+  // Existing/migrated files are resolved through CFLab for records without local blobs.
+  let remoteUrls = [];
+  if (!localPhotos.length && backendObservationId && sessionToken()) {
+    try {
+      const files = await fetchRecordFiles(settings.observationsResource, backendObservationId);
+      for (const file of files) {
+        if (!file.download_url) continue;
+        const r = await authFetch(apiBase() + file.download_url);
+        if (!r.ok) continue;
+        remoteUrls.push(URL.createObjectURL(await r.blob()));
+      }
+    } catch(e) { handleSyncAuthError(e); logWarn('Remote photo fetch failed: ' + e.message); }
+  }
+  if (!localPhotos.length && !remoteUrls.length) { tooltip.remove(); return; }
+
+  const photoSources = [
+    ...localPhotos.map(p => ({ getBlob: () => db.audioBlobs.get(p.blobId).then(rec => rec && rec.blob) })),
+    ...remoteUrls.map(url => ({ getBlob: async () => url })),
+  ];
+  for (const source of photoSources) {
+    const blob = await source.getBlob();
+    if (blob) {
       const img = document.createElement('img');
-      img.src = URL.createObjectURL(rec.blob);
+      img.src = blob instanceof Blob ? URL.createObjectURL(blob) : blob;
       img.alt = 'photo';
       img.onclick = () => {
         const big = document.createElement('div');
@@ -8193,6 +8336,7 @@ async function init() {
   logInfo('Wildlife Field Recorder ' + APP_VERSION + ' started');
   updateQueueChip();
   loadSetup();
+  restoreSession().catch(e => logWarn('Session restore failed: ' + e.message));
   initWakeLock();
   showTab('about');
   resumeActiveOuting().catch(e => { logWarn('Active outing recovery failed: ' + e.message); renderOutingStatus(); });
