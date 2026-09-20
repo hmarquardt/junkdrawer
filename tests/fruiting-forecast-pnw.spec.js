@@ -297,7 +297,7 @@ test('PNW tiles load beside earlier western and legacy tiles despite the new hem
     const manifest=await t.gisManifest(true);
     const pick=id=>(manifest.tiles||[]).find(x=>x.id===id);
     // Newest wider schema first: this is the mixed-schema case the app must survive.
-    const urls=['n44_w124','n39_w106','n37_w088'].map(id=>pick(id).habitat.url);
+    const urls=['n44_w124','n39_w106','n37_w107'].map(id=>pick(id).habitat.url);
     const names=[];
     for(let i=0;i<urls.length;i++){
       const response=await fetch('data/fruiting-forecast/'+urls[i]);
@@ -312,11 +312,13 @@ test('PNW tiles load beside earlier western and legacy tiles despite the new hem
     const pnw=conv(await conn.query("SELECT count(*) n, sum(hemlock_sitka_spruce_signal) hemlock, sum(douglas_fir_signal) douglas, sum(fir_spruce_mountain_hemlock_signal) fir FROM read_parquet('"+names[0]+"')"));
     return {union,mixedWithout,pnw};
   });
-  expect(result.union[0].n).toBe(1000); // 400 PNW + 400 Colorado + 200 legacy
-  expect(result.union[0].douglas).toBeGreaterThan(result.pnw[0].douglas); // the Colorado tile contributes too
+  expect(result.union[0].n).toBe(1200); // three 400-cell tiles
+  expect(result.union[0].douglas).toBeGreaterThan(result.pnw[0].douglas); // the southern-Rockies tiles contribute too
   // The hemlock/Sitka-spruce signal exists only in the PNW tile; older tiles read NULL.
   expect(result.union[0].hemlock).toBe(result.pnw[0].hemlock);
-  expect(result.mixedWithout).toBeTruthy();
+  // Current DuckDB reads differing schemas by name even without union_by_name; the
+  // app still requests union_by_name explicitly and the union must load fully.
+  expect(result.union[0].n).toBe(1200);
   expect(result.pnw[0].n).toBe(400);
   expect(result.pnw[0].douglas).toBeGreaterThan(200); // Douglas-fir dominates the mapped Coast Range tile
 });

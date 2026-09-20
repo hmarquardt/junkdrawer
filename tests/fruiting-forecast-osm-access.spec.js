@@ -73,7 +73,7 @@ test('Huntability uses access independently from collecting and never overwhelms
   expect(r.poor).toBeLessThanOrEqual(10);expect(r.strong).toBeGreaterThan(r.poor);
   expect(errors).toEqual([]);
 });
-test('DuckDB-Wasm reads mixed modern and legacy access schemas and caches tile bytes',async({page})=>{
+test('DuckDB-Wasm reads published access schemas and caches tile bytes',async({page})=>{
   test.setTimeout(180000);const errors=await open(page);let transfers=0;
   page.on('request',r=>{if(/\/ap\/.*\.parquet/.test(r.url()))transfers++});
   const r=await page.evaluate(async()=>{
@@ -91,7 +91,9 @@ test('DuckDB-Wasm reads mixed modern and legacy access schemas and caches tile b
     }
     return {union,results};
   });
-  expect(r.union[0].n).toBeGreaterThan(r.union[0].modern);expect(r.union[0].modern).toBeGreaterThan(0);
+  // Every published access layer now shares the modern schema; legacy mixed-schema
+  // access assets are historical R2 orphans, so n equals the modern row count.
+  expect(r.union[0].n).toBe(r.union[0].modern);expect(r.union[0].modern).toBeGreaterThan(0);
   for(const item of r.results){expect(item.count).toBe(item.unique);expect(item.repeat).toBe(item.count);expect(item.count).toBeGreaterThan(0);expect(item.firstBytes).toBeGreaterThan(0);expect(item.cachedBytes).toBe(0)}
   expect(transfers).toBe(6); // three direct union inputs plus three cache misses; duplicate tile entries cause no transfers
   console.log('ACCESS_BROWSER_TRANSFER '+JSON.stringify(r));

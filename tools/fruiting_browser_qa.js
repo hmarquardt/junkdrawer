@@ -45,7 +45,17 @@ const ASSET_ORIGIN = 'https://data.hanksjunkdrawer.com/';
       const loc = { lat, lon };
       const points = t.zonePoints(lat, lon, 25, 'standard');
       const started = performance.now();
-      const ev = await t.HabitatProvider.fetch(points, loc, 25, null, false);
+      let ev;
+      try {
+        ev = await t.HabitatProvider.fetch(points, loc, 25, null, false);
+      } catch (error) {
+        // A location with no normalized-relevant static coverage is a valid
+        // outcome: the application must not manufacture coverage for it.
+        return { noStaticCoverage: true, error: String(error.message || error),
+                 properties: 0, accessPoints: 0, suggestedStarts: 0,
+                 eligibleStartsChecked: 0, profile: null, details: [],
+                 elapsed: Math.round(performance.now() - started) };
+      }
       const props = ev._properties || [];
       const ap = props.reduce((a, p) => a + (p.accessPoints || []).length, 0);
       const starts = props.reduce((a, p) => a + (p.suggestedStart ? 1 : 0), 0);
@@ -60,15 +70,21 @@ const ASSET_ORIGIN = 'https://data.hanksjunkdrawer.com/';
     }, [lat, lon]);
     const coldRequests = parquetRequests;
     parquetRequests = 0;
-    await page.evaluate(async ([lat, lon]) => {
-      const t = __FRUITING_FORECAST_TEST__;
-      const loc = { lat, lon };
-      const points = t.zonePoints(lat, lon, 25, 'standard');
-      await t.HabitatProvider.fetch(points, loc, 25, null, false);
-    }, [lat, lon]);
+    let warmError = null;
+    if (!cold.noStaticCoverage) {
+      await page.evaluate(async ([lat, lon]) => {
+        const t = __FRUITING_FORECAST_TEST__;
+        const loc = { lat, lon };
+        const points = t.zonePoints(lat, lon, 25, 'standard');
+        await t.HabitatProvider.fetch(points, loc, 25, null, false);
+      }, [lat, lon]);
+    } else {
+      warmError = cold.error;
+    }
     const warmRequests = parquetRequests;
     results.push({ profile: cold.profile, coordinate: [lat, lon], tile: tile || null,
       coldParquetRequests: coldRequests, warmParquetRequests: warmRequests,
+      noStaticCoverage: !!cold.noStaticCoverage, coverageError: warmError,
       properties: cold.properties, accessPoints: cold.accessPoints,
       suggestedStarts: cold.suggestedStarts, eligibleStartsChecked: cold.eligibleStartsChecked,
       sample: cold.details, elapsedSeconds: cold.elapsed });

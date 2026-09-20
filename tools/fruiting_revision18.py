@@ -27,8 +27,10 @@ def main():
         if (PROD / 'national-storage-stats.json').exists() else None
     browser = json.loads((PROD / 'browser-final.json').read_text()) \
         if (PROD / 'browser-final.json').exists() else {}
-    tests = json.loads((PROD / 'batch3-tests.json').read_text()) \
-        if (PROD / 'batch3-tests.json').exists() else {}
+    tests = json.loads((PROD / 'revision18-tests.json').read_text()) \
+        if (PROD / 'revision18-tests.json').exists() else (
+            json.loads((PROD / 'batch3-tests.json').read_text())
+            if (PROD / 'batch3-tests.json').exists() else {})
     coverage = report['currentCoverage']
     audit = report.get('remoteAudit') or {}
     blocked = report['revision17BlockedTiles']
@@ -87,7 +89,7 @@ def main():
         f"- Legacy tiles: **{report['legacyDenominator']}**",
         f"- Normalized relevant: **{report['normalizedDenominator']}**",
         f"- Normalized irrelevant: **{report['normalizedIrrelevantLegacyTiles']}**",
-        f"- Already-published tiles reclassified: **{len(reclassified)}** (all were counted complete by '
+        f"- Already-published tiles reclassified: **{len(reclassified)}** (all were counted complete by "
         'Revision 17)',
         f"- Newly relevant tiles discovered outside the coarse roster: **{report['newlyRelevantTiles']}** "
         f"({', '.join(item['tile'] for item in inclusions)})",
@@ -110,14 +112,14 @@ def main():
         '### Production work',
         '',
         f"- Bounded build (not a new batch): **{len(report['boundedBuild']['completed'])} tiles** — "
-        f"{', '.join(report['boundedBuild']['completed'])}. Each had genuine U.S. land cells that the coarse '
+        f"{', '.join(report['boundedBuild']['completed'])}. Each had genuine U.S. land cells that the coarse "
         'roster had excluded.',
         f"- {report['boundedBuild']['note']}",
         '- No other tiles were built. No state preparation was needed beyond already-ready sources.',
         '',
         '### Manifest',
         '',
-        f"- Removed from the active manifest: **{report['manifestNormalization']['removedCount']}** '
+        f"- Removed from the active manifest: **{report['manifestNormalization']['removedCount']}** "
         f"normalized-irrelevant tiles — {', '.join(report['manifestNormalization']['removedTiles'])}.",
         '- Immutable R2 objects and the publisher ledger were not touched; those objects are now explicit '
         'ledger orphans. Asset classification: 6 harmless empty structures, 2 U.S. fires crossing the border, '
@@ -129,7 +131,7 @@ def main():
         '',
         f"- **Normalized GIS complete: {coverage['gisComplete']} / {report['normalizedDenominator']}** "
         '(100% of the normalized relevant universe).',
-        f"- Every one of the 13 profiles is complete within the normalized denominator: '
+        f"- Every one of the 13 profiles is complete within the normalized denominator: "
         + ', '.join(f"{name} {info['tilesGisComplete']}/{info['tilesIntersecting']}"
                     for name, info in sorted(coverage.get('profiles', {}).items())) + '.',
         f"- Actual active four-layer GIS bytes: **{audit.get('bytes', 0):,}** (manifest-referenced objects; the "
@@ -140,7 +142,7 @@ def main():
         f"- Final remote audit: {audit.get('valid')} remotely valid, {audit.get('missing')} missing, "
         f"{audit.get('invalid')} invalid, {audit.get('localOnly')} local-only (retained), "
         f"{audit.get('remoteOrphans')} publisher-ledger remote orphans (retained); clean = {audit.get('clean')}.",
-        f"- Audit scope: {audit.get('inventoryScope')}. Orphan growth is expected from the manifest '
+        f"- Audit scope: {audit.get('inventoryScope')}. Orphan growth is expected from the manifest "
         'normalization and is not a defect.',
         '',
         '### Browser',
@@ -148,8 +150,10 @@ def main():
         f"- Bounded normalized-behavior matrix: {len(browser.get('profiles', []))} live lookups; warm additional "
         f"Parquet {browser.get('warmCacheAdditionalParquetRequests')}; console errors "
         f"{len(browser.get('consoleErrors', []))}, page errors {len(browser.get('pageErrors', []))}.",
-        '- Interior, coastal/island, northern-border valid, excluded-artifact and adjacent-valid locations were '
-        'checked; excluded locations do not manufacture coverage.',
+        f"- {sum(1 for p in browser.get('profiles', []) if p.get('noStaticCoverage'))} excluded-artifact lookup "
+        'returned `No static GIS tiles cover this search area` with zero Parquet requests, while the adjacent '
+        'U.S. location, interior, coastal/island, Great Lakes and northern-border (Northwest Angle) lookups all '
+        'resolved expected GIS; excluded locations do not manufacture coverage.',
         '',
         '### Tests',
         '',
@@ -163,7 +167,7 @@ def main():
         '',
         '### Next task',
         '',
-        f"- **{report['nextTask']}** — normalized national GIS coverage is complete, so the next pass is the '
+        f"- **{report['nextTask']}** — normalized national GIS coverage is complete, so the next pass is the "
         'bounded national launch-readiness audit (not another GIS batch).',
         '',
     ]

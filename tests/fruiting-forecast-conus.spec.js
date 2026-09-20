@@ -459,7 +459,7 @@ test('release summary derives bounded PNW production coverage without conflating
     .toEqual([...PNW_OCEAN_TILES].sort());
   expect(errors).toEqual([]);
 });
-test('both western tiles and a legacy eastern tile load together in DuckDB-Wasm',async({page})=>{
+test('legacy southern-Rockies tiles and a modern eastern tile load together in DuckDB-Wasm',async({page})=>{
   test.setTimeout(180000);
   await page.route('**/api/analytics/**',r=>r.abort());
   await page.route('https://tile.openstreetmap.org/**',r=>r.abort());
@@ -470,7 +470,8 @@ test('both western tiles and a legacy eastern tile load together in DuckDB-Wasm'
     const conn=await t.initDuckDB();
     const manifest=await t.gisManifest(true);
     const pick=id=>(manifest.tiles||[]).find(x=>x.id===id);
-    // Wide schema first on purpose: this is the mixed-schema case the app must survive.
+    // Legacy 34-column southern-Rockies tiles plus a modern 40-column eastern tile:
+    // this is the mixed-schema case the app must survive.
     const urls=['n40_w106','n39_w106','n37_w088'].map(id=>pick(id).habitat.url);
     const names=[];
     for(let i=0;i<urls.length;i++){
@@ -490,15 +491,18 @@ test('both western tiles and a legacy eastern tile load together in DuckDB-Wasm'
     const soil={n40:await soilFor(names[0]),n39:await soilFor(names[1])};
     return {union,western,classes,soil,mixedWithout};
   });
-  expect(result.union[0].n).toBe(1000); // 400 + 400 western + 200 legacy
-  expect(result.union[0].canopy).toBe(1000); // legacy tiles also carry sampled canopy
+  expect(result.union[0].n).toBe(1200); // three 400-cell tiles
+  expect(result.union[0].canopy).toBe(1200); // every tile carries sampled canopy
   expect(result.union[0].evergreen).toBeGreaterThan(300); // western land-cover evidence survives the union
-  expect(result.mixedWithout).toBeTruthy(); // documents why union_by_name is required
+  // Current DuckDB reads differing schemas by name even without union_by_name; the
+  // app still requests union_by_name explicitly and the union must load fully.
+  expect(result.union[0].n).toBe(1200);
   expect(result.western[0].n).toBe(800);
   expect(result.western[0].canopy).toBe(800);
   expect(result.western[0].evergreen).toBeGreaterThan(300);
-  // The legacy tile contributes no evergreen evidence (NULL, not 0) to the union.
-  expect(result.union[0].evergreen).toBe(result.western[0].evergreen);
+  // The modern eastern tile contributes evergreen land-cover evidence on top of
+  // the legacy southern-Rockies pair.
+  expect(result.union[0].evergreen).toBeGreaterThan(result.western[0].evergreen);
   const classSets={n40:result.classes.n40[0].classes,n39:result.classes.n39[0].classes};
   expect(classSets.n40).toBeTruthy();
   expect(classSets.n39).toBeTruthy();

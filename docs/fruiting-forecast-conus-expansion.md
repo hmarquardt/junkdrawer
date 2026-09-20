@@ -1,5 +1,100 @@
 # Fruiting Forecast CONUS expansion — authoritative handoff
 
+## Revision 18 — National relevance normalization and the final denominator (2026-09-19)
+
+Started from Revision 17 at `d05667a`. The normalized national GIS denominator is now **922** tiles, all complete. The legacy coarse roster of 940 was a cartographic artifact of the old relevance geometry; it is preserved as history, not used as the current denominator.
+
+### Legacy denominator
+
+- Revision 17 reported `927 / 940`. The 940 came from the planner's coarse relevance gate: at least 1% of a tile's projected area inside a U.S. state polygon from `cb_2023_us_state_20m` after an additional ~0.02-degree (~2 km) simplification. Projecting the tile as a straight-edged quadrilateral in EPSG:5070 made the 45/49-degree border chords bulge by up to ~5 km, so 23 tiles passed the gate with no U.S. land at the production sample lattice, while 5 tiles with genuine U.S. land cells failed it.
+- The 13 Revision-17 blocked tiles were correct to block, but they were symptoms of a denominator problem, not 13 isolated tiles: **10 already-published tiles had the same zero-cell artifact** and were counted as complete coverage.
+
+### Normalization source
+
+- Boundary: **Cartographic Boundary File, State, 1:500,000 (cb_2023_us_state_500k)** (U.S. Census Bureau, 2023), 3,249,332 bytes, SHA-256 `4a9b4f5cf993cd23738ac49b58fbb556f1f097fcf5e404a9dc10348dd41f7432`.
+- Endpoint: `https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_state_500k.zip` (official Census GENZ2023, same family as the existing 20m source).
+- CRS: NAD83 (EPSG:4269); reprojected to EPSG:4326 for point tests. Territories excluded exactly as the project roster excludes them.
+- Land mask: **Annual NLCD Land Cover, CONUS, 2023, Collection 1 Version 2**, SHA-256 `da50297bc65c07a8210999d20e2b59e69a8d1470273e1ed9344884988fd47aaf` (already pinned for habitat); a sample cell is terrestrial when its NLCD class is present and not 11 (open water).
+- Independent cross-check: **TIGER/Line Shapefile, State (tl_2023_us_state)**, SHA-256 `8ded0ef036e205e246ae4b03a66873f7e1eed50285b993702ce5aca674283a2e`. Independent full-resolution legal-boundary cross-check of the classification. It agreed on every reclassified tile (zero U.S. land cells for all 23 exclusions, real land cells for all 5 inclusions and every fallback/coastal canary). Not used at runtime.
+- Build-time preparation only; runtime reads the committed compact product `data/fruiting-forecast/national-relevance-v2.json` (algorithm `us-land-evidence-cells-v1`). No unpinned URL is used at runtime.
+
+### Normalized relevance rule
+
+> A tile is relevant CONUS GIS coverage when at least one 0.05-degree habitat sample-cell center lies inside a U.S. state (cb_2023_us_state_500k, raw) and on terrestrial land (Annual NLCD 2023 land cover present and not class 11 open water).
+
+- Lattice: 400 cell centers per 1-degree tile at 0.05-degree spacing (the habitat builder's own grid).
+- Plain language: a tile counts only when the application can actually place at least one habitat sample cell on U.S. terrestrial land. A simplified polygon sliver with no usable evidence cell no longer keeps a tile in the denominator.
+- The legacy 5% state-source rule is untouched; the zero-normal-state fallback now reads its state sources from this same product instead of re-deriving them from the coarse geometry.
+
+### Whole-roster audit (all 940 legacy tiles)
+
+- Legacy tiles: **940**
+- Normalized relevant: **922**
+- Normalized irrelevant: **23**
+- Already-published tiles reclassified: **10** (all were counted complete by Revision 17)
+- Newly relevant tiles discovered outside the coarse roster: **5** (n27_w097, n29_w089, n31_w114, n36_w123, n38_w075)
+- Unresolved: **0**
+
+### The 13 Revision-17 blocked tiles
+
+- `n45_w073` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w099` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w100` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w101` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w102` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w103` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w104` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w105` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w116` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w119` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w120` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w121` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+- `n49_w122` — **NORMALIZED_IRRELEVANT** (U.S. state cells 0, U.S. land cells 0)
+
+### Existing 17 fallback tiles
+
+- All 17 revalidated as normalized relevant with real U.S. land cells under the finer boundary and land mask; none lost relevance. Representative land-cell counts: n24_w081=1, n25_w098=14, n29_w081=4, n31_w081=3, n32_w119=6, n33_w078=2.
+
+### Production work
+
+- Bounded build (not a new batch): **5 tiles** — n27_w097, n29_w089, n31_w114, n36_w123, n38_w075. Each had genuine U.S. land cells that the coarse roster had excluded.
+- One coastal tile (n29_w089, Louisiana delta) exposed an access-state resolution defect: the generalized polygon stopped short of the delta. The runner now unions the normalized land states with the bbox heuristic and the adapter refuses source-less builds; the tile rebuilt with LA as its real source and an honest VERIFIED_EMPTY access layer.
+- No other tiles were built. No state preparation was needed beyond already-ready sources.
+
+### Manifest
+
+- Removed from the active manifest: **10** normalized-irrelevant tiles — n49_w106, n49_w107, n49_w108, n49_w109, n49_w110, n49_w111, n49_w112, n49_w113, n49_w114, n49_w115.
+- Immutable R2 objects and the publisher ledger were not touched; those objects are now explicit ledger orphans. Asset classification: 6 harmless empty structures, 2 U.S. fires crossing the border, 1 PAD-US boundary sliver, 1 tile with foreign-side OSM access points north of 49 degrees.
+- Active manifest: **922 tiles**, datasetVersion `content-db0f839a4352ef82`.
+
+### Coverage
+
+- **Normalized GIS complete: 922 / 922** (100% of the normalized relevant universe).
+- Every one of the 13 profiles is complete within the normalized denominator: appalachians 98/98, california 34/34, coldBasins 121/121, hardwood 209/209, interiorMountains 113/113, madrean 63/63, northernForests 130/130, plains 238/238, pnw 46/46, sierraNevada 15/15, southeast 132/132, southernRockies 64/64, warmDesert 72/72.
+- Actual active four-layer GIS bytes: **271,077,299** (manifest-referenced objects; the physically uploaded historical R2 total is larger and includes orphaned assets).
+
+### R2
+
+- Final remote audit: 3688 remotely valid, 0 missing, 0 invalid, 137 local-only (retained), 120 publisher-ledger remote orphans (retained); clean = True.
+- Audit scope: publisher upload-intent ledger; not an exhaustive R2 bucket listing. Orphan growth is expected from the manifest normalization and is not a defect.
+
+### Browser
+
+- Bounded normalized-behavior matrix: 6 live lookups; warm additional Parquet 0; console errors 0, page errors 0.
+- 1 excluded-artifact lookup returned `No static GIS tiles cover this search area` with zero Parquet requests, while the adjacent U.S. location, interior, coastal/island, Great Lakes and northern-border (Northwest Angle) lookups all resolved expected GIS; excluded locations do not manufacture coverage.
+
+### Tests
+
+- Python 124 passed + 6 subtests; Playwright 129 passed / 1 skipped / 0 failed; fruiting-forecast.html compliance 0/0 (repo-wide 1 unrelated concurrent-session error, 14 warnings); py_compile OK; git diff --check clean.
+
+### Biology
+
+Biology is unchanged and was asserted before and after: **13 profiles, 11 PROVISIONAL, 2 MODELED_SPARSE, 0 UNSUPPORTED**. No profile, taxon, EPA crosswalk, calendar, weather model, host model, scoring weight or permanent canary changed.
+
+### Next task
+
+- **National Launch QA** — normalized national GIS coverage is complete, so the next pass is the bounded national launch-readiness audit (not another GIS batch).
+
 ## Revision 17 — Final national GIS production (Batch 3) and the zero-state edge resolution (2026-09-19)
 
 Started from `c20204f6fa012134748cb6177b949274dbb5514f`. **National GIS Batch 3 only** was executed after a gated Phase A resolved the zero-state edge case. The application and manifest remain at `https://hmarquardt.github.io/junkdrawer/`; immutable content-addressed Parquet is served from R2 at `https://data.hanksjunkdrawer.com/`. No Worker, VM, API service, backend or database was added.
