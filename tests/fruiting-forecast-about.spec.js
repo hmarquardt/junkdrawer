@@ -137,14 +137,14 @@ test('manifest counts are derived from descriptors and handle partial resource p
   const coverage=page.locator('#aboutCoverageStatus');
   const vendor = require('../data/fruiting-forecast/manifest.json');
   const counts = vendor.summary.layers;
-  for(const [label,count] of [['Published habitat tiles',counts.habitat.populated],['Public-land tiles',counts['public-land'].populated],['Access-point tiles',counts.access.populated]]) await expect(coverage.locator('dl > div').filter({hasText:label})).toContainText(String(count));
+  for(const [label,count] of [['Complete habitat tiles',counts.habitat.populated],['Public-land layer',counts['public-land'].populated],['Access-point layer',counts.access.populated],['Fire-history layer',counts.fire.populated]]) await expect(coverage.locator('dl > div').filter({hasText:label})).toContainText(String(count));
   await expect(coverage).toContainText(vendor.datasetVersion);
   await page.getByRole('tab',{name:'Forecast',exact:true}).click();
   await page.evaluate(() => window.__FRUITING_FORECAST_TEST__.getState().gis.manifest={datasetVersion:'fixture-v2',tiles:[{habitat:{url:'one.parquet'}},{id:'address-only'},{url:'legacy.parquet',publicLands:{url:'land.parquet'}}]});
   await about(page);
   await expect(coverage).toContainText('fixture-v2');
-  await expect(coverage.locator('dl > div').filter({hasText:'Published habitat tiles'})).toContainText('2');
-  await expect(coverage.locator('dl > div').filter({hasText:'Access-point tiles'})).toContainText('0');
+  await expect(coverage.locator('dl > div').filter({hasText:'Normalized relevant tiles'})).toContainText('3');
+  await expect(coverage.locator('dl > div').filter({hasText:'Access-point layer'})).toContainText('0');
   expect(errors).toEqual([]);
 });
 

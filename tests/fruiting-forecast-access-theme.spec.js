@@ -101,15 +101,18 @@ test('property shows access points, start suggestion, and habitat distances', as
   const errors = await open(page);
   await page.evaluate(() => {
     const t = window.__FRUITING_FORECAST_TEST__, h = window.__FRUITING_FORECAST_HUNTABILITY_TEST__, a = window.__FRUITING_FORECAST_ACCESS_TEST__, s = t.getState();
-    const ap1 = { accessId:'ap1', propertyId:'pike', propertyName:'Pike State Forest', name:'Main Trailhead', lat:38.31,lon:-87.61, type:'TRAILHEAD', source:'OpenStreetMap', sourceUrl:'https://osm.org/node/1', confidence:'HIGH', official:true, operator:'Indiana DNR', notes:'surface: gravel', verifiedAt:'2026-09-01', distanceToHabitatMi:0.9 };
-    const ap2 = { accessId:'ap2', propertyId:'pike', propertyName:'Pike State Forest', name:'North lot', lat:38.33,lon:-87.59, type:'PARKING', source:'OpenStreetMap', sourceUrl:'https://osm.org/node/2', confidence:'MEDIUM', official:false, operator:null, notes:null, verifiedAt:'2026-09-01', distanceToHabitatMi:2.1 };
-    const analysis = window.__FFH__.makeAnalysis({ accessPoints:[ap1, ap2], suggestedStart:a.suggestedStart([ap1, ap2]) });
+    const ap1 = { accessId:'osm:node:1', propertyId:'pike', propertyIds:['pike'], propertyName:'Pike State Forest', name:'Main Trailhead', lat:38.31,lon:-87.61, type:'TRAILHEAD', source:'OpenStreetMap', sourceUrl:'https://osm.org/node/1', confidence:'HIGH', evidenceGrade:'HIGH', startEligible:true, locationMethod:'osm-node', official:true, operator:'Indiana DNR', notes:'surface: gravel', verifiedAt:'2026-09-01', distanceToHabitatMi:0.9 };
+    const ap2 = { accessId:'osm:node:2', propertyId:'pike', propertyIds:['pike'], propertyName:'Pike State Forest', name:'North lot', lat:38.33,lon:-87.59, type:'PARKING', source:'OpenStreetMap', sourceUrl:'https://osm.org/node/2', confidence:'MEDIUM', evidenceGrade:'MEDIUM', startEligible:true, locationMethod:'osm-node', official:false, operator:null, notes:null, verifiedAt:'2026-09-01', distanceToHabitatMi:2.1 };
+    const ap3 = { accessId:'osm:node:3', propertyId:'pike', propertyIds:['pike'], propertyName:'Pike State Forest', name:'Locked service gate', lat:38.32,lon:-87.60, type:'GATE', source:'OpenStreetMap', sourceUrl:'https://osm.org/node/3', confidence:'RESTRICTED', evidenceGrade:'RESTRICTED', startEligible:false, restriction:'access=private', locationMethod:'osm-node', verifiedAt:'2026-09-01', distanceToHabitatMi:0.7 };
+    const analysis = window.__FFH__.makeAnalysis({ accessPoints:[ap1, ap2, ap3], suggestedStart:a.suggestedStart([ap1, ap2, ap3]) });
     s.analysis = analysis; s.gis.properties = [{ id:'pike', geometry:window.__FFH__.geom }];
     s.selectedSpecies = 'chanterelle'; s.selectedZone = 'center'; s.selectedProperty = 'pike'; s.mapLayer = 'accesspoints';
     h.renderHuntable(); h.renderMap(); h.renderDetail();
   });
   await expect(page.locator('#detailContent')).toContainText('Access points');
   await expect(page.locator('#detailContent')).toContainText('Suggested start');
+  await expect(page.locator('#detailContent')).toContainText('eligible mapped feature · no mapped restriction');
+  await expect(page.locator('#detailContent')).toContainText('Restriction: access=private');
   await expect(page.locator('#detailContent')).toContainText('straight-line');
   await expect(page.locator('#huntableList')).toContainText('Suggested start:');
   expect(errors).toEqual([]);

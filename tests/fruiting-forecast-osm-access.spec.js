@@ -122,9 +122,12 @@ for(const [label,lat,lon,tid] of [['colorado',39.55,-105.7,'n39_w106'],['oregon'
         h.renderHuntable();h.renderMap();h.renderDetail();if(p.suggestedStart){const start=p.suggestedStart;if(!s.layers.some(l=>l.getLatLng&&Math.abs(l.getLatLng().lat-start.lat)<1e-9&&Math.abs(l.getLatLng().lng-start.lon)<1e-9))throw Error('Suggested start marker missing');}return true;
       };
       const brief=p=>p&&({id:p.id,name:p.name,rule:p.rule.collectingStatus,access:p.huntability.accessEvidence,start:p.suggestedStart,points:p.accessPoints.length});
-      return {good:brief(good),poor:brief(poor),restricted:brief(restricted),count:ev._access.count,elapsed:performance.now()-started,tiles:s.gis.tiles.map(t=>t.id),logs:s.logs.filter(x=>x.message==='Access evidence loaded')};
+      const starts=ev._properties.filter(p=>p.suggestedStart).map(p=>({property:p.id,start:p.suggestedStart,associated:p.suggestedStart.propertyId===p.id||(p.suggestedStart.propertyIds||[]).includes(p.id)}));
+      const startViolations=starts.filter(x=>{const a=x.start;return a.startEligible!==true||!!a.restriction||!['HIGH','MEDIUM'].includes(a.evidenceGrade)||!Number.isFinite(a.lat)||!Number.isFinite(a.lon)||!/^osm:(node|way|relation):\d+$/.test(a.accessId||'')||!/^https:\/\/(?:www\.)?(?:osm\.org|openstreetmap\.org)\/(?:node|way|relation)\/\d+$/.test(a.sourceUrl||'')||!a.source||!['osm-node','mapped-area-representative-point'].includes(a.locationMethod)||!x.associated});
+      return {good:brief(good),poor:brief(poor),restricted:brief(restricted),count:ev._access.count,elapsed:performance.now()-started,tiles:s.gis.tiles.map(t=>t.id),logs:s.logs.filter(x=>x.message==='Access evidence loaded'),suggestedStartsChecked:starts.length,startViolations};
     },{lat,lon,tid,label});
     expect(r.tiles).toContain(tid);expect(r.count).toBeGreaterThan(0);expect(r.good).toBeTruthy();expect(r.poor).toBeTruthy();expect(r.restricted).toBeTruthy();
+    expect(r.suggestedStartsChecked).toBeGreaterThan(0);expect(r.startViolations).toEqual([]);
     expect(r.good.start.accessId).toMatch(/^osm:(node|way|relation):\d+$/);expect(r.good.start.startEligible).toBe(true);
     expect(r.poor.start).toBeNull();expect(r.poor.access.status).toBe('UNMAPPED');
     for(const which of ['good','poor','restricted']){
