@@ -248,9 +248,9 @@ footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(
     </div>
   </section>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.19.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.19.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt &middot; Wildlife Pattern Lab &middot; version 2026.09.19.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.19.2" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.19.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt &middot; Wildlife Pattern Lab &middot; version 2026.09.19.2
 </footer>
 </div>
 
@@ -258,7 +258,7 @@ footer { margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.09.19.1';
+const APP_VERSION = '2026.09.19.2';
 const DB_NAME = 'WildlifePatternLab';
 const LEGACY_SETTINGS_KEY = 'wpl_settings_v1';
 
@@ -271,6 +271,35 @@ db.version(1).stores({
 });
 db.version(2).stores({
   observations: 'localId, createdAt, category, subjectCommonName, backendId',
+  trips: 'localTripId, startedAt, backendId',
+  kv: 'key',
+  logs: '++id, timestamp, level'
+});
+// v3: canonical storage identity is the backend record id. The legacy observations store
+// keyed by localId collided when distinct records shared a localId, so a new store is
+// created and legacy rows are copied across before the old store is dropped in v4.
+db.version(3).stores({
+  observations: 'localId, createdAt, category, subjectCommonName, backendId',
+  observations_v2: 'id, localId, backendId, createdAt, category, subjectCommonName',
+  trips: 'localTripId, startedAt, backendId',
+  kv: 'key',
+  logs: '++id, timestamp, level'
+}).upgrade(async tx => {
+  let legacy = [];
+  try { legacy = await tx.table('observations').toArray(); } catch(e) { legacy = []; }
+  const migrated = [];
+  for (const row of legacy) {
+    try {
+      if (!row || typeof row !== 'object') continue;
+      const id = row.backendId || row.localId || crypto.randomUUID();
+      migrated.push({ ...row, id });
+    } catch(e) {}
+  }
+  if (migrated.length) await tx.table('observations_v2').bulkPut(migrated);
+});
+db.version(4).stores({
+  observations: null,
+  observations_v2: 'id, localId, backendId, createdAt, category, subjectCommonName',
   trips: 'localTripId, startedAt, backendId',
   kv: 'key',
   logs: '++id, timestamp, level'
@@ -492,11 +521,16 @@ function precipBand(v) {
 function normalizeRecord(row) {
   const data = row && row.data ? row.data : row;
   if (!data || typeof data !== 'object') return null;
-  const localId = data.localId || row.id || crypto.randomUUID();
+  const backendId = row && row.id ? row.id : data.backendObservationId || null;
+  // Backend id is the canonical cache key. localId is observation metadata only and is
+  // never used as unique storage identity. Imported recorder exports without a backend
+  // id fall back to localId so re-importing the same file stays idempotent.
+  const id = backendId || data.localId || crypto.randomUUID();
   return {
     ...data,
-    localId,
-    backendId: row && row.id ? row.id : data.backendObservationId || null,
+    id,
+    localId: data.localId || id,
+    backendId,
     createdAt: toMillis(data.createdAt) || Date.now(),
     startedAt: toMillis(data.startedAt) || toMillis(data.createdAt) || Date.now(),
     stoppedAt: toMillis(data.stoppedAt) || null,
@@ -516,7 +550,7 @@ function normalizeTrip(row) {
 }
 
 async function loadCache() {
-  observations = await db.observations.orderBy('createdAt').toArray();
+  observations = await db.observations_v2.orderBy('createdAt').toArray();
   trips = await db.trips.orderBy('startedAt').toArray();
   $('cache-pill').textContent = observations.length + ' cached obs';
   $('cache-pill').className = 'pill ' + (observations.length ? 'good' : 'warn');
@@ -528,14 +562,19 @@ async function loadCache() {
 async function saveDataset(obsRows, tripRows, source) {
   const obs = obsRows.map(normalizeRecord).filter(Boolean);
   const tripList = tripRows.map(normalizeTrip).filter(Boolean);
-  await db.transaction('rw', db.observations, db.trips, db.kv, async () => {
-    await db.observations.clear();
+  await db.transaction('rw', db.observations_v2, db.trips, db.kv, async () => {
+    await db.observations_v2.clear();
     await db.trips.clear();
-    if (obs.length) await db.observations.bulkPut(obs);
+    if (obs.length) await db.observations_v2.bulkPut(obs);
     if (tripList.length) await db.trips.bulkPut(tripList);
     await db.kv.put({ key: 'lastLoad', value: { at: Date.now(), source, obs: obs.length, trips: tripList.length } });
   });
-  logInfo('Dataset saved', { source, observations: obs.length, trips: tripList.length });
+  const stored = await db.observations_v2.count();
+  if (stored !== obs.length) {
+    logWarn('Stored observation count differs from fetched count', { fetched: obs.length, stored });
+  } else {
+    logInfo('Dataset saved', { source, observations: obs.length, trips: tripList.length });
+  }
   await loadCache();
 }
 function showAuthState() {
@@ -887,7 +926,7 @@ function wireEvents() {
   $('pull-backend').addEventListener('click', pullBackend);
   $('clear-cache').addEventListener('click', async () => {
     if (!confirm('Clear cached analysis data in this browser?')) return;
-    await db.observations.clear();
+    await db.observations_v2.clear();
     await db.trips.clear();
     await loadCache();
   });
