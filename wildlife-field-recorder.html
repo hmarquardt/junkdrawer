@@ -6017,8 +6017,9 @@ async function uploadPhoto(photo) {
   const url = filesUrl();
   const ext = photo.mimeType.includes('png') ? '.png' : photo.mimeType.includes('webp') ? '.webp' : '.jpg';
   const baseType = (photo.mimeType || 'image/jpeg').split(';')[0].trim();
+  const fileCreateId = photo.backendFileCreateId || (photo.backendFileCreateId = uuid());
   try {
-    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': baseType, 'X-Filename': (photo.originalFilename || 'photo') + ext, 'X-File-Id': photo.localPhotoId, 'X-Record-Id': obs.backendObservationId, 'X-Resource': settings.observationsResource }), body: rec.blob });
+    const r = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': baseType, 'X-Filename': (photo.originalFilename || 'photo') + ext, 'X-File-Id': fileCreateId, 'X-Record-Id': obs.backendObservationId, 'X-Resource': settings.observationsResource }), body: rec.blob });
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
     photo.backendFileId = data.id || null;
@@ -6678,7 +6679,8 @@ async function submitObservation(obs) {
         const furl = filesUrl();
         const ext = audioRec.mimeType.includes('mp4') ? '.m4a' : audioRec.mimeType.includes('ogg') ? '.ogg' : audioRec.mimeType.includes('wav') ? '.wav' : '.webm';
         const baseType = (audioRec.mimeType || 'application/octet-stream').split(';')[0].trim();
-        const ar = await fetch(furl, { method: 'POST', headers: authHeaders({ 'Content-Type': baseType, 'X-Filename': 'audio' + ext, 'X-File-Id': obs.audioBlobId, 'X-Record-Id': obs.backendObservationId, 'X-Resource': settings.observationsResource }), body: audioRec.blob });
+        const audioFileId = obs.audioBackendFileCreateId || (obs.audioBackendFileCreateId = uuid());
+        const ar = await fetch(furl, { method: 'POST', headers: authHeaders({ 'Content-Type': baseType, 'X-Filename': 'audio' + ext, 'X-File-Id': audioFileId, 'X-Record-Id': obs.backendObservationId, 'X-Resource': settings.observationsResource }), body: audioRec.blob });
         if (ar.ok) {
           const ad = await ar.json();
           const fid = ad.id || null;
@@ -7819,6 +7821,7 @@ function normalizeServerRecord(item) {
   if (item.id && !rec.id) rec.id = item.id;
   if (item.backendId && !rec.backendId) rec.backendId = item.backendId;
   if (!rec.backendId && rec.id) rec.backendId = rec.id;
+  if (!rec.backendObservationId && rec.id) rec.backendObservationId = rec.id;
   return rec;
 }
 
@@ -7988,7 +7991,7 @@ function flattenObservation(obs) {
     source: obs.localId ? 'local' : 'server',
     tripLocalId: obs.tripLocalId || null,
     backendTripId: obs.backendTripId || null,
-    backendObservationId: obs.backendObservationId || null
+    backendObservationId: obs.backendObservationId || obs.backendId || null
   };
 }
 
