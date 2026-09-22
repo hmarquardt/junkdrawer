@@ -203,6 +203,13 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   button.danger { border-color: rgba(255, 107, 107, 0.5); color: var(--danger); }
   button.danger:hover:not(:disabled) { background: rgba(255, 107, 107, 0.14); border-color: var(--danger); }
 
+  /* Float Timer toggle: reflects whether the always-on-top compact window is open. */
+  #floatTimerBtn[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
@@ -316,8 +323,10 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     <div class="toolbar" role="group" aria-label="Dashboard controls">
       <button type="button" id="pauseAllBtn">Pause All</button>
       <button type="button" id="resumeAllBtn">Resume All</button>
+      <button type="button" id="floatTimerBtn" aria-pressed="false" title="Open an always-on-top floating countdown for the timer due next">Float Timer</button>
       <button type="button" id="addTimerBtn" class="primary">+ Add Timer</button>
     </div>
+    <p class="total" id="floatNote" role="status" hidden></p>
   </div>
 
   <div class="empty" id="emptyState" hidden>
@@ -399,10 +408,11 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 </main>
 
 <div class="sr-only" id="liveRegion" aria-live="polite"></div>
+<div class="sr-only" id="floatHint">Floating timers need Chrome&rsquo;s Document Picture-in-Picture API (Chrome 116 or newer).</div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.08.26.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.08.26.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Time to Click · version 2026.08.26.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.22.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.22.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Time to Click · version 2026.09.22.1
 </footer>
 
 <script>
@@ -579,6 +589,8 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   var emptyAddBtn = $('emptyAddBtn');
   var pauseAllBtn = $('pauseAllBtn');
   var resumeAllBtn = $('resumeAllBtn');
+  var floatTimerBtn = $('floatTimerBtn');
+  var floatNote = $('floatNote');
 
   var timerDialog = $('timerDialog');
   var timerForm = $('timerForm');
@@ -964,6 +976,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
       else if (t.state === 'paused') { updateCardDynamic(t, now); }
     });
     updateDocumentTitle(now);
+    refreshCompact();
     if (!anyRunning) stopHeartbeatIfIdle();
   }
 
@@ -976,6 +989,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     due.forEach(function (t) {
       t.remindersCompleted += 1;
       enqueueAlarm(t);
+      notifyCompactExpiration(t);
       armNextInterval(t, now);
     });
     saveTimers();
@@ -1008,6 +1022,445 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     }
   }
 
+  // -------------------------------------------------------------------
+  // Compact / Float Timer (Document Picture-in-Picture). A tiny always-on-top
+  // presentation of the SAME timer state: it owns no timers, no scheduler and
+  // no alarm logic. It picks its timer with the existing soonestRunning(),
+  // derives remaining time from that timer's absolute targetTimestamp, and
+  // renders from the existing `timers` array. Expiration, rearming, speech,
+  // chime, notifications, reminder counts and persistence stay in the engine
+  // above. The PiP window may own a render-only refresh interval so its visible
+  // countdown stays smooth while the full window is minimized.
+  // -------------------------------------------------------------------
+  var COMPACT_WIDTH = 260;
+  var COMPACT_HEIGHT = 80;
+  var COMPACT_REFRESH_MS = 250;   // PiP-owned and render-only: it expires nothing
+  var COMPACT_ALARM_MS = 4000;    // transient "this timer just fired" indication
+
+  // Document-level reset for the PiP document only. The component rules below
+  // are self-contained (no document-level selectors), so the identical surface
+  // can also be mounted in-page by the non-visual automated-test probe.
+  var COMPACT_DOC_CSS = [
+    'html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;',
+    '  background: #0a0f1c; color: #e8eef8;',
+    "  font: 400 0.8rem/1.25 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    '  -webkit-font-smoothing: antialiased; }'
+  ].join('\n');
+
+  // Only the CSS the compact surface actually needs — no clone of the main
+  // stylesheet: Time to Click colors, tabular numerals, truncation, and
+  // reduced-motion handling.
+  var COMPACT_CSS = [
+    '.ttc-compact {',
+    '  --ttc-border: #22304e; --ttc-text: #e8eef8; --ttc-muted: #93a4c0; --ttc-accent: #5b8cff;',
+    '  box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;',
+    '  gap: 2px; width: 100%; height: 100%; min-width: 0; overflow: hidden;',
+    '  padding: 6px 10px; border: 1px solid transparent; background: #0a0f1c; color: var(--ttc-text);',
+    "  font: 400 0.8rem/1.25 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    '  transition: border-color 0.25s ease, background-color 0.25s ease;',
+    '}',
+    '.ttc-compact *, .ttc-compact *::before, .ttc-compact *::after { box-sizing: border-box; }',
+    '.ttc-compact-row { display: flex; align-items: center; gap: 6px; min-width: 0; }',
+    '.ttc-compact-title {',
+    '  flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;',
+    '  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; color: var(--ttc-muted);',
+    '}',
+    '.ttc-compact-restore {',
+    '  flex: 0 0 auto; appearance: none; margin: 0; padding: 0 5px;',
+    '  border: 1px solid var(--ttc-border); border-radius: 6px;',
+    '  background: rgba(255, 255, 255, 0.04); color: var(--ttc-muted); cursor: pointer;',
+    "  font: 600 0.75rem/1.35 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    '  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;',
+    '}',
+    '.ttc-compact-restore:hover { color: var(--ttc-text); border-color: var(--ttc-accent); background: rgba(91, 140, 255, 0.16); }',
+    '.ttc-compact-restore:focus-visible { outline: 2px solid #a8c1ff; outline-offset: 1px; }',
+    '.ttc-compact-countdown {',
+    "  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;",
+    '  font-variant-numeric: tabular-nums; font-size: 1.75rem; font-weight: 700; letter-spacing: 0.03em;',
+    '  line-height: 1.05; text-align: center; white-space: nowrap; overflow: hidden;',
+    '}',
+    '.ttc-compact[data-mode="paused"] .ttc-compact-countdown,',
+    '.ttc-compact[data-mode="empty"] .ttc-compact-countdown { color: var(--ttc-muted); }',
+    '.ttc-compact-meta {',
+    '  display: flex; align-items: center; justify-content: center; gap: 4px;',
+    '  font-size: 0.68rem; letter-spacing: 0.04em; color: var(--ttc-muted);',
+    '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;',
+    '}',
+    '.ttc-compact-meta-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }',
+    '.ttc-compact-bell[hidden] { display: none; }',
+    '@keyframes ttcCompactPulse {',
+    '  0%, 100% { box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.35); }',
+    '  50% { box-shadow: inset 0 0 22px rgba(91, 140, 255, 0.5); }',
+    '}',
+    '.ttc-compact[data-alarm="true"] {',
+    '  border-color: var(--ttc-accent); background: rgba(91, 140, 255, 0.1);',
+    '  animation: ttcCompactPulse 0.9s ease-in-out infinite;',
+    '}',
+    '.ttc-compact[data-alarm="true"] .ttc-compact-countdown { color: var(--ttc-accent); }',
+    '@media (prefers-reduced-motion: reduce) {',
+    '  .ttc-compact, .ttc-compact-restore { animation: none !important; transition: none !important; }',
+    '  .ttc-compact[data-alarm="true"] { box-shadow: inset 0 0 22px rgba(91, 140, 255, 0.5); }',
+    '}'
+  ].join('\n');
+
+  // Live compact presentation state. `compactRefs` is the surface currently on
+  // screen: the Document PiP document when the floating window is open, or the
+  // in-page probe mounted by automated tests. Both are built and rendered by
+  // the same functions below.
+  var compactRefs = null;
+  var compactWindow = null;        // the live Document PiP window, when open
+  var compactProbe = null;         // in-page probe host (automated tests only)
+  var compactRefreshHandle = null;
+  var compactRefreshRealm = null;
+  var compactAlarmUntil = 0;       // until when the display shows the "just fired" state
+  var compactShownId = null;       // timer id the compact display is currently showing
+
+  function supportsDocumentPip() {
+    // 'documentPictureInPicture' in window is the documented signal;
+    // requestWindow is what we actually call, so require both and never throw.
+    try {
+      return ('documentPictureInPicture' in window)
+        && !!window.documentPictureInPicture
+        && typeof window.documentPictureInPicture.requestWindow === 'function';
+    } catch (e) { return false; }
+  }
+
+  function isCompactOpen() {
+    return !!(compactWindow && !compactWindow.closed && compactRefs);
+  }
+
+  // Compact display state, derived entirely from the existing `timers` array
+  // through the same soonestRunning() the page title uses: no separate
+  // "selected timer", no independent countdown.
+  function compactViewState(now) {
+    var soonest = soonestRunning(now);
+    if (soonest) {
+      var remaining = Math.max(0, soonest.targetTimestamp - now);
+      var active = countRunning();
+      return {
+        mode: 'running',
+        id: soonest.id,
+        title: shortHead(soonest.prompt),
+        fullTitle: soonest.prompt,
+        countdown: formatClock(Math.ceil(remaining / 1000)),
+        meta: active + (active === 1 ? ' timer active' : ' timers active')
+      };
+    }
+    var paused = 0;
+    timers.forEach(function (t) { if (t.state === 'paused') paused += 1; });
+    if (paused > 0) {
+      return {
+        mode: 'paused',
+        id: null,
+        title: 'All timers paused',
+        fullTitle: 'All timers paused',
+        countdown: '--:--',
+        meta: paused + (paused === 1 ? ' timer paused' : ' timers paused')
+      };
+    }
+    return {
+      mode: 'empty',
+      id: null,
+      title: 'No active timer',
+      fullTitle: 'No active timer',
+      countdown: '--:--',
+      meta: ''
+    };
+  }
+
+  // The compact surface is built from scratch — no dashboard card is moved,
+  // cloned or restyled — so it can be created inside any document.
+  function buildCompactDom(doc) {
+    var root = doc.createElement('div');
+    root.className = 'ttc-compact';
+    root.setAttribute('data-mode', 'empty');
+    root.setAttribute('data-alarm', 'false');
+    root.setAttribute('role', 'group');
+    root.setAttribute('aria-label', 'Compact Time to Click timer');
+
+    var row = doc.createElement('div');
+    row.className = 'ttc-compact-row';
+
+    var titleEl = doc.createElement('span');
+    titleEl.className = 'ttc-compact-title';
+    titleEl.id = 'ttcCompactTitle';
+    titleEl.textContent = 'No active timer';
+
+    var restoreBtn = doc.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.className = 'ttc-compact-restore';
+    restoreBtn.textContent = '↗';
+    restoreBtn.setAttribute('aria-label', 'Restore full Time to Click');
+    restoreBtn.title = 'Restore full Time to Click';
+    // This listener belongs to THIS window's realm, so `window` inside it is
+    // the full Time to Click window that owns the floating view.
+    restoreBtn.addEventListener('click', restoreFromCompact);
+
+    row.appendChild(titleEl);
+    row.appendChild(restoreBtn);
+
+    var countdownEl = doc.createElement('div');
+    countdownEl.className = 'ttc-compact-countdown';
+    countdownEl.setAttribute('role', 'timer');
+    countdownEl.setAttribute('aria-labelledby', 'ttcCompactTitle');
+    countdownEl.textContent = '--:--';
+
+    var metaEl = doc.createElement('div');
+    metaEl.className = 'ttc-compact-meta';
+    var bellEl = doc.createElement('span');
+    bellEl.className = 'ttc-compact-bell';
+    bellEl.textContent = '🔔';
+    bellEl.hidden = true;
+    bellEl.setAttribute('aria-hidden', 'true');
+    var metaTextEl = doc.createElement('span');
+    metaTextEl.className = 'ttc-compact-meta-text';
+    metaEl.appendChild(bellEl);
+    metaEl.appendChild(metaTextEl);
+
+    root.appendChild(row);
+    root.appendChild(countdownEl);
+    root.appendChild(metaEl);
+
+    return {
+      root: root, title: titleEl, restore: restoreBtn,
+      countdown: countdownEl, meta: metaTextEl, bell: bellEl,
+      style: null
+    };
+  }
+
+  // Writes one derived compact state into the live surface. It samples no clock
+  // of its own: the caller passes the same `now` used everywhere else.
+  function applyCompactState(refs, state, now) {
+    var alarm = typeof now === 'number' && now < compactAlarmUntil;
+    refs.root.setAttribute('data-mode', state.mode);
+    refs.root.setAttribute('data-alarm', alarm ? 'true' : 'false');
+    refs.bell.hidden = !alarm;
+    refs.title.textContent = state.title;
+    refs.title.title = state.fullTitle;
+    refs.countdown.textContent = state.countdown;
+    refs.meta.textContent = state.meta;
+  }
+
+  function restoreFromCompact() {
+    // Focus the originating window, then tear the floating view down (closing
+    // the PiP window returns focus to this window as well).
+    try { window.focus(); } catch (e) {}
+    closeCompactWindow();
+  }
+
+  // Creates the compact styles + DOM for one document. `withDocReset` is only
+  // true for the standalone PiP document; the in-page probe uses the same
+  // component rules, so what the tests measure is what the widget looks like.
+  function createCompactSurface(doc, withDocReset) {
+    var style = doc.createElement('style');
+    style.className = 'ttc-compact-style';
+    style.textContent = withDocReset ? (COMPACT_DOC_CSS + '\n' + COMPACT_CSS) : COMPACT_CSS;
+    doc.head.appendChild(style);
+    var refs = buildCompactDom(doc);
+    refs.style = style;
+    return refs;
+  }
+
+  function attachCompactSurface(refs, parent) {
+    parent.appendChild(refs.root);
+    compactRefs = refs;
+    compactShownId = null;
+    compactAlarmUntil = 0;
+    renderCompactWindow(Date.now());
+  }
+
+  function detachCompactSurface(refs) {
+    compactRefs = null;
+    compactShownId = null;
+    compactAlarmUntil = 0;
+    if (!refs) return;
+    if (refs.root.parentNode) refs.root.parentNode.removeChild(refs.root);
+    if (refs.style && refs.style.parentNode) refs.style.parentNode.removeChild(refs.style);
+  }
+
+  // The single compact renderer: recomputes the soonest running timer and
+  // rewrites the compact DOM from it. A cheap no-op when nothing is floating.
+  function renderCompactWindow(now) {
+    if (!compactRefs) return;
+    if (compactWindow && (compactWindow.closed || !compactWindow.document)) {
+      // Window vanished without a pagehide (crash/replace): clean up quietly.
+      unmountCompactPresentation(false);
+      return;
+    }
+    var stamp = typeof now === 'number' ? now : Date.now();
+    var state = compactViewState(stamp);
+    applyCompactState(compactRefs, state, stamp);
+    compactShownId = state.id;
+  }
+
+  // For state transitions that already refresh the dashboard.
+  function refreshCompact() {
+    if (!compactRefs) return;
+    renderCompactWindow(Date.now());
+  }
+
+  function startCompactRefresh() {
+    if (compactRefreshHandle !== null || !compactWindow) return;
+    var pulse = function () { renderCompactWindow(Date.now()); };
+    try {
+      // Timers owned by the visible PiP window are not throttled the way a
+      // hidden page's are, so the countdown keeps ticking while the full window
+      // is minimized. Render-only: it never expires, speaks, chimes, notifies
+      // or persists anything.
+      compactRefreshHandle = compactWindow.setInterval(pulse, COMPACT_REFRESH_MS);
+      compactRefreshRealm = compactWindow;
+    } catch (e) {
+      compactRefreshHandle = setInterval(pulse, COMPACT_REFRESH_MS);
+      compactRefreshRealm = window;
+    }
+  }
+
+  function stopCompactRefresh() {
+    if (compactRefreshHandle === null) return;
+    var realm = compactRefreshRealm || window;
+    try { realm.clearInterval(compactRefreshHandle); } catch (e) {
+      try { window.clearInterval(compactRefreshHandle); } catch (e2) {}
+    }
+    compactRefreshHandle = null;
+    compactRefreshRealm = null;
+  }
+
+  function unmountCompactPresentation(closeWindow) {
+    stopCompactRefresh();
+    var pipWin = compactWindow;
+    compactWindow = null;
+    if (pipWin) {
+      try { pipWin.removeEventListener('pagehide', handleCompactPageHide); } catch (e) {}
+    }
+    detachCompactSurface(compactRefs);
+    if (compactProbe) {
+      if (compactProbe.host.parentNode) compactProbe.host.parentNode.removeChild(compactProbe.host);
+      compactProbe = null;
+    }
+    if (closeWindow && pipWin && !pipWin.closed) {
+      try { pipWin.close(); } catch (e) {}
+    }
+    updateFloatButton();
+  }
+
+  function closeCompactWindow() {
+    // Closing the floating view never touches timer state.
+    unmountCompactPresentation(true);
+  }
+
+  function handleCompactPageHide() {
+    // The user (or Chrome) closed the floating window: drop every PiP-specific
+    // reference, interval and listener and let all timers keep running.
+    unmountCompactPresentation(false);
+  }
+
+  function openCompactWindow() {
+    // Chrome only grants a PiP window from transient user activation, so this
+    // stays synchronous inside the click handler — nothing is awaited before
+    // requestWindow() — and it never opens a second window.
+    if (isCompactOpen()) {
+      try { compactWindow.focus(); } catch (e) {}
+      return true;
+    }
+    if (!supportsDocumentPip()) {
+      showFloatNote('Floating timers need Chrome’s Document Picture-in-Picture API (Chrome 116 or newer).');
+      updateFloatButton();
+      return false;
+    }
+    try {
+      window.documentPictureInPicture.requestWindow({
+        width: COMPACT_WIDTH,
+        height: COMPACT_HEIGHT,
+        // The widget provides its own restore control, so keep Chrome's UI out.
+        disallowReturnToOpener: true,
+        // Let Chrome remember where the user last placed the window.
+        preferInitialWindowPlacement: false
+      }).then(function (pipWin) {
+        if (!pipWin) return;
+        unmountCompactPresentation(false);   // never stack presentations
+        compactWindow = pipWin;
+        pipWin.document.title = 'Time to Click';
+        attachCompactSurface(createCompactSurface(pipWin.document, true), pipWin.document.body);
+        pipWin.addEventListener('pagehide', handleCompactPageHide);
+        startCompactRefresh();
+        hideFloatNote();
+        updateFloatButton();
+      }).catch(function () {
+        compactWindow = null;
+        showFloatNote('The floating timer window could not be opened. Your timers keep running here.');
+        updateFloatButton();
+      });
+    } catch (e) {
+      compactWindow = null;
+      showFloatNote('The floating timer window could not be opened. Your timers keep running here.');
+      updateFloatButton();
+      return false;
+    }
+    return true;
+  }
+
+  function showFloatNote(message) {
+    floatNote.textContent = message;
+    floatNote.hidden = false;
+  }
+
+  function hideFloatNote() {
+    floatNote.textContent = '';
+    floatNote.hidden = true;
+  }
+
+  function updateFloatButton() {
+    var supported = supportsDocumentPip();
+    var open = isCompactOpen();
+    floatTimerBtn.disabled = !supported;
+    floatTimerBtn.textContent = open ? 'Close Float' : 'Float Timer';
+    floatTimerBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
+    if (supported) {
+      floatTimerBtn.title = open
+        ? 'Close the always-on-top compact timer'
+        : 'Open an always-on-top floating countdown for the timer due next';
+      floatTimerBtn.removeAttribute('aria-describedby');
+    } else {
+      // Graceful degradation: no error and no dead-end click — the reason is in
+      // the tooltip and available to assistive technology.
+      floatTimerBtn.title = "Floating timers need Chrome's Document Picture-in-Picture API (Chrome 116 or newer).";
+      floatTimerBtn.setAttribute('aria-describedby', 'floatHint');
+    }
+  }
+
+  // Called from the existing expiration path only, for a timer that just fired:
+  // a brief visual indication in the floating view and nothing else. Speech,
+  // chime, notification, reminder counts and rearming stay exactly where they
+  // were — there is still exactly one alarm per expiration.
+  function notifyCompactExpiration(timer) {
+    if (!compactRefs) return;
+    if (compactShownId === timer.id) compactAlarmUntil = Date.now() + COMPACT_ALARM_MS;
+  }
+
+  // Automated-test helper only: mounts the identical compact surface (same CSS,
+  // same DOM builder, same renderer) inside this document so compact rendering
+  // can be asserted without an OS-level PiP window. Invisible, aria-hidden,
+  // off-canvas, pointer-inert, and never used by the UI.
+  function mountCompactProbe() {
+    if (compactProbe) return true;
+    var host = document.createElement('div');
+    host.id = 'ttcCompactProbe';
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position: fixed; left: -10000px; top: 0; width: ' + COMPACT_WIDTH
+      + 'px; height: ' + COMPACT_HEIGHT + 'px; overflow: hidden; opacity: 0; pointer-events: none;';
+    document.body.appendChild(host);
+    compactProbe = { host: host };
+    attachCompactSurface(createCompactSurface(document, false), host);
+    renderCompactWindow(Date.now());
+    return true;
+  }
+
+  // Toolbar wiring: one control opens the floating view and closes it again.
+  floatTimerBtn.addEventListener('click', function () {
+    if (isCompactOpen()) closeCompactWindow();
+    else openCompactWindow();
+  });
+
   function flashCard(timer) {
     var el = cardEls[timer.id];
     if (!el) return;
@@ -1034,6 +1487,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     saveTimers();
     updateCardDynamic(timer, Date.now());
     updateDashboard();
+    refreshCompact();
     if (countRunning() > 0) startHeartbeat();
     updateWakeLockState();
     announce('Started: ' + shortHead(timer.prompt) + '. Next reminder in ' + formatClock(timer.currentIntervalSeconds) + '.');
@@ -1047,6 +1501,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     saveTimers();
     updateCardDynamic(timer, Date.now());
     updateDashboard();
+    refreshCompact();
     stopHeartbeatIfIdle();
     updateWakeLockState();
     announce('Paused: ' + shortHead(timer.prompt) + '.');
@@ -1059,6 +1514,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     saveTimers();
     updateCardDynamic(timer, Date.now());
     if (countRunning() > 0) startHeartbeat();
+    refreshCompact();
     updateWakeLockState();
     announce('Resumed: ' + shortHead(timer.prompt) + '.');
   }
@@ -1069,6 +1525,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     saveTimers();
     updateCardDynamic(timer, Date.now());
     if (countRunning() > 0) startHeartbeat();
+    refreshCompact();
     announce('New interval for ' + shortHead(timer.prompt) + ': ' + formatClock(timer.currentIntervalSeconds) + '.');
   }
 
@@ -1079,6 +1536,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     if (idx >= 0) timers.splice(idx, 1);
     saveTimers();
     updateDashboard();
+    refreshCompact();
     stopHeartbeatIfIdle();
     updateWakeLockState();
     announce('Deleted timer: ' + shortHead(timer.prompt) + '.');
@@ -1492,6 +1950,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
         saveTimers();
         updateCardDynamic(timer, Date.now());
         updateDashboard();
+        refreshCompact();
         announce('Updated timer: ' + shortHead(timer.prompt) + '.');
       }
     } else {
@@ -1551,6 +2010,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     saveTimers();
     timers.forEach(function (t) { updateCardDynamic(t, now); });
     updateDashboard();
+    refreshCompact();
     stopHeartbeatIfIdle();
     updateWakeLockState();
     announce('Paused all timers.');
@@ -1567,6 +2027,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     saveTimers();
     timers.forEach(function (t) { updateCardDynamic(t, now); });
     updateDashboard();
+    refreshCompact();
     if (countRunning() > 0) startHeartbeat();
     updateWakeLockState();
     announce('Resumed all timers.');
@@ -1671,7 +2132,9 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     timers = loadTimers();
     var overdueTimers = restoreRuntime();
     bindSettingsToUI();
+    updateFloatButton();
     rebuildGrid();
+    refreshCompact();
     refreshVoices();
 
     // Cards now exist, so restore-time alarms can safely flash them.
@@ -1740,6 +2203,18 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     setSpeechRate: function (r) { settings.speechRate = clampNumber(r, 0.5, 2, 1); saveSettings(); },
     tick: function () { tick(); },
     find: findTimer,
+    // Compact / Float Timer surface (non-visual). These are the same functions
+    // the Document PiP window uses, so compact rendering is testable without an
+    // OS-level PiP window: compactProbeMount() mounts the identical surface
+    // off-canvas, inside this document, for deterministic assertions.
+    compactSupported: function () { return supportsDocumentPip(); },
+    compactOpen: function () { return isCompactOpen(); },
+    compactView: function () { return compactViewState(Date.now()); },
+    compactRender: function () { renderCompactWindow(Date.now()); },
+    compactProbeMount: function () { return mountCompactProbe(); },
+    compactProbeUnmount: function () { if (compactProbe) unmountCompactPresentation(false); },
+    openCompact: function () { return openCompactWindow(); },
+    closeCompact: function () { closeCompactWindow(); },
     setRemaining: function (id, ms) {
       var t = findTimer(id); if (!t) return;
       t.remainingMilliseconds = ms; t.targetTimestamp = Date.now() + ms; t.state = 'running';

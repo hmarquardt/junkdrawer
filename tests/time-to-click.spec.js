@@ -711,3 +711,383 @@ test("externally seeded data exceeding MAX_TIMERS is truncated, sanitized, and p
   await page.waitForFunction(() => Boolean(window.__TTC_TEST__) && window.__TTC_TEST__.timers().length === 100);
   expect(errors.length).toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// Compact / Float Timer (Document Picture-in-Picture) mode.
+//
+// An OS-level Document PiP window cannot be exercised reliably from this
+// file:// harness, so these tests mount the identical compact surface — same
+// CSS, same DOM builder, same renderer the PiP document uses — through
+// window.__TTC_TEST__.compactProbeMount(). The probe is off-canvas, aria-hidden
+// and pointer-inert; the restore control is activated with a real DOM click.
+// What is asserted is therefore the production rendering path, not a stand-in.
+// ---------------------------------------------------------------------------
+
+const COMPACT_PROBE = "#ttcCompactProbe";
+const COMPACT_ROOT = `${COMPACT_PROBE} .ttc-compact`;
+
+function clockToSeconds(clock) {
+  const m = /^(\d+):(\d\d)$/.exec(String(clock));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// A snapshot of the fields closing/opening compact mode must never disturb.
+function timerSnapshot(page) {
+  return page.evaluate(() => window.__TTC_TEST__.timers().map(t => ({
+    id: t.id, prompt: t.prompt, state: t.state,
+    minMinutes: t.minMinutes, maxMinutes: t.maxMinutes,
+    currentIntervalSeconds: t.currentIntervalSeconds,
+    targetTimestamp: t.targetTimestamp,
+    remindersCompleted: t.remindersCompleted
+  })));
+}
+
+async function mountCompactProbe(page) {
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactProbeMount())).toBe(true);
+  await expect(page.locator(COMPACT_PROBE)).toHaveCount(1);
+}
+
+async function readCompactRoot(page) {
+  return page.evaluate((sel) => {
+    const root = document.querySelector(sel);
+    if (!root) return null;
+    const title = root.querySelector(".ttc-compact-title");
+    return {
+      mode: root.dataset.mode,
+      alarm: root.dataset.alarm,
+      title: title.textContent,
+      titleTooltip: title.title,
+      countdown: root.querySelector(".ttc-compact-countdown").textContent,
+      meta: root.querySelector(".ttc-compact-meta-text").textContent,
+      restoreLabel: root.querySelector(".ttc-compact-restore").getAttribute("aria-label"),
+      bellHidden: root.querySelector(".ttc-compact-bell").hidden
+    };
+  }, COMPACT_ROOT);
+}
+
+test("Float Timer control reflects Document PiP support and degrades gracefully without it", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+
+  // Chrome exposes the API to this harness, so the control is live and closed.
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactSupported())).toBe(true);
+  await expect(page.locator("#floatTimerBtn")).toBeEnabled();
+  await expect(page.locator("#floatTimerBtn")).toHaveText("Float Timer");
+  await expect(page.locator("#floatTimerBtn")).toHaveAttribute("aria-pressed", "false");
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactOpen())).toBe(false);
+
+  // The same page with the API absent: it still loads, explains itself, and
+  // never throws or leaves a dead-end click.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "documentPictureInPicture", { configurable: true, get: () => undefined });
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+  expect(await page.evaluate(() => "documentPictureInPicture" in window)).toBe(true);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactSupported())).toBe(false);
+  await expect(page.locator("#floatTimerBtn")).toBeDisabled();
+  expect(await page.locator("#floatTimerBtn").getAttribute("title")).toMatch(/Picture-in-Picture/);
+  expect(await page.locator("#floatTimerBtn").getAttribute("aria-describedby")).toBe("floatHint");
+  await expect(page.locator("#floatHint")).toHaveText(/Document Picture-in-Picture/);
+
+  // Asking for the floating view anyway fails softly, with a visible reason.
+  expect(await page.evaluate(() => window.__TTC_TEST__.openCompact())).toBe(false);
+  await expect(page.locator("#floatNote")).toBeVisible();
+  await expect(page.locator("#floatNote")).toContainText("Document Picture-in-Picture");
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactView().mode)).toBe("empty");
+
+  // Timers themselves are unaffected without the API.
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "No PiP needed", minMinutes: 5, maxMinutes: 5 }));
+  await expect(page.locator(".timer-card")).toHaveCount(1);
+  await expect(page.locator(".timer-card .countdown")).toHaveText("05:00");
+  expect(errors.length).toBe(0);
+});
+
+test("compact mode shows the soonest running timer and derives its countdown from the target timestamp", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Alpha task", minMinutes: 5, maxMinutes: 5 }));
+  const b = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Bravo task", minMinutes: 5, maxMinutes: 5 }));
+  const c = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Charlie task", minMinutes: 5, maxMinutes: 5 }));
+  // Alpha is created first but is NOT the soonest, so nothing can pass by order.
+  await page.evaluate(id => window.__TTC_TEST__.setRemaining(id, 240000), a);
+  await page.evaluate(id => window.__TTC_TEST__.setRemaining(id, 90000), b);
+  await page.evaluate(id => window.__TTC_TEST__.setRemaining(id, 300000), c);
+  await mountCompactProbe(page);
+
+  const view = await page.evaluate(() => window.__TTC_TEST__.compactView());
+  expect(view.id).toBe(b);
+  expect(view.mode).toBe("running");
+  expect(view.meta).toBe("3 timers active");
+
+  const root = await readCompactRoot(page);
+  expect(root.title).toBe("Bravo task");
+  expect(root.countdown).toBe("01:30");
+  expect(root.meta).toBe("3 timers active");
+  expect(root.mode).toBe("running");
+  expect(root.alarm).toBe("false");
+  expect(root.bellHidden).toBe(true);
+  expect(root.restoreLabel).toBe("Restore full Time to Click");
+
+  // The surface and the page title resolve the same soonest timer from the same
+  // absolute target: one source of truth, no second clock inside compact mode.
+  await page.evaluate(() => window.__TTC_TEST__.tick());
+  const titleClock = await page.evaluate(() => document.title);
+  expect(Math.abs(clockToSeconds(titleClock.slice(0, 5)) - clockToSeconds(root.countdown))).toBeLessThanOrEqual(1);
+
+  // Rendering never mutates the model.
+  const bAfter = await page.evaluate(i => window.__TTC_TEST__.find(i), b);
+  expect(bAfter.state).toBe("running");
+  expect(bAfter.remainingMilliseconds).toBeGreaterThan(88000);
+  expect(bAfter.targetTimestamp).toBeGreaterThan(Date.now());
+
+  // Move the deadline: the countdown follows the authoritative timestamp.
+  await page.evaluate(id => window.__TTC_TEST__.setRemaining(id, 45000), b);
+  await page.evaluate(() => window.__TTC_TEST__.compactRender());
+  const shifted = await readCompactRoot(page);
+  expect(shifted.countdown).toBe("00:45");
+  expect(shifted.title).toBe("Bravo task");
+  expect(errors.length).toBe(0);
+});
+
+test("pausing the displayed timer hands compact mode to the next soonest running timer", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Alpha task", minMinutes: 5, maxMinutes: 5 }));
+  const b = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Bravo task", minMinutes: 6, maxMinutes: 6 }));
+  await mountCompactProbe(page);
+  expect((await readCompactRoot(page)).title).toBe("Alpha task");
+
+  await page.evaluate(id => window.__TTC_TEST__.pause(id), a);
+  const pausedView = await page.evaluate(() => window.__TTC_TEST__.compactView());
+  const afterPause = await readCompactRoot(page);
+  expect(pausedView.id).toBe(b);
+  expect(pausedView.mode).toBe("running");
+  expect(pausedView.meta).toBe("1 timer active");
+  expect(afterPause.title).toBe("Bravo task");
+  expect(afterPause.countdown).toMatch(/^0[56]:\d\d$/);
+  // Pausing one timer never pauses, starts or resumes anything else.
+  const aPaused = await page.evaluate(i => window.__TTC_TEST__.find(i), a);
+  expect(aPaused.state).toBe("paused");
+  expect(aPaused.remainingMilliseconds).toBeGreaterThan(290000);
+  expect((await page.evaluate(i => window.__TTC_TEST__.find(i), b)).state).toBe("running");
+
+  // Resuming hands the display back to the genuinely soonest timer.
+  await page.evaluate(id => window.__TTC_TEST__.resume(id), a);
+  expect((await readCompactRoot(page)).title).toBe("Alpha task");
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactView().id)).toBe(a);
+  expect(errors.length).toBe(0);
+});
+
+test("expiration and rearm switch compact mode to the newly soonest timer with a single alarm", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Alpha task", minMinutes: 5, maxMinutes: 5 }));
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Bravo task", minMinutes: 5, maxMinutes: 5 }));
+  await page.evaluate(id => window.__TTC_TEST__.setRemaining(id, 2000), a);
+  await page.evaluate(() => window.__TTC_TEST__.setRemaining(window.__TTC_TEST__.timers()[1].id, 60000));
+  await mountCompactProbe(page);
+  expect((await readCompactRoot(page)).title).toBe("Alpha task");
+
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), a);
+  // Alpha rearmed for a fresh 5-minute interval, so Bravo is due next.
+  const root = await readCompactRoot(page);
+  expect(root.title).toBe("Bravo task");
+  expect(root.mode).toBe("running");
+  expect(root.meta).toBe("2 timers active");
+  // The indication is visual only, and exactly one alarm ran.
+  expect(root.alarm).toBe("true");
+  expect(root.bellHidden).toBe(false);
+  expect((await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.remindersCompleted))).sort()).toEqual([0, 1]);
+
+  // The indication clears by itself while the countdown keeps rendering.
+  await page.waitForFunction(sel => document.querySelector(sel).dataset.alarm === "false", COMPACT_ROOT, { timeout: 10000 });
+  const cleared = await readCompactRoot(page);
+  expect(cleared.bellHidden).toBe(true);
+  expect(cleared.title).toBe("Bravo task");
+  const clearedSeconds = clockToSeconds(cleared.countdown);
+  expect(clearedSeconds).toBeGreaterThan(50);
+  expect(clearedSeconds).toBeLessThanOrEqual(60);
+
+  // Extra ticks add no alarm and no reminder: compact mode is a view only.
+  await page.evaluate(() => window.__TTC_TEST__.tick());
+  await page.evaluate(() => window.__TTC_TEST__.tick());
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(1);
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().reduce((s, t) => s + t.remindersCompleted, 0))).toBe(1);
+  expect(errors.length).toBe(0);
+});
+
+test("Pause All shows the neutral compact state and Resume All restores the soonest timer", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Alpha task", minMinutes: 5, maxMinutes: 5 }));
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Bravo task", minMinutes: 6, maxMinutes: 6 }));
+  await mountCompactProbe(page);
+  expect((await readCompactRoot(page)).mode).toBe("running");
+
+  await page.evaluate(() => window.__TTC_TEST__.pauseAll());
+  const pausedView = await page.evaluate(() => window.__TTC_TEST__.compactView());
+  const pausedRoot = await readCompactRoot(page);
+  expect(pausedView.mode).toBe("paused");
+  expect(pausedView.id).toBeNull();
+  expect(pausedRoot.mode).toBe("paused");
+  expect(pausedRoot.title).toBe("All timers paused");
+  expect(pausedRoot.countdown).toBe("--:--");
+  expect(pausedRoot.meta).toBe("2 timers paused");
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().every(t => t.state === "paused"))).toBe(true);
+
+  await page.evaluate(() => window.__TTC_TEST__.resumeAll());
+  const resumedRoot = await readCompactRoot(page);
+  expect(resumedRoot.mode).toBe("running");
+  expect(resumedRoot.title).toBe("Alpha task");
+  expect(clockToSeconds(resumedRoot.countdown)).toBeGreaterThan(290);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactView().id)).toBe(a);
+  expect(errors.length).toBe(0);
+});
+
+test("deleting the displayed timer moves compact mode to the next running timer, then to the empty state", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Alpha task", minMinutes: 5, maxMinutes: 5 }));
+  const b = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Bravo task", minMinutes: 6, maxMinutes: 6 }));
+  await mountCompactProbe(page);
+  expect((await readCompactRoot(page)).title).toBe("Alpha task");
+
+  await page.evaluate(id => window.__TTC_TEST__.deleteDirect(id), a);
+  const afterDelete = await readCompactRoot(page);
+  expect(afterDelete.title).toBe("Bravo task");
+  expect(afterDelete.mode).toBe("running");
+  expect(afterDelete.meta).toBe("1 timer active");
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactView().id)).toBe(b);
+
+  await page.evaluate(id => window.__TTC_TEST__.deleteDirect(id), b);
+  const empty = await readCompactRoot(page);
+  expect(empty.mode).toBe("empty");
+  expect(empty.title).toBe("No active timer");
+  expect(empty.countdown).toBe("--:--");
+  expect(empty.meta).toBe("");
+  // The floating view stays up (nothing was closed or started by deleting).
+  await expect(page.locator(COMPACT_PROBE)).toHaveCount(1);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactOpen())).toBe(false);
+  expect(errors.length).toBe(0);
+});
+
+test("closing compact mode leaves timer state untouched and can be reopened", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Alpha task", minMinutes: 5, maxMinutes: 5 }));
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Bravo task", minMinutes: 6, maxMinutes: 6 }));
+  await mountCompactProbe(page);
+  const before = await timerSnapshot(page);
+
+  // Real activation of the restore control: focus the full window, then close.
+  const afterRestore = await page.evaluate(() => {
+    document.querySelector("#ttcCompactProbe .ttc-compact-restore").click();
+    return {
+      probe: document.querySelectorAll("#ttcCompactProbe").length,
+      compactOpen: window.__TTC_TEST__.compactOpen(),
+      buttonText: document.getElementById("floatTimerBtn").textContent,
+      buttonPressed: document.getElementById("floatTimerBtn").getAttribute("aria-pressed")
+    };
+  });
+  expect(afterRestore.probe).toBe(0);
+  expect(afterRestore.compactOpen).toBe(false);
+  expect(afterRestore.buttonText).toBe("Float Timer");
+  expect(afterRestore.buttonPressed).toBe("false");
+  expect(await timerSnapshot(page)).toEqual(before);
+
+  // Closing again is a safe no-op; opening again works normally afterwards.
+  await page.evaluate(() => window.__TTC_TEST__.closeCompact());
+  await mountCompactProbe(page);
+  expect((await readCompactRoot(page)).mode).toBe("running");
+  await page.evaluate(() => window.__TTC_TEST__.closeCompact());
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactView().mode)).toBe("running");
+  expect(await timerSnapshot(page)).toEqual(before);
+  await page.evaluate(() => window.__TTC_TEST__.tick());
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().every(t => t.state === "running"))).toBe(true);
+  expect(errors.length).toBe(0);
+});
+
+test("long prompts cannot break the compact layout", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const long = "Please check the annotation queue and confirm every pending item before moving on with the rest of your work today";
+  await page.evaluate(p => window.__TTC_TEST__.addAndStart({ prompt: p, minMinutes: 5, maxMinutes: 5 }), long);
+  await mountCompactProbe(page);
+
+  const metrics = await page.evaluate(({ sel, prompt }) => {
+    const host = document.getElementById("ttcCompactProbe");
+    const root = document.querySelector(sel);
+    const title = root.querySelector(".ttc-compact-title");
+    const countdown = root.querySelector(".ttc-compact-countdown");
+    const box = root.getBoundingClientRect();
+    const titleStyle = getComputedStyle(title);
+    return {
+      host: [host.clientWidth, host.clientHeight, host.scrollWidth, host.scrollHeight],
+      root: [box.width, box.height],
+      titleHeight: title.offsetHeight,
+      titleClips: title.scrollWidth <= title.clientWidth,
+      textOverflow: titleStyle.textOverflow,
+      whiteSpace: titleStyle.whiteSpace,
+      shortened: title.textContent.length <= 22 && /…$/.test(title.textContent),
+      tooltipIsFullPrompt: title.title === prompt,
+      countdownBelowTitle: countdown.getBoundingClientRect().top >= title.getBoundingClientRect().bottom - 1,
+      countdownFits: countdown.scrollWidth <= countdown.clientWidth
+    };
+  }, { sel: COMPACT_ROOT, prompt: long });
+
+  // Exactly the requested viewport, with nothing spilling out of it.
+  expect(metrics.root[0]).toBeLessThanOrEqual(260);
+  expect(metrics.root[1]).toBeLessThanOrEqual(80);
+  expect(metrics.host[2]).toBeLessThanOrEqual(metrics.host[0]);
+  expect(metrics.host[3]).toBeLessThanOrEqual(metrics.host[1]);
+  // One tidy line for the name, truncation rules in place, full text on hover.
+  expect(metrics.titleHeight).toBeLessThan(24);
+  expect(metrics.textOverflow).toBe("ellipsis");
+  expect(metrics.whiteSpace).toBe("nowrap");
+  expect(metrics.shortened).toBe(true);
+  expect(metrics.tooltipIsFullPrompt).toBe(true);
+  expect(metrics.countdownBelowTitle).toBe(true);
+  expect(metrics.countdownFits).toBe(true);
+
+  // Even squeezed well below the default width, nothing overflows the surface.
+  const squeezed = await page.evaluate((sel) => {
+    const host = document.getElementById("ttcCompactProbe");
+    host.style.width = "120px";
+    window.__TTC_TEST__.compactRender();
+    const root = document.querySelector(sel);
+    const title = root.querySelector(".ttc-compact-title");
+    return {
+      host: [host.clientWidth, host.scrollWidth],
+      root: [root.clientWidth, root.scrollWidth],
+      titleClipped: title.scrollWidth > title.clientWidth
+    };
+  }, COMPACT_ROOT);
+  expect(squeezed.host[1]).toBeLessThanOrEqual(squeezed.host[0]);
+  expect(squeezed.root[1]).toBeLessThanOrEqual(squeezed.root[0]);
+  expect(squeezed.titleClipped).toBe(true);
+  expect(errors.length).toBe(0);
+});
+
+test("compact mode adds no second alarm path when two timers expire together", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Alpha task", minMinutes: 5, maxMinutes: 5 }));
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Bravo task", minMinutes: 5, maxMinutes: 5 }));
+  await mountCompactProbe(page);
+
+  await page.evaluate(() => window.__TTC_TEST__.expireAll());
+  const inline = await readCompactRoot(page);
+  expect(inline.mode).toBe("running");
+  expect(inline.alarm).toBe("true");
+
+  // Both alarms still travel the one existing serialized queue, once each.
+  await page.waitForFunction(
+    () => window.__TTC_TEST__.alarmQueueLength() === 0 && !window.__TTC_TEST__.alarmBusy(),
+    { timeout: 30000 }
+  );
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(2);
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.remindersCompleted))).toEqual([1, 1]);
+  expect(await page.evaluate(() => document.querySelector("#ttcCompactProbe .ttc-compact").dataset.mode)).toBe("running");
+  expect(errors.length).toBe(0);
+});
