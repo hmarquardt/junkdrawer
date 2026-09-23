@@ -167,18 +167,20 @@ async function installWorkflowMock(page, options = {}) {
       const facts = payload.facts || [];
       const pick = (prefix, n = 1) => facts.filter(f => f.id.startsWith(prefix)).slice(0, n).map(f => f.id);
       const anyId = pick('cand:left').length ? pick('cand:left') : [facts[0]?.id].filter(Boolean);
+      const humanLeft = options.ignoreHumanFacts ? [] : pick('human:left');
+      const humanRight = options.ignoreHumanFacts ? [] : pick('human:right');
       const aesthetics = options.aesthetics
         ? { ...options.aesthetics, source_ids: options.aesthetics.source_ids && options.aesthetics.source_ids.length ? options.aesthetics.source_ids : (pick('archive:visual').length ? pick('archive:visual') : anyId) }
         : { choice: 'About equal', basis: 'visual', rationale: 'Both use a similar layout.', confidence: 'low', source_ids: pick('archive:visual') };
       content = {
         functional_correctness: {
-          left: { choice: 'Works', rationale: 'Static markup includes the requested controls.', confidence: 'low', source_ids: anyId },
-          right: { choice: 'Partly works', rationale: 'Static markup lacks one requested control.', confidence: 'low', source_ids: pick('cand:right').length ? pick('cand:right') : anyId }
+          left: { choice: 'Works', rationale: 'Static markup includes the requested controls.', confidence: 'low', source_ids: humanLeft.length ? humanLeft : anyId },
+          right: { choice: 'Partly works', rationale: 'Static markup lacks one requested control.', confidence: 'low', source_ids: humanRight.length ? humanRight : (pick('cand:right').length ? pick('cand:right') : anyId) }
         },
         requirements_coverage: { choice: 'About equal', rationale: 'Both list the requested items.', confidence: 'low', source_ids: pick('archive:').length ? pick('archive:') : anyId },
         product_depth: { choice: 'Right', rationale: 'The right candidate lists an extra control.', confidence: 'low', source_ids: pick('cand:right').length ? pick('cand:right') : anyId },
         aesthetics,
-        overall_preference: { choice: 'Left', primary_reason: 'Functionality', optional_comment: 'The left candidate covers the requested controls in its static markup. The right candidate is missing one requested control.', rationale: 'Functional difference.', confidence: 'low', source_ids: anyId }
+        overall_preference: { choice: 'Left', primary_reason: 'Functionality', optional_comment: 'The left candidate covers the requested controls in its static markup. The right candidate is missing one requested control.', rationale: 'Functional difference.', confidence: 'low', source_ids: [...anyId, ...humanLeft, ...humanRight].slice(0, 3) }
       };
     } else if (name === 'webdev_visual_judgment') {
       content = options.visual || {
@@ -193,7 +195,7 @@ async function installWorkflowMock(page, options = {}) {
         confidence: 'medium'
       };
     } else if (name === 'webdev_workflow_evidence') {
-      content = {
+      content = options.evidence || {
         functional_correctness_left_evidence: 'The left static markup includes the requested input, Add control, and Clear control.',
         functional_correctness_right_evidence: 'The right static markup includes the input and the Add control and the list region.',
         requirements_coverage_evidence: 'Both candidates include the requested input and Add control in their static markup.',
@@ -482,6 +484,193 @@ test('writing style persists locally', async ({ page }) => {
   await openSettings(page);
   await expect(page.locator('#orStyle')).toHaveValue('Persisted style sentinel.');
   expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.styleInstruction())).toBe('Persisted style sentinel.');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- Human functional review notes ---------- */
+
+test('human functional review notes persist for left and right', async ({ page }) => {
+  const errors = await open(page);
+  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
+  await page.locator('#humanRight').fill('All obvious controls worked.');
+  await page.waitForTimeout(700);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  await expect(page.locator('#humanLeft')).toHaveValue('Upload worked, Generate worked, Export did nothing.');
+  await expect(page.locator('#humanRight')).toHaveValue('All obvious controls worked.');
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { notes: t.humanReview(), lint: t.lint().join('\n'), status: document.getElementById('humanReviewStatus').textContent };
+  });
+  expect(result.notes).toEqual({ left: 'Upload worked, Generate worked, Export did nothing.', right: 'All obvious controls worked.' });
+  expect(result.lint).not.toContain('Human functional review');
+  expect(result.status).toContain('2 note(s) supplied');
+  expect(errors).toEqual([]);
+});
+
+test('human notes feed judgment and evidence, outrank static markup, and show Human review evidence', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
+  await page.locator('#humanRight').fill('Export worked from the preview.');
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const judgment = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
+  const judgmentPayload = JSON.parse(judgment.messages[1].content);
+  expect(judgmentPayload.facts.some(f => f.id === 'human:left' && f.text.includes('Export did nothing'))).toBe(true);
+  expect(judgmentPayload.facts.some(f => f.id === 'human:right' && f.text.includes('Export worked'))).toBe(true);
+  expect(judgment.messages[0].content).toMatch(/human functional review notes/i);
+  const evidence = requests.find(r => r.response_format?.json_schema?.name === 'webdev_workflow_evidence');
+  expect(JSON.parse(evidence.messages[1].content).facts.some(f => f.id === 'human:left')).toBe(true);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      meta: t.state().analysis.fieldMeta,
+      diagnostics: t.humanDiagnostics().map(d => d.message).join('\n'),
+      badges: ['functional_correctness_left', 'functional_correctness_right', 'overall_preference_choice'].map(key => document.querySelector(`[data-result="${key}"] .basis-badge`)?.textContent || ''),
+      canonical: JSON.stringify(t.canonical())
+    };
+  });
+  expect(result.meta.functional_correctness_left.basis).toBe('human');
+  expect(result.meta.functional_correctness_right.basis).toBe('human');
+  expect(result.badges[0]).toContain('Human review evidence');
+  expect(result.badges[1]).toContain('Human review evidence');
+  expect(result.diagnostics).toContain('Conflict on Left');
+  expect(result.diagnostics).toContain('human observation is favored');
+  expect(result.canonical).not.toContain('Export did nothing');
+  expect(errors).toEqual([]);
+});
+
+test('a functional judgment that ignores supplied human notes is rejected', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page, { ignoreHumanFacts: true });
+  await configureAI(page);
+  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { warnings: t.state().analysis.warnings.join('\n'), functional: t.canonical().functional_correctness.left };
+  });
+  expect(result.warnings).toContain('must cite the supplied human functional review note');
+  expect(result.functional.choice).toBe('');
+  expect(errors).toEqual([]);
+});
+
+test('human notes never enter the webdev-sbs-v1 payload', async ({ page }) => {
+  await open(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    t.state().humanReview.left = 'sentinel human note';
+    const payload = t.canonical();
+    return { schema: payload.schema, serialized: JSON.stringify(payload), keys: Object.keys(payload).sort(), valid: t.validatePayload(payload, { complete: false }) };
+  });
+  expect(result.schema).toBe('webdev-sbs-v1');
+  expect(result.serialized).not.toContain('sentinel human note');
+  expect(result.keys).toEqual(['aesthetics', 'functional_correctness', 'overall_preference', 'product_depth', 'requirements_coverage', 'schema']);
+  expect(result.valid.filter(x => /human/i.test(x))).toEqual([]);
+});
+
+test('final evidence never contains runtime-capture disclaimers', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page, {
+    evidence: {
+      functional_correctness_left_evidence: 'The upload worked, but runtime behavior was not captured.',
+      functional_correctness_right_evidence: 'Export worked and the list updated.',
+      requirements_coverage_evidence: 'Both candidates include the requested controls.',
+      product_depth_evidence: 'The right candidate lists a task counter control.',
+      aesthetics_evidence: ''
+    }
+  });
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const payload = t.canonical();
+    return {
+      flags: t.evidenceFlags('functional_correctness.left', 'The upload worked, but runtime behavior was not captured.'),
+      left: payload.functional_correctness.left.evidence,
+      all: JSON.stringify(payload),
+      warnings: t.state().analysis.warnings.join('\n')
+    };
+  });
+  expect(result.flags).toContain('Archive or runtime caveats do not belong in evidence');
+  expect(result.left).not.toContain('runtime behavior was not captured');
+  expect(result.all).not.toMatch(/runtime (?:behavior|behaviour) was not captured|could not be tested|could not be verified|static archive/i);
+  expect(result.warnings).toContain('Archive or runtime caveats');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- Completion chime ---------- */
+
+test('completion chime fires once per completed analysis', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState())).toEqual({ enabled: true, count: 0 });
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.state().analysis.lastRun);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
+  await page.evaluate(() => { window.__WEBDEV_SBS_TEST__.renderAll(); window.__WEBDEV_SBS_TEST__.renderAll(); });
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('chime does not fire on individual AI actions or aborted analysis', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await openAdvanced(page);
+  await page.locator('#prompt').fill('Build a pricing table. No authentication is required.');
+  await page.locator('#aiExtract').click();
+  await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(1);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.evaluate(() => window.__WEBDEV_SBS_TEST__.forceStageFailure());
+  await page.locator('#analyze').click();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.state().analysis.stages.some(stage => stage.status === 'failed'));
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('completion-chime preference persists and the test control uses the same helper', async ({ page }) => {
+  const errors = await open(page);
+  await openSettings(page);
+  await expect(page.locator('#orChime')).toBeChecked();
+  await page.locator('#orChime').uncheck();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')).chime)).toBe(false);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  await openSettings(page);
+  await expect(page.locator('#orChime')).not.toBeChecked();
+  await page.locator('#orTestChime').click();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
+  await page.locator('#orChime').check();
+  await page.locator('#orTestChime').click();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
+  await page.evaluate(() => window.__WEBDEV_SBS_TEST__.playCompletionChime());
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('Ready for review stays visible with audio disabled', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await openSettings(page);
+  await page.locator('#orChime').uncheck();
+  await page.locator('#saveSettings').click();
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#resultsSummary')).toContainText('Ready for review');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
   expect(errors).toEqual([]);
 });
 
@@ -888,7 +1077,7 @@ test('AI requirements are strict, quoted, staged, and out-of-scope text is warne
   expect(requests[0].response_format.json_schema.strict).toBe(true);
   await page.locator('#aiStage [data-ai-apply]').click();
   await expect(page.locator('#requirementsList .req-card')).toHaveCount(1);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')))).toEqual({ enabled: true, apiKey: 'test-local-key', model: 'anthropic/claude-test', visualModel: '', style: 'Plainspoken, concise, technically literate, conversational. Avoid rubric/QA boilerplate.' });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')))).toEqual({ enabled: true, apiKey: 'test-local-key', model: 'anthropic/claude-test', visualModel: '', style: 'Plainspoken, concise, technically literate, conversational. Avoid rubric/QA boilerplate.', chime: true });
 
   answer = aiReply({ requirements: [{ label: 'Authentication', wording: 'Add authentication', category: 'Interaction', explicit: true, testable: true, notes: '' }] });
   await page.locator('#aiExtract').click();
