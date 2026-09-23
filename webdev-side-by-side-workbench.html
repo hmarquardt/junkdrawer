@@ -79,6 +79,15 @@ textarea{resize:vertical;line-height:1.45}
 .or-diag-entry code{overflow-wrap:anywhere}
 .or-diag-entry.error{border-color:#e0afa8;background:var(--red-soft)}
 .or-diag-entry.warn{border-color:#e8ca87;background:var(--amber-soft)}
+.style-field{display:block;font-size:.77rem;font-weight:700;margin:12px 0 5px;color:#435650}
+#orStyle{min-height:56px}
+#renderHost{position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;pointer-events:none}
+#renderHost iframe{border:0;background:#fff}
+.shot-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.shot{border:1px solid var(--line);border-radius:9px;background:#fffefa;padding:8px}
+.shot img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:#fff}
+.shot figcaption{font-size:.72rem;color:var(--muted);margin-top:6px}
+.basis-badge.rendered{background:#e9eef8;border-color:#b9c8e2;color:var(--blue)}
 .stage-list{display:grid;gap:6px;list-style:none;margin:0;padding:0}
 .stage-list li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center;padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:#fffefa;font-size:.83rem}
 .stage-list li[data-status=active]{border-color:#e8ca87;background:var(--amber-soft)}
@@ -247,7 +256,7 @@ h1,h2{font-family:'Iowan Old Style',Georgia,serif}
       </div>
       <div class="upload-actions">
         <button class="button primary big" id="analyze" type="button" disabled>Analyze Evaluation</button>
-        <span class="model-line" id="analyzeModel">Model: <span id="analyzeModelName">openai/gpt-4.1-mini</span> · <button class="linklike" id="changeModel" type="button">Change</button> <span id="analyzeModelState" class="model-state"></span></span>
+        <span class="model-line" id="analyzeModel">Model: <span id="analyzeModelName">openai/gpt-4.1-mini</span> · <button class="linklike" id="changeModel" type="button">Change</button> <span id="analyzeModelState" class="model-state"></span> <span id="analyzeVisualModel" class="hint"></span></span>
         <button class="button ghost small" id="clearUpload" type="button" hidden>Remove file</button>
       </div>
       <p class="hint" id="analyzeHint">Upload a captured evaluation to enable analysis.</p>
@@ -379,6 +388,9 @@ h1,h2{font-family:'Iowan Old Style',Georgia,serif}
           <p class="hint" style="margin-top:0">Rendered from the static HTML and CSS recovered out of the archive. Scripts were not captured, so interactions here do not run. Use this for the visual pass, then answer Aesthetics yourself.</p>
           <div class="preview-tools"><button class="button small" data-preview-view="desktop" type="button">Desktop</button><button class="button small" data-preview-view="mobile" type="button">Mobile</button><span class="hint" id="previewStatus"></span></div>
           <div class="subgrid" id="candidatePreviews"></div>
+          <h3 style="margin-top:16px">Images sent to the model</h3>
+          <p class="hint" style="margin-top:4px">Rasterized from the recovered HTML/CSS at the evaluation viewports. These are the exact images the vision model receives; external and runtime assets are unavailable.</p>
+          <div id="renderedShotsView" class="hint">No rendered evidence yet. Run Analyze Evaluation.</div>
         </div>
       </details>
 
@@ -393,12 +405,13 @@ h1,h2{font-family:'Iowan Old Style',Georgia,serif}
   </details>
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.22.4" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.22.4" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · WebDev Side-by-Side Evaluation Workbench · version 2026.09.22.4
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.22.5" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.22.5" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · WebDev Side-by-Side Evaluation Workbench · version 2026.09.22.5
 </footer>
 </div>
 <div id="live-status" role="status" aria-live="polite"></div>
+<div id="renderHost" aria-hidden="true"></div>
 <div class="modal-backdrop" id="settingsModal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <header class="modal-head"><h2 id="settingsTitle">OpenRouter settings</h2><button class="button ghost small" id="closeSettings" type="button" aria-label="Close settings">×</button></header>
@@ -411,6 +424,11 @@ h1,h2{font-family:'Iowan Old Style',Georgia,serif}
         <button class="button" id="orRefreshModels" type="button">Refresh models</button>
         <button class="button" id="orTestModel" type="button">Test selected model</button>
       </div>
+      <div class="ai-controls" style="margin-top:10px">
+        <label class="ai-key" for="orVisualModel">Visual model<select id="orVisualModel"></select></label>
+      </div>
+      <label class="style-field" for="orStyle">Writing style (evidence sentences)</label>
+      <textarea id="orStyle" rows="2" placeholder="Plainspoken, concise, technically literate, conversational. Avoid rubric/QA boilerplate."></textarea>
       <p id="orModelCapability" class="ai-config-note">Load the model catalog to see which models support strict structured output.</p>
       <div id="orModelStatus" role="status" aria-live="polite" class="ai-status">No key configured.</div>
       <div class="inline-actions"><button class="button small" id="orUseFallback" type="button" hidden>Use compatible fallback</button></div>
@@ -499,7 +517,7 @@ function mergeState(s){
 function readPath(path){return path.split('.').reduce((o,k)=>o?.[k],state.evaluation)}
 function setPath(path,key,value){let o=readPath(path);if(o){o[key]=value;scheduleSave();renderPreview();renderValidation();renderStatus();renderResultsSummary()}}
 function requirement(label='',wording=''){return{id:uid(),label,wording,category:'Other',explicit:true,testable:false,notes:'',left:{presence:'Not yet checked',function:'Not tested',note:''},right:{presence:'Not yet checked',function:'Not tested',note:''}}}
-function guessCategory(t){return /click|filter|search|calculate|submit|open|toggle|select|drag|upload|play|add to|remove|navigate|checkout|switch/i.test(t)?'Interaction':/layout|mobile|responsive|color|typography|style|visual|grid/i.test(t)?'Visual/layout':/button|card|table|form|menu|header|chart|modal|section/i.test(t)?'Component':/copy|text|title|description|content|headline/i.test(t)?'Content':'Other'}
+function guessCategory(t){return /click|filter|search|calculate|submit|open|toggle|select|drag|upload|play|add to|\badd\b|\bdelete\b|\bremove\b|\bclear\b|\bupdate\b|\bcreate\b|\bsave\b|\bedit\b|\bsort\b|navigate|checkout|switch/i.test(t)?'Interaction':/layout|mobile|responsive|color|typography|style|visual|grid/i.test(t)?'Visual/layout':/button|card|table|form|menu|header|chart|modal|section/i.test(t)?'Component':/copy|text|title|description|content|headline/i.test(t)?'Content':'Other'}
 function extract(){let text=state.prompt.trim();if(!text)return[];let parts=text.split(/(?:\r?\n\s*(?:[-*•]|\d+[.)])\s+)|(?:\r?\n\s*\r?\n)|(?<=[.!?])\s+(?=[A-Z])/).map(x=>x.replace(/^[-*•\d.)\s]+/,'').trim()).filter(x=>x.length>7);if(parts.length<2)parts=text.split(/\n/).map(x=>x.trim()).filter(Boolean);return parts.slice(0,80).map((line,i)=>{let r=requirement(line.slice(0,58).replace(/[.:;,]$/,''),line),c=guessCategory(line);r.category=c;r.testable=c==='Interaction';r.explicit=!/^(?:context|background|note|for example|e\.g\.)\b/i.test(line);return r})}
 function replaceExtract(){if(state.requirements.length&&!confirm('Replace current requirements and their Left/Right observations?'))return;state.requirements=extract();renderRequirements();renderObservations();renderStatus();scheduleSave();notice(state.requirements.length+' editable requirements extracted. Review for false positives.')}
 function renderStatus(){let strip=$('#statusStrip');if(!strip)return;let inspected=['left','right'].flatMap(s=>['desktop','mobile'].map(v=>!!state.inspections[s][v])).filter(Boolean).length;let complete=DIMENSIONS.every(([p])=>readPath(p)?.choice&&readPath(p)?.evidence.trim())&&state.evaluation.overall_preference.choice&&state.evaluation.overall_preference.primary_reason;let warnings=lint().length;let chips=[['Parsed '+state.source.partCount+' parts',state.source.parsed],['Prompt loaded',!!state.prompt.trim()],['Requirements '+state.requirements.length,state.requirements.length>0],['Inspections '+inspected+'/4',inspected===4],['Rubric complete',!!complete],['Validation '+(warnings?'· '+warnings+' warnings':'clean'),warnings===0]];strip.innerHTML=chips.map(([t,ok])=>`<span class="status-chip ${ok?'good':'warn'}">${esc(t)}</span>`).join('')}
@@ -703,24 +721,42 @@ function candidateStats(doc,css,rawHtml){
     styleBlocks:doc.querySelectorAll('style').length
   };
 }
+function isExternalRef(value){return /^\s*(?:https?:)?\/\//i.test(String(value||''))}
+function neutralizeExternalCssRefs(css){
+  let count=0;
+  let out=String(css||'')
+    .replace(/@import[^;]+;/gi,()=>{count++;return ''})
+    .replace(/url\(\s*(['"]?)(?:https?:)?\/\/[^)]*\)/gi,()=>{count++;return 'url(about:invalid)'});
+  return{out,count};
+}
 function sanitizeCandidate(doc,byId){
-  let cssParts=[],warnings=[];
+  let cssParts=[],warnings=[],externalAssets=0;
   for(let link of [...doc.querySelectorAll('link[rel~="stylesheet"]')]){
-    let key=cidKey(link.getAttribute('href')),part=key?byId.get(key):null;
-    if(part){cssParts.push(part.text);link.remove()}
+    let href=link.getAttribute('href')||'';
+    let key=cidKey(href),part=key?byId.get(key):null;
+    if(part){cssParts.push(part.text);link.remove();continue}
+    if(isExternalRef(href)){externalAssets++;link.remove()}
   }
   for(let style of [...doc.querySelectorAll('style')]){cssParts.push(style.textContent);style.remove()}
   for(let s of [...doc.querySelectorAll('script,iframe,object,embed')])s.remove();
   for(let el of doc.querySelectorAll('*')){
     for(let attr of [...el.attributes]){
-      if(/^on/i.test(attr.name))el.removeAttribute(attr.name);
-      else if(/^(src|href)$/i.test(attr.name)&&/^(javascript:|data:text\/html)/i.test(attr.value))el.removeAttribute(attr.name);
+      if(/^on/i.test(attr.name)){el.removeAttribute(attr.name);continue}
+      if(/^(src|poster|data|srcset)$/i.test(attr.name)&&isExternalRef(attr.value)){el.removeAttribute(attr.name);externalAssets++;continue}
+      if(/^href$/i.test(attr.name)&&el.tagName!=='A'&&isExternalRef(attr.value)){el.removeAttribute(attr.name);externalAssets++;continue}
+      if(/^(src|href)$/i.test(attr.name)&&/^(javascript:|data:text\/html)/i.test(attr.value))el.removeAttribute(attr.name);
     }
   }
-  let html='<!doctype html>'+doc.documentElement.outerHTML,css=cssParts.join('\n');
+  let html='<!doctype html>'+doc.documentElement.outerHTML;
+  let css='';
+  for(let part of cssParts){
+    let neutralized=neutralizeExternalCssRefs(part);
+    externalAssets+=neutralized.count;
+    css+=(css?'\n':'')+neutralized.out;
+  }
   if(html.length>400000){html=html.slice(0,400000);warnings.push('Candidate HTML truncated at 400 KB for local storage.')}
   if(css.length>800000){css=css.slice(0,800000);warnings.push('Candidate CSS truncated at 800 KB for local storage.')}
-  return{html,css,warnings};
+  return{html,css,warnings,externalAssets};
 }
 function resolveCandidate(ref,byId,diagnostics,depth){
   if(depth>4){diagnostics.push({level:'warn',message:'Frame nesting exceeded four levels; resolution stopped.'});return null}
@@ -739,6 +775,7 @@ function resolveCandidate(ref,byId,diagnostics,depth){
   let sanitized=sanitizeCandidate(doc,byId);
   sanitized.warnings.forEach(message=>diagnostics.push({level:'warn',message}));
   let stats=candidateStats(doc,sanitized.css,part.text);
+  stats.externalAssets=sanitized.externalAssets;
   return{
     key,
     title:stats.title,
@@ -834,6 +871,7 @@ function parseArchive(fileName,input){
       out.candidates[side]=cand;
       add('info',`${side} candidate recovered: “${cand.title||'untitled'}” (${formatBytes(cand.html.length+cand.css.length)} of HTML + CSS).`);
       if(cand.stats.scriptCount===0)add('warn',`${side} candidate has no scripts in the archive; interactions cannot be executed.`);
+      if(cand.stats.externalAssets)add('warn',`${side} candidate references ${cand.stats.externalAssets} external asset(s) that were not captured; they were omitted from previews and renders.`);
       if(cand.stats.hiddenViews>0)add('info',`${side} candidate contains ${cand.stats.hiddenViews} hidden view container(s) in its static markup.`);
     }
   }
@@ -865,11 +903,14 @@ function keywordSignals(text,cand){
    ============================================================ */
 
 const OR_SETTINGS='webdev-sbs.openrouter.v1',DEFAULT_MODEL='openai/gpt-4.1-mini';
+const DEFAULT_STYLE='Plainspoken, concise, technically literate, conversational. Avoid rubric/QA boilerplate.';
+const VIEWPORTS=[{id:'desktop',label:'Desktop',width:1440,height:900},{id:'mobile',label:'Mobile',width:390,height:844}];
 const OR_CHAT='https://openrouter.ai/api/v1/chat/completions',OR_MODELS='https://openrouter.ai/api/v1/models';
 const AI_FIELDS=['functional_correctness.left','functional_correctness.right','requirements_coverage','product_depth','aesthetics'];
 const CONF_ENUM={type:'string',enum:CONFIDENCE};
 const SOURCE_IDS={type:'array',items:{type:'string'}};
-let orSettings={enabled:false,apiKey:'',model:DEFAULT_MODEL},modelList=[],aiProposals=[],aiBusy=false,revision=0,orDiagnostics=[],orAbort=false,orPreflight=null;
+let orSettings={enabled:false,apiKey:'',model:DEFAULT_MODEL,visualModel:'',style:DEFAULT_STYLE},modelList=[],aiProposals=[],aiBusy=false,revision=0,orDiagnostics=[],orAbort=false,orPreflight=null;
+let renderedShots=null,renderLimitations=[],rasterFailure='',rasterizeForced=false;
 const modelTestSchema=()=>schema('webdev_model_test',strictObject({ok:{type:'boolean'}}));
 function normalizeStringArray(value){return Array.isArray(value)?value.filter(x=>typeof x==='string'&&x):[]}
 function normalizeModel(raw){
@@ -948,8 +989,17 @@ const workflowEvidenceSchema=schema('webdev_workflow_evidence',strictObject({
   product_depth_evidence:string,
   aesthetics_evidence:string
 }));
-function loadOrSettings(){try{let x=JSON.parse(localStorage.getItem(OR_SETTINGS)||'{}');orSettings={enabled:x.enabled===true,apiKey:typeof x.apiKey==='string'?x.apiKey:'',model:typeof x.model==='string'&&x.model?x.model:DEFAULT_MODEL}}catch{orSettings={enabled:false,apiKey:'',model:DEFAULT_MODEL}}}
+const observationsSchema=strictObject({
+  left_desktop:{type:'array',items:string},
+  left_mobile:{type:'array',items:string},
+  right_desktop:{type:'array',items:string},
+  right_mobile:{type:'array',items:string}
+});
+const visualSchema=schema('webdev_visual_judgment',strictObject({choice:{type:'string',enum:COMP},evidence:string,observations:observationsSchema,confidence:CONF_ENUM}));
+function loadOrSettings(){try{let x=JSON.parse(localStorage.getItem(OR_SETTINGS)||'{}');orSettings={enabled:x.enabled===true,apiKey:typeof x.apiKey==='string'?x.apiKey:'',model:typeof x.model==='string'&&x.model?x.model:DEFAULT_MODEL,visualModel:typeof x.visualModel==='string'?x.visualModel:'',style:typeof x.style==='string'&&x.style.trim()?x.style:DEFAULT_STYLE}}catch{orSettings={enabled:false,apiKey:'',model:DEFAULT_MODEL,visualModel:'',style:DEFAULT_STYLE}}}
 function saveOrSettings(){try{localStorage.setItem(OR_SETTINGS,JSON.stringify(orSettings));renderModelBadge();return true}catch(e){aiMessage('OpenRouter settings could not be saved: '+e.message,true);return false}}
+function styleInstruction(){return String(orSettings.style||'').trim()||DEFAULT_STYLE}
+function styledEvidencePrompt(base){return base+'\nWriting style for evidence sentences: '+styleInstruction()+' Write like a technically literate person making a quick judgment, not a compliance report. Prefer contractions and plain verbs such as works, breaks, or clips over demonstrates, exhibits, provides, or maintains. Do not repeat the same sentence opener for every field.'}
 function aiConfigured(){return !!(orSettings.enabled&&orSettings.apiKey)}
 function aiUnavailableReason(){
   if(!orSettings.enabled)return 'OpenRouter is disabled in settings.';
@@ -992,12 +1042,19 @@ function renderOpenRouterDiagnostics(){
 }
 function renderModelCapability(){
   let box=$('#orModelCapability');if(!box)return;
-  if(!orSettings.apiKey){box.textContent='Load the model catalog to see which models support strict structured output.';return}
+  if(!orSettings.apiKey){box.textContent='Load the model catalog to see which models support strict structured output and image input.';return}
   if(!modelList.length){box.textContent='Refresh models to load capability metadata from OpenRouter.';return}
-  let model=selectedModelRecord();
-  if(!model){box.textContent='Saved model “'+(orSettings.model||DEFAULT_MODEL)+'” is not in the loaded catalog. Choose a model from the list.';return}
-  let cap=modelCapability(model);
-  box.textContent='Selected: '+model.id+' · '+capabilityLabel(cap)+(cap.reasons.length?' · '+cap.reasons.join(' · '):'');
+  let analysis=selectedModelRecord();
+  if(!analysis){box.textContent='Saved analysis model “'+(orSettings.model||DEFAULT_MODEL)+'” is not in the loaded catalog. Choose a model from the list.';return}
+  let cap=modelCapability(analysis);
+  let lines=['Analysis model: '+analysis.id+' · '+capabilityLabel(cap)+(cap.reasons.length?' · '+cap.reasons.join(' · '):'')];
+  let visual=effectiveVisualModel();
+  if(visual){
+    let vcap=modelCapability(visual);
+    lines.push('Visual model: '+visual.id+' · '+capabilityLabel(vcap)+(visual.id===analysis.id?' (used for both)':''));
+    if(orSettings.visualModel&&orSettings.visualModel!==visual.id)lines.push('Saved visual model '+orSettings.visualModel+' is not usable from the catalog; using '+visual.id+' for images.');
+  }else lines.push('Visual model: none available in this catalog; aesthetics stays unavailable.');
+  box.innerHTML=lines.map((line,index)=>(index?'<br>':'')+esc(line)).join('');
 }
 function renderModelCatalogNotice(){
   let button=$('#orUseFallback');if(!button)return;
@@ -1023,16 +1080,33 @@ function renderModelBadge(){
     stateEl.textContent=label;
     stateEl.className='model-state '+(kind||'');
   }
+  let visualEl=$('#analyzeVisualModel');
+  if(visualEl){
+    let analysis=selectedModelRecord(),visual=effectiveVisualModel();
+    if(aiConfigured()&&modelList.length&&visual&&visual.id!==(analysis?analysis.id:'')){
+      visualEl.textContent='· Visual: '+visual.id+(modelVisionReady()?'':' (replaces text-only analysis model)');
+    }else visualEl.textContent='';
+  }
   let progress=$('#progressModel');
-  if(progress)progress.textContent=aiConfigured()?'Model: '+current:'Deterministic only';
+  if(progress){
+    let visual=effectiveVisualModel();
+    let suffix=aiConfigured()&&visual&&visual.id!==(orSettings.model||DEFAULT_MODEL)?' · Visual: '+visual.id:'';
+    progress.textContent=aiConfigured()?'Model: '+current+suffix:'Deterministic only';
+  }
   renderModelCapability();renderModelCatalogNotice();
+}
+function modelGroup(model){
+  let cap=modelCapability(model);
+  if(cap.structured==='none')return 'incompatible';
+  if(cap.structured==='json')return 'limited';
+  return cap.vision?'visionStrict':'textStrict';
 }
 function renderModelSelect(models=modelList){
   let select=$('#orModel');if(!select)return;
   let current=orSettings.model||DEFAULT_MODEL;
   select.replaceChildren();
-  let buckets={compatible:[],limited:[],incompatible:[]};
-  for(let model of models){let cap=modelCapability(model);buckets[cap.tier==='limited'?'limited':cap.tier==='compatible'?'compatible':'incompatible'].push(model)}
+  let buckets={visionStrict:[],textStrict:[],limited:[],incompatible:[]};
+  for(let model of models)buckets[modelGroup(model)].push(model);
   if(!models.some(model=>model.id===current)){
     if(models.length){
       buckets.incompatible.unshift({id:current,name:current,savedPlaceholder:true,supported_parameters:[],architecture:{input_modalities:[],output_modalities:[],modality:''},top_provider:{context_length:null,max_completion_tokens:null,is_moderated:false}});
@@ -1040,19 +1114,57 @@ function renderModelSelect(models=modelList){
       let group=document.createElement('optgroup');group.label='Saved model · catalog not loaded';group.append(new Option(current,current));select.append(group);
     }
   }
-  let tiers=[['compatible','Compatible · strict structured output'],['limited','Limited compatibility · JSON mode'],['incompatible','Not compatible with the evaluator']];
+  let tiers=[['visionStrict','Vision + strict structured output'],['textStrict','Text + strict structured output'],['limited','Limited compatibility · JSON mode'],['incompatible','Not compatible with the evaluator']];
   for(let [tier,label] of tiers){
     let list=buckets[tier];if(!list.length)continue;
     let group=document.createElement('optgroup');group.label=label;
     list.sort((a,b)=>a.id.localeCompare(b.id));
     for(let model of list){
       let cap=modelCapability(model);
-      let suffix=model.savedPlaceholder?' · saved, not in catalog':cap.structured==='strict'?' · strict JSON':cap.structured==='json'?' · JSON mode only':'';
+      let suffix=model.savedPlaceholder?' · saved, not in catalog':cap.structured==='strict'?(cap.vision?' · strict JSON + vision':' · strict JSON'):cap.structured==='json'?' · JSON mode only':'';
       group.append(new Option((model.name||model.id)+suffix,model.id));
     }
     select.append(group);
   }
   if([...select.options].some(option=>option.value===current))select.value=current;
+}
+function renderVisualModelSelect(models=modelList){
+  let select=$('#orVisualModel');if(!select)return;
+  let current=orSettings.visualModel||'';
+  select.replaceChildren();
+  select.append(new Option('Same as analysis model (only if it accepts images)',''));
+  let vision=models.filter(model=>modelCapability(model).vision&&modelCapability(model).structured!=='none');
+  for(let tier of [['strict','Vision + strict structured output'],['json','Vision + JSON mode']]){
+    let list=vision.filter(model=>tier[0]==='strict'?modelCapability(model).structured==='strict':modelCapability(model).structured==='json');
+    if(!list.length)continue;
+    let group=document.createElement('optgroup');group.label=tier[1];
+    list.sort((a,b)=>a.id.localeCompare(b.id));
+    for(let model of list)group.append(new Option(model.name||model.id,model.id));
+    select.append(group);
+  }
+  if(current&&!vision.some(model=>model.id===current)){
+    let group=document.createElement('optgroup');group.label='Saved visual model · not usable from the catalog';
+    group.append(new Option(current,current));
+    select.append(group);
+  }
+  select.value=current;
+}
+function catalogVisionFallback(){
+  let preferred=modelList.find(model=>model.id===DEFAULT_MODEL&&modelCapability(model).vision&&modelCapability(model).structured!=='none');
+  if(preferred)return preferred;
+  return modelList.find(model=>modelCapability(model).vision&&modelCapability(model).structured==='strict')
+    ||modelList.find(model=>modelCapability(model).vision&&modelCapability(model).structured==='json')
+    ||null;
+}
+function effectiveVisualModel(){
+  if(orSettings.visualModel){
+    let saved=modelList.find(model=>model.id===orSettings.visualModel);
+    if(saved&&modelCapability(saved).vision&&modelCapability(saved).structured!=='none')return saved;
+    if(!modelList.length)return null;
+  }
+  let analysis=selectedModelRecord();
+  if(analysis&&modelCapability(analysis).vision&&modelCapability(analysis).structured!=='none')return analysis;
+  return catalogVisionFallback();
 }
 async function refreshModels(){
   if(!orSettings.apiKey){modelMessage('Enter an API key before loading models.',true);return false}
@@ -1064,6 +1176,7 @@ async function refreshModels(){
     if(!Array.isArray(json.data))throw Error('Invalid model catalog');
     modelList=json.data.map(normalizeModel).filter(Boolean);
     renderModelSelect();
+    renderVisualModelSelect();
     let base='Connection OK · '+modelList.length+' models loaded.';
     let model=selectedModelRecord(),cap=modelCapability(model);
     if(!model){
@@ -1075,7 +1188,9 @@ async function refreshModels(){
     }else if(cap.structured==='json'){
       modelMessage(base+' '+model.id+' has limited compatibility: JSON mode only.',false);
     }else{
-      modelMessage(base,false);
+      let visual=effectiveVisualModel();
+      let extra=visual&&visual.id!==model.id?' Visual model: '+visual.id+(orSettings.visualModel?'':' (automatic fallback)')+'.':(visual?'':' No vision-capable model in this catalog; aesthetics stays unavailable.');
+      modelMessage(base+extra,false);
     }
     renderModelBadge();
     return true;
@@ -1141,18 +1256,22 @@ async function performOpenRouterRequest(built,model){
   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw orFail('OpenRouter returned the wrong JSON shape',{modelId:model.id,status:response.status,message:'Unexpected JSON shape',sent:built.sent,requireParameters:!!built.body.provider?.require_parameters,supported:model.supported_parameters,structuredMode:built.structuredMode,modelReturned});
   return{parsed,json,modelReturned};
 }
+async function callOpenRouterWithModel(name,responseSchema,userPayload,systemInstruction,model){
+  if(!model)throw Error('No model was selected for this request.');
+  let cap=modelCapability(model);
+  if(responseSchema&&cap.structured==='none')throw orFail('Model '+model.id+' '+cap.reasons.join(' and ')+'; the evaluator requires structured output.',{modelId:model.id,status:null,message:'No response_format support',sent:[],supported:model.supported_parameters,requireParameters:false,structuredMode:'none'});
+  let tokens={requirements:3200,evidence:1800,rubric:1200,judgment:2000,workflow_evidence:1400,visual_analysis:1600,model_test:64}[name]||1400;
+  let userContent=Array.isArray(userPayload)?userPayload:JSON.stringify(userPayload);
+  let built=buildOpenRouterRequest(model,{responseSchema,systemInstruction,userContent,tokens});
+  let result=await performOpenRouterRequest(built,model);
+  return result.parsed;
+}
 async function callOpenRouter(name,responseSchema,userPayload,systemInstruction){
   if(!orSettings.apiKey)throw Error('Enter an OpenRouter key first.');
   if(!modelList.length)await ensureCatalog();
   let model=selectedModelRecord();
   if(!model)throw orFail('Model '+(orSettings.model||DEFAULT_MODEL)+' is not in the loaded OpenRouter catalog. Refresh models in settings.',{modelId:orSettings.model||DEFAULT_MODEL,status:null,message:'Model missing from catalog',sent:[],supported:[],requireParameters:false,structuredMode:'none'});
-  let cap=modelCapability(model);
-  if(responseSchema&&cap.structured==='none')throw orFail('Model '+model.id+' '+cap.reasons.join(' and ')+'; the evaluator requires structured output.',{modelId:model.id,status:null,message:'No response_format support',sent:[],supported:model.supported_parameters,requireParameters:false,structuredMode:'none'});
-  let tokens={requirements:3200,evidence:1800,rubric:1200,judgment:2000,workflow_evidence:1400,model_test:64}[name]||1400;
-  let userContent=Array.isArray(userPayload)?userPayload:JSON.stringify(userPayload);
-  let built=buildOpenRouterRequest(model,{responseSchema,systemInstruction,userContent,tokens});
-  let result=await performOpenRouterRequest(built,model);
-  return result.parsed;
+  return callOpenRouterWithModel(name,responseSchema,userPayload,systemInstruction,model);
 }
 function normalizeQuote(s){return String(s||'').replace(/\s+/g,' ').trim().toLowerCase()}
 function onlyKeys(value,keys){return value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&Object.keys(value).every(k=>keys.includes(k))}
@@ -1161,8 +1280,15 @@ function factsFor(kind='all'){let facts=[];if(kind==='all'||kind==='requirements
 function buildWorkflowFacts(){
   let facts=factsFor('all');
   let src=state.source;
-  let attachedVisual=src.visualEvidence&&aiConfigured()&&modelVisionReady();
-  facts.push({id:'archive:visual',text:attachedVisual?`${src.images.filter(i=>i.dataUrl).length} embedded image capture(s) are attached to this request for visual comparison.`:(src.visualEvidence?'Embedded images exist but the selected model cannot accept image input; aesthetics cannot be judged visually.':'No rendered screenshots or image captures are present in the archive; only static HTML and CSS were captured.')});
+  let renderUsable=shotsUsable(renderedShots);
+  let embeddedUsable=src.images.some(img=>img.dataUrl);
+  facts.push({id:'archive:visual',text:renderUsable?'Rendered archive evidence exists for both candidates at desktop and mobile sizes.':embeddedUsable?'Embedded archive image captures are present; visual judgment depends on an image-capable model.':'No rendered or embedded visual evidence is available.'});
+  if(renderUsable){
+    facts.push({id:'render:limitations',text:'Rendered from archived HTML/CSS; external fonts, images, and runtime-fetched assets may be missing and JavaScript-rendered states were not recreated. It supports layout, hierarchy, spacing, typography, responsive, clipping, overflow, density, and composition judgments only.'});
+    for(let side of ['left','right'])for(let view of VIEWPORTS){
+      if(renderedShots[side][view.id])facts.push({id:`render:${side}:${view.id}`,text:`Rendered ${side} ${view.label} image reconstructed from archived HTML/CSS at ${view.width}x${view.height}.`});
+    }
+  }
   facts.push({id:'archive:scripts',text:'Candidate scripts were not captured, so no interaction could be executed; behavior can only be inferred from static markup.'});
   facts.push({id:'archive:states',text:'Captured candidate states: '+src.capturedStates+'.'});
   for(let side of ['left','right']){
@@ -1188,8 +1314,8 @@ function supportsEvidence(field,facts){if(field.startsWith('functional_correctne
 function validateAIEvidence(output,fields,facts){if(!onlyKeys(output,['suggestions'])||!Array.isArray(output.suggestions)||output.suggestions.length>fields.length)throw Error('AI evidence has an invalid suggestions array');let seen=new Set();return output.suggestions.map((x,i)=>{if(!onlyKeys(x,['field','evidence','source_ids'])||!fields.includes(x.field)||seen.has(x.field)||typeof x.evidence!=='string')throw Error(`AI evidence item ${i+1} has an invalid field`);seen.add(x.field);let issues=evidenceFlags(x.field,x.evidence);if(x.field.startsWith('functional_correctness')&&/\b(missing|omits|absent)\b/i.test(x.evidence))issues.push('Missing requirements belong in coverage');if(issues.length)throw Error(`AI evidence for ${x.field} rejected: ${issues.join('; ')}`);let prefixes=x.field.startsWith('functional_correctness')?['obs:']:x.field==='aesthetics'?['visual:']:x.field==='product_depth'?['extra:']:['req:','obs:'];validateSources(x.source_ids,facts,prefixes);if(x.field.startsWith('functional_correctness')){let side=x.field.endsWith('left')?'left':'right';if(x.source_ids.some(id=>!id.endsWith(':'+side)||!/interaction (Works|Partly works|Does not work)/.test(facts.find(f=>f.id===id).text)))throw Error('Functional evidence must cite tested interactions on its own side')}if(x.field==='product_depth'&&x.source_ids.some(id=>!facts.find(f=>f.id===id).text.includes('working yes')))throw Error('Broken extras cannot support Product depth evidence');return x})}
 function deterministicChoices(){let result={},req=state.requirements.filter(r=>r.explicit),testable=req.filter(r=>r.testable);for(let side of ['left','right']){let field=`functional_correctness.${side}`;if(req.length&&!testable.length){result[field]='No testable functionality';continue}let statuses=testable.map(r=>r[side]);if(statuses.length&&statuses.every(o=>o.presence==='Present'&&o.function==='Works'))result[field]='Works';else if(statuses.length&&statuses.every(o=>o.presence==='Present'&&o.function==='Does not work'))result[field]='Does not work';else if(statuses.length&&statuses.every(o=>o.presence==='Present'&&!['Not tested','Not applicable'].includes(o.function))&&statuses.some(o=>o.function!=='Works'))result[field]='Partly works'}if(req.length&&req.every(r=>['left','right'].every(s=>r[s].presence!=='Not yet checked'))){let l=req.filter(r=>r.left.presence==='Present').length,r=req.filter(r=>r.right.presence==='Present').length;result.requirements_coverage=l===r?'About equal':l>r?'Left':'Right'}let ex=s=>state.extras[s].filter(e=>e.working&&e.capability.trim()&&e.why.trim()).length,l=ex('left'),r=ex('right');if(!l&&!r&&['left','right'].every(s=>['desktop','mobile'].every(v=>state.inspections[s][v])))result.product_depth='About equal';else if(l&&!r)result.product_depth='Left';else if(r&&!l)result.product_depth='Right';return result}
 function validateAIRubric(output,fields,facts){if(!onlyKeys(output,['suggestions'])||!Array.isArray(output.suggestions)||output.suggestions.length>fields.length)throw Error('AI rubric response has an invalid suggestions array');let seen=new Set();return output.suggestions.map((x,i)=>{if(!onlyKeys(x,['field','choice','rationale','source_ids'])||!fields.includes(x.field)||seen.has(x.field)||typeof x.rationale!=='string'||!x.rationale.trim()||x.rationale.length>350)throw Error(`AI rubric item ${i+1} has an invalid field or rationale`);seen.add(x.field);let legal=x.field.startsWith('functional_correctness')?FUNC:COMP;if(!legal.includes(x.choice))throw Error(`AI rubric item ${i+1} has an invalid choice`);let prefixes=x.field.startsWith('functional_correctness')?['obs:']:['extra:'];validateSources(x.source_ids,facts,prefixes);if(x.field.startsWith('functional_correctness')&&x.source_ids.some(id=>!id.endsWith(':'+x.field.split('.')[1])||!/interaction (Works|Partly works|Does not work)/.test(facts.find(f=>f.id===id).text)))throw Error('Functional rubric must cite tested interactions on its own side');if(x.field==='product_depth'&&x.source_ids.some(id=>!facts.find(f=>f.id===id).text.includes('working yes')))throw Error('Broken extras cannot support Product depth');return x})}
-function validateAIAesthetics(output,facts){if(!onlyKeys(output,['choice','evidence','rationale','source_ids'])||!COMP.includes(output.choice)||typeof output.evidence!=='string'||typeof output.rationale!=='string'||!output.rationale.trim())throw Error('AI aesthetics response has an invalid structure');let issues=evidenceFlags('aesthetics',output.evidence);if(issues.length)throw Error('AI aesthetics evidence rejected: '+issues.join('; '));validateSources(output.source_ids,facts,['visual:']);return output}
-function validateAIOverall(output,facts){if(!onlyKeys(output,['choice','primary_reason','rationale','source_ids'])||!COMP.includes(output.choice)||!REASONS.includes(output.primary_reason)||typeof output.rationale!=='string'||!output.rationale.trim()||output.rationale.length>500)throw Error('AI overall response has an invalid structure');validateSources(output.source_ids,facts,['req:','obs:','visual:','extra:','cand:','archive:']);if(output.choice==='About equal'&&output.primary_reason!=='No meaningful difference')throw Error('About equal overall requires No meaningful difference as primary reason');if(output.choice!=='About equal'&&output.primary_reason==='No meaningful difference')throw Error('A preferred side needs a deciding reason');return output}
+function validateAIAesthetics(output,facts){if(!onlyKeys(output,['choice','evidence','rationale','source_ids'])||!COMP.includes(output.choice)||typeof output.evidence!=='string'||typeof output.rationale!=='string'||!output.rationale.trim())throw Error('AI aesthetics response has an invalid structure');let issues=evidenceFlags('aesthetics',output.evidence);if(issues.length)throw Error('AI aesthetics evidence rejected: '+issues.join('; '));validateSources(output.source_ids,facts,['visual:','render:']);return output}
+function validateAIOverall(output,facts){if(!onlyKeys(output,['choice','primary_reason','rationale','source_ids'])||!COMP.includes(output.choice)||!REASONS.includes(output.primary_reason)||typeof output.rationale!=='string'||!output.rationale.trim()||output.rationale.length>500)throw Error('AI overall response has an invalid structure');validateSources(output.source_ids,facts,['req:','obs:','visual:','extra:','cand:','archive:','render:']);if(output.choice==='About equal'&&output.primary_reason!=='No meaningful difference')throw Error('About equal overall requires No meaningful difference as primary reason');if(output.choice!=='About equal'&&output.primary_reason==='No meaningful difference')throw Error('A preferred side needs a deciding reason');return output}
 function validateJudgment(output,facts,{visualEvidence=false}={}){
   if(!onlyKeys(output,['functional_correctness','requirements_coverage','product_depth','aesthetics','overall_preference']))throw Error('Judgment response has an invalid shape');
   let fc=output.functional_correctness;
@@ -1203,17 +1329,17 @@ function validateJudgment(output,facts,{visualEvidence=false}={}){
     validateSources(item.source_ids,facts,prefixes);
     judgment[key]={choice:item.choice,rationale:item.rationale.trim(),confidence:item.confidence,source_ids:item.source_ids};
   };
-  for(let side of ['left','right'])checkItem('functional_correctness_'+side,fc[side],FUNC,['cand:','archive:','obs:']);
-  checkItem('requirements_coverage',output.requirements_coverage,COMP,['cand:','archive:','match:','req:','obs:']);
-  checkItem('product_depth',output.product_depth,COMP,['cand:','archive:','extra:']);
+  for(let side of ['left','right'])checkItem('functional_correctness_'+side,fc[side],FUNC,['cand:','archive:','obs:','render:']);
+  checkItem('requirements_coverage',output.requirements_coverage,COMP,['cand:','archive:','match:','req:','obs:','render:']);
+  checkItem('product_depth',output.product_depth,COMP,['cand:','archive:','extra:','render:']);
   let a=output.aesthetics;
   if(!a||!onlyKeys(a,['choice','basis','rationale','confidence','source_ids']))throw Error('Judgment entry aesthetics has an invalid structure');
   if(![...COMP,'Unavailable'].includes(a.choice)||!['visual','markup','unavailable'].includes(a.basis))throw Error('Judgment entry aesthetics has an illegal choice or basis');
   if(!CONFIDENCE.includes(a.confidence))throw Error('Judgment entry aesthetics has an invalid confidence');
   if(typeof a.rationale!=='string'||a.rationale.length>600)throw Error('Judgment entry aesthetics has an invalid rationale');
-  validateSources(a.source_ids,facts,['cand:','visual:','archive:','match:']);
+  validateSources(a.source_ids,facts,['cand:','visual:','archive:','match:','render:']);
   if(!visualEvidence&&(a.choice!=='Unavailable'||a.basis==='visual')){
-    warnings.push('No rendered visual evidence exists in the archive, so the aesthetics proposal was discarded.');
+    warnings.push('No usable visual evidence was supplied to this request, so the aesthetics proposal was discarded.');
     a={...a,choice:'Unavailable',basis:'unavailable'};
   }
   if(visualEvidence&&a.basis==='markup')warnings.push('Aesthetics was judged from markup structure, not from a rendered screenshot.');
@@ -1230,18 +1356,206 @@ function validateJudgment(output,facts,{visualEvidence=false}={}){
   return{judgment,warnings};
 }
 function validateWorkflowEvidence(output){let keys=['functional_correctness_left_evidence','functional_correctness_right_evidence','requirements_coverage_evidence','product_depth_evidence','aesthetics_evidence'];if(!onlyKeys(output,keys))throw Error('Workflow evidence response has an invalid shape');let evidence={},warnings=[];for(let key of keys){let value=output[key];if(typeof value!=='string')throw Error('Workflow evidence for '+key+' is not text');if(key==='aesthetics_evidence'&&!value.trim())continue;if(!value.trim())throw Error('Workflow evidence for '+key+' is empty');let field=RESULT_FIELDS.find(f=>f.key===key),flags=evidenceFlags(field.path,value);if(/^functional_correctness/.test(key)&&/\b(missing|omits|absent)\b/i.test(value))flags.push('Missing requirements belong in coverage');if(flags.length){warnings.push(key+': '+flags.join('; '));continue}evidence[key]=value.trim()}return{evidence,warnings}}
+function validateVisionAnalysis(output){
+  if(!onlyKeys(output,['choice','evidence','observations','confidence']))throw Error('Visual analysis response has an invalid shape');
+  if(!COMP.includes(output.choice))throw Error('Visual analysis has an illegal choice');
+  if(!CONFIDENCE.includes(output.confidence))throw Error('Visual analysis has an invalid confidence');
+  if(typeof output.evidence!=='string')throw Error('Visual analysis evidence is not text');
+  let flags=evidenceFlags('aesthetics',output.evidence);
+  if(flags.length)throw Error('Visual analysis evidence rejected: '+flags.join('; '));
+  if(!output.observations||typeof output.observations!=='object'||Array.isArray(output.observations))throw Error('Visual analysis observations are invalid');
+  let observations={};
+  for(let key of ['left_desktop','left_mobile','right_desktop','right_mobile']){
+    let list=output.observations[key];
+    if(!Array.isArray(list)||list.some(x=>typeof x!=='string'))throw Error('Visual analysis observations for '+key+' are invalid');
+    observations[key]=list.slice(0,12).map(x=>x.trim().slice(0,300)).filter(Boolean);
+  }
+  return{choice:output.choice,evidence:output.evidence.trim(),observations,confidence:output.confidence};
+}
 function queueProposals(items){aiProposals.push(...items.map(x=>({...x,id:uid(),revision})));renderAIProposals()}
 function renderAIProposals(){let box=$('#aiStage');if(!box)return;box.innerHTML=aiProposals.map(p=>{let title=p.kind==='requirements'?`AI extraction · ${p.items.length} requirements`:p.kind==='overall'?'Overall preference':p.kind==='aesthetics'?'Aesthetics + evidence':p.target.replaceAll('_',' ').replace('.',' / ');let body=p.kind==='requirements'?p.items.map(x=>`${x.explicit?'●':'○'} ${x.label} · ${x.category}${x.testable?' · testable':''}`).join('\n'):p.kind==='overall'?`${p.value.choice} · ${p.value.primary_reason}\n${p.value.rationale}`:p.kind==='aesthetics'?`${p.value.choice}\n${p.value.evidence}\n${p.value.rationale}`:p.kind==='choice'?`${p.value}\n${p.rationale||''}`:p.value;return `<article class="ai-proposal" data-proposal="${p.id}"><header><span>${esc(title)}</span><span class="section-index">${esc(p.origin||'AI suggestion')}</span></header><p>${esc(body)}</p>${p.warnings?.length?`<small>⚠ ${esc(p.warnings.join(' · '))}</small>`:''}${p.source_ids?.length?`<small>Sources: ${esc(p.source_ids.join(', '))}</small>`:''}<div class="inline-actions"><button class="button small primary" data-ai-apply type="button">Apply suggestion</button><button class="button small ghost" data-ai-dismiss type="button">Dismiss</button>${p.revision!==revision?'<span class="hint">Evaluation changed since this suggestion was made.</span>':''}</div></article>`}).join('')}
 function applyProposal(p){if(p.revision!==revision&&!confirm('The evaluation changed after this suggestion was created. Apply it anyway?'))return false;if(p.kind==='requirements'){if(state.requirements.length&&!confirm('Replace current requirements and their Left/Right observations with this AI extraction?'))return false;state.requirements=p.items;renderRequirements();renderObservations();renderStatus()}else if(p.kind==='evidence'||p.kind==='choice'){let current=readPath(p.target)[p.kind==='evidence'?'evidence':'choice'];if(current&&current!==p.value&&!confirm('Replace the current '+p.target+' '+p.kind+' with this suggestion?'))return false;readPath(p.target)[p.kind==='evidence'?'evidence':'choice']=p.value;let metaKey=p.kind==='evidence'?p.target.replace(/\./g,'_')+'_evidence':(p.target.startsWith('functional_correctness')?p.target.replace(/\./g,'_'):p.target+'_choice');setFieldMeta(metaKey,{basis:'inference',confidence:'medium',note:'Applied from an OpenRouter suggestion.'});renderResults()}else if(p.kind==='aesthetics'){let o=state.evaluation.aesthetics;if((o.choice&&o.choice!==p.value.choice||o.evidence&&o.evidence!==p.value.evidence)&&!confirm('Replace current Aesthetics choice or evidence with this suggestion?'))return false;Object.assign(o,{choice:p.value.choice,evidence:p.value.evidence});renderResults()}else if(p.kind==='overall'){let o=state.evaluation.overall_preference;if((o.choice&&o.choice!==p.value.choice||o.primary_reason&&o.primary_reason!==p.value.primary_reason)&&!confirm('Replace current Overall preference or primary reason with this suggestion?'))return false;Object.assign(o,{choice:p.value.choice,primary_reason:p.value.primary_reason});renderResults()}else return false;renderPreview();renderValidation();renderStatus();scheduleSave();return true}
 async function runAI(label,operation){if(aiBusy){aiMessage('An OpenRouter request is already running.',true);return}await ensureCatalog().catch(()=>false);let reason=aiUnavailableReason();if(reason){aiMessage(reason+' Local actions remain available.',true);return}aiBusy=true;let started=revision;$$('#aiAssist .ai-actions button').forEach(b=>b.disabled=true);aiMessage(label+'…');try{let proposals=await operation();if(revision!==started){aiMessage('The evaluation changed during the AI request; its suggestions were discarded. Retry when ready.',true);return}if(proposals?.length){queueProposals(proposals);aiMessage(`${proposals.length} suggestion${proposals.length===1?'':'s'} ready for review.`)}else aiMessage('No supported suggestions returned. Your evaluation is unchanged.')}catch(e){aiMessage(label+' failed: '+e.message+'. Your evaluation is unchanged; retry when ready.',true)}finally{aiBusy=false;$$('#aiAssist .ai-actions button').forEach(b=>b.disabled=false)}}
 async function aiExtract(){if(!state.prompt.trim()){aiMessage('Paste a prompt first.',true);return}let prompt=state.prompt;await runAI('Extracting requirements',async()=>{let output=await callOpenRouter('requirements',extractionSchema,{prompt},'Extract only requirements explicitly present in the prompt. Copy each requirement wording as an exact contiguous quote from the prompt. Distinguish Content, Component, Interaction, Visual/layout, Other. Flag testable interactions only when their expected action is specified. Do not invent conventional website requirements. Validation, persistence, authentication, and backend are not required unless explicitly requested. Generic controls have no invented destination. Return strict JSON.');let{items,warnings}=validateAIRequirements(output,prompt);return[{kind:'requirements',items,warnings,origin:'OpenRouter'}]})}
 function evidenceFields(facts){return AI_FIELDS.filter(field=>supportsEvidence(field,facts))}
-async function aiEvidence(){let facts=factsFor('all'),fields=evidenceFields(facts);if(!fields.length){aiMessage('Record tested interactions or visual observations before asking AI for evidence.',true);return}await runAI('Drafting evidence',async()=>{let current=Object.fromEntries(fields.map(field=>[field,readPath(field).evidence]));let output=await callOpenRouter('evidence',evidenceSchema,{fields,current,facts},'Draft one observable evidence sentence per supported field, at most 200 characters. Use only cited fact IDs from the supplied observations. Never invent tests. Independent Left/Right functionality evidence cannot compare candidates or report missing features. Missing requirements belong in coverage; clipping, overlap, and responsive breakage belong in aesthetics. Avoid vague claims. Omit fields with inadequate observations. Return strict JSON.');let valid=validateAIEvidence(output,fields,facts);return valid.map(x=>({kind:'evidence',target:x.field,value:x.evidence,source_ids:x.source_ids,origin:'OpenRouter'}))})}
-async function aiRubric(){let deterministic=deterministicChoices(),facts=[...factsFor('requirements'),...factsFor('extras')],proposals=Object.entries(deterministic).map(([target,value])=>({kind:'choice',target,value,rationale:'Derived directly from recorded statuses and counts.',origin:'Deterministic'}));if(proposals.length)queueProposals(proposals);let fields=['functional_correctness.left','functional_correctness.right','product_depth'].filter(x=>!deterministic[x]&&supportsEvidence(x,facts));if(!fields.length){aiMessage(proposals.length?'Deterministic choices are ready for review.':'Record more observations before requesting rubric suggestions.');return}await runAI('Suggesting rubric',async()=>{let output=await callOpenRouter('rubric',rubricSchema,{fields,facts},'Suggest only the requested rubric fields from cited recorded facts. Functional correctness is independent per side and concerns tested behavior; missing components belong in coverage. Broken extras have zero Product depth value. Do not infer tests or candidate visuals. Return strict JSON.');let valid=validateAIRubric(output,fields,facts);return valid.map(x=>({kind:'choice',target:x.field,value:x.choice,rationale:x.rationale,source_ids:x.source_ids,origin:'OpenRouter'}))})}
-async function aiAesthetics(){if(!['left','right'].every(s=>['desktop','mobile'].every(v=>state.inspections[s][v]))){aiMessage('Finish all four desktop/mobile inspection checks before asking AI to judge visuals.',true);return}let facts=factsFor('visual');if(!supportsEvidence('aesthetics',facts)){aiMessage('Record at least one desktop or mobile visual note or issue before requesting a visual judgment.',true);return}await runAI('Judging visual observations',async()=>{let output=await callOpenRouter('aesthetics',aestheticsSchema,{facts},'Compare visual quality across desktop and mobile using only these collected visual observations. Do not infer from source code, missing features, or unobserved screens. Return Left, About equal, or Right; one observable evidence sentence under 200 characters; and a brief rationale with cited fact IDs. Return strict JSON.');let value=validateAIAesthetics(output,facts);return[{kind:'aesthetics',value,source_ids:value.source_ids,origin:'OpenRouter'}]})}
+async function aiEvidence(){let facts=factsFor('all'),fields=evidenceFields(facts);if(!fields.length){aiMessage('Record tested interactions or visual observations before asking AI for evidence.',true);return}await runAI('Drafting evidence',async()=>{let current=Object.fromEntries(fields.map(field=>[field,readPath(field).evidence]));let output=await callOpenRouter('evidence',evidenceSchema,{fields,current,facts},styledEvidencePrompt('Draft one observable evidence sentence per supported field, at most 200 characters. Use only cited fact IDs from the supplied observations. Never invent tests. Independent Left/Right functionality evidence cannot compare candidates or report missing features. Missing requirements belong in coverage; clipping, overlap, and responsive breakage belong in aesthetics. Omit fields with inadequate observations. Return strict JSON.'));let valid=validateAIEvidence(output,fields,facts);return valid.map(x=>({kind:'evidence',target:x.field,value:x.evidence,source_ids:x.source_ids,origin:'OpenRouter'}))})}
+async function aiRubric(){let deterministic=deterministicChoices(),facts=[...factsFor('requirements'),...factsFor('extras')],proposals=Object.entries(deterministic).map(([target,value])=>({kind:'choice',target,value,rationale:'Derived directly from recorded statuses and counts.',origin:'Deterministic'}));if(proposals.length)queueProposals(proposals);let fields=['functional_correctness.left','functional_correctness.right','product_depth'].filter(x=>!deterministic[x]&&supportsEvidence(x,facts));if(!fields.length){aiMessage(proposals.length?'Deterministic choices are ready for review.':'Record more observations before requesting rubric suggestions.');return}await runAI('Suggesting rubric',async()=>{let output=await callOpenRouter('rubric',rubricSchema,{fields,facts},styledEvidencePrompt('Suggest only the requested rubric fields from cited recorded facts. Functional correctness is independent per side and concerns tested behavior; missing components belong in coverage. Broken extras have zero Product depth value. Do not infer tests or candidate visuals. Return strict JSON.'));let valid=validateAIRubric(output,fields,facts);return valid.map(x=>({kind:'choice',target:x.field,value:x.choice,rationale:x.rationale,source_ids:x.source_ids,origin:'OpenRouter'}))})}
+async function aiAesthetics(){if(!['left','right'].every(s=>['desktop','mobile'].every(v=>state.inspections[s][v]))){aiMessage('Finish all four desktop/mobile inspection checks before asking AI to judge visuals.',true);return}let facts=factsFor('visual');if(!supportsEvidence('aesthetics',facts)){aiMessage('Record at least one desktop or mobile visual note or issue before requesting a visual judgment.',true);return}await runAI('Judging visual observations',async()=>{let output=await callOpenRouter('aesthetics',aestheticsSchema,{facts},styledEvidencePrompt('Compare visual quality across desktop and mobile using only these collected visual observations. Do not infer from source code, missing features, or unobserved screens. Return Left, About equal, or Right; one observable evidence sentence under 200 characters; and a brief rationale with cited fact IDs. Return strict JSON.'));let value=validateAIAesthetics(output,facts);return[{kind:'aesthetics',value,source_ids:value.source_ids,origin:'OpenRouter'}]})}
 function effectiveRubric(){let copy=structuredClone(state.evaluation);for(let p of aiProposals){if(p.kind==='choice'&&readPath(p.target)?.choice===''){let target=p.target.split('.').reduce((o,k)=>o?.[k],copy);if(target)target.choice=p.value}else if(p.kind==='evidence'&&readPath(p.target)?.evidence===''){let target=p.target.split('.').reduce((o,k)=>o?.[k],copy);if(target)target.evidence=p.value}else if(p.kind==='aesthetics'){if(!copy.aesthetics.choice)copy.aesthetics.choice=p.value.choice;if(!copy.aesthetics.evidence)copy.aesthetics.evidence=p.value.evidence}}return copy}
-async function aiOverall(){let rubric=effectiveRubric(),needed=['functional_correctness.left','functional_correctness.right','requirements_coverage','product_depth','aesthetics'];if(needed.some(x=>{let o=x.split('.').reduce((a,k)=>a?.[k],rubric);return!o?.choice||!o?.evidence?.trim()})){aiMessage('Complete or stage all five rubric choices and evidence sentences before suggesting overall preference.',true);return}let facts=factsFor('all');if(!facts.length){aiMessage('Record candidate observations first.',true);return}await runAI('Suggesting overall preference',async()=>{let output=await callOpenRouter('overall',overallSchema,{facts,rubric},'Choose the prototype a user would likely prefer from the supplied explicit requirements, recorded observations, and rubric results. Do not tally votes, retest, infer unobserved behavior, or assess production readiness. Return one choice, its single primary reason, a brief grounded rationale, and cited fact IDs as strict JSON.');let value=validateAIOverall(output,facts);return[{kind:'overall',value,source_ids:value.source_ids,origin:'OpenRouter'}]})}
-async function clearAllLocal(){if(!confirm('Permanently clear this draft, OpenRouter key/model settings, and pending AI suggestions? Export JSON first if needed.'))return;clearTimeout(saveTimer);try{if(!db)db=await openDB();await idbDelete();try{localStorage.removeItem(MARKER);localStorage.removeItem(OR_SETTINGS)}catch{}state=fresh();orSettings={enabled:false,apiKey:'',model:DEFAULT_MODEL};modelList=[];aiProposals=[];orDiagnostics=[];orAbort=false;orPreflight=null;renderAll();renderAIProposals();renderOpenRouterDiagnostics();$('#orEnabled').checked=false;$('#orKey').value='';renderModelSelect();renderModelBadge();modelMessage('No key configured.');aiMessage('Local draft and AI settings cleared.');$('#saveStatus').textContent='Saved data cleared';syncStages()}catch(e){notice('Clear failed: '+e.message)}}
+async function aiOverall(){let rubric=effectiveRubric(),needed=['functional_correctness.left','functional_correctness.right','requirements_coverage','product_depth','aesthetics'];if(needed.some(x=>{let o=x.split('.').reduce((a,k)=>a?.[k],rubric);return!o?.choice||!o?.evidence?.trim()})){aiMessage('Complete or stage all five rubric choices and evidence sentences before suggesting overall preference.',true);return}let facts=factsFor('all');if(!facts.length){aiMessage('Record candidate observations first.',true);return}await runAI('Suggesting overall preference',async()=>{let output=await callOpenRouter('overall',overallSchema,{facts,rubric},styledEvidencePrompt('Choose the prototype a user would likely prefer from the supplied explicit requirements, recorded observations, and rubric results. Do not tally votes, retest, infer unobserved behavior, or assess production readiness. Return one choice, its single primary reason, a brief grounded rationale, and cited fact IDs as strict JSON.'));let value=validateAIOverall(output,facts);return[{kind:'overall',value,source_ids:value.source_ids,origin:'OpenRouter'}]})}
+async function clearAllLocal(){if(!confirm('Permanently clear this draft, OpenRouter key/model settings, and pending AI suggestions? Export JSON first if needed.'))return;clearTimeout(saveTimer);try{if(!db)db=await openDB();await idbDelete();try{localStorage.removeItem(MARKER);localStorage.removeItem(OR_SETTINGS)}catch{}state=fresh();orSettings={enabled:false,apiKey:'',model:DEFAULT_MODEL,visualModel:'',style:DEFAULT_STYLE};modelList=[];aiProposals=[];orDiagnostics=[];orAbort=false;orPreflight=null;renderedShots=null;renderLimitations=[];rasterFailure='';renderAll();renderAIProposals();renderOpenRouterDiagnostics();$('#orEnabled').checked=false;$('#orKey').value='';$('#orStyle').value=DEFAULT_STYLE;renderModelSelect();renderVisualModelSelect();renderModelBadge();modelMessage('No key configured.');aiMessage('Local draft and AI settings cleared.');$('#saveStatus').textContent='Saved data cleared';syncStages()}catch(e){notice('Clear failed: '+e.message)}}
+/* ============================================================
+   Local candidate rendering.
+   Reconstructs sanitized candidate HTML/CSS in sandboxed frames,
+   rasterizes PNGs at the evaluation viewports with an SVG
+   foreignObject pass, and keeps the images for advanced review.
+   Nothing leaves the browser except through the explicit vision
+   request.
+   ============================================================ */
+
+function nextFrame(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))}
+function waitForFrame(frame,timeout=4000){
+  return new Promise((resolve,reject)=>{
+    let settled=false,start=Date.now();
+    let check=()=>{
+      if(settled)return;
+      let doc=null;
+      try{doc=frame.contentDocument}catch{}
+      if(doc&&doc.readyState==='complete'&&doc.querySelector&&doc.querySelector('meta[name="jd-render"]')){settled=true;resolve(doc);return}
+      if(Date.now()-start>timeout){settled=true;reject(Error('the render frame did not finish loading'));return}
+      setTimeout(check,25);
+    };
+    check();
+  });
+}
+function neutralizeRenderCss(css,limitations){
+  let external=0;
+  let out=String(css||'')
+    .replace(/@import[^;]+;/gi,()=>{external++;return ''})
+    .replace(/url\(\s*(['"]?)https?:\/\/[^)]*\)/gi,()=>{external++;return 'url(about:invalid)'});
+  if(external)limitations.push(external+' external CSS asset reference(s) were neutralized for the local render.');
+  return out;
+}
+function neutralizeRenderHtml(html,limitations){
+  let doc=parseDocument(html);
+  if(!doc)return{html:'<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>',limitations:['Candidate HTML could not be parsed for rendering.']};
+  let external=0;
+  for(let el of doc.querySelectorAll('[src],[srcset],[poster],[data],[href]')){
+    for(let attr of ['src','srcset','poster','data']){
+      if(el.hasAttribute(attr)&&/^\s*https?:/i.test(el.getAttribute(attr))){el.removeAttribute(attr);external++}
+    }
+    if(el.tagName!=='A'&&el.hasAttribute('href')&&/^\s*https?:/i.test(el.getAttribute('href'))){el.removeAttribute('href');external++}
+  }
+  if(external)limitations.push(external+' external HTML resource reference(s) were neutralized for the local render.');
+  return{html:'<!doctype html>'+doc.documentElement.outerHTML,limitations};
+}
+function buildRenderDocument(candidate){
+  let limitations=[];
+  let css=neutralizeRenderCss(candidate.css,limitations);
+  let sanitized=neutralizeRenderHtml(candidate.html,limitations);
+  sanitized.limitations.forEach(x=>{if(!limitations.includes(x))limitations.push(x)});
+  let doc=parseDocument(sanitized.html);
+  if(!doc)return{html:sanitized.html,limitations};
+  let head=doc.querySelector('head')||doc.documentElement;
+  let marker=doc.createElement('meta');
+  marker.setAttribute('name','jd-render');
+  marker.setAttribute('content','1');
+  head.append(marker);
+  let style=doc.createElement('style');
+  style.textContent=css;
+  head.append(style);
+  limitations.push('Static reconstruction of archived HTML/CSS: scripts, event handlers, runtime state, external fonts, and external images are not recreated.');
+  if(candidate.stats&&candidate.stats.scriptCount)limitations.push(candidate.stats.scriptCount+' script tag(s) existed in the archive and were not executed.');
+  if(candidate.stats&&candidate.stats.externalAssets)limitations.push(candidate.stats.externalAssets+' external asset reference(s) from the archive were omitted (network fonts, images, or stylesheets).');
+  return{html:'<!doctype html>'+doc.documentElement.outerHTML,limitations};
+}
+function loadImageFromSvg(svg){
+  return new Promise((resolve,reject)=>{
+    let img=new Image(),timer=setTimeout(()=>{reject(Error('timed out rasterizing the rendered document'))},8000);
+    img.onload=()=>{clearTimeout(timer);resolve(img)};
+    img.onerror=()=>{clearTimeout(timer);reject(Error('the browser refused to rasterize the rendered document'))};
+    img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  });
+}
+async function rasterizeDocument(doc,width,height){
+  if(rasterizeForced)throw Error('rasterization is disabled for this run');
+  let root=doc.documentElement.cloneNode(true);
+  root.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
+  let xml;
+  try{xml=new XMLSerializer().serializeToString(root)}catch(e){throw Error('could not serialize the rendered document: '+e.message)}
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="${width}" height="${height}">${xml}</foreignObject></svg>`;
+  let img=await loadImageFromSvg(svg);
+  let canvas=document.createElement('canvas');
+  canvas.width=width;canvas.height=height;
+  let ctx=canvas.getContext('2d');
+  ctx.fillStyle='#ffffff';
+  ctx.fillRect(0,0,width,height);
+  ctx.drawImage(img,0,0,width,height);
+  return canvas.toDataURL('image/png');
+}
+function shotsUsable(shots){return !!shots&&['left','right'].every(side=>Object.keys(shots[side]||{}).length>0)}
+async function renderCandidateShots(){
+  renderedShots=null;renderLimitations=[];rasterFailure='';
+  renderRenderedShots();
+  if(!state.source.candidates.left||!state.source.candidates.right){
+    rasterFailure='Both candidate documents must be recovered before visual evidence can be rendered.';
+    renderRenderedShots();
+    return null;
+  }
+  let host=$('#renderHost');
+  if(!host){rasterFailure='The local render host is unavailable.';renderRenderedShots();return null}
+  host.replaceChildren();
+  let shots={left:{},right:{}},failures=[];
+  for(let side of ['left','right']){
+    let built=buildRenderDocument(state.source.candidates[side]);
+    built.limitations.forEach(x=>{if(!renderLimitations.includes(x))renderLimitations.push(x)});
+    let frame=document.createElement('iframe');
+    frame.setAttribute('sandbox','allow-same-origin');
+    frame.setAttribute('title',side+' candidate render');
+    frame.width=VIEWPORTS[0].width;
+    frame.height=VIEWPORTS[0].height;
+    host.append(frame);
+    try{
+      let loaded=waitForFrame(frame);
+      frame.srcdoc=built.html;
+      let doc=await loaded;
+      try{if(doc.fonts&&doc.fonts.ready)await doc.fonts.ready}catch{}
+      await nextFrame();
+      for(let view of VIEWPORTS){
+        frame.width=view.width;
+        frame.height=view.height;
+        await nextFrame();
+        let dataUrl=await rasterizeDocument(doc,view.width,view.height);
+        shots[side][view.id]={side,view:view.id,width:view.width,height:view.height,bytes:dataUrl.length,label:(side==='left'?'Left':'Right')+' '+view.label,dataUrl};
+      }
+    }catch(e){
+      failures.push((side==='left'?'Left':'Right')+' render failed: '+e.message);
+    }
+    frame.remove();
+  }
+  host.replaceChildren();
+  if(shotsUsable(shots))renderedShots=shots;
+  if(failures.length)rasterFailure=failures.join(' · ');
+  else if(!shotsUsable(shots))rasterFailure='Rendered images could not be produced for both candidates.';
+  renderRenderedShots();
+  return renderedShots;
+}
+function visionEvidenceSet(){
+  if(shotsUsable(renderedShots)){
+    return{kind:'rendered',images:VIEWPORTS.flatMap(view=>['left','right'].map(side=>renderedShots[side][view.id]).filter(Boolean)),limitations:[...renderLimitations]};
+  }
+  let embedded=state.source.images.filter(img=>img.dataUrl).slice(0,4);
+  if(embedded.length)return{kind:'embedded',images:embedded.map((img,index)=>({side:'',view:'',label:'Archive image '+(index+1),width:0,height:0,dataUrl:img.dataUrl})),limitations:['Archive image captures were supplied; their viewport and provenance are unknown.']};
+  return null;
+}
+function renderRenderedShots(){
+  let box=$('#renderedShotsView');if(!box)return;
+  let shots=shotsUsable(renderedShots)?renderedShots:null;
+  if(!shots){
+    let reason=rasterFailure||(state.analysis.visualBasis?'Rendered evidence was produced in an earlier session and is not kept in local storage. Re-analyze to regenerate the images.':'No rendered evidence yet. Run Analyze Evaluation.');
+    box.innerHTML=`<span>${esc(reason)}</span>`+(renderLimitations.length?`<ul class="diag-list">${renderLimitations.map(x=>`<li class="warn">${esc(x)}</li>`).join('')}</ul>`:'');
+    return;
+  }
+  let figures=[];
+  for(let side of ['left','right'])for(let view of VIEWPORTS){
+    let shot=shots[side][view.id];
+    if(shot)figures.push(`<figure class="shot"><img alt="${esc(shot.label)} reconstructed from archived HTML and CSS" src="${esc(shot.dataUrl)}"><figcaption>${esc(shot.label)} · ${shot.width}×${shot.height} · ${formatBytes(Math.round(shot.bytes*3/4))}</figcaption></figure>`);
+  }
+  box.innerHTML=`<div class="shot-grid">${figures.join('')}</div>`+(renderLimitations.length?`<p class="hint">Reconstruction limitations</p><ul class="diag-list">${renderLimitations.map(x=>`<li class="warn">${esc(x)}</li>`).join('')}</ul>`:'')+renderVisualObservationNotes();
+}
+function renderVisualObservationNotes(){
+  let visual=state.analysis.visualObservations;
+  if(!visual||!visual.observations)return '';
+  let labels={left_desktop:'Left desktop',left_mobile:'Left mobile',right_desktop:'Right desktop',right_mobile:'Right mobile'};
+  let blocks=Object.keys(labels).map(key=>{
+    let items=(visual.observations[key]||[]).filter(Boolean);
+    if(!items.length)return '';
+    return `<p class="hint" style="margin-top:10px">${esc(labels[key])} · ${esc(visual.model||'')}</p><ul class="diag-list">${items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
+  }).join('');
+  if(!blocks)return '';
+  return `<p class="hint" style="margin-top:12px">Visible observations returned with the ${esc(visual.basis||'rendered')} visual analysis (kept out of the final evidence sentence).</p>${blocks}`;
+}
+
 /* ============================================================
    Coordinated analysis pipeline + results UI.
    Deterministic parsing and rule checks first; OpenRouter for
@@ -1251,15 +1565,16 @@ async function clearAllLocal(){if(!confirm('Permanently clear this draft, OpenRo
 
 const STAGES=['Reading archive','Extracting prompt','Building requirements','Inspecting candidate data','Evaluating candidates','Writing evidence','Validating answers'];
 const REQ_SYSTEM='Extract only requirements explicitly present in the prompt. Copy each requirement wording as an exact contiguous quote from the prompt. Distinguish Content, Component, Interaction, Visual/layout, Other. Flag testable interactions only when their expected action is specified. Do not invent conventional website requirements. Validation, persistence, authentication, and backend are not required unless explicitly requested. Generic controls have no invented destination. Return strict JSON.';
-const JUDGE_SYSTEM='You are judging two generated web prototypes for a side-by-side evaluation. Use only the supplied facts. Every claim must cite the fact IDs it rests on in source_ids. No rendered screenshots and no runnable scripts may be present; when they are absent, say so through the aesthetics basis field and do not pretend you inspected the screens. Functional correctness rates each candidate independently on requested interactions; with static markup only, infer conservatively and use low confidence. Requirements coverage is presence, not quality, and only for explicitly requested items. Product depth rewards relevant working extras and never broken or decorative extras. Aesthetics is only "visual" when image captures are supplied; otherwise use basis "markup" or "unavailable". Overall preference is a judgment from the collected evidence, not a tally. Return strict JSON.';
-const EVIDENCE_SYSTEM='Write one observable evidence sentence per requested field, at most 200 characters, exactly one sentence, grounded only in the supplied facts. Cite nothing you cannot see. Independent Left/Right functionality evidence must not compare candidates or report missing requirements. The coverage sentence names one material omission or why coverage is equal. The depth sentence names the single most useful differentiator. The aesthetics sentence names the decisive visual difference and must be left empty when aesthetics is Unavailable. Return strict JSON.';
-let lastFacts=[];
+const JUDGE_SYSTEM='You are judging two generated web prototypes for a side-by-side evaluation. Use only the supplied facts. Every claim must cite the fact IDs it rests on in source_ids. Functional correctness rates each candidate independently on requested interactions; with static markup only, infer conservatively and use low confidence. Requirements coverage is presence, not quality, and only for explicitly requested items. Product depth rewards relevant working extras and never broken or decorative extras. A renderedVisualAnalysis supplied in the payload has already judged aesthetics from reconstructed page images: copy its choice and evidence into the aesthetics field, do not re-judge visuals, and weigh it when choosing overall preference. If no renderedVisualAnalysis is supplied, aesthetics must be Unavailable. Overall preference is a judgment from the collected evidence, not a tally. Return strict JSON.';
+const EVIDENCE_SYSTEM='Write one observable evidence sentence per requested field, at most 200 characters, exactly one sentence, grounded only in the supplied facts. Cite nothing you cannot see. Independent Left/Right functionality evidence must not compare candidates or report missing requirements; name the actions tested and the most important failure. The coverage sentence names one material omission or why coverage is equal. The depth sentence names the single most useful differentiator. The aesthetics sentence is already supplied when visual analysis ran; do not overwrite it. Return strict JSON.';
+const VISION_SYSTEM='You compare reconstructed page images of two candidate prototypes for a side-by-side evaluation. The images were rasterized locally from archived HTML and CSS; external fonts, images, and runtime-fetched assets may be missing, and JavaScript-rendered states were not recreated. Judge only what is visible in the images: layout, hierarchy, spacing, typography, responsive behavior, clipping, overflow, density, and overall composition. Layout breakage counts. Do not claim dynamic behavior and do not judge features or functionality. Return Left, About equal, or Right for visual quality across desktop and mobile, one observable evidence sentence under 200 characters naming the decisive visual difference, short bullet observations for each supplied image view, and a confidence. Return strict JSON.';
+let lastFacts=[],lastVision=null;
 const tick=()=>new Promise(resolve=>setTimeout(resolve,15));
 
 function resultValue(key){let f=RESULT_FIELDS.find(x=>x.key===key);if(!f)return '';let o=readPath(f.path);if(!o)return '';if(f.kind==='choice')return o[f.field||'choice'];if(f.kind==='comment')return o.optional_comment;return o.evidence}
 function resultsPresent(){return FORM_FIELD_ORDER.some(key=>String(resultValue(key)||'').trim())}
 function setFieldMeta(key,meta){state.analysis.fieldMeta=state.analysis.fieldMeta||{};state.analysis.fieldMeta[key]={...(state.analysis.fieldMeta[key]||{}),...meta}}
-function basisText(b){return{extracted:'Extracted evidence',inference:'Model inference',unavailable:'Unavailable evidence',manual:'Manual'}[b]||b}
+function basisText(b){return{extracted:'Extracted evidence',rendered:'Rendered archive evidence',inference:'Model inference',unavailable:'Unavailable evidence',manual:'Manual'}[b]||b}
 function resultHead(f,i,meta){let badge=meta.basis?`<span class="basis-badge ${esc(meta.basis)}">${esc(basisText(meta.basis))}</span>`:'';let confidence=meta.confidence?`<span class="hint mono">confidence: ${esc(meta.confidence)}</span>`:'';return `<div class="result-head"><span class="result-index">${String(i+1).padStart(2,'0')}</span><strong>${esc(f.label)}</strong>${badge}${confidence}</div>`}
 function resultNote(meta){return meta.note?`<div class="result-note ${meta.basis==='unavailable'?'warn':''}">${esc(meta.note)}</div>`:''}
 function renderResults(){
@@ -1365,7 +1680,7 @@ function renderCandidatePreviews(){
 }
 function renderAll(){
   syncPromptField();
-  renderRequirements();renderInspection();renderObservations();renderVisual();renderExtras();renderResults();renderValidation();renderPreview();renderStatus();renderResultsSummary();renderResultsWarnings();renderRawArchive();renderFormMapCheck();renderCandidatePreviews();renderModelBadge();
+  renderRequirements();renderInspection();renderObservations();renderVisual();renderExtras();renderResults();renderValidation();renderPreview();renderStatus();renderResultsSummary();renderResultsWarnings();renderRawArchive();renderFormMapCheck();renderCandidatePreviews();renderRenderedShots();renderModelBadge();
 }
 
 function orCallAllowed(){return aiConfigured()&&!orAbort&&!!orPreflight&&orPreflight.ok}
@@ -1464,7 +1779,23 @@ function applyDeterministicOnly(){
   else if(state.source.candidates.left&&state.source.candidates.right)setFieldMeta('product_depth_choice',{basis:undefined,confidence:'',note:'OpenRouter is not configured; inspect the candidates for a useful working extra and answer depth.'});
   return used.length?`Deterministic proposals · ${used.join(', ')}`:'Deterministic checks complete';
 }
-function applyJudgment(j,judgeNotes){
+function applyVisionAesthetics(vision){
+  if(vision&&vision.choice){
+    let rendered=vision.kind==='rendered';
+    state.evaluation.aesthetics.choice=vision.choice;
+    state.evaluation.aesthetics.evidence=vision.evidence;
+    let note=rendered?'Rendered archive evidence: reconstructed from archived HTML/CSS at desktop and mobile sizes; external fonts, images, and runtime state may be missing.':'Embedded archive image captures; viewport and provenance are unknown.';
+    setFieldMeta('aesthetics_choice',{basis:rendered?'rendered':'extracted',confidence:vision.confidence||'medium',note});
+    setFieldMeta('aesthetics_evidence',{basis:rendered?'rendered':'extracted',confidence:vision.confidence||'medium',note});
+    return;
+  }
+  state.evaluation.aesthetics.choice='';
+  state.evaluation.aesthetics.evidence='';
+  let reason=rasterFailure||(visionEvidenceSet()?'visual analysis did not return a usable judgment':'no usable rendered or captured images were available');
+  setFieldMeta('aesthetics_choice',{basis:'unavailable',confidence:'',note:'Aesthetics stays unavailable: '+reason+' Inspect the recovered previews and answer it yourself.'});
+  setFieldMeta('aesthetics_evidence',{basis:'unavailable',confidence:'',note:'Aesthetics evidence needs a rendered or captured image comparison.'});
+}
+function applyJudgment(j,judgeNotes,vision){
   let candidatesRecovered=!!(state.source.candidates.left&&state.source.candidates.right);
   let staticOnly=candidatesRecovered&&state.source.candidates.left.stats.scriptCount===0&&state.source.candidates.right.stats.scriptCount===0;
   let note=staticOnly?'Interactions were not captured in the archive; this is inferred from static markup and needs a preview check.':'';
@@ -1472,7 +1803,6 @@ function applyJudgment(j,judgeNotes){
   state.evaluation.functional_correctness.right.choice=j.functional_correctness_right.choice;
   state.evaluation.requirements_coverage.choice=j.requirements_coverage.choice;
   state.evaluation.product_depth.choice=j.product_depth.choice;
-  if(j.aesthetics.choice!=='Unavailable')state.evaluation.aesthetics.choice=j.aesthetics.choice;
   state.evaluation.overall_preference.choice=j.overall_preference.choice;
   state.evaluation.overall_preference.primary_reason=j.overall_preference.primary_reason;
   if(j.overall_preference.optional_comment)state.evaluation.overall_preference.optional_comment=j.overall_preference.optional_comment;
@@ -1480,52 +1810,73 @@ function applyJudgment(j,judgeNotes){
   setFieldMeta('functional_correctness_right',{basis:'inference',confidence:j.functional_correctness_right.confidence,note});
   setFieldMeta('requirements_coverage_choice',{basis:'inference',confidence:j.requirements_coverage.confidence,note:'Judge presence only; confirm candidates in the live preview.'});
   setFieldMeta('product_depth_choice',{basis:'inference',confidence:j.product_depth.confidence,note:''});
-  if(j.aesthetics.choice==='Unavailable'){
-    setFieldMeta('aesthetics_choice',{basis:'unavailable',confidence:'',note:'No rendered visual evidence exists in the archive. Use the recovered candidate previews or the live pages, then answer Aesthetics yourself.'});
-    setFieldMeta('aesthetics_evidence',{basis:'unavailable',confidence:'',note:'Aesthetics evidence cannot be written without a visual pass.'});
-  }else{
-    setFieldMeta('aesthetics_choice',{basis:j.aesthetics.basis==='visual'?'inference':'inference',confidence:j.aesthetics.confidence,note:j.aesthetics.basis==='visual'?'Judged from embedded image captures.':'Judged from markup structure, not a rendered screenshot.'});
-  }
-  setFieldMeta('overall_preference_choice',{basis:'inference',confidence:j.overall_preference.confidence,note:''});
+  applyVisionAesthetics(vision);
+  setFieldMeta('overall_preference_choice',{basis:'inference',confidence:j.overall_preference.confidence,note:vision?'Weighs the rendered visual analysis with the rest of the evidence.':''});
   setFieldMeta('overall_preference_primary_reason',{basis:'inference',confidence:j.overall_preference.confidence,note:''});
   if(j.overall_preference.optional_comment)setFieldMeta('overall_preference_optional_comment',{basis:'inference',confidence:j.overall_preference.confidence,note:'Rubric asks for 2–4 sentences; edit as needed.'});
   (judgeNotes||[]).forEach(w=>state.analysis.warnings.push(w));
 }
-async function pipelineJudge(facts){
-  if(!aiConfigured())return applyDeterministicOnly();
-  if(!orCallAllowed())return 'Deterministic fallback · OpenRouter unavailable for this run';
-  let visualForModel=state.source.visualEvidence&&modelVisionReady();
-  if(state.source.visualEvidence&&!visualForModel)state.analysis.warnings.push('The selected model cannot accept image input, so aesthetics cannot be judged visually and remains unavailable.');
-  let payload={prompt:state.prompt,archive:{visualEvidence:visualForModel,imageCount:visualForModel?state.source.images.filter(i=>i.dataUrl).length:0,capturedStates:state.source.capturedStates,scriptsCaptured:false},facts};
-  let userContent=payload;
-  if(visualForModel){
-    let images=state.source.images.filter(img=>img.dataUrl).slice(0,4);
-    if(images.length){
-      userContent=[{type:'text',text:JSON.stringify({...payload,attachedImages:images.map(img=>({type:img.type,size:img.size,location:img.location}))})}];
-      images.forEach(img=>userContent.push({type:'image_url',image_url:{url:img.dataUrl}}));
-    }
-  }
+function visualRequirements(){
+  let explicit=state.requirements.filter(r=>r.explicit);
+  let visual=explicit.filter(r=>r.category==='Visual/layout');
+  let chosen=visual.length?visual:explicit;
+  return chosen.slice(0,8).map(r=>({label:r.label,wording:r.wording}));
+}
+async function pipelineVision(facts){
+  let evidence=visionEvidenceSet();
+  if(!evidence)return{result:null,detail:'vision skipped · no usable images'};
+  if(!aiConfigured())return{result:null,detail:'vision skipped · OpenRouter not configured'};
+  if(!orCallAllowed())return{result:null,detail:'vision skipped · OpenRouter unavailable for this run'};
+  let model=effectiveVisualModel();
+  if(!model)return{result:null,detail:'vision skipped · no image-capable model in the catalog'};
+  let cap=modelCapability(model);
+  if(cap.structured==='none')return{result:null,detail:'vision skipped · '+model.id+' lacks structured output'};
+  let images=evidence.images.slice(0,6);
+  let manifest=images.map(img=>({label:img.label,side:img.side||null,view:img.view||null,width:img.width||null,height:img.height||null}));
+  let payload={prompt:state.prompt,imageBasis:evidence.kind,imageManifest:manifest,visualRequirements:visualRequirements(),limitations:evidence.limitations};
+  let content=[{type:'text',text:JSON.stringify(payload)}];
+  images.forEach(img=>content.push({type:'image_url',image_url:{url:img.dataUrl}}));
   try{
-    let output=await callOpenRouter('judgment',judgmentSchema,userContent,JUDGE_SYSTEM);
-    let{judgment,warnings}=validateJudgment(output,facts,{visualEvidence:visualForModel});
-    applyJudgment(judgment,warnings);
-    return `OpenRouter judgment · ${judgment.aesthetics.choice==='Unavailable'?'aesthetics unavailable':judgment.aesthetics.basis} basis`;
+    let output=await callOpenRouterWithModel('visual_analysis',visualSchema,content,styledEvidencePrompt(VISION_SYSTEM),model);
+    let result=validateVisionAnalysis(output,facts);
+    state.analysis.visualBasis=evidence.kind;
+    state.analysis.visualObservations={basis:evidence.kind,model:model.id,observations:result.observations,confidence:result.confidence};
+    state.analysis.visualLimitations=[...evidence.limitations];
+    return{result:{...result,kind:evidence.kind,model:model.id},detail:`vision · ${result.choice} (${evidence.kind==='rendered'?'rendered archive evidence':'embedded archive images'})`};
   }catch(e){
-    recordPipelineFailure(e,'OpenRouter judgment failed','deterministic proposals were used');
-    return applyDeterministicOnly();
+    recordPipelineFailure(e,'OpenRouter visual analysis failed','aesthetics left unavailable');
+    return{result:null,detail:'vision failed · aesthetics left unavailable'};
   }
 }
-async function pipelineEvidence(facts){
+async function pipelineJudge(facts,vision){
+  if(!aiConfigured()){applyDeterministicOnly();applyVisionAesthetics(vision&&vision.result);return 'Deterministic fallback · OpenRouter not configured'}
+  if(!orCallAllowed()){applyDeterministicOnly();applyVisionAesthetics(vision&&vision.result);return 'Deterministic fallback · OpenRouter unavailable for this run'}
+  let payload={prompt:state.prompt,archive:{renderedVisualEvidence:!!(vision&&vision.result),imageBasis:vision&&vision.result?vision.result.kind:'none',capturedStates:state.source.capturedStates,scriptsCaptured:false},facts};
+  if(vision&&vision.result)payload.renderedVisualAnalysis={choice:vision.result.choice,evidence:vision.result.evidence,observations:vision.result.observations,confidence:vision.result.confidence,model:vision.result.model};
+  try{
+    let output=await callOpenRouter('judgment',judgmentSchema,payload,styledEvidencePrompt(JUDGE_SYSTEM));
+    let{judgment,warnings}=validateJudgment(output,facts,{visualEvidence:!!(vision&&vision.result)});
+    applyJudgment(judgment,warnings,vision&&vision.result);
+    return `judgment · ${judgment.requirements_coverage.choice} coverage · ${judgment.overall_preference.choice} overall`;
+  }catch(e){
+    recordPipelineFailure(e,'OpenRouter judgment failed','deterministic proposals were used');
+    applyDeterministicOnly();
+    applyVisionAesthetics(vision&&vision.result);
+    return 'Deterministic fallback · judgment failed';
+  }
+}
+async function pipelineEvidence(facts,vision){
   if(!aiConfigured())return 'OpenRouter not configured · evidence left for review';
   if(!orCallAllowed())return 'OpenRouter unavailable for this run · evidence left for review';
   let payload={prompt:state.prompt,rubric:canonical(),facts};
+  if(vision&&vision.result)payload.renderedVisualAnalysis={choice:vision.result.choice,evidence:vision.result.evidence};
   try{
-    let output=await callOpenRouter('workflow_evidence',workflowEvidenceSchema,payload,EVIDENCE_SYSTEM);
+    let output=await callOpenRouter('workflow_evidence',workflowEvidenceSchema,payload,styledEvidencePrompt(EVIDENCE_SYSTEM));
     let{evidence,warnings}=validateWorkflowEvidence(output);
     warnings.forEach(w=>state.analysis.warnings.push('Evidence warning — '+w));
     let written=0;
     for(let[key,value]of Object.entries(evidence)){
-      if(key==='aesthetics_evidence'&&(!state.source.visualEvidence||!state.evaluation.aesthetics.choice))continue;
+      if(key==='aesthetics_evidence'&&!state.evaluation.aesthetics.choice)continue;
       let f=RESULT_FIELDS.find(x=>x.key===key),o=readPath(f.path);
       if(o.evidence&&o.evidence.trim())continue;
       let flags=evidenceFlags(f.path,value);
@@ -1548,6 +1899,10 @@ async function analyzeEvaluation(){
   state.analysis.warnings=[];
   state.analysis.stages=stages;
   state.analysis.openRouterFailure='';
+  state.analysis.visualBasis='';
+  state.analysis.visualObservations=null;
+  state.analysis.visualLimitations=[];
+  lastVision=null;
   orAbort=false;
   orPreflight=null;
   let box=$('#stageProgress');
@@ -1559,9 +1914,16 @@ async function analyzeEvaluation(){
     await step(0,async()=>`${state.source.partCount} parts · ${state.source.diagnostics.length} diagnostics`);
     await step(1,async()=>{state.prompt=state.source.prompt;syncPromptField();return `${state.prompt.length} characters recovered`});
     await step(2,async()=>{await runOpenRouterPreflight();return pipelineRequirements()});
-    await step(3,async()=>{lastFacts=buildWorkflowFacts();let c=['left','right'].filter(s=>state.source.candidates[s]).length;if(c<2)state.analysis.warnings.push('Only '+c+' of 2 candidate documents were recovered from the archive; candidate-dependent judgments are limited to the recovered evidence.');return `${lastFacts.length} evidence facts · ${c}/2 candidates`});
-    await step(4,()=>pipelineJudge(lastFacts));
-    await step(5,()=>pipelineEvidence(lastFacts));
+    await step(3,async()=>{
+      let shots=await renderCandidateShots();
+      if(!shots&&rasterFailure&&state.source.candidates.left&&state.source.candidates.right)state.analysis.warnings.push('Rendered visual evidence unavailable: '+rasterFailure);
+      lastFacts=buildWorkflowFacts();
+      let c=['left','right'].filter(s=>state.source.candidates[s]).length;
+      if(c<2)state.analysis.warnings.push('Only '+c+' of 2 candidate documents were recovered from the archive; candidate-dependent judgments are limited to the recovered evidence.');
+      return `${lastFacts.length} evidence facts · ${shots?VIEWPORTS.length*2:0} rendered view(s)`;
+    });
+    await step(4,async()=>{let vision=await pipelineVision(lastFacts);lastVision=vision;let judge=await pipelineJudge(lastFacts,vision);return vision.detail+' · '+judge});
+    await step(5,()=>pipelineEvidence(lastFacts,lastVision));
     await step(6,()=>{renderResults();renderPreview();renderValidation();let structural=validatePayload(canonical(),{complete:false});return structural.length?`${structural.length} structural issue(s)`: 'Choices legal · evidence within limits'});
     state.analysis.lastRun=new Date().toISOString();
     state.analysis.model=aiConfigured()?(orSettings.model||DEFAULT_MODEL):'deterministic only';
@@ -1599,6 +1961,7 @@ async function handleFile(file){
   let same=state.source.fileName===name&&state.source.fileSize===file.size;
   if(!same&&state.source.parsed&&resultsPresent()&&!confirm('Replace the current evaluation with this upload? Existing answers will be cleared.'))return;
   if(!same&&state.source.parsed)state=fresh();
+  renderedShots=null;renderLimitations=[];rasterFailure='';
   state.source=freshSource();
   state.source.fileName=name;state.source.fileSize=file.size;state.source.fileType=file.type||'';
   $('#fileMeta').hidden=false;$('#clearUpload').hidden=false;
@@ -1706,7 +2069,32 @@ function bindSettings(){
   $('#settingsModal').addEventListener('click',e=>{if(e.target.id==='settingsModal')closeSettings()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#settingsModal').hidden)closeSettings()});
 }
-function bindAI(){loadOrSettings();$('#orEnabled').checked=orSettings.enabled;$('#orKey').value=orSettings.apiKey;renderModelSelect();renderModelBadge();renderOpenRouterDiagnostics();modelMessage(orSettings.apiKey?'API key saved locally · model list available on refresh.':'No key configured.');$('#orEnabled').onchange=e=>{orSettings.enabled=e.target.checked;saveOrSettings();aiMessage(orSettings.enabled?'OpenRouter enabled. AI calls require an explicit action.':'OpenRouter disabled. Local actions remain available.')};$('#orKey').onchange=e=>{orSettings.apiKey=e.target.value.trim();if(saveOrSettings()){modelMessage(orSettings.apiKey?'API key saved locally. Loading models…':'Key removed.');if(orSettings.apiKey)refreshModels();else{modelList=[];renderModelSelect();renderModelBadge()}}};$('#orModel').onchange=e=>{orSettings.model=e.target.value||DEFAULT_MODEL;saveOrSettings();renderModelBadge();let model=selectedModelRecord(),cap=modelCapability(model);if(!modelList.length)modelMessage('Selected model saved locally.');else if(!model)modelMessage('Selected model '+(orSettings.model||DEFAULT_MODEL)+' is not in the loaded catalog.',true);else if(cap.structured==='none')modelMessage('Selected model '+model.id+' is not compatible: '+cap.reasons.join('; ')+'.',true);else if(cap.structured==='json')modelMessage('Selected model saved locally · limited compatibility (JSON mode only).',false);else modelMessage('Selected model saved locally · '+capabilityLabel(cap));};$('#orRefreshModels').onclick=refreshModels;$('#orTestModel').onclick=testSelectedModel;$('#orUseFallback').onclick=useCompatibleFallback;$('#aiExtract').onclick=aiExtract;$('#aiEvidence').onclick=aiEvidence;$('#aiRubric').onclick=aiRubric;$('#aiAesthetics').onclick=aiAesthetics;$('#aiOverall').onclick=aiOverall;$('#aiStage').onclick=e=>{let card=e.target.closest('[data-proposal]'),index=aiProposals.findIndex(p=>p.id===card?.dataset.proposal);if(index<0)return;if(e.target.closest('[data-ai-dismiss]')){aiProposals.splice(index,1);renderAIProposals()}else if(e.target.closest('[data-ai-apply]')&&applyProposal(aiProposals[index])){aiProposals.splice(index,1);renderAIProposals();renderResults();aiMessage('Suggestion applied. Review the updated rubric and validation desk.')}}}
+function bindAI(){
+  loadOrSettings();
+  $('#orEnabled').checked=orSettings.enabled;
+  $('#orKey').value=orSettings.apiKey;
+  $('#orStyle').value=orSettings.style||DEFAULT_STYLE;
+  renderModelSelect();
+  renderVisualModelSelect();
+  renderModelBadge();
+  renderOpenRouterDiagnostics();
+  modelMessage(orSettings.apiKey?'API key saved locally · model list available on refresh.':'No key configured.');
+  $('#orEnabled').onchange=e=>{orSettings.enabled=e.target.checked;saveOrSettings();aiMessage(orSettings.enabled?'OpenRouter enabled. AI calls require an explicit action.':'OpenRouter disabled. Local actions remain available.')};
+  $('#orKey').onchange=e=>{orSettings.apiKey=e.target.value.trim();if(saveOrSettings()){modelMessage(orSettings.apiKey?'API key saved locally. Loading models…':'Key removed.');if(orSettings.apiKey)refreshModels();else{modelList=[];renderModelSelect();renderVisualModelSelect();renderModelBadge()}}};
+  $('#orModel').onchange=e=>{orSettings.model=e.target.value||DEFAULT_MODEL;saveOrSettings();renderModelBadge();let model=selectedModelRecord(),cap=modelCapability(model);if(!modelList.length)modelMessage('Selected model saved locally.');else if(!model)modelMessage('Selected model '+(orSettings.model||DEFAULT_MODEL)+' is not in the loaded catalog.',true);else if(cap.structured==='none')modelMessage('Selected model '+model.id+' is not compatible: '+cap.reasons.join('; ')+'.',true);else if(cap.structured==='json')modelMessage('Selected model saved locally · limited compatibility (JSON mode only).',false);else modelMessage('Selected model saved locally · '+capabilityLabel(cap));};
+  $('#orVisualModel').onchange=e=>{orSettings.visualModel=e.target.value||'';saveOrSettings();renderModelBadge();let visual=effectiveVisualModel();if(!orSettings.visualModel)modelMessage('Visual model follows the analysis model when it accepts images.',false);else if(visual&&visual.id===orSettings.visualModel)modelMessage('Visual model '+visual.id+' selected.',false);else modelMessage('Visual model '+orSettings.visualModel+' is not usable from the loaded catalog; a compatible fallback will be used.',true)};
+  $('#orStyle').addEventListener('input',e=>{orSettings.style=e.target.value});
+  $('#orStyle').addEventListener('change',e=>{orSettings.style=e.target.value.trim()||DEFAULT_STYLE;saveOrSettings()});
+  $('#orRefreshModels').onclick=refreshModels;
+  $('#orTestModel').onclick=testSelectedModel;
+  $('#orUseFallback').onclick=useCompatibleFallback;
+  $('#aiExtract').onclick=aiExtract;
+  $('#aiEvidence').onclick=aiEvidence;
+  $('#aiRubric').onclick=aiRubric;
+  $('#aiAesthetics').onclick=aiAesthetics;
+  $('#aiOverall').onclick=aiOverall;
+  $('#aiStage').onclick=e=>{let card=e.target.closest('[data-proposal]'),index=aiProposals.findIndex(p=>p.id===card?.dataset.proposal);if(index<0)return;if(e.target.closest('[data-ai-dismiss]')){aiProposals.splice(index,1);renderAIProposals()}else if(e.target.closest('[data-ai-apply]')&&applyProposal(aiProposals[index])){aiProposals.splice(index,1);renderAIProposals();renderResults();aiMessage('Suggestion applied. Review the updated rubric and validation desk.')}}
+}
 function bind(){
   let prompt=$('#prompt');
   prompt.addEventListener('input',()=>{state.prompt=prompt.value;scheduleSave();renderValidation();renderStatus()});
@@ -1756,7 +2144,7 @@ alert('WebDev Autofill v1\nFields filled: '+filled+'/'+targets.length+'\nFields 
 })().catch(e=>alert('WebDev Autofill stopped: '+e.message))}
 const BOOKMARKLET='javascript:('+webdevAutofill.toString()+')()';
 
-window.__WEBDEV_SBS_TEST__={canonical,validatePayload,lint,evidenceFlags,commentFlags,nativeSet,webdevAutofill,bookmarklet:()=>BOOKMARKLET,mergeState,importPayload,state:()=>state,requirement,renderAll,renderResults,resultValue,validateAIRequirements,validateAIEvidence,validateAIRubric,validateAIAesthetics,validateAIOverall,validateJudgment,validateWorkflowEvidence,deterministicChoices,factsFor,buildWorkflowFacts,aiProposals:()=>aiProposals,orSettings:()=>({...orSettings}),callOpenRouter,parseArchive,extractPromptFromDocument,compareFormStructure,keywordSignals,FORM_FIELD_ORDER,RESULT_FIELDS,uploadText:async(name,text,type)=>handleFile(new File([text],name,{type:type||'multipart/related'})),analyzeEvaluation:()=>analyzeEvaluation(),syncStages,models:()=>modelList.map(m=>JSON.parse(JSON.stringify(m))),normalizeModel,modelCapability,buildOpenRouterRequest,openRouterPreflight,refreshModels:()=>refreshModels(),testSelectedModel:()=>testSelectedModel(),orDiagnostics:()=>orDiagnostics.map(d=>({...d}))};
+window.__WEBDEV_SBS_TEST__={canonical,validatePayload,lint,evidenceFlags,commentFlags,nativeSet,webdevAutofill,bookmarklet:()=>BOOKMARKLET,mergeState,importPayload,state:()=>state,requirement,renderAll,renderResults,resultValue,validateAIRequirements,validateAIEvidence,validateAIRubric,validateAIAesthetics,validateAIOverall,validateJudgment,validateVisionAnalysis,validateWorkflowEvidence,deterministicChoices,factsFor,buildWorkflowFacts,aiProposals:()=>aiProposals,orSettings:()=>({...orSettings}),callOpenRouter,parseArchive,extractPromptFromDocument,compareFormStructure,keywordSignals,FORM_FIELD_ORDER,RESULT_FIELDS,uploadText:async(name,text,type)=>handleFile(new File([text],name,{type:type||'multipart/related'})),analyzeEvaluation:()=>analyzeEvaluation(),syncStages,models:()=>modelList.map(m=>JSON.parse(JSON.stringify(m))),normalizeModel,modelCapability,buildOpenRouterRequest,openRouterPreflight,refreshModels:()=>refreshModels(),testSelectedModel:()=>testSelectedModel(),orDiagnostics:()=>orDiagnostics.map(d=>({...d})),styleInstruction,styledEvidencePrompt,effectiveVisualModel:()=>{let m=effectiveVisualModel();return m?m.id:''},renderCandidateShots:()=>renderCandidateShots(),shotsMeta:()=>renderedShots?Object.fromEntries(['left','right'].map(side=>[side,Object.fromEntries(Object.entries(renderedShots[side]).map(([view,shot])=>[view,{width:shot.width,height:shot.height,bytes:shot.bytes,prefix:shot.dataUrl.slice(0,22)}]))])):null,rasterFailure:()=>rasterFailure,renderLimitations:()=>[...renderLimitations],forceRasterFailure:value=>{rasterizeForced=!!value},visualObservations:()=>state.analysis.visualObservations?JSON.parse(JSON.stringify(state.analysis.visualObservations)):null};
 
 bind();
 bindAI();

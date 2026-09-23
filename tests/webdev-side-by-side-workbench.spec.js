@@ -57,7 +57,7 @@ function buildFixture(options = {}) {
   ].join('\n\n');
   const includeCandidates = options.includeCandidates !== false;
   const includeImage = options.includeImage === true;
-  const leftBody = options.leftBody || '<h1>Todo</h1><ul class="list"></ul><input id="task" placeholder="New task"><button>Add</button><button>Clear</button>';
+  const leftBody = options.leftBody || '<h1>Todo</h1><img src="https://cdn.example.invalid/hero.png" alt="hero"><ul class="list"></ul><input id="task" placeholder="New task"><button>Add</button><button>Clear</button>';
   const rightBody = options.rightBody || '<h1>Task Manager</h1><ul class="list"></ul><input id="task" placeholder="New task"><button>Add</button>';
   const promptHtml = prompt.split('\n\n').map(p => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`).join('');
   const iframes = includeCandidates
@@ -125,7 +125,8 @@ async function openSettings(page) {
 
 const CATALOG = [
   { id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 mini', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens', 'max_completion_tokens'], architecture: { input_modalities: ['text', 'image', 'file'], output_modalities: ['text'] }, top_provider: { context_length: 128000, max_completion_tokens: 16384, is_moderated: false } },
-  { id: 'anthropic/claude-test', name: 'Claude test', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: { context_length: 200000, max_completion_tokens: 8192, is_moderated: false } }
+  { id: 'anthropic/claude-test', name: 'Claude test', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: { context_length: 200000, max_completion_tokens: 8192, is_moderated: false } },
+  { id: 'meta/text-only', name: 'Text Only', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'], output_modalities: ['text'] }, top_provider: { context_length: 32000 } }
 ];
 
 async function installCatalog(page, models = CATALOG) {
@@ -178,6 +179,18 @@ async function installWorkflowMock(page, options = {}) {
         product_depth: { choice: 'Right', rationale: 'The right candidate lists an extra control.', confidence: 'low', source_ids: pick('cand:right').length ? pick('cand:right') : anyId },
         aesthetics,
         overall_preference: { choice: 'Left', primary_reason: 'Functionality', optional_comment: 'The left candidate covers the requested controls in its static markup. The right candidate is missing one requested control.', rationale: 'Functional difference.', confidence: 'low', source_ids: anyId }
+      };
+    } else if (name === 'webdev_visual_judgment') {
+      content = options.visual || {
+        choice: 'Right',
+        evidence: 'The right one keeps its three-column grid on mobile, while the left clips the last card.',
+        observations: {
+          left_desktop: ['Three cards fit cleanly across the page.'],
+          left_mobile: ['The last card is clipped at the right edge.'],
+          right_desktop: ['Cards keep even spacing.'],
+          right_mobile: ['Cards stack into a single column without clipping.']
+        },
+        confidence: 'medium'
       };
     } else if (name === 'webdev_workflow_evidence') {
       content = {
@@ -286,7 +299,7 @@ test('missing candidate evidence is reported instead of invented', async ({ page
   expect(errors).toEqual([]);
 });
 
-test('complete analysis proposes all 13 live-form fields', async ({ page }) => {
+test('complete analysis proposes all 13 live-form fields with rendered visual evidence', async ({ page }) => {
   const errors = await open(page);
   const requests = await installWorkflowMock(page);
   await configureAI(page);
@@ -295,40 +308,180 @@ test('complete analysis proposes all 13 live-form fields', async ({ page }) => {
   await expect(page.locator('#stageResults')).toBeVisible();
   await expect(page.locator('#resultList .result-row')).toHaveCount(13);
   await expect(page.locator('#resultsCount')).toHaveText('13 / 13');
+  const visionRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment');
+  expect(Array.isArray(visionRequest.messages[1].content)).toBe(true);
+  expect(visionRequest.messages[1].content.filter(part => part.type === 'image_url')).toHaveLength(4);
+  expect(visionRequest.model).toBe('openai/gpt-4.1-mini');
   const judgmentRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
-  expect(Array.isArray(judgmentRequest.messages[1].content)).toBe(true);
-  expect(judgmentRequest.messages[1].content.some(part => part.type === 'image_url')).toBe(true);
+  expect(typeof judgmentRequest.messages[1].content).toBe('string');
+  expect(judgmentRequest.messages[1].content).toContain('renderedVisualAnalysis');
   const result = await page.evaluate(() => {
     const t = window.__WEBDEV_SBS_TEST__;
     const values = {};
     for (const key of t.FORM_FIELD_ORDER) values[key] = t.resultValue(key);
-    return { values, structural: t.validatePayload(t.canonical(), { complete: true }), stages: t.state().analysis.stages.map(x => x.status), aestheticsMeta: t.state().analysis.fieldMeta.aesthetics_choice };
+    return { values, structural: t.validatePayload(t.canonical(), { complete: true }), stages: t.state().analysis.stages.map(x => x.status), aestheticsMeta: t.state().analysis.fieldMeta.aesthetics_choice, visuals: t.visualObservations(), badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '' };
   });
   for (const key of FORM_FIELD_ORDER) expect(String(result.values[key]).length).toBeGreaterThan(0);
   expect(result.structural).toEqual([]);
   expect(result.stages.every(x => x === 'done')).toBe(true);
-  expect(result.aestheticsMeta.basis).toBe('inference');
+  expect(result.aestheticsMeta.basis).toBe('rendered');
+  expect(result.badge).toContain('Rendered archive evidence');
+  expect(result.visuals.basis).toBe('rendered');
+  expect(result.visuals.observations.left_mobile.length).toBeGreaterThan(0);
+  await openAdvanced(page);
+  await expect(page.locator('#renderedShotsView')).toContainText('Visible observations');
+  await expect(page.locator('#renderedShotsView')).toContainText('Cards stack into a single column without clipping.');
+  await expect(page.locator('#renderedShotsView .shot')).toHaveCount(4);
   expect(errors).toEqual([]);
 });
 
-test('aesthetics is never hallucinated when no visual evidence exists', async ({ page }) => {
+test('rasterization failure does not fabricate aesthetics', async ({ page }) => {
   const errors = await open(page);
-  const requests = await installWorkflowMock(page, { aesthetics: { choice: 'Right', basis: 'visual', rationale: 'Pretend screenshot comparison.', confidence: 'high', source_ids: [] } });
+  const requests = await installWorkflowMock(page);
   await configureAI(page);
+  await page.evaluate(() => window.__WEBDEV_SBS_TEST__.forceRasterFailure(true));
   await upload(page, 'rating.mhtml', buildFixture());
   await page.locator('#analyze').click();
   await expect(page.locator('#stageResults')).toBeVisible();
   const result = await page.evaluate(() => {
     const t = window.__WEBDEV_SBS_TEST__;
-    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta, warnings: t.state().analysis.warnings.join('\n'), badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '' };
+    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta, warnings: t.state().analysis.warnings.join('\n'), failure: t.rasterFailure(), shots: t.shotsMeta(), badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '' };
   });
   expect(result.aesthetics.choice).toBe('');
   expect(result.aesthetics.evidence).toBe('');
   expect(result.meta.aesthetics_choice.basis).toBe('unavailable');
-  expect(result.warnings).toContain('No rendered visual evidence');
   expect(result.badge.toLowerCase()).toContain('unavailable');
+  expect(result.failure).toContain('rasterization');
+  expect(result.shots).toBeNull();
+  expect(result.warnings).toContain('Rendered visual evidence unavailable');
+  expect(requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment')).toBeUndefined();
+  expect(errors).toEqual([]);
+});
+
+test('recovered HTML/CSS renders desktop and mobile snapshots and records limitations', async ({ page }) => {
+  const errors = await open(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  const result = await page.evaluate(async () => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    await t.renderCandidateShots();
+    return { shots: t.shotsMeta(), limitations: t.renderLimitations(), failure: t.rasterFailure() };
+  });
+  expect(result.failure).toBe('');
+  expect(result.shots.left.desktop.prefix).toBe('data:image/png;base64,');
+  expect(result.shots.left.desktop.width).toBe(1440);
+  expect(result.shots.left.desktop.height).toBe(900);
+  expect(result.shots.left.mobile.width).toBe(390);
+  expect(result.shots.left.mobile.height).toBe(844);
+  expect(result.shots.right.desktop.prefix).toBe('data:image/png;base64,');
+  expect(result.shots.right.mobile.prefix).toBe('data:image/png;base64,');
+  expect(result.shots.left.desktop.bytes).not.toBe(result.shots.right.desktop.bytes);
+  expect(result.shots.left.mobile.bytes).not.toBe(result.shots.right.mobile.bytes);
+  expect(result.limitations.join('\n')).toContain('external');
+  expect(result.limitations.join('\n')).toContain('scripts, event handlers, runtime state');
+  await openAdvanced(page);
+  await expect(page.locator('#renderedShotsView .shot')).toHaveCount(4);
+  expect(errors).toEqual([]);
+});
+
+test('vision capability is detected from model metadata', async ({ page }) => {
+  const errors = await open(page);
+  await configureAI(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const models = t.models();
+    return {
+      vision: t.modelCapability(models.find(m => m.id === 'openai/gpt-4.1-mini')).vision,
+      textOnly: t.modelCapability(models.find(m => m.id === 'meta/text-only')).vision,
+      fallback: t.effectiveVisualModel()
+    };
+  });
+  expect(result.vision).toBe(true);
+  expect(result.textOnly).toBe(false);
+  expect(result.fallback).toBe('openai/gpt-4.1-mini');
+  expect(errors).toEqual([]);
+});
+
+test('text-only models do not receive image requests', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page, [{ id: 'meta/text-only', name: 'Text Only', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} }]);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  expect(requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment')).toBeUndefined();
+  for (const request of requests) expect(Array.isArray(request.messages[1].content)).toBe(false);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta.aesthetics_choice, visuals: t.visualObservations() };
+  });
+  expect(result.aesthetics.choice).toBe('');
+  expect(result.meta.basis).toBe('unavailable');
+  expect(result.visuals).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+test('a separate visual model can be selected for image analysis', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page, [
+    { id: 'meta/text-only', name: 'Text Only', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} },
+    { id: 'vendor/vision', name: 'Vision Model', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: {} }
+  ]);
+  await openSettings(page);
+  await page.locator('#orModel').selectOption('meta/text-only');
+  await page.locator('#orVisualModel').selectOption('vendor/vision');
+  await page.locator('#saveSettings').click();
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const visionRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment');
+  expect(visionRequest.model).toBe('vendor/vision');
+  expect(visionRequest.messages[1].content.filter(part => part.type === 'image_url')).toHaveLength(4);
+  const judgmentRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
+  expect(judgmentRequest.model).toBe('meta/text-only');
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { visual: t.visualObservations(), meta: t.state().analysis.fieldMeta.aesthetics_choice };
+  });
+  expect(result.visual.model).toBe('vendor/vision');
+  expect(result.meta.basis).toBe('rendered');
+  expect(errors).toEqual([]);
+});
+
+test('evidence writing follows the configurable writing style, requirements extraction does not', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await openSettings(page);
+  await page.locator('#orStyle').fill('Sentinel style: short, dry, and specific.');
+  await page.locator('#orStyle').press('Tab');
+  await page.locator('#saveSettings').click();
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const requirements = requests.find(r => r.response_format?.json_schema?.name === 'webdev_requirements');
+  const evidence = requests.find(r => r.response_format?.json_schema?.name === 'webdev_workflow_evidence');
+  const vision = requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment');
   const judgment = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
-  expect(judgment.messages[1].content).toContain('No rendered screenshots');
+  expect(evidence.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
+  expect(vision.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
+  expect(judgment.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
+  expect(requirements.messages[0].content).not.toContain('Sentinel style');
+  expect(errors).toEqual([]);
+});
+
+test('writing style persists locally', async ({ page }) => {
+  const errors = await open(page);
+  await openSettings(page);
+  await page.locator('#orStyle').fill('Persisted style sentinel.');
+  await page.locator('#orStyle').press('Tab');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')).style)).toBe('Persisted style sentinel.');
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  await openSettings(page);
+  await expect(page.locator('#orStyle')).toHaveValue('Persisted style sentinel.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.styleInstruction())).toBe('Persisted style sentinel.');
   expect(errors).toEqual([]);
 });
 
@@ -735,7 +888,7 @@ test('AI requirements are strict, quoted, staged, and out-of-scope text is warne
   expect(requests[0].response_format.json_schema.strict).toBe(true);
   await page.locator('#aiStage [data-ai-apply]').click();
   await expect(page.locator('#requirementsList .req-card')).toHaveCount(1);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')))).toEqual({ enabled: true, apiKey: 'test-local-key', model: 'anthropic/claude-test' });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')))).toEqual({ enabled: true, apiKey: 'test-local-key', model: 'anthropic/claude-test', visualModel: '', style: 'Plainspoken, concise, technically literate, conversational. Avoid rubric/QA boilerplate.' });
 
   answer = aiReply({ requirements: [{ label: 'Authentication', wording: 'Add authentication', category: 'Interaction', explicit: true, testable: true, notes: '' }] });
   await page.locator('#aiExtract').click();
