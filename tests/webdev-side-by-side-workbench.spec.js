@@ -123,12 +123,21 @@ async function openSettings(page) {
   await expect(page.locator('#settingsModal')).toBeVisible();
 }
 
-async function configureAI(page) {
-  await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 mini' }, { id: 'anthropic/claude-test', name: 'Claude test' }] }) }));
+const CATALOG = [
+  { id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 mini', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens', 'max_completion_tokens'], architecture: { input_modalities: ['text', 'image', 'file'], output_modalities: ['text'] }, top_provider: { context_length: 128000, max_completion_tokens: 16384, is_moderated: false } },
+  { id: 'anthropic/claude-test', name: 'Claude test', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: { context_length: 200000, max_completion_tokens: 8192, is_moderated: false } }
+];
+
+async function installCatalog(page, models = CATALOG) {
+  await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: models }) }));
+}
+
+async function configureAI(page, models = CATALOG) {
+  await installCatalog(page, models);
   await openSettings(page);
   await page.locator('#orKey').fill('test-local-key');
   await page.locator('#orKey').press('Tab');
-  await expect(page.locator('#orModelStatus')).toContainText('2 models loaded');
+  await expect(page.locator('#orModelStatus')).toContainText('models loaded');
   await page.locator('#orEnabled').check();
   await page.locator('#saveSettings').click();
   await expect(page.locator('#settingsModal')).toBeHidden();
@@ -320,6 +329,209 @@ test('aesthetics is never hallucinated when no visual evidence exists', async ({
   expect(result.badge.toLowerCase()).toContain('unavailable');
   const judgment = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
   expect(judgment.messages[1].content).toContain('No rendered screenshots');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- OpenRouter capability handling ---------- */
+
+test('model catalog preserves capability metadata', async ({ page }) => {
+  const errors = await open(page);
+  await configureAI(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const models = t.models();
+    return {
+      gpt: models.find(m => m.id === 'openai/gpt-4.1-mini'),
+      caps: Object.fromEntries(models.map(m => [m.id, t.modelCapability(m)]))
+    };
+  });
+  expect(result.gpt.supported_parameters).toContain('structured_outputs');
+  expect(result.gpt.architecture.input_modalities).toEqual(['text', 'image', 'file']);
+  expect(result.gpt.top_provider.context_length).toBe(128000);
+  expect(result.gpt.top_provider.max_completion_tokens).toBe(16384);
+  expect(result.caps['openai/gpt-4.1-mini'].tier).toBe('compatible');
+  expect(result.caps['openai/gpt-4.1-mini'].tokenParam).toBe('max_tokens');
+  expect(errors).toEqual([]);
+});
+
+test('request parameters are built from advertised model capabilities', async ({ page }) => {
+  const errors = await open(page);
+  await configureAI(page, [
+    { id: 'vendor/full', name: 'Full', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} },
+    { id: 'vendor/notemp', name: 'No temperature', supported_parameters: ['response_format', 'structured_outputs', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} },
+    { id: 'vendor/mct', name: 'Completion tokens', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_completion_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} },
+    { id: 'vendor/jsononly', name: 'JSON only', supported_parameters: ['response_format', 'temperature'], architecture: { input_modalities: ['text'] }, top_provider: {} },
+    { id: 'vendor/legacy', name: 'Legacy', supported_parameters: ['temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} }
+  ]);
+  const built = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const byId = Object.fromEntries(t.models().map(m => [m.id, m]));
+    const schema = { type: 'json_schema', json_schema: { name: 'x', strict: true, schema: { type: 'object' } } };
+    const build = id => t.buildOpenRouterRequest(byId[id], { responseSchema: schema, systemInstruction: 'sys', userContent: { a: 1 }, tokens: 100 });
+    return { full: build('vendor/full'), notemp: build('vendor/notemp'), mct: build('vendor/mct'), jsononly: build('vendor/jsononly'), legacy: build('vendor/legacy') };
+  });
+  expect(built.full.body.temperature).toBe(0.1);
+  expect(built.full.body.max_tokens).toBe(100);
+  expect(built.full.body.max_completion_tokens).toBeUndefined();
+  expect(built.full.body.response_format.json_schema.strict).toBe(true);
+  expect(built.full.body.provider.require_parameters).toBe(true);
+  expect(built.full.sent).toEqual(['response_format', 'temperature', 'max_tokens']);
+
+  expect(built.notemp.body.temperature).toBeUndefined();
+  expect(built.notemp.body.max_tokens).toBe(100);
+  expect(built.notemp.body.provider.require_parameters).toBe(true);
+  expect(built.notemp.sent).toEqual(['response_format', 'max_tokens']);
+
+  expect(built.mct.body.max_completion_tokens).toBe(100);
+  expect(built.mct.body.max_tokens).toBeUndefined();
+  expect(built.mct.sent).toEqual(['response_format', 'temperature', 'max_completion_tokens']);
+
+  expect(built.jsononly.body.response_format.type).toBe('json_object');
+  expect(built.jsononly.structuredMode).toBe('json');
+  expect(built.jsononly.body.temperature).toBe(0.1);
+  expect(built.jsononly.body.max_tokens).toBeUndefined();
+  expect(built.jsononly.sent).toEqual(['response_format', 'temperature']);
+
+  expect(built.legacy.body.response_format).toBeUndefined();
+  expect(built.legacy.structuredMode).toBe('prompt');
+  expect(built.legacy.sent).toEqual(['temperature', 'max_tokens']);
+  expect(errors).toEqual([]);
+});
+
+test('Test selected model uses the same request builder and reports the provider', async ({ page }) => {
+  const errors = await open(page);
+  const bodies = [];
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    const body = route.request().postDataJSON();
+    bodies.push(body);
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ provider: 'Test Provider', model: body.model, choices: [{ message: { content: '{"ok":true}' } }] }) });
+  });
+  await configureAI(page);
+  await openSettings(page);
+  await page.locator('#orTestModel').click();
+  await expect(page.locator('#orModelStatus')).toContainText('Model ready · structured output verified');
+  await expect(page.locator('#orModelStatus')).toContainText('Test Provider');
+  expect(bodies).toHaveLength(1);
+  const body = bodies[0];
+  expect(body.response_format.json_schema.name).toBe('webdev_model_test');
+  expect(body.response_format.json_schema.strict).toBe(true);
+  expect(body.response_format.json_schema.schema.required).toEqual(['ok']);
+  expect(body.temperature).toBe(0.1);
+  expect(body.max_tokens).toBe(64);
+  expect(body.provider.require_parameters).toBe(true);
+  const expected = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const model = t.models().find(m => m.id === 'openai/gpt-4.1-mini');
+    return t.buildOpenRouterRequest(model, { responseSchema: { type: 'json_schema', json_schema: { name: 'webdev_model_test', strict: true, schema: { type: 'object', additionalProperties: false, required: ['ok'], properties: { ok: { type: 'boolean' } } } } }, systemInstruction: 'Reply with a JSON object.', userContent: { probe: 'return ok true' }, tokens: 64 }).body;
+  });
+  expect(body).toEqual(expected);
+  expect(errors).toEqual([]);
+});
+
+test('an incompatible model is detected before full analysis and blocks AI calls', async ({ page }) => {
+  const errors = await open(page);
+  let chatCalls = 0;
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => { chatCalls++; return route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }) });
+  await configureAI(page, [{ id: 'vendor/legacy', name: 'Legacy', supported_parameters: ['temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} }]);
+  await openSettings(page);
+  await page.locator('#orModel').selectOption('vendor/legacy');
+  await page.locator('#saveSettings').click();
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  await expect(page.locator('#resultList .result-row')).toHaveCount(13);
+  expect(chatCalls).toBe(0);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { warnings: t.state().analysis.warnings.join('\n'), aesthetics: t.canonical().aesthetics, functional: t.canonical().functional_correctness.left.choice };
+  });
+  expect(result.warnings).toContain('model check failed');
+  expect(result.aesthetics.choice).toBe('');
+  expect(result.functional).toBe('');
+  expect(errors).toEqual([]);
+});
+
+test('a saved incompatible model is flagged and switched only by explicit fallback', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error' && !message.text().includes('analytics-lite')) errors.push(message.text()); });
+  await page.route('**/api/analytics/**', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(() => localStorage.setItem('webdev-sbs.openrouter.v1', JSON.stringify({ enabled: true, apiKey: 'test-local-key', model: 'vendor/missing' })));
+  await installCatalog(page);
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.orSettings().model)).toBe('vendor/missing');
+  await openSettings(page);
+  await page.locator('#orRefreshModels').click();
+  await expect(page.locator('#orModelStatus')).toContainText('not in the catalog');
+  await expect(page.locator('#orUseFallback')).toBeVisible();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.orSettings().model)).toBe('vendor/missing');
+  await page.locator('#orUseFallback').click();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.orSettings().model)).toBe('openai/gpt-4.1-mini');
+  await expect(page.locator('#orModelStatus')).toContainText('Switched to compatible model');
+  expect(errors).toEqual([]);
+});
+
+test('an OpenRouter 404 routing error aborts the remaining AI stages', async ({ page }) => {
+  const errors = await open(page);
+  let chatCalls = 0;
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    chatCalls++;
+    return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'No endpoints found that can handle the requested parameters.' } }) });
+  });
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  await expect(page.locator('#resultList .result-row')).toHaveCount(13);
+  expect(chatCalls).toBe(1);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { warnings: t.state().analysis.warnings.join('\n'), failure: t.state().analysis.openRouterFailure, stages: t.state().analysis.stages.map(x => x.status) };
+  });
+  expect(result.failure).toContain('routing failed');
+  expect(result.warnings).toContain('Remaining AI stages were skipped');
+  expect(result.stages[4]).toBe('done');
+  expect(errors.length).toBeGreaterThan(0);
+  expect(errors.every(message => message.includes('404'))).toBe(true);
+});
+
+test('OpenRouter diagnostics name the model and parameters without the API key', async ({ page }) => {
+  const errors = await open(page);
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'No endpoints found that can handle the requested parameters.' } }) }));
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  await openAdvanced(page);
+  const text = await page.locator('#orDiagnostics').textContent();
+  expect(text).toContain('openai/gpt-4.1-mini');
+  expect(text).toContain('HTTP 404');
+  expect(text).toContain('response_format');
+  expect(text).toContain('temperature');
+  expect(text).toContain('require_parameters: yes');
+  expect(text).toContain('Likely incompatible parameter');
+  expect(text).not.toContain('test-local-key');
+  expect(text).not.toContain('Bearer');
+  expect(errors.length).toBeGreaterThan(0);
+  expect(errors.every(message => message.includes('404'))).toBe(true);
+});
+
+test('a blank optional comment produces no validation warning', async ({ page }) => {
+  const errors = await open(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      blankLint: t.lint(),
+      blankFlags: t.commentFlags(''),
+      shortFlags: t.commentFlags('Only one sentence.'),
+      goodFlags: t.commentFlags('The left app wins because it works. The right app loses because it is missing the table.')
+    };
+  });
+  expect(result.blankLint.join('\n')).not.toContain('Optional comment');
+  expect(result.blankFlags).toEqual([]);
+  expect(result.shortFlags.join(' ')).toContain('2–4 sentences');
+  expect(result.goodFlags).toEqual([]);
   expect(errors).toEqual([]);
 });
 
