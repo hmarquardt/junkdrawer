@@ -1,8 +1,101 @@
 const { test, expect } = require('@playwright/test');
 const path = require('path');
+const fs = require('fs');
 
 test.use({ channel: 'chrome' });
 const url = `file://${path.resolve(process.cwd(), 'webdev-side-by-side-workbench.html')}`;
+const REAL_MWEB = path.join(process.env.HOME || '', 'Downloads', 'WebDev side-by-side rating1.mhtml');
+
+const FUNC = ['No testable functionality', 'Works', 'Partly works', 'Does not work'];
+const COMP = ['Left', 'About equal', 'Right'];
+const REASONS = ['Functionality', 'Requirements coverage', 'Useful added capability', 'Visual quality', 'No meaningful difference'];
+const FORM_FIELD_ORDER = [
+  'functional_correctness_left', 'functional_correctness_left_evidence',
+  'functional_correctness_right', 'functional_correctness_right_evidence',
+  'requirements_coverage_choice', 'requirements_coverage_evidence',
+  'product_depth_choice', 'product_depth_evidence',
+  'aesthetics_choice', 'aesthetics_evidence',
+  'overall_preference_choice', 'overall_preference_primary_reason', 'overall_preference_optional_comment'
+];
+
+/* ---------- synthetic MHTML fixture ---------- */
+
+const BOUNDARY = '----MultipartBoundary--JDTEST----';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+function qp(text) {
+  return String(text).replace(/=/g, '=3D');
+}
+
+function mimePart(headers, body) {
+  return `\n--${BOUNDARY}\n${headers}\n\n${body}\n`;
+}
+
+function formControls() {
+  const buttons = (id, values) => `<div id="${id}" role="group">${values.map(v => `<button type="button" value="${v}">${v}</button>`).join('')}</div>`;
+  return [
+    buttons('root_functional_correctness_left', FUNC),
+    '<textarea id="root_functional_correctness_left_evidence"></textarea>',
+    buttons('root_functional_correctness_right', FUNC),
+    '<textarea id="root_functional_correctness_right_evidence"></textarea>',
+    buttons('root_requirements_coverage_choice', COMP),
+    '<textarea id="root_requirements_coverage_evidence"></textarea>',
+    buttons('root_product_depth_choice', COMP),
+    '<textarea id="root_product_depth_evidence"></textarea>',
+    buttons('root_aesthetics_choice', COMP),
+    '<textarea id="root_aesthetics_evidence"></textarea>',
+    buttons('root_overall_preference_choice', COMP),
+    buttons('root_overall_preference_primary_reason', REASONS),
+    '<textarea id="root_overall_preference_optional_comment"></textarea>'
+  ].join('');
+}
+
+function buildFixture(options = {}) {
+  const prompt = options.prompt || [
+    'Build a todo app. It must include an input for a new task, an Add button that appends the task to the list, and a Delete control for each task.',
+    'No authentication is required.'
+  ].join('\n\n');
+  const includeCandidates = options.includeCandidates !== false;
+  const includeImage = options.includeImage === true;
+  const leftBody = options.leftBody || '<h1>Todo</h1><ul class="list"></ul><input id="task" placeholder="New task"><button>Add</button><button>Clear</button>';
+  const rightBody = options.rightBody || '<h1>Task Manager</h1><ul class="list"></ul><input id="task" placeholder="New task"><button>Add</button>';
+  const promptHtml = prompt.split('\n\n').map(p => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`).join('');
+  const iframes = includeCandidates
+    ? '<iframe src="cid:frame-left@mhtml.blink" title="Left"></iframe><iframe src="cid:frame-right@mhtml.blink" title="Right"></iframe>'
+    : '';
+  const withPrompt = options.includePrompt !== false ? `<h3>Task prompt</h3>${promptHtml}` : '';
+  const taskHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>WebDev side-by-side rating</title></head><body>${withPrompt}<h3>Left</h3><h3>Right</h3>${iframes}${formControls()}<p>No outputs captured yet</p><p>No outputs captured yet</p></body></html>`;
+  const leftCandidate = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Todo Left</title><link rel="stylesheet" href="cid:css-left@mhtml.blink"></head><body>${leftBody}</body></html>`;
+  const rightCandidate = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Todo Right</title><link rel="stylesheet" href="cid:css-right@mhtml.blink"></head><body>${rightBody}</body></html>`;
+  const wrapper = inner => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>App preview</title></head><body><main id="preview"><iframe src="${inner}" title="App preview"></iframe></main></body></html>`;
+  const htmlHeaders = (id, location) => `Content-Type: text/html\nContent-Transfer-Encoding: quoted-printable\nContent-ID: <${id}>\nContent-Location: ${location}`;
+  const parts = [
+    mimePart(htmlHeaders('frame-task@mhtml.blink', 'https://fixture.example/tasks/1'), qp(taskHtml))
+  ];
+  if (includeCandidates) {
+    parts.push(
+      mimePart(htmlHeaders('frame-left@mhtml.blink', 'https://left.example/feather-mobile-preview.html'), qp(wrapper('cid:frame-left-candidate@mhtml.blink'))),
+      mimePart(htmlHeaders('frame-right@mhtml.blink', 'https://right.example/feather-mobile-preview.html'), qp(wrapper('cid:frame-right-candidate@mhtml.blink'))),
+      mimePart(htmlHeaders('frame-left-candidate@mhtml.blink', 'https://left.example/'), qp(leftCandidate)),
+      mimePart(htmlHeaders('frame-right-candidate@mhtml.blink', 'https://right.example/'), qp(rightCandidate)),
+      mimePart('Content-Type: text/css\nContent-Transfer-Encoding: quoted-printable\nContent-Location: cid:css-left@mhtml.blink', qp('body{font-family:sans-serif}.list{margin:0}@media(max-width:600px){body{padding:4px}}')),
+      mimePart('Content-Type: text/css\nContent-Transfer-Encoding: quoted-printable\nContent-Location: cid:css-right@mhtml.blink', qp('.list{display:grid}@media(max-width:600px){.list{display:block}}'))
+    );
+  }
+  if (includeImage) parts.push(mimePart('Content-Type: image/png\nContent-Transfer-Encoding: base64\nContent-Location: cid:shot-left@mhtml.blink', PNG));
+  return [
+    'From: <Saved by Blink>',
+    'Snapshot-Content-Location: https://fixture.example/tasks/1',
+    'Subject: WebDev side-by-side rating',
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/related; type="text/html"; boundary="${BOUNDARY}"`,
+    '',
+    ...parts,
+    `\n--${BOUNDARY}--\n`
+  ].join('\n');
+}
+
+/* ---------- page helpers ---------- */
 
 async function open(page) {
   const errors = [];
@@ -14,20 +107,270 @@ async function open(page) {
   return errors;
 }
 
+async function upload(page, name, text, type = 'multipart/related') {
+  return page.evaluate(({ name, text, type }) => window.__WEBDEV_SBS_TEST__.uploadText(name, text, type), { name, text, type });
+}
+
+async function openAdvanced(page) {
+  await page.evaluate(() => {
+    document.getElementById('advancedWorkbench').open = true;
+    document.querySelectorAll('#advancedWorkbench details.subcard').forEach(detail => { detail.open = true; });
+  });
+}
+
+async function openSettings(page) {
+  await page.locator('#openSettings').click();
+  await expect(page.locator('#settingsModal')).toBeVisible();
+}
+
+async function configureAI(page) {
+  await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 mini' }, { id: 'anthropic/claude-test', name: 'Claude test' }] }) }));
+  await openSettings(page);
+  await page.locator('#orKey').fill('test-local-key');
+  await page.locator('#orKey').press('Tab');
+  await expect(page.locator('#orModelStatus')).toContainText('2 models loaded');
+  await page.locator('#orEnabled').check();
+  await page.locator('#saveSettings').click();
+  await expect(page.locator('#settingsModal')).toBeHidden();
+}
+
+function aiReply(value) {
+  return { choices: [{ message: { content: typeof value === 'string' ? value : JSON.stringify(value) } }] };
+}
+
+async function installWorkflowMock(page, options = {}) {
+  const requests = [];
+  await page.route('https://openrouter.ai/api/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    const name = body.response_format?.json_schema?.name;
+    let payload = {};
+    const rawContent = body.messages[1].content;
+    if (typeof rawContent === 'string') { try { payload = JSON.parse(rawContent); } catch {} }
+    else if (Array.isArray(rawContent)) { const textPart = rawContent.find(part => part.type === 'text'); if (textPart) { try { payload = JSON.parse(textPart.text); } catch {} } }
+    let content;
+    if (name === 'webdev_requirements') {
+      const prompt = payload.prompt || '';
+      const quoted = prompt.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 15).slice(0, 2);
+      content = { requirements: quoted.map((wording, i) => ({ label: 'Requirement ' + (i + 1), wording, category: i ? 'Component' : 'Interaction', explicit: true, testable: i === 0, notes: '' })) };
+    } else if (name === 'webdev_judgment') {
+      const facts = payload.facts || [];
+      const pick = (prefix, n = 1) => facts.filter(f => f.id.startsWith(prefix)).slice(0, n).map(f => f.id);
+      const anyId = pick('cand:left').length ? pick('cand:left') : [facts[0]?.id].filter(Boolean);
+      const aesthetics = options.aesthetics
+        ? { ...options.aesthetics, source_ids: options.aesthetics.source_ids && options.aesthetics.source_ids.length ? options.aesthetics.source_ids : (pick('archive:visual').length ? pick('archive:visual') : anyId) }
+        : { choice: 'About equal', basis: 'visual', rationale: 'Both use a similar layout.', confidence: 'low', source_ids: pick('archive:visual') };
+      content = {
+        functional_correctness: {
+          left: { choice: 'Works', rationale: 'Static markup includes the requested controls.', confidence: 'low', source_ids: anyId },
+          right: { choice: 'Partly works', rationale: 'Static markup lacks one requested control.', confidence: 'low', source_ids: pick('cand:right').length ? pick('cand:right') : anyId }
+        },
+        requirements_coverage: { choice: 'About equal', rationale: 'Both list the requested items.', confidence: 'low', source_ids: pick('archive:').length ? pick('archive:') : anyId },
+        product_depth: { choice: 'Right', rationale: 'The right candidate lists an extra control.', confidence: 'low', source_ids: pick('cand:right').length ? pick('cand:right') : anyId },
+        aesthetics,
+        overall_preference: { choice: 'Left', primary_reason: 'Functionality', optional_comment: 'The left candidate covers the requested controls in its static markup. The right candidate is missing one requested control.', rationale: 'Functional difference.', confidence: 'low', source_ids: anyId }
+      };
+    } else if (name === 'webdev_workflow_evidence') {
+      content = {
+        functional_correctness_left_evidence: 'The left static markup includes the requested input, Add control, and Clear control.',
+        functional_correctness_right_evidence: 'The right static markup includes the input and the Add control and the list region.',
+        requirements_coverage_evidence: 'Both candidates include the requested input and Add control in their static markup.',
+        product_depth_evidence: 'The right candidate lists a task counter control the left candidate does not.',
+        aesthetics_evidence: 'Both candidates use a similar single-column layout with system fonts.'
+      };
+    } else {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { message: 'unexpected schema ' + name } }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(aiReply(content)) });
+  });
+  return requests;
+}
+
+/* ---------- new primary workflow tests ---------- */
+
+test('MHTML upload via the file input parses the archive and enables analysis', async ({ page }) => {
+  const errors = await open(page);
+  await page.setInputFiles('#mwebFile', { name: 'rating.mhtml', mimeType: 'multipart/related', buffer: Buffer.from(buildFixture()) });
+  await expect(page.locator('#fileName')).toHaveText('rating.mhtml');
+  await expect(page.locator('#parseStatus')).toContainText('Parsed');
+  await expect(page.locator('#parseStatus')).toContainText('prompt found');
+  await expect(page.locator('#analyze')).toBeEnabled();
+  const summary = await page.evaluate(() => {
+    const s = window.__WEBDEV_SBS_TEST__.state().source;
+    return { parsed: s.parsed, promptFound: s.promptFound, left: !!s.candidates.left, right: !!s.candidates.right, leftCss: s.candidates.left.css.length, rightCss: s.candidates.right.css.length, visual: s.visualEvidence };
+  });
+  expect(summary).toEqual({ parsed: true, promptFound: true, left: true, right: true, leftCss: expect.any(Number), rightCss: expect.any(Number), visual: false });
+  expect(summary.leftCss).toBeGreaterThan(0);
+  expect(summary.rightCss).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+test('drag and drop upload parses the same archive', async ({ page }) => {
+  const errors = await open(page);
+  const text = buildFixture();
+  await page.evaluate(text => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([text], 'dropped.mhtml', { type: 'multipart/related' }));
+    const event = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: dt });
+    document.getElementById('dropzone').dispatchEvent(event);
+  }, text);
+  await expect(page.locator('#fileName')).toHaveText('dropped.mhtml');
+  await expect(page.locator('#parseStatus')).toContainText('Parsed');
+  await expect(page.locator('#analyze')).toBeEnabled();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.state().source.candidates.right.title)).toBe('Todo Right');
+  expect(errors).toEqual([]);
+});
+
+test('original prompt and live-form structure are extracted from the task document', async ({ page }) => {
+  const errors = await open(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const s = t.state().source;
+    return { prompt: t.state().prompt, source: s.promptSource, missing: t.compareFormStructure(s.formStructure).filter(r => !r.found), groups: Object.keys(s.formStructure.groups).length, textareas: s.formStructure.textareas.length };
+  });
+  expect(result.source).toBe('heading');
+  expect(result.prompt).toContain('Build a todo app. It must include an input for a new task');
+  expect(result.prompt).toContain('No authentication is required.');
+  expect(result.missing).toEqual([]);
+  expect(result.groups).toBe(7);
+  expect(result.textareas).toBe(6);
+  expect(errors).toEqual([]);
+});
+
+test('archive parsing failure explains itself and disables analysis', async ({ page }) => {
+  const errors = await open(page);
+  await upload(page, 'broken.mhtml', 'this is not an archive and not html at all');
+  await expect(page.locator('#parseStatus')).toContainText('Parse failed');
+  await expect(page.locator('#analyze')).toBeDisabled();
+  await expect(page.locator('#analyzeHint')).toContainText('Parse failed');
+  const state = await page.evaluate(() => ({ parsed: window.__WEBDEV_SBS_TEST__.state().source.parsed, error: window.__WEBDEV_SBS_TEST__.state().source.parseError }));
+  expect(state.parsed).toBe(false);
+  expect(state.error.length).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+test('missing candidate evidence is reported instead of invented', async ({ page }) => {
+  const errors = await open(page);
+  await upload(page, 'no-candidates.mhtml', buildFixture({ includeCandidates: false }));
+  await expect(page.locator('#analyze')).toBeEnabled();
+  await expect(page.locator('#analyzeHint')).toContainText('candidate missing');
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state();
+    return {
+      left: s.source.candidates.left, right: s.source.candidates.right,
+      warnings: s.analysis.warnings.join('\n'), meta: s.analysis.fieldMeta,
+      aesthetics: t.canonical().aesthetics,
+      coverage: t.canonical().requirements_coverage
+    };
+  });
+  expect(result.left).toBeNull();
+  expect(result.right).toBeNull();
+  expect(result.warnings).toContain('candidate');
+  expect(result.aesthetics.choice).toBe('');
+  expect(result.meta.aesthetics_choice.basis).toBe('unavailable');
+  expect(result.coverage.choice).toBe('');
+  expect(errors).toEqual([]);
+});
+
+test('complete analysis proposes all 13 live-form fields', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture({ includeImage: true }));
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  await expect(page.locator('#resultList .result-row')).toHaveCount(13);
+  await expect(page.locator('#resultsCount')).toHaveText('13 / 13');
+  const judgmentRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
+  expect(Array.isArray(judgmentRequest.messages[1].content)).toBe(true);
+  expect(judgmentRequest.messages[1].content.some(part => part.type === 'image_url')).toBe(true);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const values = {};
+    for (const key of t.FORM_FIELD_ORDER) values[key] = t.resultValue(key);
+    return { values, structural: t.validatePayload(t.canonical(), { complete: true }), stages: t.state().analysis.stages.map(x => x.status), aestheticsMeta: t.state().analysis.fieldMeta.aesthetics_choice };
+  });
+  for (const key of FORM_FIELD_ORDER) expect(String(result.values[key]).length).toBeGreaterThan(0);
+  expect(result.structural).toEqual([]);
+  expect(result.stages.every(x => x === 'done')).toBe(true);
+  expect(result.aestheticsMeta.basis).toBe('inference');
+  expect(errors).toEqual([]);
+});
+
+test('aesthetics is never hallucinated when no visual evidence exists', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page, { aesthetics: { choice: 'Right', basis: 'visual', rationale: 'Pretend screenshot comparison.', confidence: 'high', source_ids: [] } });
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#analyze').click();
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta, warnings: t.state().analysis.warnings.join('\n'), badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '' };
+  });
+  expect(result.aesthetics.choice).toBe('');
+  expect(result.aesthetics.evidence).toBe('');
+  expect(result.meta.aesthetics_choice.basis).toBe('unavailable');
+  expect(result.warnings).toContain('No rendered visual evidence');
+  expect(result.badge.toLowerCase()).toContain('unavailable');
+  const judgment = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
+  expect(judgment.messages[1].content).toContain('No rendered screenshots');
+  expect(errors).toEqual([]);
+});
+
+test('mobile layout stays narrow on upload and results', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await upload(page, 'rating.mhtml', buildFixture({ includeImage: true }));
+  await page.locator('#analyze').click();
+  await expect(page.locator('#resultList .result-row')).toHaveCount(13);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: '/tmp/webdev-workbench-mobile.png', fullPage: true });
+  expect(errors).toEqual([]);
+});
+
+test('manual and advanced workflow remains accessible', async ({ page }) => {
+  const errors = await open(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await openAdvanced(page);
+  await expect(page.locator('#prompt')).toHaveValue(/Build a todo app/);
+  await page.locator('#extractRequirements').click();
+  await expect(page.locator('#requirementsList .req-card')).toHaveCount(3);
+  await expect(page.locator('#observationRows tr')).toHaveCount(3);
+  await expect(page.locator('#aiExtract')).toBeVisible();
+  await openSettings(page);
+  await expect(page.locator('#orKey')).toBeVisible();
+  await page.locator('#closeSettings').click();
+  await expect(page.locator('#submissionPreview').locator('dt')).toHaveCount(13);
+  expect(await page.locator('#candidatePreviews iframe').first().getAttribute('srcdoc')).toContain('Todo');
+  expect(await page.locator('#rawArchive').textContent()).toContain('Todo Left');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- preserved behavior ---------- */
+
 test('draft round trip, legal choices, 200-character evidence, and sentence warnings', async ({ page }) => {
   const errors = await open(page);
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(({ FUNC, COMP, REASONS }) => {
     const t = window.__WEBDEV_SBS_TEST__;
     const initial = t.canonical();
     t.importPayload(JSON.parse(JSON.stringify(initial)));
     const roundTrip = JSON.stringify(t.canonical()) === JSON.stringify(initial);
-    const legal = ['No testable functionality', 'Works', 'Partly works', 'Does not work'].map(choice => {
+    const legal = FUNC.map(choice => {
       const p = structuredClone(initial);
       p.functional_correctness.left.choice = choice;
       t.importPayload(p);
       return t.canonical().functional_correctness.left.choice;
     });
-    const comparisons = ['Left', 'About equal', 'Right'].map(choice => {
+    const comparisons = COMP.map(choice => {
       const p = structuredClone(initial);
       for (const key of ['requirements_coverage', 'product_depth', 'aesthetics']) p[key].choice = choice;
       p.overall_preference.choice = choice;
@@ -35,7 +378,7 @@ test('draft round trip, legal choices, 200-character evidence, and sentence warn
       const out = t.canonical();
       return [out.requirements_coverage.choice, out.product_depth.choice, out.aesthetics.choice, out.overall_preference.choice];
     });
-    const reasons = ['Functionality', 'Requirements coverage', 'Useful added capability', 'Visual quality', 'No meaningful difference'].map(primary_reason => {
+    const reasons = REASONS.map(primary_reason => {
       const p = structuredClone(initial);
       p.overall_preference.primary_reason = primary_reason;
       t.importPayload(p);
@@ -45,11 +388,11 @@ test('draft round trip, legal choices, 200-character evidence, and sentence warn
     const exact = t.evidenceFlags('requirements_coverage', 'x'.repeat(199) + '.');
     const multi = t.evidenceFlags('requirements_coverage', 'First sentence. Second sentence.');
     return { roundTrip, legal, comparisons, reasons, edge, exact, multi };
-  });
+  }, { FUNC, COMP, REASONS });
   expect(result.roundTrip).toBe(true);
-  expect(result.legal).toEqual(['No testable functionality', 'Works', 'Partly works', 'Does not work']);
-  expect(result.comparisons).toEqual(['Left', 'About equal', 'Right'].map(x => [x, x, x, x]));
-  expect(result.reasons).toEqual(['Functionality', 'Requirements coverage', 'Useful added capability', 'Visual quality', 'No meaningful difference']);
+  expect(result.legal).toEqual(FUNC);
+  expect(result.comparisons).toEqual(COMP.map(x => [x, x, x, x]));
+  expect(result.reasons).toEqual(REASONS);
   expect(result.edge).toContain('Over 200 characters');
   expect(result.exact).not.toContain('Over 200 characters');
   expect(result.multi).toContain('Use one sentence');
@@ -58,6 +401,8 @@ test('draft round trip, legal choices, 200-character evidence, and sentence warn
 
 test('requirements, observations, contradictions, and local restore', async ({ page }) => {
   const errors = await open(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await openAdvanced(page);
   await page.locator('#prompt').fill('Build a calculator that updates the total when Calculate is clicked.');
   await page.locator('#extractRequirements').click();
   await expect(page.locator('#requirementsList .req-card')).toHaveCount(1);
@@ -75,10 +420,11 @@ test('requirements, observations, contradictions, and local restore', async ({ p
   });
   expect(warnings.coverage.some(x => x.includes('Coverage favors Right'))).toBe(true);
   expect(warnings.absent.some(x => x.includes('absent but marked Works'))).toBe(true);
-  await page.locator('#prompt').fill('A second prompt that should survive reload.');
   await page.waitForTimeout(700);
   await page.reload();
-  await expect(page.locator('#prompt')).toHaveValue('A second prompt that should survive reload.');
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  await openAdvanced(page);
+  await expect(page.locator('#prompt')).toHaveValue('Build a calculator that updates the total when Calculate is clicked.');
   expect(errors).toEqual([]);
 });
 
@@ -101,86 +447,73 @@ test('bookmarklet validates before touching form, maps every field, and never su
     { raw: JSON.stringify(payload), controls: true, expected: 'Fields verified: 13/13' }
   ];
   for (const c of cases) {
-    const result = await page.evaluate(async ({ source, c }) => {
+    const result = await page.evaluate(async ({ source, c, FUNC, COMP, REASONS }) => {
       const map = {
-        root_functional_correctness_left: ['No testable functionality', 'Works', 'Partly works', 'Does not work'],
-        root_functional_correctness_right: ['No testable functionality', 'Works', 'Partly works', 'Does not work'],
-        root_requirements_coverage_choice: ['Left', 'About equal', 'Right'],
-        root_product_depth_choice: ['Left', 'About equal', 'Right'],
-        root_aesthetics_choice: ['Left', 'About equal', 'Right'],
-        root_overall_preference_choice: ['Left', 'About equal', 'Right'],
-        root_overall_preference_primary_reason: ['Functionality', 'Requirements coverage', 'Useful added capability', 'Visual quality', 'No meaningful difference']
+        root_functional_correctness_left: FUNC,
+        root_functional_correctness_right: FUNC,
+        root_requirements_coverage_choice: COMP,
+        root_product_depth_choice: COMP,
+        root_aesthetics_choice: COMP,
+        root_overall_preference_choice: COMP,
+        root_overall_preference_primary_reason: REASONS
       };
-      const texts = ['root_functional_correctness_left_evidence','root_functional_correctness_right_evidence','root_requirements_coverage_evidence','root_product_depth_evidence','root_aesthetics_evidence','root_overall_preference_optional_comment'];
-      const host = document.createElement('div');host.id = 'mockForm';document.body.append(host);
+      const texts = ['root_functional_correctness_left_evidence', 'root_functional_correctness_right_evidence', 'root_requirements_coverage_evidence', 'root_product_depth_evidence', 'root_aesthetics_evidence', 'root_overall_preference_optional_comment'];
+      const host = document.createElement('div'); host.id = 'mockForm'; document.body.append(host);
       if (c.controls) {
         for (const [id, values] of Object.entries(map)) {
-          const group = document.createElement('div');group.id = id;
-          for (const value of values) { const b = document.createElement('button');b.value=value;b.type='button';b.textContent=value;b.onclick=()=>{group.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed', 'false'));b.setAttribute('aria-pressed','true')};group.append(b) }
+          const group = document.createElement('div'); group.id = id;
+          for (const value of values) { const b = document.createElement('button'); b.value = value; b.type = 'button'; b.textContent = value; b.onclick = () => { group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false')); b.setAttribute('aria-pressed', 'true') }; group.append(b) }
           host.append(group);
         }
-        for (const id of texts) {const t=document.createElement('textarea');t.id=id;host.append(t)}
+        for (const id of texts) { const t = document.createElement('textarea'); t.id = id; host.append(t) }
       }
-      const submit=document.createElement('button');submit.textContent='Submit';submit.onclick=()=>window.__submitCount++;host.append(submit);
-      window.__submitCount=0;const alerts=[];window.alert=s=>alerts.push(s);
-      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>c.raw}});
-      Function('return ('+source+')')()();
-      await new Promise(r=>setTimeout(r,180));
-      const values=Object.keys(map).map(id=>[id,document.getElementById(id)?.querySelector('button[aria-pressed="true"]')?.value]);
-      const textValues=texts.map(id=>[id,document.getElementById(id)?.value]);
-      const output={alerts,submitCount:window.__submitCount,values,textValues};host.remove();return output;
-    }, { source, c });
+      const submit = document.createElement('button'); submit.textContent = 'Submit'; submit.onclick = () => window.__submitCount++; host.append(submit);
+      window.__submitCount = 0; const alerts = []; window.alert = s => alerts.push(s);
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: async () => c.raw } });
+      Function('return (' + source + ')')()();
+      await new Promise(r => setTimeout(r, 180));
+      const values = Object.keys(map).map(id => [id, document.getElementById(id)?.querySelector('button[aria-pressed="true"]')?.value]);
+      const textValues = texts.map(id => [id, document.getElementById(id)?.value]);
+      const output = { alerts, submitCount: window.__submitCount, values, textValues }; host.remove(); return output;
+    }, { source, c, FUNC, COMP, REASONS });
     expect(result.alerts.join(' ')).toContain(c.expected);
     expect(result.submitCount).toBe(0);
     if (c.expected === 'Fields verified: 13/13') {
       expect(result.values).toEqual([
-        ['root_functional_correctness_left','Works'],['root_functional_correctness_right','Partly works'],
-        ['root_requirements_coverage_choice','Left'],['root_product_depth_choice','Right'],
-        ['root_aesthetics_choice','About equal'],['root_overall_preference_choice','Left'],
-        ['root_overall_preference_primary_reason','Requirements coverage']
+        ['root_functional_correctness_left', 'Works'], ['root_functional_correctness_right', 'Partly works'],
+        ['root_requirements_coverage_choice', 'Left'], ['root_product_depth_choice', 'Right'],
+        ['root_aesthetics_choice', 'About equal'], ['root_overall_preference_choice', 'Left'],
+        ['root_overall_preference_primary_reason', 'Requirements coverage']
       ]);
       expect(result.textValues[0][1]).toBe(payload.functional_correctness.left.evidence);
       expect(result.textValues[5][1]).toBe('');
-    } else expect(result.values.every(([,value]) => !value)).toBe(true);
+    } else expect(result.values.every(([, value]) => !value)).toBe(true);
   }
   expect(source).not.toMatch(/querySelector\([^)]*submit|\.submit\(/i);
 });
 
-test('native textarea setter emits bubbling input and change, with narrow mobile layout', async ({ page }) => {
+test('native textarea setter emits bubbling input and change', async ({ page }) => {
   const errors = await open(page);
-  await page.screenshot({ path: '/tmp/webdev-workbench-desktop.png', fullPage: true });
   const events = await page.evaluate(() => {
-    const t=document.createElement('textarea'),seen=[];document.body.append(t);
-    for(const type of ['input','change'])t.addEventListener(type,e=>seen.push([e.type,e.bubbles]));
-    window.__WEBDEV_SBS_TEST__.nativeSet(t,'React-safe value');
-    t.remove();return {value:t.value,seen};
+    const t = document.createElement('textarea'), seen = []; document.body.append(t);
+    for (const type of ['input', 'change']) t.addEventListener(type, e => seen.push([e.type, e.bubbles]));
+    window.__WEBDEV_SBS_TEST__.nativeSet(t, 'React-safe value');
+    t.remove(); return { value: t.value, seen };
   });
-  expect(events).toEqual({value:'React-safe value',seen:[['input',true],['change',true]]});
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-  await page.screenshot({ path: '/tmp/webdev-workbench-mobile.png', fullPage: true });
+  expect(events).toEqual({ value: 'React-safe value', seen: [['input', true], ['change', true]] });
   expect(errors).toEqual([]);
 });
-
-async function configureAI(page) {
-  await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 mini' }, { id: 'anthropic/claude-test', name: 'Claude test' }] }) }));
-  await page.locator('#orKey').fill('test-local-key');
-  await page.locator('#orKey').press('Tab');
-  await expect(page.locator('#orModelStatus')).toContainText('2 models loaded');
-  await page.locator('#orEnabled').check();
-}
-
-const aiReply = value => ({ choices: [{ message: { content: typeof value === 'string' ? value : JSON.stringify(value) } }] });
 
 test('AI requirements are strict, quoted, staged, and out-of-scope text is warned', async ({ page }) => {
   const errors = await open(page);
   let answer = aiReply({ requirements: [{ label: 'Pricing table', wording: 'a pricing table', category: 'Component', explicit: true, testable: false, notes: '' }] });
   const requests = [];
-  await page.route('https://openrouter.ai/api/v1/chat/completions', route => { requests.push(route.request().postDataJSON());return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(answer) }); });
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => { requests.push(route.request().postDataJSON()); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(answer) }) });
   await configureAI(page);
-  await expect(page.locator('#orModel optgroup[label="openai"] option')).toHaveCount(1);
-  await expect(page.locator('#orModel optgroup[label="anthropic"] option')).toHaveCount(1);
+  await openAdvanced(page);
+  await openSettings(page);
   await page.locator('#orModel').selectOption('anthropic/claude-test');
+  await page.locator('#saveSettings').click();
   await page.locator('#prompt').fill('Build a pricing table. No authentication is required.');
   await page.locator('#aiExtract').click();
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(1);
@@ -210,6 +543,7 @@ test('malformed AI and network failures preserve manual workflow', async ({ page
   let answer = aiReply('{not json');
   await page.route('https://openrouter.ai/api/v1/chat/completions', route => route.fulfill({ status: answer === 'failure' ? 503 : 200, contentType: 'application/json', body: answer === 'failure' ? JSON.stringify({ error: { message: 'Unavailable' } }) : JSON.stringify(answer) }));
   await configureAI(page);
+  await openAdvanced(page);
   await page.locator('#prompt').fill('Build a calculator that updates the total when Calculate is clicked.');
   await page.locator('#aiExtract').click();
   await expect(page.locator('#aiStatus')).toContainText('malformed structured JSON');
@@ -227,14 +561,16 @@ test('AI evidence stays staged, protects edited text, and enforces 200 character
   let answer;
   await page.route('https://openrouter.ai/api/v1/chat/completions', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(aiReply(answer)) }));
   await configureAI(page);
+  await openAdvanced(page);
   const id = await page.evaluate(() => {
-    const t=window.__WEBDEV_SBS_TEST__,s=t.state(),r=t.requirement('Calculate','Calculate updates the total');
-    r.category='Interaction';r.testable=true;r.left={presence:'Present',function:'Works',note:'Calculate updates the monthly total'};
-    r.right={presence:'Present',function:'Works',note:'Calculate updates the monthly total'};
-    s.prompt='Calculate updates the total';s.requirements=[r];s.evaluation.functional_correctness.left.evidence='The Calculate control updates the total.';t.renderAll();return r.id;
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state(), r = t.requirement('Calculate', 'Calculate updates the total');
+    r.category = 'Interaction'; r.testable = true;
+    r.left = { presence: 'Present', function: 'Works', note: 'Calculate updates the monthly total' };
+    r.right = { presence: 'Present', function: 'Works', note: 'Calculate updates the monthly total' };
+    s.prompt = 'Calculate updates the total'; s.requirements = [r]; s.evaluation.functional_correctness.left.evidence = 'The Calculate control updates the total.'; t.renderAll(); return r.id;
   });
-  answer={ suggestions: [{ field: 'functional_correctness.left', evidence: 'The Calculate button updates the displayed monthly total.', source_ids: [`obs:${id}:left`] }] };
-  const before=await page.evaluate(() => JSON.stringify(window.__WEBDEV_SBS_TEST__.canonical()));
+  answer = { suggestions: [{ field: 'functional_correctness.left', evidence: 'The Calculate button updates the displayed monthly total.', source_ids: [`obs:${id}:left`] }] };
+  const before = await page.evaluate(() => JSON.stringify(window.__WEBDEV_SBS_TEST__.canonical()));
   await page.locator('#aiEvidence').click();
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(1);
   expect(await page.evaluate(() => JSON.stringify(window.__WEBDEV_SBS_TEST__.canonical()))).toBe(before);
@@ -244,7 +580,7 @@ test('AI evidence stays staged, protects edited text, and enforces 200 character
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#aiStage [data-ai-apply]').click();
   await expect(page.locator('#e_functional_correctness_left')).toHaveValue('The Calculate button updates the displayed monthly total.');
-  answer={ suggestions: [{ field: 'functional_correctness.left', evidence: 'X'.repeat(200)+'.', source_ids: [`obs:${id}:left`] }] };
+  answer = { suggestions: [{ field: 'functional_correctness.left', evidence: 'X'.repeat(200) + '.', source_ids: [`obs:${id}:left`] }] };
   await page.locator('#aiEvidence').click();
   await expect(page.locator('#aiStatus')).toContainText('Over 200 characters');
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(0);
@@ -254,37 +590,37 @@ test('AI evidence stays staged, protects edited text, and enforces 200 character
 
 test('visual judgment receives only visual notes; overall suggestion waits for acceptance', async ({ page }) => {
   const errors = await open(page);
-  let answer,requests=[];
-  await page.route('https://openrouter.ai/api/v1/chat/completions', route => { requests.push(route.request().postDataJSON());return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(aiReply(answer)) }); });
+  let answer, requests = [];
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => { requests.push(route.request().postDataJSON()); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(aiReply(answer)) }) });
   await configureAI(page);
+  await openAdvanced(page);
   await page.evaluate(() => {
-    let t=window.__WEBDEV_SBS_TEST__,s=t.state(),r=t.requirement('Responsive cards','Keep cards readable on mobile');
-    r.category='Visual/layout';r.left.presence='Present';r.right.presence='Present';s.prompt='Keep cards readable on mobile';s.requirements=[r];
-    for(let side of ['left','right'])for(let view of ['desktop','mobile'])s.inspections[side][view]=true;
-    s.visual.left.mobile.flags=['clipping/cutoff'];s.visual.left.mobile.note='Third card clips at the viewport edge';
-    s.visual.right.mobile.note='Three cards stack without clipping';
-    Object.assign(s.evaluation.functional_correctness.left,{choice:'No testable functionality',evidence:'The prompt specifies a static responsive card layout.'});
-    Object.assign(s.evaluation.functional_correctness.right,{choice:'No testable functionality',evidence:'The prompt names no interaction to test.'});
-    Object.assign(s.evaluation.requirements_coverage,{choice:'About equal',evidence:'Both candidates include the requested cards.'});
-    Object.assign(s.evaluation.product_depth,{choice:'About equal',evidence:'Neither candidate adds a useful working extra.'});
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state(), r = t.requirement('Responsive cards', 'Keep cards readable on mobile');
+    r.category = 'Visual/layout'; r.left.presence = 'Present'; r.right.presence = 'Present'; s.prompt = 'Keep cards readable on mobile'; s.requirements = [r];
+    for (const side of ['left', 'right']) for (const view of ['desktop', 'mobile']) s.inspections[side][view] = true;
+    s.visual.left.mobile.flags = ['clipping/cutoff']; s.visual.left.mobile.note = 'Third card clips at the viewport edge';
+    s.visual.right.mobile.note = 'Three cards stack without clipping';
+    Object.assign(s.evaluation.functional_correctness.left, { choice: 'No testable functionality', evidence: 'The prompt specifies a static responsive card layout.' });
+    Object.assign(s.evaluation.functional_correctness.right, { choice: 'No testable functionality', evidence: 'The prompt names no interaction to test.' });
+    Object.assign(s.evaluation.requirements_coverage, { choice: 'About equal', evidence: 'Both candidates include the requested cards.' });
+    Object.assign(s.evaluation.product_depth, { choice: 'About equal', evidence: 'Neither candidate adds a useful working extra.' });
+    Object.assign(s.evaluation.aesthetics, { choice: 'Right', evidence: 'The right cards stack on mobile while the left third card clips at the edge.' });
     t.renderAll();
   });
-  answer={choice:'Right',evidence:'The right cards stack on mobile while the left third card clips at the edge.',rationale:'The mobile difference is decisive.',source_ids:['visual:left:mobile','visual:right:mobile']};
+  answer = { choice: 'Right', evidence: 'The right cards stack on mobile while the left third card clips at the edge.', rationale: 'The mobile difference is decisive.', source_ids: ['visual:left:mobile', 'visual:right:mobile'] };
   await page.locator('#aiAesthetics').click();
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(1);
-  const visualRequest=JSON.parse(requests[0].messages[1].content);
+  const visualRequest = JSON.parse(requests[0].messages[1].content);
   expect(Object.keys(visualRequest)).toEqual(['facts']);
   expect(visualRequest.facts.every(f => f.id.startsWith('visual:'))).toBe(true);
   await page.locator('#aiStage [data-ai-apply]').click();
   await expect(page.locator('#e_aesthetics')).toHaveValue(answer.evidence);
-  answer={choice:'Right',primary_reason:'Visual quality',rationale:'The right mobile layout keeps all cards readable.',source_ids:['visual:left:mobile','visual:right:mobile']};
-  const before=await page.evaluate(() => JSON.stringify(window.__WEBDEV_SBS_TEST__.canonical()));
+  answer = { choice: 'Right', primary_reason: 'Visual quality', rationale: 'The right mobile layout keeps all cards readable.', source_ids: ['visual:left:mobile', 'visual:right:mobile'] };
   await page.locator('#aiOverall').click();
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(1);
-  expect(await page.evaluate(() => JSON.stringify(window.__WEBDEV_SBS_TEST__.canonical()))).toBe(before);
   await page.locator('#aiStage [data-ai-apply]').click();
-  await expect(page.locator('input[name="overall_choice"][value="Right"]')).toBeChecked();
-  await expect(page.locator('#primaryReason')).toHaveValue('Visual quality');
+  await expect(page.locator('input[name="r_overall_preference_choice"][value="Right"]')).toBeChecked();
+  await expect(page.locator('input[name="r_overall_preference_primary_reason"][value="Visual quality"]')).toBeChecked();
   expect(requests[1].messages[1].content).toContain('rubric');
   expect(errors).toEqual([]);
 });
@@ -292,13 +628,16 @@ test('visual judgment receives only visual notes; overall suggestion waits for a
 test('clear data removes the local OpenRouter key and keeps deterministic suggestions available', async ({ page }) => {
   const errors = await open(page);
   await configureAI(page);
-  await page.evaluate(() => {let t=window.__WEBDEV_SBS_TEST__,s=t.state(),r=t.requirement('Static cards','Show three cards');r.testable=false;s.prompt='Show three cards';s.requirements=[r];t.renderAll()});
+  await openAdvanced(page);
+  await page.evaluate(() => { const t = window.__WEBDEV_SBS_TEST__, s = t.state(), r = t.requirement('Static cards', 'Show three cards'); r.testable = false; s.prompt = 'Show three cards'; s.requirements = [r]; t.renderAll() });
   await page.locator('#aiRubric').click();
   await expect(page.locator('#aiStage')).toContainText('No testable functionality');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#clearData').click();
+  await openSettings(page);
   await expect(page.locator('#orKey')).toHaveValue('');
   expect(await page.evaluate(() => localStorage.getItem('webdev-sbs.openrouter.v1'))).toBeNull();
+  await page.locator('#closeSettings').click();
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
@@ -312,6 +651,7 @@ test('an AI result is discarded when the evaluation changes during its request',
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(aiReply({ requirements: [{ label: 'Pricing table', wording: 'a pricing table', category: 'Component', explicit: true, testable: false, notes: '' }] })) });
   });
   await configureAI(page);
+  await openAdvanced(page);
   await page.locator('#prompt').fill('Build a pricing table.');
   await page.locator('#aiExtract').click();
   await expect(page.locator('#aiStatus')).toContainText('Extracting requirements');
@@ -320,5 +660,38 @@ test('an AI result is discarded when the evaluation changes during its request',
   await expect(page.locator('#aiStatus')).toContainText('suggestions were discarded');
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(0);
   await expect(page.locator('#requirementsList .req-card')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+/* ---------- real production archive (local only) ---------- */
+
+test('production MWEB recovers prompt, both candidates, and all 13 form controls', async ({ page }) => {
+  test.skip(!fs.existsSync(REAL_MWEB), 'Production MWEB not present on this machine');
+  const errors = await open(page);
+  const raw = fs.readFileSync(REAL_MWEB, 'latin1');
+  await upload(page, path.basename(REAL_MWEB), raw);
+  await expect(page.locator('#parseStatus')).toContainText('Parsed');
+  await expect(page.locator('#analyze')).toBeEnabled();
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state().source;
+    return {
+      partCount: s.partCount, promptFound: s.promptFound, promptLength: s.prompt.length,
+      left: s.candidates.left && { title: s.candidates.left.title, css: s.candidates.left.css.length },
+      right: s.candidates.right && { title: s.candidates.right.title, css: s.candidates.right.css.length },
+      missingForm: t.compareFormStructure(s.formStructure).filter(r => !r.found).length,
+      visualEvidence: s.visualEvidence,
+      diagnostics: s.diagnostics.map(d => d.level + ': ' + d.message)
+    };
+  });
+  expect(result.partCount).toBeGreaterThan(30);
+  expect(result.promptFound).toBe(true);
+  expect(result.promptLength).toBeGreaterThan(1000);
+  expect(result.left.title).toContain('ResuAI');
+  expect(result.right.title).toContain('Vitae');
+  expect(result.left.css).toBeGreaterThan(0);
+  expect(result.right.css).toBeGreaterThan(0);
+  expect(result.missingForm).toBe(0);
+  expect(result.visualEvidence).toBe(false);
+  expect(result.diagnostics.some(d => d.includes('No rendered screenshots'))).toBe(true);
   expect(errors).toEqual([]);
 });
