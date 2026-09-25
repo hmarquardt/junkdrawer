@@ -123,6 +123,26 @@ async function openSettings(page) {
   await expect(page.locator('#settingsModal')).toBeVisible();
 }
 
+async function analyze(page) {
+  await page.locator('#analyze').click();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.state().analysis.lastRun);
+}
+
+async function confirmLive(page, { chrome = true } = {}) {
+  await page.evaluate(({ chrome }) => {
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state();
+    for (const side of ['left', 'right']) for (const view of ['desktop', 'mobile']) s.inspections[side][view] = true;
+    s.inspections.chromeNewTab = chrome;
+    t.renderAll();
+  }, { chrome });
+}
+
+async function finalize(page) {
+  await page.evaluate(() => { window.__WEBDEV_SBS_TEST__.state().analysis.finalizedAt = ''; });
+  await page.locator('#finalize').click();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.state().analysis.finalizedAt);
+}
+
 const CATALOG = [
   { id: 'openai/gpt-4.1-mini', name: 'GPT 4.1 mini', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens', 'max_completion_tokens'], architecture: { input_modalities: ['text', 'image', 'file'], output_modalities: ['text'] }, top_provider: { context_length: 128000, max_completion_tokens: 16384, is_moderated: false } },
   { id: 'anthropic/claude-test', name: 'Claude test', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: { context_length: 200000, max_completion_tokens: 8192, is_moderated: false } },
@@ -158,6 +178,7 @@ async function installWorkflowMock(page, options = {}) {
     const rawContent = body.messages[1].content;
     if (typeof rawContent === 'string') { try { payload = JSON.parse(rawContent); } catch {} }
     else if (Array.isArray(rawContent)) { const textPart = rawContent.find(part => part.type === 'text'); if (textPart) { try { payload = JSON.parse(textPart.text); } catch {} } }
+    const phase = payload.phase || 'pre-analysis';
     let content;
     if (name === 'webdev_requirements') {
       const prompt = payload.prompt || '';
@@ -169,18 +190,26 @@ async function installWorkflowMock(page, options = {}) {
       const anyId = pick('cand:left').length ? pick('cand:left') : [facts[0]?.id].filter(Boolean);
       const humanLeft = options.ignoreHumanFacts ? [] : pick('human:left');
       const humanRight = options.ignoreHumanFacts ? [] : pick('human:right');
-      const aesthetics = options.aesthetics
-        ? { ...options.aesthetics, source_ids: options.aesthetics.source_ids && options.aesthetics.source_ids.length ? options.aesthetics.source_ids : (pick('archive:visual').length ? pick('archive:visual') : anyId) }
-        : { choice: 'About equal', basis: 'visual', rationale: 'Both use a similar layout.', confidence: 'low', source_ids: pick('archive:visual') };
+      const humanVisualIds = [...pick('humanvisual:left'), ...pick('humanvisual:right')];
+      const confirmedExtra = facts.find(f => f.id.startsWith('extra:') && f.text.includes('working yes') && f.text.includes('confirmed live yes'));
+      let aesthetics;
+      if (options.noAesthetics) {
+        aesthetics = { choice: 'Unavailable', basis: 'unavailable', rationale: 'No live visual evidence was supplied.', confidence: 'low', source_ids: humanVisualIds.length ? humanVisualIds : (pick('archive:visual').length ? pick('archive:visual') : anyId) };
+      } else if (options.aesthetics) {
+        aesthetics = { ...options.aesthetics, source_ids: options.aesthetics.source_ids && options.aesthetics.source_ids.length ? options.aesthetics.source_ids : (humanVisualIds.length ? humanVisualIds : (pick('archive:visual').length ? pick('archive:visual') : anyId)) };
+      } else {
+        aesthetics = { choice: humanVisualIds.length ? 'Right' : 'About equal', basis: 'visual', rationale: 'Both candidates keep a similar layout.', confidence: 'low', source_ids: humanVisualIds.length ? humanVisualIds : (pick('archive:visual').length ? pick('archive:visual') : anyId) };
+      }
+      const depthSide = confirmedExtra ? (confirmedExtra.id.startsWith('extra:right') ? 'Right' : 'Left') : 'About equal';
       content = {
         functional_correctness: {
           left: { choice: 'Works', rationale: 'Static markup includes the requested controls.', confidence: 'low', source_ids: humanLeft.length ? humanLeft : anyId },
           right: { choice: 'Partly works', rationale: 'Static markup lacks one requested control.', confidence: 'low', source_ids: humanRight.length ? humanRight : (pick('cand:right').length ? pick('cand:right') : anyId) }
         },
         requirements_coverage: { choice: 'About equal', rationale: 'Both list the requested items.', confidence: 'low', source_ids: pick('archive:').length ? pick('archive:') : anyId },
-        product_depth: { choice: 'Right', rationale: 'The right candidate lists an extra control.', confidence: 'low', source_ids: pick('cand:right').length ? pick('cand:right') : anyId },
+        product_depth: { choice: depthSide, rationale: confirmedExtra ? 'A live-confirmed extra is present.' : 'No live-confirmed extras were observed.', confidence: 'low', source_ids: confirmedExtra ? [confirmedExtra.id] : (humanLeft.length ? humanLeft : anyId) },
         aesthetics,
-        overall_preference: { choice: 'Left', primary_reason: 'Functionality', optional_comment: 'The left candidate covers the requested controls in its static markup. The right candidate is missing one requested control.', rationale: 'Functional difference.', confidence: 'low', source_ids: [...anyId, ...humanLeft, ...humanRight].slice(0, 3) }
+        overall_preference: { choice: humanVisualIds.length ? 'Right' : 'Left', primary_reason: humanVisualIds.length ? 'Visual quality' : 'Functionality', optional_comment: 'The left candidate covers the requested controls in its static markup. The right candidate is missing one requested control.', rationale: 'Functional difference.', confidence: 'low', source_ids: [...new Set([...anyId, ...humanLeft, ...humanRight, ...humanVisualIds])].slice(0, 4) }
       };
     } else if (name === 'webdev_visual_judgment') {
       content = options.visual || {
@@ -211,7 +240,552 @@ async function installWorkflowMock(page, options = {}) {
   return requests;
 }
 
-/* ---------- new primary workflow tests ---------- */
+/* ---------- archive pre-analysis vs live review vs finalization ---------- */
+
+test('archive pre-analysis runs before live review and its output is provisional', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await expect(page.locator('#finalize')).toBeDisabled();
+  await analyze(page);
+  await expect(page.locator('#stageResults')).toBeVisible();
+  await expect(page.locator('#resultsSummary')).toContainText('Pre-analysis complete · Live preview review required');
+  await expect(page.locator('#liveReviewStatus')).toContainText('Live preview review required');
+  await expect(page.locator('#resultList .result-row')).toHaveCount(13);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      chime: t.chimeState(),
+      provisional: t.provisionalRun(),
+      finalized: t.finalizedRun(),
+      finalizedAt: t.state().analysis.finalizedAt,
+      aesthetics: t.canonical().aesthetics,
+      meta: t.state().analysis.fieldMeta,
+      badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || ''
+    };
+  });
+  expect(result.chime.count).toBe(0);
+  expect(result.finalized).toBe(false);
+  expect(result.finalizedAt).toBe('');
+  expect(result.provisional).toBe(true);
+  expect(result.aesthetics.choice).not.toBe('');
+  expect(result.meta.aesthetics_choice.basis).toBe('provisional');
+  expect(result.badge).toContain('Provisional archive');
+  const judgment = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
+  expect(JSON.parse(judgment.messages[1].content).phase).toBe('pre-analysis');
+  expect(errors).toEqual([]);
+});
+
+test('finalize is blocked until both views on both sides and the Chrome new-tab confirmation are checked', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await expect(page.locator('#finalize')).toBeDisabled();
+  await page.locator('#liveInspection input[data-inspection="left.desktop"]').check();
+  await page.locator('#liveInspection input[data-inspection="left.mobile"]').check();
+  await page.locator('#liveInspection input[data-inspection="right.desktop"]').check();
+  await expect(page.locator('#finalize')).toBeDisabled();
+  await expect(page.locator('#finalizeHint')).toContainText('3/5');
+  await page.locator('#liveInspection input[data-inspection="right.mobile"]').check();
+  await expect(page.locator('#finalize')).toBeDisabled();
+  await expect(page.locator('#finalizeHint')).toContainText('4/5');
+  await page.locator('#chromeNewTab').check();
+  await expect(page.locator('#finalize')).toBeEnabled();
+  await expect(page.locator('#liveReviewStatus')).toContainText('Live preview review complete');
+  await expect(page.locator('#finalizeHint')).toContainText('Finalize Evaluation');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.liveReviewComplete())).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('finalized output covers all 13 fields, is marked final, and chimes exactly once', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture({ includeImage: true }));
+  await analyze(page);
+  await confirmLive(page);
+  await page.locator('#archiveMatchLeft').check();
+  await page.locator('#archiveMatchRight').check();
+  await finalize(page);
+  await expect(page.locator('#resultsSummary')).toContainText('Analysis complete · Ready for review');
+  await expect(page.locator('#resultsCount')).toHaveText('13 / 13');
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const values = {};
+    for (const key of t.FORM_FIELD_ORDER) values[key] = t.resultValue(key);
+    return { values, chime: t.chimeState().count, finalized: t.finalizedRun(), structural: t.validatePayload(t.canonical(), { complete: true }), meta: t.state().analysis.fieldMeta, badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '' };
+  });
+  for (const key of FORM_FIELD_ORDER) expect(String(result.values[key]).length).toBeGreaterThan(0);
+  expect(result.finalized).toBe(true);
+  expect(result.chime).toBe(1);
+  expect(result.structural).toEqual([]);
+  expect(result.meta.aesthetics_choice.basis).toBe('rendered');
+  expect(result.badge).toContain('Rendered archive evidence');
+  const finalJudgment = requests.filter(r => r.response_format?.json_schema?.name === 'webdev_judgment').pop();
+  expect(JSON.parse(finalJudgment.messages[1].content).phase).toBe('final');
+  expect(finalJudgment.messages[0].content).toMatch(/human visual review notes|Evidence hierarchy/i);
+  await page.evaluate(() => { window.__WEBDEV_SBS_TEST__.renderAll(); window.__WEBDEV_SBS_TEST__.renderAll(); });
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('chime does not fire after archive pre-analysis alone or after an aborted run', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
+  await page.evaluate(() => window.__WEBDEV_SBS_TEST__.forceStageFailure());
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#reAnalyze').click();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.state().analysis.stages.some(stage => stage.status === 'failed'));
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('live review state persists through reload without entering the payload', async ({ page }) => {
+  const errors = await open(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await page.locator('#humanLeft').fill('Upload worked, Export did nothing.');
+  await page.locator('#humanVisualRight').fill('Mobile nav overlaps the title; desktop is clean.');
+  for (const side of ['left', 'right']) for (const view of ['desktop', 'mobile']) await page.locator(`#liveInspection input[data-inspection="${side}.${view}"]`).check();
+  await page.locator('#chromeNewTab').check();
+  await page.locator('#archiveMatchLeft').check();
+  await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    t.state().extras.left.push({ capability: 'Clear', working: true, why: 'clears the whole list', confirmedLive: true, source: 'archive' });
+    t.renderAll();
+  });
+  await page.waitForTimeout(700);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      humanReview: t.humanReview(),
+      humanVisual: t.humanVisual(),
+      archiveMatch: t.archiveMatch(),
+      complete: t.liveReviewComplete(),
+      extras: JSON.parse(JSON.stringify(t.state().extras.left)),
+      serialized: JSON.stringify(t.canonical())
+    };
+  });
+  expect(result.humanReview.left).toBe('Upload worked, Export did nothing.');
+  expect(result.humanVisual.right).toBe('Mobile nav overlaps the title; desktop is clean.');
+  expect(result.archiveMatch).toEqual({ left: true, right: false });
+  expect(result.complete).toBe(true);
+  expect(result.extras.find(e => e.capability === 'Clear').confirmedLive).toBe(true);
+  expect(result.serialized).not.toContain('Export did nothing');
+  expect(result.serialized).not.toContain('Mobile nav overlaps');
+  expect(result.serialized).not.toContain('clears the whole list');
+  await expect(page.locator('#humanLeft')).toHaveValue('Upload worked, Export did nothing.');
+  await expect(page.locator('#humanVisualRight')).toHaveValue('Mobile nav overlaps the title; desktop is clean.');
+  await expect(page.locator('#chromeNewTab')).toBeChecked();
+  expect(errors).toEqual([]);
+});
+
+test('human visual notes outrank unconfirmed reconstruction and feed final aesthetics', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await page.locator('#humanVisualLeft').fill('Mobile hero wraps awkwardly but nothing clips.');
+  await page.locator('#humanVisualRight').fill('Mobile nav overlaps the title; desktop is clean.');
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await confirmLive(page);
+  await finalize(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      meta: t.state().analysis.fieldMeta,
+      aesthetics: t.canonical().aesthetics,
+      badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '',
+      facts: t.buildFinalFacts().filter(f => f.id.startsWith('humanvisual:'))
+    };
+  });
+  const finalJudgment = requests.filter(r => r.response_format?.json_schema?.name === 'webdev_judgment').pop();
+  const payload = JSON.parse(finalJudgment.messages[1].content);
+  expect(payload.facts.some(f => f.id === 'humanvisual:left' && f.text.includes('wraps awkwardly'))).toBe(true);
+  expect(payload.liveReview.humanVisualNotes.right).toContain('overlaps the title');
+  expect(result.meta.aesthetics_choice.basis).toBe('human');
+  expect(result.badge).toContain('Human review evidence');
+  expect(result.aesthetics.evidence).not.toBe('');
+  expect(result.facts.length).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('unconfirmed archive reconstruction cannot finalize aesthetics', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  const before = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.canonical().aesthetics.choice);
+  expect(before).not.toBe('');
+  await confirmLive(page);
+  await finalize(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta, warnings: t.state().analysis.warnings.join('\n') };
+  });
+  expect(result.aesthetics.choice).toBe('');
+  expect(result.aesthetics.evidence).toBe('');
+  expect(result.meta.aesthetics_choice.basis).toBe('unavailable');
+  expect(result.warnings).toContain('unconfirmed archive reconstruction');
+  expect(errors).toEqual([]);
+});
+
+test('archive-match confirmation lets reconstructed evidence support the final visual judgment', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await confirmLive(page);
+  await page.locator('#archiveMatchLeft').check();
+  await page.locator('#archiveMatchRight').check();
+  await finalize(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta, badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '' };
+  });
+  expect(result.aesthetics.choice).not.toBe('');
+  expect(result.aesthetics.evidence).not.toBe('');
+  expect(result.meta.aesthetics_choice.basis).toBe('rendered');
+  expect(result.meta.aesthetics_choice.note).toContain('confirmed');
+  expect(result.badge).toContain('Rendered archive evidence');
+  expect(errors).toEqual([]);
+});
+
+test('pre-analysis and finalization degrade gracefully without OpenRouter', async ({ page }) => {
+  const errors = await open(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await expect(page.locator('#resultsSummary')).toContainText('Pre-analysis complete · Live preview review required');
+  await confirmLive(page);
+  await finalize(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      finalized: t.finalizedRun(),
+      chime: t.chimeState().count,
+      summary: document.getElementById('resultsSummary').textContent,
+      rows: document.querySelectorAll('#resultList .result-row').length,
+      meta: t.state().analysis.fieldMeta
+    };
+  });
+  expect(result.finalized).toBe(true);
+  expect(result.chime).toBe(1);
+  expect(result.summary).toContain('Analysis complete · Ready for review');
+  expect(result.rows).toBe(13);
+  expect(result.meta.aesthetics_choice.basis).toBe('unavailable');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- functionality, coverage, depth ---------- */
+
+test('human functional notes remain highest-priority functionality evidence through finalization', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
+  await page.locator('#humanRight').fill('Export worked from the preview.');
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await confirmLive(page);
+  await finalize(page);
+  const rejection = await (async () => {
+    await installWorkflowMock(page, { ignoreHumanFacts: true });
+    return true;
+  })();
+  expect(rejection).toBe(true);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      meta: t.state().analysis.fieldMeta,
+      badges: ['functional_correctness_left', 'functional_correctness_right'].map(key => document.querySelector(`[data-result="${key}"] .basis-badge`)?.textContent || ''),
+      diagnostics: t.humanDiagnostics().map(d => d.message).join('\n'),
+      canonical: JSON.stringify(t.canonical())
+    };
+  });
+  expect(result.meta.functional_correctness_left.basis).toBe('human');
+  expect(result.meta.functional_correctness_right.basis).toBe('human');
+  expect(result.badges[0]).toContain('Human review evidence');
+  expect(result.badges[1]).toContain('Human review evidence');
+  expect(result.diagnostics).toContain('Conflict on Left');
+  expect(result.diagnostics).toContain('human observation is favored');
+  expect(result.canonical).not.toContain('Export did nothing');
+  const finalJudgment = requests.filter(r => r.response_format?.json_schema?.name === 'webdev_judgment').pop();
+  const payload = JSON.parse(finalJudgment.messages[1].content);
+  expect(payload.facts.some(f => f.id === 'human:left' && f.text.includes('Export did nothing'))).toBe(true);
+  expect(payload.liveReview.humanFunctionalNotes.left).toContain('Export did nothing');
+  expect(errors).toEqual([]);
+});
+
+test('a judgment that ignores supplied human functional notes is rejected', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page, { ignoreHumanFacts: true });
+  await configureAI(page);
+  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { warnings: t.state().analysis.warnings.join('\n') };
+  });
+  expect(result.warnings).toContain('must cite the supplied human functional review note');
+  expect(errors).toEqual([]);
+});
+
+test('coverage stays quantity-based and a present-but-broken component still counts', async ({ page }) => {
+  const errors = await open(page);
+  await open(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state();
+    const table = t.requirement('Pricing table', 'pricing table'); table.explicit = true; table.testable = false;
+    table.left.presence = 'Present'; table.right.presence = 'Absent';
+    const calc = t.requirement('Calculate', 'Calculate updates the total'); calc.explicit = true; calc.testable = true;
+    calc.left = { presence: 'Present', function: 'Does not work', note: 'Present but broken' };
+    calc.right = { presence: 'Present', function: 'Does not work', note: 'Present but broken' };
+    s.requirements = [table, calc];
+    const det = t.deterministicChoices();
+    s.evaluation.requirements_coverage.choice = det.requirements_coverage;
+    return {
+      coverage: det.requirements_coverage,
+      functionalLeft: det['functional_correctness.left'],
+      leftCount: s.requirements.filter(r => r.left.presence === 'Present').length,
+      rightCount: s.requirements.filter(r => r.right.presence === 'Present').length
+    };
+  });
+  expect(result.coverage).toBe('Left');
+  expect(result.leftCount).toBe(2);
+  expect(result.rightCount).toBe(1);
+  expect(result.functionalLeft).toBe('Does not work');
+  expect(errors).toEqual([]);
+});
+
+test('a missing requested component is not moved into functionality evidence', async ({ page }) => {
+  const errors = await open(page);
+  await open(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const flags = t.evidenceFlags('functional_correctness.left', 'The left app omits the pricing table.');
+    const facts = [{ id: 'cand:left', text: 'left candidate static inventory' }];
+    let thrown = '';
+    try {
+      t.validateAIEvidence({ suggestions: [{ field: 'functional_correctness.left', evidence: 'The left app omits the pricing table.', source_ids: ['cand:left'] }] }, ['functional_correctness.left'], facts);
+    } catch (e) { thrown = e.message; }
+    return { flags, thrown };
+  });
+  expect(result.flags).toContain('Missing requirements belong in coverage');
+  expect(result.thrown).toContain('Missing requirements belong in coverage');
+  expect(errors).toEqual([]);
+});
+
+test('unconfirmed archive extras never count for Product depth but confirmed live extras do', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  const seeded = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state();
+    return {
+      candidates: t.archiveExtraCandidates(),
+      extras: JSON.parse(JSON.stringify(s.extras)),
+      depth: t.deterministicChoices().product_depth,
+      provisional: t.canonical().product_depth.choice
+    };
+  });
+  expect(seeded.candidates.left).toContain('Clear');
+  expect(seeded.extras.left.some(e => e.capability === 'Clear' && e.confirmedLive === false && e.source === 'archive')).toBe(true);
+  expect(seeded.depth).toBe('About equal');
+  await confirmLive(page);
+  await finalize(page);
+  const unconfirmed = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { depth: t.canonical().product_depth.choice, meta: t.state().analysis.fieldMeta, candidates: t.archiveExtraCandidates() };
+  });
+  expect(unconfirmed.depth).toBe('About equal');
+  expect(unconfirmed.meta.product_depth_choice.basis).not.toBe('human');
+  expect(unconfirmed.candidates.left).toContain('Clear');
+
+  await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__, s = t.state();
+    const extra = s.extras.left.find(e => e.capability === 'Clear');
+    extra.working = true;
+    extra.confirmedLive = true;
+    extra.why = 'clears the whole list in one click';
+    t.renderAll();
+  });
+  await finalize(page);
+  const confirmed = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { depth: t.canonical().product_depth.choice, meta: t.state().analysis.fieldMeta, facts: t.buildFinalFacts().filter(f => f.id.startsWith('extra:left') && f.text.includes('confirmed live yes')) };
+  });
+  expect(confirmed.depth).toBe('Left');
+  expect(confirmed.meta.product_depth_choice.basis).toBe('human');
+  expect(confirmed.facts.length).toBeGreaterThan(0);
+  const finalJudgment = requests.filter(r => r.response_format?.json_schema?.name === 'webdev_judgment').pop();
+  expect(JSON.parse(finalJudgment.messages[1].content).liveReview.confirmedExtras.left[0].capability).toBe('Clear');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- evidence writing ---------- */
+
+test('evidence is issue-first, one sentence, within 200 characters, and keeps the configured style', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await openSettings(page);
+  await page.locator('#orStyle').fill('Sentinel style: short, dry, and specific.');
+  await page.locator('#orStyle').press('Tab');
+  await page.locator('#saveSettings').click();
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    const long = 'x'.repeat(200) + '.';
+    const two = 'First sentence. Second sentence.';
+    return {
+      exact: t.evidenceFlags('requirements_coverage', 'x'.repeat(199) + '.'),
+      over: t.evidenceFlags('requirements_coverage', long),
+      two: t.evidenceFlags('requirements_coverage', two),
+      praise: t.evidenceFlags('functional_correctness.left', 'The app feels polished and intuitive.')
+    };
+  });
+  expect(result.exact).not.toContain('Over 200 characters');
+  expect(result.over).toContain('Over 200 characters');
+  expect(result.two).toContain('Use one sentence');
+  expect(result.praise.some(x => x.includes('praise') || x.includes('Vague'))).toBe(true);
+  const evidenceRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_workflow_evidence');
+  expect(evidenceRequest.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
+  expect(evidenceRequest.messages[0].content).toMatch(/failure or difference/i);
+  const judgmentRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
+  expect(judgmentRequest.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
+  const requirementsRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_requirements');
+  expect(requirementsRequest.messages[0].content).not.toContain('Sentinel style');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- mandatory overall comment ---------- */
+
+test('overall comment is required, must be 2–4 sentences, and blocks clean completion', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  const flags = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      blank: t.commentFlags(''),
+      one: t.commentFlags('Only one sentence.'),
+      good: t.commentFlags('The left app wins because it works. The right app loses because it is missing the table.'),
+      five: t.commentFlags('One. Two. Three. Four. Five.'),
+      generic: t.commentFlags('The right app is better. It is simply better in every way.')
+    };
+  });
+  expect(flags.blank.join(' ')).toContain('required');
+  expect(flags.one.join(' ')).toContain('2–4 sentences');
+  expect(flags.good).toEqual([]);
+  expect(flags.five.join(' ')).toContain('2–4 sentences');
+  expect(flags.generic.join(' ')).toContain('generic');
+  await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    t.state().evaluation.overall_preference.optional_comment = '';
+    t.renderAll();
+  });
+  const blankState = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return {
+      errors: t.validatePayload(t.canonical(), { complete: true }).join('\n'),
+      lint: t.lint().join('\n'),
+      count: document.getElementById('resultsCount').textContent
+    };
+  });
+  expect(blankState.errors).toContain('optional_comment');
+  expect(blankState.lint).toContain('Overall comment');
+  expect(blankState.count).not.toBe('13 / 13');
+  await page.locator('#fillLive').click();
+  await expect(page.locator('#handoffStatus')).toContainText('incomplete');
+  const judgmentRequest = requests.filter(r => r.response_format?.json_schema?.name === 'webdev_judgment').pop();
+  expect(JSON.parse(judgmentRequest.messages[1].content)).toBeTruthy();
+  expect(errors).toEqual([]);
+});
+
+test('webdev-sbs-v1 schema is unchanged and bookmarklet mapping still fills 13/13', async ({ page }) => {
+  await open(page);
+  const source = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.webdevAutofill.toString());
+  const payload = {
+    schema: 'webdev-sbs-v1',
+    functional_correctness: { left: { choice: 'Works', evidence: 'The Calculate control updates the total.' }, right: { choice: 'Partly works', evidence: 'The Calculate control updates once but ignores a changed term.' } },
+    requirements_coverage: { choice: 'Left', evidence: 'The right candidate omits the requested pricing table.' },
+    product_depth: { choice: 'Right', evidence: 'The right candidate adds a working cart quantity stepper.' },
+    aesthetics: { choice: 'About equal', evidence: 'Both candidates keep readable layouts on desktop and mobile.' },
+    overall_preference: { choice: 'Left', primary_reason: 'Requirements coverage', optional_comment: '' }
+  };
+  const keys = await page.evaluate(() => Object.keys(window.__WEBDEV_SBS_TEST__.canonical()).sort());
+  expect(keys).toEqual(['aesthetics', 'functional_correctness', 'overall_preference', 'product_depth', 'requirements_coverage', 'schema']);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.FORM_FIELD_ORDER)).toEqual(FORM_FIELD_ORDER);
+  const cases = [
+    { raw: '{bad', controls: true, expected: 'malformed JSON' },
+    { raw: JSON.stringify({ ...payload, schema: 'other' }), controls: true, expected: 'validation failed' },
+    { raw: JSON.stringify({ ...payload, aesthetics: { ...payload.aesthetics, evidence: 'x'.repeat(201) } }), controls: true, expected: 'validation failed' },
+    { raw: JSON.stringify(payload), controls: false, expected: 'incompatible form DOM' },
+    { raw: JSON.stringify(payload), controls: true, expected: 'Fields verified: 13/13' }
+  ];
+  for (const c of cases) {
+    const result = await page.evaluate(async ({ source, c, FUNC, COMP, REASONS }) => {
+      const map = {
+        root_functional_correctness_left: FUNC,
+        root_functional_correctness_right: FUNC,
+        root_requirements_coverage_choice: COMP,
+        root_product_depth_choice: COMP,
+        root_aesthetics_choice: COMP,
+        root_overall_preference_choice: COMP,
+        root_overall_preference_primary_reason: REASONS
+      };
+      const texts = ['root_functional_correctness_left_evidence', 'root_functional_correctness_right_evidence', 'root_requirements_coverage_evidence', 'root_product_depth_evidence', 'root_aesthetics_evidence', 'root_overall_preference_optional_comment'];
+      const host = document.createElement('div'); host.id = 'mockForm'; document.body.append(host);
+      if (c.controls) {
+        for (const [id, values] of Object.entries(map)) {
+          const group = document.createElement('div'); group.id = id;
+          for (const value of values) { const b = document.createElement('button'); b.value = value; b.type = 'button'; b.textContent = value; b.onclick = () => { group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false')); b.setAttribute('aria-pressed', 'true') }; group.append(b) }
+          host.append(group);
+        }
+        for (const id of texts) { const t = document.createElement('textarea'); t.id = id; host.append(t) }
+      }
+      const submit = document.createElement('button'); submit.textContent = 'Submit'; submit.onclick = () => window.__submitCount++; host.append(submit);
+      window.__submitCount = 0; const alerts = []; window.alert = s => alerts.push(s);
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: async () => c.raw } });
+      Function('return (' + source + ')')()();
+      await new Promise(r => setTimeout(r, 180));
+      const values = Object.keys(map).map(id => [id, document.getElementById(id)?.querySelector('button[aria-pressed="true"]')?.value]);
+      const textValues = texts.map(id => [id, document.getElementById(id)?.value]);
+      const output = { alerts, submitCount: window.__submitCount, values, textValues }; host.remove(); return output;
+    }, { source, c, FUNC, COMP, REASONS });
+    expect(result.alerts.join(' ')).toContain(c.expected);
+    expect(result.submitCount).toBe(0);
+    if (c.expected === 'Fields verified: 13/13') {
+      expect(result.values).toEqual([
+        ['root_functional_correctness_left', 'Works'], ['root_functional_correctness_right', 'Partly works'],
+        ['root_requirements_coverage_choice', 'Left'], ['root_product_depth_choice', 'Right'],
+        ['root_aesthetics_choice', 'About equal'], ['root_overall_preference_choice', 'Left'],
+        ['root_overall_preference_primary_reason', 'Requirements coverage']
+      ]);
+      expect(result.textValues[0][1]).toBe(payload.functional_correctness.left.evidence);
+      expect(result.textValues[5][1]).toBe('');
+    } else expect(result.values.every(([, value]) => !value)).toBe(true);
+  }
+  expect(source).not.toMatch(/querySelector\([^)]*submit|\.submit\(/i);
+});
+
+/* ---------- upload and archive parsing ---------- */
 
 test('MHTML upload via the file input parses the archive and enables analysis', async ({ page }) => {
   const errors = await open(page);
@@ -281,7 +855,7 @@ test('missing candidate evidence is reported instead of invented', async ({ page
   await upload(page, 'no-candidates.mhtml', buildFixture({ includeCandidates: false }));
   await expect(page.locator('#analyze')).toBeEnabled();
   await expect(page.locator('#analyzeHint')).toContainText('candidate missing');
-  await page.locator('#analyze').click();
+  await analyze(page);
   await expect(page.locator('#stageResults')).toBeVisible();
   const result = await page.evaluate(() => {
     const t = window.__WEBDEV_SBS_TEST__, s = t.state();
@@ -301,15 +875,14 @@ test('missing candidate evidence is reported instead of invented', async ({ page
   expect(errors).toEqual([]);
 });
 
-test('complete analysis proposes all 13 live-form fields with rendered visual evidence', async ({ page }) => {
+test('pre-analysis uses reconstructed images and keeps its visual evidence provisional', async ({ page }) => {
   const errors = await open(page);
   const requests = await installWorkflowMock(page);
   await configureAI(page);
   await upload(page, 'rating.mhtml', buildFixture({ includeImage: true }));
-  await page.locator('#analyze').click();
+  await analyze(page);
   await expect(page.locator('#stageResults')).toBeVisible();
   await expect(page.locator('#resultList .result-row')).toHaveCount(13);
-  await expect(page.locator('#resultsCount')).toHaveText('13 / 13');
   const visionRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment');
   expect(Array.isArray(visionRequest.messages[1].content)).toBe(true);
   expect(visionRequest.messages[1].content.filter(part => part.type === 'image_url')).toHaveLength(4);
@@ -319,15 +892,11 @@ test('complete analysis proposes all 13 live-form fields with rendered visual ev
   expect(judgmentRequest.messages[1].content).toContain('renderedVisualAnalysis');
   const result = await page.evaluate(() => {
     const t = window.__WEBDEV_SBS_TEST__;
-    const values = {};
-    for (const key of t.FORM_FIELD_ORDER) values[key] = t.resultValue(key);
-    return { values, structural: t.validatePayload(t.canonical(), { complete: true }), stages: t.state().analysis.stages.map(x => x.status), aestheticsMeta: t.state().analysis.fieldMeta.aesthetics_choice, visuals: t.visualObservations(), badge: document.querySelector('[data-result="aesthetics_choice"] .basis-badge')?.textContent || '' };
+    return { visuals: t.visualObservations(), meta: t.state().analysis.fieldMeta.aesthetics_choice, structural: t.validatePayload(t.canonical(), { complete: false }), stages: t.state().analysis.stages.map(x => x.status) };
   });
-  for (const key of FORM_FIELD_ORDER) expect(String(result.values[key]).length).toBeGreaterThan(0);
   expect(result.structural).toEqual([]);
   expect(result.stages.every(x => x === 'done')).toBe(true);
-  expect(result.aestheticsMeta.basis).toBe('rendered');
-  expect(result.badge).toContain('Rendered archive evidence');
+  expect(result.meta.basis).toBe('provisional');
   expect(result.visuals.basis).toBe('rendered');
   expect(result.visuals.observations.left_mobile.length).toBeGreaterThan(0);
   await openAdvanced(page);
@@ -343,7 +912,7 @@ test('rasterization failure does not fabricate aesthetics', async ({ page }) => 
   await configureAI(page);
   await page.evaluate(() => window.__WEBDEV_SBS_TEST__.forceRasterFailure(true));
   await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
+  await analyze(page);
   await expect(page.locator('#stageResults')).toBeVisible();
   const result = await page.evaluate(() => {
     const t = window.__WEBDEV_SBS_TEST__;
@@ -383,294 +952,6 @@ test('recovered HTML/CSS renders desktop and mobile snapshots and records limita
   expect(result.limitations.join('\n')).toContain('scripts, event handlers, runtime state');
   await openAdvanced(page);
   await expect(page.locator('#renderedShotsView .shot')).toHaveCount(4);
-  expect(errors).toEqual([]);
-});
-
-test('vision capability is detected from model metadata', async ({ page }) => {
-  const errors = await open(page);
-  await configureAI(page);
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    const models = t.models();
-    return {
-      vision: t.modelCapability(models.find(m => m.id === 'openai/gpt-4.1-mini')).vision,
-      textOnly: t.modelCapability(models.find(m => m.id === 'meta/text-only')).vision,
-      fallback: t.effectiveVisualModel()
-    };
-  });
-  expect(result.vision).toBe(true);
-  expect(result.textOnly).toBe(false);
-  expect(result.fallback).toBe('openai/gpt-4.1-mini');
-  expect(errors).toEqual([]);
-});
-
-test('text-only models do not receive image requests', async ({ page }) => {
-  const errors = await open(page);
-  const requests = await installWorkflowMock(page);
-  await configureAI(page, [{ id: 'meta/text-only', name: 'Text Only', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} }]);
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
-  await expect(page.locator('#stageResults')).toBeVisible();
-  expect(requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment')).toBeUndefined();
-  for (const request of requests) expect(Array.isArray(request.messages[1].content)).toBe(false);
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta.aesthetics_choice, visuals: t.visualObservations() };
-  });
-  expect(result.aesthetics.choice).toBe('');
-  expect(result.meta.basis).toBe('unavailable');
-  expect(result.visuals).toBeNull();
-  expect(errors).toEqual([]);
-});
-
-test('a separate visual model can be selected for image analysis', async ({ page }) => {
-  const errors = await open(page);
-  const requests = await installWorkflowMock(page);
-  await configureAI(page, [
-    { id: 'meta/text-only', name: 'Text Only', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} },
-    { id: 'vendor/vision', name: 'Vision Model', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: {} }
-  ]);
-  await openSettings(page);
-  await page.locator('#orModel').selectOption('meta/text-only');
-  await page.locator('#orVisualModel').selectOption('vendor/vision');
-  await page.locator('#saveSettings').click();
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
-  await expect(page.locator('#stageResults')).toBeVisible();
-  const visionRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment');
-  expect(visionRequest.model).toBe('vendor/vision');
-  expect(visionRequest.messages[1].content.filter(part => part.type === 'image_url')).toHaveLength(4);
-  const judgmentRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
-  expect(judgmentRequest.model).toBe('meta/text-only');
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    return { visual: t.visualObservations(), meta: t.state().analysis.fieldMeta.aesthetics_choice };
-  });
-  expect(result.visual.model).toBe('vendor/vision');
-  expect(result.meta.basis).toBe('rendered');
-  expect(errors).toEqual([]);
-});
-
-test('evidence writing follows the configurable writing style, requirements extraction does not', async ({ page }) => {
-  const errors = await open(page);
-  const requests = await installWorkflowMock(page);
-  await configureAI(page);
-  await openSettings(page);
-  await page.locator('#orStyle').fill('Sentinel style: short, dry, and specific.');
-  await page.locator('#orStyle').press('Tab');
-  await page.locator('#saveSettings').click();
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
-  await expect(page.locator('#stageResults')).toBeVisible();
-  const requirements = requests.find(r => r.response_format?.json_schema?.name === 'webdev_requirements');
-  const evidence = requests.find(r => r.response_format?.json_schema?.name === 'webdev_workflow_evidence');
-  const vision = requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment');
-  const judgment = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
-  expect(evidence.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
-  expect(vision.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
-  expect(judgment.messages[0].content).toContain('Sentinel style: short, dry, and specific.');
-  expect(requirements.messages[0].content).not.toContain('Sentinel style');
-  expect(errors).toEqual([]);
-});
-
-test('writing style persists locally', async ({ page }) => {
-  const errors = await open(page);
-  await openSettings(page);
-  await page.locator('#orStyle').fill('Persisted style sentinel.');
-  await page.locator('#orStyle').press('Tab');
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')).style)).toBe('Persisted style sentinel.');
-  await page.reload();
-  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
-  await openSettings(page);
-  await expect(page.locator('#orStyle')).toHaveValue('Persisted style sentinel.');
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.styleInstruction())).toBe('Persisted style sentinel.');
-  expect(errors).toEqual([]);
-});
-
-/* ---------- Human functional review notes ---------- */
-
-test('human functional review notes persist for left and right', async ({ page }) => {
-  const errors = await open(page);
-  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
-  await page.locator('#humanRight').fill('All obvious controls worked.');
-  await page.waitForTimeout(700);
-  await page.reload();
-  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
-  await expect(page.locator('#humanLeft')).toHaveValue('Upload worked, Generate worked, Export did nothing.');
-  await expect(page.locator('#humanRight')).toHaveValue('All obvious controls worked.');
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    return { notes: t.humanReview(), lint: t.lint().join('\n'), status: document.getElementById('humanReviewStatus').textContent };
-  });
-  expect(result.notes).toEqual({ left: 'Upload worked, Generate worked, Export did nothing.', right: 'All obvious controls worked.' });
-  expect(result.lint).not.toContain('Human functional review');
-  expect(result.status).toContain('2 note(s) supplied');
-  expect(errors).toEqual([]);
-});
-
-test('human notes feed judgment and evidence, outrank static markup, and show Human review evidence', async ({ page }) => {
-  const errors = await open(page);
-  const requests = await installWorkflowMock(page);
-  await configureAI(page);
-  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
-  await page.locator('#humanRight').fill('Export worked from the preview.');
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
-  await expect(page.locator('#stageResults')).toBeVisible();
-  const judgment = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
-  const judgmentPayload = JSON.parse(judgment.messages[1].content);
-  expect(judgmentPayload.facts.some(f => f.id === 'human:left' && f.text.includes('Export did nothing'))).toBe(true);
-  expect(judgmentPayload.facts.some(f => f.id === 'human:right' && f.text.includes('Export worked'))).toBe(true);
-  expect(judgment.messages[0].content).toMatch(/human functional review notes/i);
-  const evidence = requests.find(r => r.response_format?.json_schema?.name === 'webdev_workflow_evidence');
-  expect(JSON.parse(evidence.messages[1].content).facts.some(f => f.id === 'human:left')).toBe(true);
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    return {
-      meta: t.state().analysis.fieldMeta,
-      diagnostics: t.humanDiagnostics().map(d => d.message).join('\n'),
-      badges: ['functional_correctness_left', 'functional_correctness_right', 'overall_preference_choice'].map(key => document.querySelector(`[data-result="${key}"] .basis-badge`)?.textContent || ''),
-      canonical: JSON.stringify(t.canonical())
-    };
-  });
-  expect(result.meta.functional_correctness_left.basis).toBe('human');
-  expect(result.meta.functional_correctness_right.basis).toBe('human');
-  expect(result.badges[0]).toContain('Human review evidence');
-  expect(result.badges[1]).toContain('Human review evidence');
-  expect(result.diagnostics).toContain('Conflict on Left');
-  expect(result.diagnostics).toContain('human observation is favored');
-  expect(result.canonical).not.toContain('Export did nothing');
-  expect(errors).toEqual([]);
-});
-
-test('a functional judgment that ignores supplied human notes is rejected', async ({ page }) => {
-  const errors = await open(page);
-  await installWorkflowMock(page, { ignoreHumanFacts: true });
-  await configureAI(page);
-  await page.locator('#humanLeft').fill('Upload worked, Generate worked, Export did nothing.');
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
-  await expect(page.locator('#stageResults')).toBeVisible();
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    return { warnings: t.state().analysis.warnings.join('\n'), functional: t.canonical().functional_correctness.left };
-  });
-  expect(result.warnings).toContain('must cite the supplied human functional review note');
-  expect(result.functional.choice).toBe('');
-  expect(errors).toEqual([]);
-});
-
-test('human notes never enter the webdev-sbs-v1 payload', async ({ page }) => {
-  await open(page);
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    t.state().humanReview.left = 'sentinel human note';
-    const payload = t.canonical();
-    return { schema: payload.schema, serialized: JSON.stringify(payload), keys: Object.keys(payload).sort(), valid: t.validatePayload(payload, { complete: false }) };
-  });
-  expect(result.schema).toBe('webdev-sbs-v1');
-  expect(result.serialized).not.toContain('sentinel human note');
-  expect(result.keys).toEqual(['aesthetics', 'functional_correctness', 'overall_preference', 'product_depth', 'requirements_coverage', 'schema']);
-  expect(result.valid.filter(x => /human/i.test(x))).toEqual([]);
-});
-
-test('final evidence never contains runtime-capture disclaimers', async ({ page }) => {
-  const errors = await open(page);
-  await installWorkflowMock(page, {
-    evidence: {
-      functional_correctness_left_evidence: 'The upload worked, but runtime behavior was not captured.',
-      functional_correctness_right_evidence: 'Export worked and the list updated.',
-      requirements_coverage_evidence: 'Both candidates include the requested controls.',
-      product_depth_evidence: 'The right candidate lists a task counter control.',
-      aesthetics_evidence: ''
-    }
-  });
-  await configureAI(page);
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
-  await expect(page.locator('#stageResults')).toBeVisible();
-  const result = await page.evaluate(() => {
-    const t = window.__WEBDEV_SBS_TEST__;
-    const payload = t.canonical();
-    return {
-      flags: t.evidenceFlags('functional_correctness.left', 'The upload worked, but runtime behavior was not captured.'),
-      left: payload.functional_correctness.left.evidence,
-      all: JSON.stringify(payload),
-      warnings: t.state().analysis.warnings.join('\n')
-    };
-  });
-  expect(result.flags).toContain('Archive or runtime caveats do not belong in evidence');
-  expect(result.left).not.toContain('runtime behavior was not captured');
-  expect(result.all).not.toMatch(/runtime (?:behavior|behaviour) was not captured|could not be tested|could not be verified|static archive/i);
-  expect(result.warnings).toContain('Archive or runtime caveats');
-  expect(errors).toEqual([]);
-});
-
-/* ---------- Completion chime ---------- */
-
-test('completion chime fires once per completed analysis', async ({ page }) => {
-  const errors = await open(page);
-  await installWorkflowMock(page);
-  await configureAI(page);
-  await upload(page, 'rating.mhtml', buildFixture());
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState())).toEqual({ enabled: true, count: 0 });
-  await page.locator('#analyze').click();
-  await expect(page.locator('#stageResults')).toBeVisible();
-  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.state().analysis.lastRun);
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
-  await page.evaluate(() => { window.__WEBDEV_SBS_TEST__.renderAll(); window.__WEBDEV_SBS_TEST__.renderAll(); });
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
-  expect(errors).toEqual([]);
-});
-
-test('chime does not fire on individual AI actions or aborted analysis', async ({ page }) => {
-  const errors = await open(page);
-  await installWorkflowMock(page);
-  await configureAI(page);
-  await openAdvanced(page);
-  await page.locator('#prompt').fill('Build a pricing table. No authentication is required.');
-  await page.locator('#aiExtract').click();
-  await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(1);
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.evaluate(() => window.__WEBDEV_SBS_TEST__.forceStageFailure());
-  await page.locator('#analyze').click();
-  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.state().analysis.stages.some(stage => stage.status === 'failed'));
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
-  expect(errors).toEqual([]);
-});
-
-test('completion-chime preference persists and the test control uses the same helper', async ({ page }) => {
-  const errors = await open(page);
-  await openSettings(page);
-  await expect(page.locator('#orChime')).toBeChecked();
-  await page.locator('#orChime').uncheck();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')).chime)).toBe(false);
-  await page.reload();
-  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
-  await openSettings(page);
-  await expect(page.locator('#orChime')).not.toBeChecked();
-  await page.locator('#orTestChime').click();
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
-  await page.locator('#orChime').check();
-  await page.locator('#orTestChime').click();
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
-  await page.evaluate(() => window.__WEBDEV_SBS_TEST__.playCompletionChime());
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(2);
-  expect(errors).toEqual([]);
-});
-
-test('Ready for review stays visible with audio disabled', async ({ page }) => {
-  const errors = await open(page);
-  await installWorkflowMock(page);
-  await configureAI(page);
-  await openSettings(page);
-  await page.locator('#orChime').uncheck();
-  await page.locator('#saveSettings').click();
-  await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
-  await expect(page.locator('#resultsSummary')).toContainText('Ready for review');
-  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
   expect(errors).toEqual([]);
 });
 
@@ -779,7 +1060,7 @@ test('an incompatible model is detected before full analysis and blocks AI calls
   await page.locator('#orModel').selectOption('vendor/legacy');
   await page.locator('#saveSettings').click();
   await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
+  await analyze(page);
   await expect(page.locator('#stageResults')).toBeVisible();
   await expect(page.locator('#resultList .result-row')).toHaveCount(13);
   expect(chatCalls).toBe(0);
@@ -823,7 +1104,7 @@ test('an OpenRouter 404 routing error aborts the remaining AI stages', async ({ 
   });
   await configureAI(page);
   await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
+  await analyze(page);
   await expect(page.locator('#stageResults')).toBeVisible();
   await expect(page.locator('#resultList .result-row')).toHaveCount(13);
   expect(chatCalls).toBe(1);
@@ -843,7 +1124,7 @@ test('OpenRouter diagnostics name the model and parameters without the API key',
   await page.route('https://openrouter.ai/api/v1/chat/completions', route => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'No endpoints found that can handle the requested parameters.' } }) }));
   await configureAI(page);
   await upload(page, 'rating.mhtml', buildFixture());
-  await page.locator('#analyze').click();
+  await analyze(page);
   await expect(page.locator('#stageResults')).toBeVisible();
   await openAdvanced(page);
   const text = await page.locator('#orDiagnostics').textContent();
@@ -859,53 +1140,120 @@ test('OpenRouter diagnostics name the model and parameters without the API key',
   expect(errors.every(message => message.includes('404'))).toBe(true);
 });
 
-test('a blank optional comment produces no validation warning', async ({ page }) => {
+test('vision capability is detected from model metadata', async ({ page }) => {
   const errors = await open(page);
+  await configureAI(page);
   const result = await page.evaluate(() => {
     const t = window.__WEBDEV_SBS_TEST__;
+    const models = t.models();
     return {
-      blankLint: t.lint(),
-      blankFlags: t.commentFlags(''),
-      shortFlags: t.commentFlags('Only one sentence.'),
-      goodFlags: t.commentFlags('The left app wins because it works. The right app loses because it is missing the table.')
+      vision: t.modelCapability(models.find(m => m.id === 'openai/gpt-4.1-mini')).vision,
+      textOnly: t.modelCapability(models.find(m => m.id === 'meta/text-only')).vision,
+      fallback: t.effectiveVisualModel()
     };
   });
-  expect(result.blankLint.join('\n')).not.toContain('Optional comment');
-  expect(result.blankFlags).toEqual([]);
-  expect(result.shortFlags.join(' ')).toContain('2–4 sentences');
-  expect(result.goodFlags).toEqual([]);
+  expect(result.vision).toBe(true);
+  expect(result.textOnly).toBe(false);
+  expect(result.fallback).toBe('openai/gpt-4.1-mini');
   expect(errors).toEqual([]);
 });
 
-test('mobile layout stays narrow on upload and results', async ({ page }) => {
+test('text-only models do not receive image requests', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page, [{ id: 'meta/text-only', name: 'Text Only', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} }]);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await expect(page.locator('#stageResults')).toBeVisible();
+  expect(requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment')).toBeUndefined();
+  for (const request of requests) if (request.response_format?.json_schema?.name !== 'webdev_requirements') expect(Array.isArray(request.messages[1].content)).toBe(false);
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { aesthetics: t.canonical().aesthetics, meta: t.state().analysis.fieldMeta.aesthetics_choice, visuals: t.visualObservations() };
+  });
+  expect(result.aesthetics.choice).toBe('');
+  expect(result.meta.basis).toBe('unavailable');
+  expect(result.visuals).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+test('a separate visual model can be selected for image analysis', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page, [
+    { id: 'meta/text-only', name: 'Text Only', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text'] }, top_provider: {} },
+    { id: 'vendor/vision', name: 'Vision Model', supported_parameters: ['response_format', 'structured_outputs', 'temperature', 'max_tokens'], architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, top_provider: {} }
+  ]);
+  await openSettings(page);
+  await page.locator('#orModel').selectOption('meta/text-only');
+  await page.locator('#orVisualModel').selectOption('vendor/vision');
+  await page.locator('#saveSettings').click();
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await expect(page.locator('#stageResults')).toBeVisible();
+  const visionRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_visual_judgment');
+  expect(visionRequest.model).toBe('vendor/vision');
+  expect(visionRequest.messages[1].content.filter(part => part.type === 'image_url')).toHaveLength(4);
+  const judgmentRequest = requests.find(r => r.response_format?.json_schema?.name === 'webdev_judgment');
+  expect(judgmentRequest.model).toBe('meta/text-only');
+  const result = await page.evaluate(() => {
+    const t = window.__WEBDEV_SBS_TEST__;
+    return { visual: t.visualObservations(), meta: t.state().analysis.fieldMeta.aesthetics_choice };
+  });
+  expect(result.visual.model).toBe('vendor/vision');
+  expect(result.meta.basis).toBe('provisional');
+  expect(errors).toEqual([]);
+});
+
+test('writing style persists locally', async ({ page }) => {
+  const errors = await open(page);
+  await openSettings(page);
+  await page.locator('#orStyle').fill('Persisted style sentinel.');
+  await page.locator('#orStyle').press('Tab');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')).style)).toBe('Persisted style sentinel.');
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  await openSettings(page);
+  await expect(page.locator('#orStyle')).toHaveValue('Persisted style sentinel.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.styleInstruction())).toBe('Persisted style sentinel.');
+  expect(errors).toEqual([]);
+});
+
+/* ---------- chime preferences and visible ready state ---------- */
+
+test('completion-chime preference persists and the test control uses the same helper', async ({ page }) => {
+  const errors = await open(page);
+  await openSettings(page);
+  await expect(page.locator('#orChime')).toBeChecked();
+  await page.locator('#orChime').uncheck();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')).chime)).toBe(false);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__WEBDEV_SBS_TEST__));
+  await openSettings(page);
+  await expect(page.locator('#orChime')).not.toBeChecked();
+  await page.locator('#orTestChime').click();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
+  await page.locator('#orChime').check();
+  await page.locator('#orTestChime').click();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(1);
+  await page.evaluate(() => window.__WEBDEV_SBS_TEST__.playCompletionChime());
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('Ready for review appears after finalization with audio disabled', async ({ page }) => {
   const errors = await open(page);
   await installWorkflowMock(page);
   await configureAI(page);
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-  await upload(page, 'rating.mhtml', buildFixture({ includeImage: true }));
-  await page.locator('#analyze').click();
-  await expect(page.locator('#resultList .result-row')).toHaveCount(13);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-  await page.screenshot({ path: '/tmp/webdev-workbench-mobile.png', fullPage: true });
-  expect(errors).toEqual([]);
-});
-
-test('manual and advanced workflow remains accessible', async ({ page }) => {
-  const errors = await open(page);
-  await upload(page, 'rating.mhtml', buildFixture());
-  await openAdvanced(page);
-  await expect(page.locator('#prompt')).toHaveValue(/Build a todo app/);
-  await page.locator('#extractRequirements').click();
-  await expect(page.locator('#requirementsList .req-card')).toHaveCount(3);
-  await expect(page.locator('#observationRows tr')).toHaveCount(3);
-  await expect(page.locator('#aiExtract')).toBeVisible();
   await openSettings(page);
-  await expect(page.locator('#orKey')).toBeVisible();
-  await page.locator('#closeSettings').click();
-  await expect(page.locator('#submissionPreview').locator('dt')).toHaveCount(13);
-  expect(await page.locator('#candidatePreviews iframe').first().getAttribute('srcdoc')).toContain('Todo');
-  expect(await page.locator('#rawArchive').textContent()).toContain('Todo Left');
+  await page.locator('#orChime').uncheck();
+  await page.locator('#saveSettings').click();
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await confirmLive(page);
+  await finalize(page);
+  await expect(page.locator('#resultsSummary')).toContainText('Ready for review');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.chimeState().count)).toBe(0);
   expect(errors).toEqual([]);
 });
 
@@ -980,70 +1328,6 @@ test('requirements, observations, contradictions, and local restore', async ({ p
   await openAdvanced(page);
   await expect(page.locator('#prompt')).toHaveValue('Build a calculator that updates the total when Calculate is clicked.');
   expect(errors).toEqual([]);
-});
-
-test('bookmarklet validates before touching form, maps every field, and never submits', async ({ page }) => {
-  await open(page);
-  const source = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.webdevAutofill.toString());
-  const payload = {
-    schema: 'webdev-sbs-v1',
-    functional_correctness: { left: { choice: 'Works', evidence: 'The Calculate control updates the total.' }, right: { choice: 'Partly works', evidence: 'The Calculate control updates once but ignores a changed term.' } },
-    requirements_coverage: { choice: 'Left', evidence: 'The right candidate omits the requested pricing table.' },
-    product_depth: { choice: 'Right', evidence: 'The right candidate adds a working cart quantity stepper.' },
-    aesthetics: { choice: 'About equal', evidence: 'Both candidates keep readable layouts on desktop and mobile.' },
-    overall_preference: { choice: 'Left', primary_reason: 'Requirements coverage', optional_comment: '' }
-  };
-  const cases = [
-    { raw: '{bad', controls: true, expected: 'malformed JSON' },
-    { raw: JSON.stringify({ ...payload, schema: 'other' }), controls: true, expected: 'validation failed' },
-    { raw: JSON.stringify({ ...payload, aesthetics: { ...payload.aesthetics, evidence: 'x'.repeat(201) } }), controls: true, expected: 'validation failed' },
-    { raw: JSON.stringify(payload), controls: false, expected: 'incompatible form DOM' },
-    { raw: JSON.stringify(payload), controls: true, expected: 'Fields verified: 13/13' }
-  ];
-  for (const c of cases) {
-    const result = await page.evaluate(async ({ source, c, FUNC, COMP, REASONS }) => {
-      const map = {
-        root_functional_correctness_left: FUNC,
-        root_functional_correctness_right: FUNC,
-        root_requirements_coverage_choice: COMP,
-        root_product_depth_choice: COMP,
-        root_aesthetics_choice: COMP,
-        root_overall_preference_choice: COMP,
-        root_overall_preference_primary_reason: REASONS
-      };
-      const texts = ['root_functional_correctness_left_evidence', 'root_functional_correctness_right_evidence', 'root_requirements_coverage_evidence', 'root_product_depth_evidence', 'root_aesthetics_evidence', 'root_overall_preference_optional_comment'];
-      const host = document.createElement('div'); host.id = 'mockForm'; document.body.append(host);
-      if (c.controls) {
-        for (const [id, values] of Object.entries(map)) {
-          const group = document.createElement('div'); group.id = id;
-          for (const value of values) { const b = document.createElement('button'); b.value = value; b.type = 'button'; b.textContent = value; b.onclick = () => { group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false')); b.setAttribute('aria-pressed', 'true') }; group.append(b) }
-          host.append(group);
-        }
-        for (const id of texts) { const t = document.createElement('textarea'); t.id = id; host.append(t) }
-      }
-      const submit = document.createElement('button'); submit.textContent = 'Submit'; submit.onclick = () => window.__submitCount++; host.append(submit);
-      window.__submitCount = 0; const alerts = []; window.alert = s => alerts.push(s);
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: async () => c.raw } });
-      Function('return (' + source + ')')()();
-      await new Promise(r => setTimeout(r, 180));
-      const values = Object.keys(map).map(id => [id, document.getElementById(id)?.querySelector('button[aria-pressed="true"]')?.value]);
-      const textValues = texts.map(id => [id, document.getElementById(id)?.value]);
-      const output = { alerts, submitCount: window.__submitCount, values, textValues }; host.remove(); return output;
-    }, { source, c, FUNC, COMP, REASONS });
-    expect(result.alerts.join(' ')).toContain(c.expected);
-    expect(result.submitCount).toBe(0);
-    if (c.expected === 'Fields verified: 13/13') {
-      expect(result.values).toEqual([
-        ['root_functional_correctness_left', 'Works'], ['root_functional_correctness_right', 'Partly works'],
-        ['root_requirements_coverage_choice', 'Left'], ['root_product_depth_choice', 'Right'],
-        ['root_aesthetics_choice', 'About equal'], ['root_overall_preference_choice', 'Left'],
-        ['root_overall_preference_primary_reason', 'Requirements coverage']
-      ]);
-      expect(result.textValues[0][1]).toBe(payload.functional_correctness.left.evidence);
-      expect(result.textValues[5][1]).toBe('');
-    } else expect(result.values.every(([, value]) => !value)).toBe(true);
-  }
-  expect(source).not.toMatch(/querySelector\([^)]*submit|\.submit\(/i);
 });
 
 test('native textarea setter emits bubbling input and change', async ({ page }) => {
@@ -1159,6 +1443,7 @@ test('visual judgment receives only visual notes; overall suggestion waits for a
     Object.assign(s.evaluation.requirements_coverage, { choice: 'About equal', evidence: 'Both candidates include the requested cards.' });
     Object.assign(s.evaluation.product_depth, { choice: 'About equal', evidence: 'Neither candidate adds a useful working extra.' });
     Object.assign(s.evaluation.aesthetics, { choice: 'Right', evidence: 'The right cards stack on mobile while the left third card clips at the edge.' });
+    Object.assign(s.evaluation.overall_preference, { choice: 'Right', primary_reason: 'Visual quality', optional_comment: 'The right layout stays readable on mobile. The left clips its third card at the edge.' });
     t.renderAll();
   });
   answer = { choice: 'Right', evidence: 'The right cards stack on mobile while the left third card clips at the edge.', rationale: 'The mobile difference is decisive.', source_ids: ['visual:left:mobile', 'visual:right:mobile'] };
@@ -1166,7 +1451,7 @@ test('visual judgment receives only visual notes; overall suggestion waits for a
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(1);
   const visualRequest = JSON.parse(requests[0].messages[1].content);
   expect(Object.keys(visualRequest)).toEqual(['facts']);
-  expect(visualRequest.facts.every(f => f.id.startsWith('visual:'))).toBe(true);
+  expect(visualRequest.facts.every(f => f.id.startsWith('visual:') || f.id.startsWith('humanvisual:'))).toBe(true);
   await page.locator('#aiStage [data-ai-apply]').click();
   await expect(page.locator('#e_aesthetics')).toHaveValue(answer.evidence);
   answer = { choice: 'Right', primary_reason: 'Visual quality', rationale: 'The right mobile layout keeps all cards readable.', source_ids: ['visual:left:mobile', 'visual:right:mobile'] };
@@ -1214,6 +1499,40 @@ test('an AI result is discarded when the evaluation changes during its request',
   await expect(page.locator('#aiStatus')).toContainText('suggestions were discarded');
   await expect(page.locator('#aiStage .ai-proposal')).toHaveCount(0);
   await expect(page.locator('#requirementsList .req-card')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('manual and advanced workflow remains accessible', async ({ page }) => {
+  const errors = await open(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await openAdvanced(page);
+  await expect(page.locator('#prompt')).toHaveValue(/Build a todo app/);
+  await page.locator('#extractRequirements').click();
+  await expect(page.locator('#requirementsList .req-card')).toHaveCount(3);
+  await expect(page.locator('#observationRows tr')).toHaveCount(3);
+  await expect(page.locator('#aiExtract')).toBeVisible();
+  await openSettings(page);
+  await expect(page.locator('#orKey')).toBeVisible();
+  await page.locator('#closeSettings').click();
+  await expect(page.locator('#submissionPreview').locator('dt')).toHaveCount(13);
+  expect(await page.locator('#candidatePreviews iframe').first().getAttribute('srcdoc')).toContain('Todo');
+  expect(await page.locator('#rawArchive').textContent()).toContain('Todo Left');
+  expect(errors).toEqual([]);
+});
+
+test('mobile layout stays narrow on upload, live review, and results', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await upload(page, 'rating.mhtml', buildFixture({ includeImage: true }));
+  await analyze(page);
+  await confirmLive(page);
+  await finalize(page);
+  await expect(page.locator('#resultList .result-row')).toHaveCount(13);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: '/tmp/webdev-workbench-mobile.png', fullPage: true });
   expect(errors).toEqual([]);
 });
 
