@@ -1950,6 +1950,68 @@ test('voice notes never satisfy or weaken the live-preview confirmations', async
   expect(errors).toEqual([]);
 });
 
+test('transcription settings lay out cleanly and refresh/keep-audio keep working', async ({ page }) => {
+  const errors = await open(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await installCatalog(page);
+  await page.route('https://openrouter.ai/api/v1/models?output_modalities=transcription', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'openai/gpt-transcribe', name: 'GPT Transcribe' }, { id: 'openai/whisper-1', name: 'Whisper 1' }] }) }));
+  await openSettings(page);
+  await expect(page.locator('.voice-settings .ai-config-note')).toHaveText('Recording controls appear in Live Preview Review.');
+  const measure = () => page.evaluate(() => {
+    const overlapArea = (a, b) => { const x = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)); const y = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)); return x > 0 && y > 0 ? x * y : 0; };
+    const rect = id => document.querySelector(id).getBoundingClientRect();
+    const body = rect('#settingsModal .modal-body'), select = rect('#orTranscribeModel'), refresh = rect('#orRefreshTranscribeModels'), keep = rect('.voice-settings-keep');
+    const outside = [select, refresh, keep].some(r => r.left < body.left - 1 || r.right > body.right + 1);
+    return { overlap: overlapArea(refresh, keep), outside, selectRatio: select.width / body.width, keepWidth: keep.width };
+  });
+  let m = await measure();
+  expect(m.overlap).toBe(0);
+  expect(m.outside).toBe(false);
+  expect(m.selectRatio).toBeGreaterThan(0.9);
+  expect(m.keepWidth).toBeGreaterThan(140);
+  await page.locator('#orKey').fill('test-local-key');
+  await page.locator('#orKey').press('Tab');
+  await page.locator('#orRefreshTranscribeModels').click();
+  await expect(page.locator('#orTranscribeStatus')).toContainText('transcription model(s) loaded');
+  await page.locator('#orTranscribeModel').selectOption('openai/whisper-1');
+  await page.locator('#orKeepAudio').check();
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')));
+  expect(stored.transcribeModel).toBe('openai/whisper-1');
+  expect(stored.keepAudio).toBe(true);
+  await page.setViewportSize({ width: 420, height: 900 });
+  m = await measure();
+  expect(m.overlap).toBe(0);
+  expect(m.outside).toBe(false);
+  expect(m.keepWidth).toBeGreaterThan(140);
+  expect(errors).toEqual([]);
+});
+
+test('voice review notes are discoverable in live preview review and record/stop report the captured context', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await setVoiceTranscript(page, 'B mobile. The cards touch the right edge.');
+  await setVoiceInterpretation(page, { visual: [], functional: [], requirementObservations: [], general: [] });
+  await expect(page.locator('#voiceNotes')).toBeVisible();
+  await expect(page.locator('#voiceNotes .eyebrow')).toHaveText('Voice review notes');
+  await expect(page.locator('#voiceNotesTitle')).toContainText('Speak observations while inspecting the live previews');
+  await expect(page.locator('#voiceRecord')).toBeVisible();
+  await expect(page.locator('#voiceRecord')).toContainText('Record observation');
+  await expect(page.locator('#voiceStop')).toContainText('Stop recording');
+  await expect(page.locator('#liveInspection input[data-inspection]')).toHaveCount(4);
+  await startVoice(page, 'B', 'mobile');
+  await expect(page.locator('#voiceRecordingContext')).toBeVisible();
+  await expect(page.locator('#voiceRecordingContext')).toHaveText('Recording Website B (Right) · Mobile');
+  await expect(page.locator('#voiceStop')).toBeEnabled();
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  await expect(page.locator('#voiceRecordingContext')).toBeHidden();
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.candidate).toBe('B');
+  expect(rec.viewport).toBe('mobile');
+  expect(errors).toEqual([]);
+});
+
+
 
 
 
