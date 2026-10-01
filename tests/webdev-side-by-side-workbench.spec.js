@@ -1361,7 +1361,7 @@ test('AI requirements are strict, quoted, staged, and out-of-scope text is warne
   expect(requests[0].response_format.json_schema.strict).toBe(true);
   await page.locator('#aiStage [data-ai-apply]').click();
   await expect(page.locator('#requirementsList .req-card')).toHaveCount(1);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')))).toEqual({ enabled: true, apiKey: 'test-local-key', model: 'anthropic/claude-test', visualModel: '', style: 'Plainspoken, concise, technically literate, conversational. Avoid rubric/QA boilerplate.', chime: true });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('webdev-sbs.openrouter.v1')))).toEqual({ enabled: true, apiKey: 'test-local-key', model: 'anthropic/claude-test', visualModel: '', transcribeModel: 'openai/gpt-transcribe', keepAudio: false, style: 'Plainspoken, concise, technically literate, conversational. Avoid rubric/QA boilerplate.', chime: true });
 
   answer = aiReply({ requirements: [{ label: 'Authentication', wording: 'Add authentication', category: 'Interaction', explicit: true, testable: true, notes: '' }] });
   await page.locator('#aiExtract').click();
@@ -1568,3 +1568,389 @@ test('production MWEB recovers prompt, both candidates, and all 13 form controls
   expect(result.diagnostics.some(d => d.includes('No rendered screenshots'))).toBe(true);
   expect(errors).toEqual([]);
 });
+
+/* ---------- voice notes (Live Preview Review human evidence) ---------- */
+
+async function installFakeMedia(page) {
+  await page.evaluate(() => {
+    const tracks = [];
+    window.__voiceTest = { tracks, streams: [], stopped: 0, started: 0 };
+    window.__WEBDEV_SBS_TEST__.voice.setMedia({
+      getUserMedia: async () => {
+        const tr = { stop: () => { window.__voiceTest.stopped += 1; } };
+        tracks.push(tr);
+        const stream = { getTracks: () => [tr] };
+        window.__voiceTest.streams.push(stream);
+        return stream;
+      },
+      createRecorder: (s, mime) => {
+        const rec = {
+          mimeType: mime || 'audio/webm', state: 'inactive', ondataavailable: null, onstop: null, onerror: null,
+          start() { this.state = 'recording'; window.__voiceTest.started += 1; },
+          stop() {
+            this.state = 'inactive';
+            if (this.ondataavailable) this.ondataavailable({ data: new Blob([new Uint8Array([1, 2, 3, 4])], { type: this.mimeType }) });
+            if (this.onstop) this.onstop();
+          }
+        };
+        window.__voiceTest.recorder = rec; return rec;
+      }
+    });
+  });
+}
+async function setVoiceTranscript(page, transcript) {
+  await page.evaluate(t => { window.__WEBDEV_SBS_TEST__.voice.setTranscribe(async () => t); }, transcript);
+}
+async function setVoiceInterpretation(page, interpretation) {
+  await page.evaluate(v => { window.__WEBDEV_SBS_TEST__.voice.setInterpret(async () => v); }, interpretation);
+}
+async function selectVoiceContext(page, candidate, viewport) {
+  await page.evaluate(({ candidate, viewport }) => window.__WEBDEV_SBS_TEST__.voice.setContext({ candidate, viewport }), { candidate, viewport });
+}
+async function startVoice(page, candidate = 'A', viewport = 'desktop') {
+  await selectVoiceContext(page, candidate, viewport);
+  await page.locator('#voiceRecord').click();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.voice.phase() === 'recording');
+}
+async function stopVoice(page) {
+  await page.locator('#voiceStop').click();
+}
+async function waitVoiceSettled(page, count = 1) {
+  await page.waitForFunction(n => window.__WEBDEV_SBS_TEST__.voice.recordings().filter(r => r.status === 'ready' || r.status === 'error').length >= n, count);
+}
+const SAMPLE = {
+  visual: [{ observation: 'Mobile cards sit too close to the right viewport edge.', confidence: 'high' }],
+  functional: [{ observation: 'Selecting Electronics in the filter produced no visible change.', confidence: 'medium' }],
+  requirementObservations: [{ observation: 'The filter control is present but did not change the list.', requirement: 'a working category filter', confidence: 'low' }],
+  general: [{ observation: 'The main heading seems oversized for the surrounding content.', confidence: 'low' }]
+};
+
+test('voice recording snapshots candidate and viewport at start and stops every media track', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await setVoiceTranscript(page, 'A mobile. The cards are fine.');
+  await setVoiceInterpretation(page, { visual: [], functional: [], requirementObservations: [], general: [] });
+  await startVoice(page, 'A', 'mobile');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.pendingContext())).toEqual({ candidate: 'A', viewport: 'mobile' });
+  await selectVoiceContext(page, 'B', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.candidate).toBe('A');
+  expect(rec.side).toBe('left');
+  expect(rec.viewport).toBe('mobile');
+  expect(await page.evaluate(() => window.__voiceTest.stopped)).toBe(1);
+  expect(await page.evaluate(() => window.__voiceTest.recorder.state)).toBe('inactive');
+  expect(errors).toEqual([]);
+});
+
+test('transcription preserves the verbatim transcript and interpretation cannot replace it', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  const raw = 'Okay B mobile. The top looks pretty good but the cards are touching the right edge.';
+  await setVoiceTranscript(page, raw);
+  await setVoiceInterpretation(page, SAMPLE);
+  await startVoice(page, 'B', 'mobile');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.transcriptRaw).toBe(raw);
+  expect(rec.transcriptStatus).toBe('done');
+  expect(rec.interpretationStatus).toBe('done');
+  const observations = Object.values(rec.interpretation).flat().map(x => x.observation);
+  expect(observations).not.toContain(raw);
+  observations.forEach(o => expect(o).not.toBe(raw));
+  await expect(page.locator('.voice-transcript').first()).toHaveValue(raw);
+  expect(errors).toEqual([]);
+});
+
+test('accepted visual and functional observations route to the right candidate and keep viewport metadata', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await setVoiceTranscript(page, 'B mobile notes.');
+  await setVoiceInterpretation(page, SAMPLE);
+  await startVoice(page, 'B', 'mobile');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.acceptedLines('right', 'visual'))).toEqual([]);
+  await page.locator('#voiceSessionList [data-voice-accept-all]').click();
+  const visual = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.acceptedLines('right', 'visual'));
+  const functional = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.acceptedLines('right', 'functional'));
+  expect(visual).toContain(SAMPLE.visual[0].observation);
+  expect(functional).toContain(SAMPLE.functional[0].observation);
+  expect(functional).toContain(SAMPLE.requirementObservations[0].observation + ' (requirement: ' + SAMPLE.requirementObservations[0].requirement + ')');
+  expect(functional).toContain(SAMPLE.general[0].observation);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.acceptedLines('left', 'visual'))).toEqual([]);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.acceptedLines('left', 'functional'))).toEqual([]);
+  expect((await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0].viewport).toBe('mobile');
+  const notes = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.effectiveNotes());
+  expect(notes.visual.right).toContain(SAMPLE.visual[0].observation);
+  expect(notes.functional.right).toContain(SAMPLE.functional[0].observation);
+  expect(errors).toEqual([]);
+});
+
+test('changing the selectors during async transcription does not change note ownership', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await page.evaluate(() => { window.__release = null; window.__WEBDEV_SBS_TEST__.voice.setTranscribe(() => new Promise(resolve => { window.__release = resolve; })); });
+  await setVoiceInterpretation(page, { visual: [], functional: [], requirementObservations: [], general: [] });
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.voice.phase() === 'transcribing');
+  await selectVoiceContext(page, 'B', 'mobile');
+  await page.evaluate(() => window.__release('A desktop transcript.'));
+  await waitVoiceSettled(page);
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.candidate).toBe('A');
+  expect(rec.side).toBe('left');
+  expect(rec.viewport).toBe('desktop');
+  expect(rec.transcriptRaw).toBe('A desktop transcript.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.context())).toEqual({ candidate: 'B', viewport: 'mobile' });
+  expect(errors).toEqual([]);
+});
+
+test('multiple short clips remain independent with their own context and transcript', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await setVoiceInterpretation(page, { visual: [], functional: [], requirementObservations: [], general: [] });
+  await setVoiceTranscript(page, 'First clip — A desktop.');
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page, 1);
+  await setVoiceTranscript(page, 'Second clip — B mobile.');
+  await startVoice(page, 'B', 'mobile');
+  await stopVoice(page);
+  await waitVoiceSettled(page, 2);
+  const recs = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings());
+  expect(recs).toHaveLength(2);
+  expect(new Set(recs.map(r => r.id)).size).toBe(2);
+  const byTranscript = Object.fromEntries(recs.map(r => [r.transcriptRaw, r]));
+  expect(byTranscript['First clip — A desktop.'].candidate).toBe('A');
+  expect(byTranscript['First clip — A desktop.'].viewport).toBe('desktop');
+  expect(byTranscript['Second clip — B mobile.'].candidate).toBe('B');
+  expect(byTranscript['Second clip — B mobile.'].viewport).toBe('mobile');
+  expect(await page.evaluate(() => window.__voiceTest.stopped)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('interpretation failure keeps the transcript and can be retried', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await setVoiceTranscript(page, 'A desktop. The filter does nothing.');
+  await page.evaluate(() => { window.__WEBDEV_SBS_TEST__.voice.setInterpret(async () => { throw new Error('boom'); }); });
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  let rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.status).toBe('error');
+  expect(rec.interpretationStatus).toBe('failed');
+  expect(rec.transcriptRaw).toBe('A desktop. The filter does nothing.');
+  expect(rec.error).toContain('Interpretation failed');
+  await expect(page.locator('.voice-transcript').first()).toHaveValue('A desktop. The filter does nothing.');
+  await setVoiceInterpretation(page, SAMPLE);
+  await page.locator('#voiceSessionList [data-voice-retry-interpret]').click();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.voice.recordings()[0].status === 'ready');
+  rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.transcriptRaw).toBe('A desktop. The filter does nothing.');
+  expect(rec.interpretationStatus).toBe('done');
+  expect(rec.interpretation.functional).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test('transcription failure leaves the evaluation usable and the transcript empty', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await page.evaluate(() => { window.__WEBDEV_SBS_TEST__.voice.setTranscribe(async () => { throw new Error('malformed transcription response'); }); });
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.transcriptStatus).toBe('failed');
+  expect(rec.status).toBe('error');
+  expect(rec.error).toContain('Transcription failed');
+  expect(rec.transcriptRaw).toBe('');
+  await page.locator('#humanLeft').fill('Typed note still works.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.state().humanReview.left)).toBe('Typed note still works.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.acceptedLines('left', 'functional'))).toEqual([]);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.acceptedLines('left', 'visual'))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('malformed transcription and interpretation responses fail safely', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await setVoiceTranscript(page, 'A desktop. Cards look tight.');
+  await page.evaluate(() => { window.__WEBDEV_SBS_TEST__.voice.setInterpret(async () => ({ visual: 'not-an-array' })); });
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.status).toBe('error');
+  expect(rec.interpretationStatus).toBe('failed');
+  expect(rec.error).toContain('malformed JSON');
+  expect(rec.transcriptRaw).toBe('A desktop. Cards look tight.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.validateInterpretation ? true : false)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('voice notes degrade gracefully without permission, MediaRecorder, or a key', async ({ page }) => {
+  const errors = await open(page);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => { const e = new Error('denied'); e.name = 'NotAllowedError'; throw e; } } });
+  });
+  await page.locator('#voiceRecord').click();
+  await page.waitForFunction(() => window.__WEBDEV_SBS_TEST__.voice.phase() === 'error');
+  await expect(page.locator('#voiceStatus')).toHaveText('Error');
+  await expect(page.locator('#voiceHint')).toContainText('permission was denied');
+  await page.locator('#humanLeft').fill('Manual note after denial.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.state().humanReview.left)).toBe('Manual note after denial.');
+  await page.evaluate(() => { window.MediaRecorder = undefined; Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined }); window.__WEBDEV_SBS_TEST__.voice.render(); });
+  expect(await page.locator('#voiceRecord').isDisabled()).toBe(true);
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.supported())).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('voice audio goes to OpenRouter speech-to-text and the transcript drives a strict interpretation request', async ({ page }) => {
+  const errors = await open(page);
+  const stt = [];
+  await installCatalog(page);
+  await page.route('https://openrouter.ai/api/v1/audio/transcriptions', async route => {
+    stt.push({ headers: route.request().headers(), body: route.request().postDataJSON() });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: 'A desktop transcript from the wire.' }) });
+  });
+  const chat = [];
+  await page.route('https://openrouter.ai/api/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON(); chat.push(body);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(aiReply({ visual: [], functional: [{ observation: 'The filter did nothing.', confidence: 'high' }], requirementObservations: [], general: [] })) });
+  });
+  await configureAI(page);
+  await installFakeMedia(page);
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  expect(stt).toHaveLength(1);
+  expect(stt[0].body.model).toBe('openai/gpt-transcribe');
+  expect(stt[0].body.input_audio.format).toBe('webm');
+  expect(typeof stt[0].body.input_audio.data).toBe('string');
+  expect(stt[0].body.input_audio.data.length).toBeGreaterThan(0);
+  expect(stt[0].headers.authorization).toBe('Bearer test-local-key');
+  expect(JSON.stringify(stt[0].body)).not.toContain('test-local-key');
+  const vo = chat.find(b => b.response_format && b.response_format.json_schema && b.response_format.json_schema.name === 'webdev_voice_notes');
+  expect(vo).toBeTruthy();
+  const payload = JSON.parse(vo.messages[1].content);
+  expect(payload.transcript).toBe('A desktop transcript from the wire.');
+  expect(payload.candidate).toBe('A');
+  expect(payload.viewport).toBe('desktop');
+  expect(JSON.stringify(vo)).not.toContain('test-local-key');
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.transcriptRaw).toBe('A desktop transcript from the wire.');
+  expect(rec.audioStored).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('voice transcription without a configured key fails safely and keeps manual review', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  const rec = (await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.recordings()))[0];
+  expect(rec.transcriptStatus).toBe('failed');
+  expect(rec.error).toContain('OpenRouter API key');
+  await page.locator('#humanRight').fill('Manual review still available.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.state().humanReview.right)).toBe('Manual review still available.');
+  expect(errors).toEqual([]);
+});
+
+test('accepted voice observations reach Finalize as human review evidence', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await installFakeMedia(page);
+  const observation = 'Selecting Electronics in the filter produced no visible change.';
+  await setVoiceTranscript(page, 'A desktop. Selecting electronics in the filter produced no visible change.');
+  await setVoiceInterpretation(page, { visual: [], functional: [{ observation, confidence: 'high' }], requirementObservations: [], general: [] });
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  await page.locator('#voiceSessionList [data-voice-accept-all]').click();
+  const facts = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.finalizeHumanFacts());
+  expect(facts.map(f => f.id)).toContain('human:left');
+  expect(facts.find(f => f.id === 'human:left').text).toContain(observation);
+  await confirmLive(page);
+  await finalize(page);
+  const sent = requests.map(r => typeof r.messages[1].content === 'string' ? r.messages[1].content : JSON.stringify(r.messages[1].content)).join('\n');
+  expect(sent).toContain(observation);
+  expect(errors).toEqual([]);
+});
+
+test('discarded voice observations never reach Finalize', async ({ page }) => {
+  const errors = await open(page);
+  const requests = await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await installFakeMedia(page);
+  const observation = 'A phrase that must never be adjudicated.';
+  await setVoiceTranscript(page, 'A desktop note.');
+  await setVoiceInterpretation(page, { visual: [], functional: [{ observation, confidence: 'high' }], requirementObservations: [], general: [] });
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  await page.locator('#voiceSessionList [data-voice-accept-all]').click();
+  await page.locator('#voiceSessionList [data-voice-discard]').click();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.finalizeHumanFacts())).toEqual([]);
+  await confirmLive(page);
+  await finalize(page);
+  const sent = requests.map(r => typeof r.messages[1].content === 'string' ? r.messages[1].content : JSON.stringify(r.messages[1].content)).join('\n');
+  expect(sent).not.toContain(observation);
+  expect(errors).toEqual([]);
+});
+
+test('typed human review notes are unchanged by voice recording', async ({ page }) => {
+  const errors = await open(page);
+  await installFakeMedia(page);
+  await page.locator('#humanLeft').fill('Upload worked, Export did nothing.');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.state().humanReview.left)).toBe('Upload worked, Export did nothing.');
+  await setVoiceTranscript(page, 'A desktop note.');
+  await setVoiceInterpretation(page, { visual: [{ observation: 'Header spacing looks even.', confidence: 'medium' }], functional: [], requirementObservations: [], general: [] });
+  await startVoice(page, 'A', 'desktop');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  await page.locator('#voiceSessionList [data-voice-accept-all]').click();
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.state().humanReview.left)).toBe('Upload worked, Export did nothing.');
+  await expect(page.locator('#humanLeft')).toHaveValue('Upload worked, Export did nothing.');
+  const notes = await page.evaluate(() => window.__WEBDEV_SBS_TEST__.voice.effectiveNotes());
+  expect(notes.functional.left).toContain('Upload worked, Export did nothing.');
+  expect(notes.visual.left).toContain('Header spacing looks even.');
+  expect(errors).toEqual([]);
+});
+
+test('voice notes never satisfy or weaken the live-preview confirmations', async ({ page }) => {
+  const errors = await open(page);
+  await installWorkflowMock(page);
+  await configureAI(page);
+  await upload(page, 'rating.mhtml', buildFixture());
+  await analyze(page);
+  await installFakeMedia(page);
+  await setVoiceTranscript(page, 'B mobile note.');
+  await setVoiceInterpretation(page, SAMPLE);
+  await startVoice(page, 'B', 'mobile');
+  await stopVoice(page);
+  await waitVoiceSettled(page);
+  await page.locator('#voiceSessionList [data-voice-accept-all]').click();
+  await page.evaluate(() => { const t = window.__WEBDEV_SBS_TEST__, s = t.state(); s.inspections.left.desktop = true; s.inspections.left.mobile = true; s.inspections.right.desktop = true; t.renderAll(); });
+  await expect(page.locator('#finalize')).toBeDisabled();
+  await expect(page.locator('#finalizeHint')).toContainText('3/5');
+  expect(await page.evaluate(() => window.__WEBDEV_SBS_TEST__.liveReviewCount())).toBe(3);
+  await confirmLive(page);
+  await expect(page.locator('#finalize')).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
+
+
+
+
