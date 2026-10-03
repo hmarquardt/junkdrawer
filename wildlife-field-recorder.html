@@ -94,6 +94,16 @@ header .status { margin-left: auto; display: flex; gap: 6px; align-items: center
 .status-chip.ok { background: var(--ok-bg); color: var(--accent-bright); border-color: var(--accent-dim); }
 .status-chip.warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
 .status-chip.off { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-dim); }
+.auth-status { margin: 10px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-3); color: var(--text-muted); font-size: 0.8rem; line-height: 1.35; overflow-wrap: anywhere; }
+.auth-status[hidden] { display: none; }
+.auth-status[data-state="busy"] { border-color: var(--accent-dim); color: var(--accent-bright); }
+.auth-status[data-state="success"] { background: var(--ok-bg); border-color: var(--accent-dim); color: var(--accent-bright); }
+.auth-status[data-state="warn"] { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+.auth-status[data-state="error"] { background: var(--danger-bg); border-color: var(--danger-dim); color: var(--danger); }
+.sync-banner { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin: 10px 12px 0; padding: 9px 12px; border-radius: var(--radius-sm); border: 1px solid var(--warn); background: var(--warn-bg); color: var(--warn); font-size: 0.82rem; font-weight: 600; }
+.sync-banner[hidden] { display: none; }
+.sync-banner .sync-banner-count { font-weight: 700; }
+.sync-banner button { border-color: var(--warn); }
 nav#tabs { display: flex; gap: 2px; overflow-x: auto; padding: 6px 10px 0; background: var(--bg-2); border-bottom: 1px solid var(--border); scrollbar-width: none; -ms-overflow-style: none; position: sticky; top: 47px; z-index: 40; }
 nav#tabs::-webkit-scrollbar { display: none; }
 nav#tabs button { flex: 0 0 auto; background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 10px; color: var(--text-muted); font-size: 0.82rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
@@ -396,6 +406,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
   <button data-tab="history">History</button>
   <button data-tab="admin">Admin</button>
 </nav>
+<div id="sync-banner" class="sync-banner" role="status" aria-live="polite" hidden></div>
 <main>
 
 <!-- About -->
@@ -655,6 +666,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
         <button id="cfg-sign-in" class="btn btn-primary" type="button">Sign in</button>
       </div>
     </div>
+    <p id="cfg-auth-status" class="auth-status" role="status" aria-live="polite" data-state="idle">Not signed in to CFLab.</p>
     <div id="cfg-auth-signed-in" style="display:none;">
       <p style="font-size:0.8rem;color:var(--text-dim);margin:4px 0 0;">Signed in as <strong id="cfg-auth-user"></strong></p>
       <div class="btn-group">
@@ -806,9 +818,9 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.20.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.20.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.09.20.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.03.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.10.03.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: var(--text-dim); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Wildlife Field Recorder · version 2026.10.03.1
 </footer>
 </div>
 
@@ -816,7 +828,7 @@ html[data-theme="light"] .log-line { border-bottom-color: rgba(23,35,27,0.10); }
 (function() {
 'use strict';
 
-const APP_VERSION = '2026.09.20.1';
+const APP_VERSION = '2026.10.03.1';
 
 /* ========================
    DB (Dexie)
@@ -1480,6 +1492,66 @@ async function fetchCompleteCollection(resource) {
   }
   throw new Error('Pagination limit exceeded for ' + resource);
 }
+/* Human auth status surface. Every sign-in outcome must be visible: a rejected
+   login used to only write to the diagnostics log, which made a real failure
+   look like an inert button. Messages here are sanitized and never include the
+   password or the session token. */
+const AUTH_STATUS_MESSAGES = {
+  idle: 'Not signed in to CFLab.',
+  busy: 'Signing in…',
+  signedOut: 'CFLab signed out — captures are safe locally; sign in to sync.',
+  missing: 'Enter your CFLab email and password, then tap Sign in.',
+  invalid: 'Invalid email or password. Check your CFLab credentials and try again.',
+  rateLimited: 'Too many sign-in attempts. Wait about a minute, then try again.',
+  unreachable: 'Could not reach CFLab from this page. Check network/CFLab origin authorization.',
+  originDenied: 'CFLab refused this page origin. Could not reach CFLab from this page. Check network/CFLab origin authorization.',
+  backend: 'CFLab sign-in failed on the server. Try again shortly, or open Admin → Diagnostics.'
+};
+function sanitizeAuthMessage(message) {
+  return String(message == null ? '' : message)
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, 'Bearer [redacted]')
+    .replace(/\bcflu_[A-Za-z0-9._-]+/g, '[redacted session]')
+    .replace(/(["']?(?:api[_-]?key|authorization|access[_-]?token|password|token)["']?\s*[:=]\s*["']?)[^"'\s,}]+/gi, '$1[redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]+/g, '[redacted key]')
+    .slice(0, 300);
+}
+function setAuthStatus(state, message) {
+  const el = document.getElementById('cfg-auth-status');
+  if (!el) return;
+  const safeState = ['idle', 'busy', 'success', 'warn', 'error'].includes(state) ? state : 'idle';
+  el.dataset.state = safeState;
+  el.textContent = sanitizeAuthMessage(message || '');
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  el.hidden = !el.textContent;
+}
+/** Conspicuous, always-visible signed-out notice. Field capture is never
+ *  blocked by an absent cloud session; this only makes the condition obvious. */
+async function renderSessionBanner(signedIn = !!sessionToken()) {
+  const banner = document.getElementById('sync-banner');
+  if (!banner) return;
+  if (signedIn) { banner.hidden = true; banner.textContent = ''; return; }
+  let pending = 0;
+  try { pending = await db.observations.where('submitStatus').notEqual('submitted').count(); } catch (e) { pending = 0; }
+  banner.textContent = '';
+  const text = document.createElement('span');
+  text.className = 'sync-banner-text';
+  text.textContent = AUTH_STATUS_MESSAGES.signedOut;
+  banner.appendChild(text);
+  if (pending > 0) {
+    const count = document.createElement('span');
+    count.className = 'sync-banner-count';
+    count.textContent = pending + ' record(s) waiting to sync';
+    banner.appendChild(count);
+  }
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.className = 'btn btn-small';
+  action.textContent = 'Sign in';
+  action.addEventListener('click', () => showTab('admin'));
+  banner.appendChild(action);
+  banner.hidden = false;
+}
 function showAuthState() {
   const signedIn = !!sessionToken();
   const out = document.getElementById('cfg-auth-signed-out');
@@ -1490,26 +1562,86 @@ function showAuthState() {
   if (user) user.textContent = signedIn && currentUser ? currentUser.email : '';
   const chip = document.getElementById('history-source-chip');
   if (chip && !signedIn) { chip.textContent = 'Local only — signed out'; chip.className = 'status-chip warn'; chip.style.display = 'inline-block'; }
+  const statusEl = document.getElementById('cfg-auth-status');
+  // Only replace an idle status: never stomp an in-flight or error message.
+  if (statusEl && !signedIn && statusEl.dataset.state === 'idle') setAuthStatus('warn', AUTH_STATUS_MESSAGES.signedOut);
+  renderSessionBanner(signedIn);
+}
+function isAuthFailure(error) {
+  if (!error) return false;
+  if (error.status === 401) return true;
+  return /not signed in to cflab/i.test(String(error.message || ''));
 }
 async function signIn() {
-  const email = document.getElementById('cfg-auth-email').value.trim();
-  const password = document.getElementById('cfg-auth-password').value;
-  if (!email || !password) { addLog('warn', 'Enter CFLab email and password'); return; }
+  const emailEl = document.getElementById('cfg-auth-email');
+  const passwordEl = document.getElementById('cfg-auth-password');
+  const button = document.getElementById('cfg-sign-in');
+  const email = emailEl ? emailEl.value.trim() : '';
+  const password = passwordEl ? passwordEl.value : '';
+  if (!email || !password) {
+    setAuthStatus('error', AUTH_STATUS_MESSAGES.missing);
+    logWarn('CFLab sign-in not attempted: missing email or password');
+    if (emailEl && !email) emailEl.focus();
+    else if (passwordEl) passwordEl.focus();
+    return { ok: false, reason: 'missing_credentials' };
+  }
+  const restoreLabel = button ? button.textContent : 'Sign in';
+  if (button) { button.disabled = true; button.textContent = 'Signing in…'; button.setAttribute('aria-busy', 'true'); }
+  setAuthStatus('busy', AUTH_STATUS_MESSAGES.busy);
   try {
     const r = await fetch(apiBase() + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
     if (!r.ok) throw await httpError(r);
     const data = await r.json();
     setSessionToken(data.token);
     currentUser = data.user || null;
-    document.getElementById('cfg-auth-password').value = '';
+    if (passwordEl) passwordEl.value = '';
     showAuthState();
-    logInfo('Signed in to CFLab as ' + (currentUser ? currentUser.email : 'user'));
+    const who = currentUser && currentUser.email ? currentUser.email : email;
+    setAuthStatus('success', 'Signed in as ' + who);
+    logInfo('Signed in to CFLab as ' + who);
     updateQueueChip();
-  } catch(e) {
-    setSessionToken('');
-    currentUser = null;
+    return { ok: true, user: currentUser };
+  } catch (e) {
+    if (passwordEl) passwordEl.value = '';
+    const status = e && typeof e.status === 'number' ? e.status : 0;
+    let reason = 'unreachable';
+    if (status === 401) { reason = 'invalid_credentials'; setAuthStatus('error', AUTH_STATUS_MESSAGES.invalid); logWarn('CFLab sign-in rejected: invalid credentials'); }
+    else if (status === 429) { reason = 'rate_limited'; setAuthStatus('error', AUTH_STATUS_MESSAGES.rateLimited); logWarn('CFLab sign-in rate limited'); }
+    else if (status === 403) { reason = 'origin_denied'; setAuthStatus('error', AUTH_STATUS_MESSAGES.originDenied); logWarn('CFLab sign-in blocked by origin policy (HTTP 403)'); }
+    else if (status >= 400) { reason = 'http_error'; setAuthStatus('error', sanitizeAuthMessage('CFLab sign-in failed: ' + e.message)); logError('CFLab sign-in failed: ' + sanitizeAuthMessage(e.message)); }
+    else { setAuthStatus('error', AUTH_STATUS_MESSAGES.unreachable); logWarn('CFLab sign-in unreachable: ' + sanitizeAuthMessage(e && e.message)); }
     showAuthState();
-    logError('CFLab sign-in failed: ' + e.message);
+    return { ok: false, reason, status };
+  } finally {
+    if (button) { button.disabled = false; button.textContent = restoreLabel; button.removeAttribute('aria-busy'); }
+  }
+}
+/** One authentication check before a batch submit so a missing/expired session
+ *  fails fast once instead of emitting an identical error per record. */
+async function preflightSubmitAuth() {
+  if (!sessionToken()) {
+    return { ok: false, reason: 'not_signed_in', message: 'Not signed in to CFLab — captures are safe locally. Sign in from Admin → CFLab Backend, then submit again. No records were changed.' };
+  }
+  try {
+    const r = await authFetch(apiBase() + '/api/auth/me');
+    if (r.status === 401) {
+      setSessionToken('');
+      currentUser = null;
+      showAuthState();
+      setAuthStatus('warn', AUTH_STATUS_MESSAGES.signedOut);
+      logWarn('CFLab session expired before submit; pending captures are kept locally');
+      return { ok: false, reason: 'session_expired', message: 'CFLab session expired — captures are safe locally. Sign in again, then submit. No records were changed.' };
+    }
+    if (!r.ok) {
+      logWarn('CFLab session preflight failed (HTTP ' + r.status + ')');
+      return { ok: false, reason: 'http_error', message: 'Could not verify the CFLab session (HTTP ' + r.status + '). No records were changed.' };
+    }
+    const me = await r.json().catch(() => null);
+    if (me && me.user) currentUser = me.user;
+    return { ok: true };
+  } catch (e) {
+    logWarn('CFLab session preflight unreachable: ' + sanitizeAuthMessage(e && e.message));
+    return { ok: false, reason: 'unreachable', message: 'Could not reach CFLab to verify the session. Check network/CFLab origin authorization. No records were changed.' };
   }
 }
 async function signOut() {
@@ -1517,6 +1649,7 @@ async function signOut() {
   setSessionToken('');
   currentUser = null;
   showAuthState();
+  setAuthStatus('warn', AUTH_STATUS_MESSAGES.signedOut);
   logInfo('Signed out of CFLab');
   updateQueueChip();
 }
@@ -2562,25 +2695,40 @@ $('build-trips').addEventListener('click', async () => {
 });
 $('submit-ready').addEventListener('click', async () => {
   $('process-log').textContent = 'Checking for ready records...';
+  const readyCount = await db.observations.where('submitStatus').equals('ready').count();
+  if (!readyCount) { $('process-log').textContent = 'No ready records to submit'; return; }
+  // One authentication check up front: a missing/expired CFLab session must
+  // fail fast once, not once per record.
+  const preflight = await preflightSubmitAuth();
+  if (!preflight.ok) {
+    logWarn('Submit blocked (' + preflight.reason + '); no records were changed');
+    updateQueueChip();
+    $('process-log').textContent = preflight.message;
+    return;
+  }
   const trips = await buildTrips({ promptForNames: true });
   const ready = await db.observations.where('submitStatus').equals('ready').toArray();
   if (!ready.length) { $('process-log').textContent = 'No ready records to submit'; return; }
   $('process-log').textContent = `Submitting ${ready.length} record(s) across ${trips.length} trip(s)...`;
-  let done = 0, errs = 0;
+  let done = 0, errs = 0, authStopped = false;
   const readyTripIds = [...new Set(ready.map(o => o.tripLocalId).filter(Boolean))];
   for (const tripId of readyTripIds) {
     try { await submitTrip(tripId); }
-    catch(e) { errs++; logError('Trip submit: ' + e.message); }
+    catch(e) { errs++; logError('Trip submit: ' + e.message); if (isAuthFailure(e)) { authStopped = true; break; } }
   }
-  const refreshed = await db.observations.where('submitStatus').equals('ready').toArray();
-  for (const obs of refreshed) {
-    try { await submitObservation(obs); done++; }
-    catch (e) { errs++; logError('Submit: ' + e.message); }
+  if (!authStopped) {
+    const refreshed = await db.observations.where('submitStatus').equals('ready').toArray();
+    for (const obs of refreshed) {
+      try { await submitObservation(obs); done++; }
+      catch (e) { errs++; logError('Submit: ' + e.message); if (isAuthFailure(e)) { authStopped = true; break; } }
+    }
   }
   loadProcess(); updateQueueChip();
-  $('process-log').textContent = errs
-    ? `Submit had ${errs} failure(s). ${done} observation(s) succeeded. See diagnostics for details.`
-    : `Submit complete. ${done} succeeded.`;
+  $('process-log').textContent = authStopped
+    ? `Submission stopped: CFLab authentication is required. ${done} succeeded; remaining captures are safe locally. Sign in from Admin → CFLab Backend, then submit again.`
+    : errs
+      ? `Submit had ${errs} failure(s). ${done} observation(s) succeeded. See diagnostics for details.`
+      : `Submit complete. ${done} succeeded.`;
 });
 $('retry-failed').addEventListener('click', async () => {
   $('process-log').textContent = 'Checking for failed records...';
@@ -7037,7 +7185,7 @@ function saveFromSetup() {
 });
 
 $('cfg-sign-in').addEventListener('click', signIn);
-$('cfg-auth-password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+$('cfg-auth-password').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); signIn(); } });
 $('cfg-sign-out').addEventListener('click', signOut);
 
 $('test-backend').addEventListener('click', async () => {
@@ -8381,6 +8529,10 @@ window.__WFR_TEST__ = {
   compassDirection, wallEpochMinutes, captureWallParts, wallIso,
   applyObservationTime, observationWallInputValue,
   categoryFromSubjectType, submitObservation, reviewTop,
+  // Auth surface for deterministic sign-in / session tests.
+  signIn, signOut, restoreSession, showAuthState, setAuthStatus, renderSessionBanner,
+  preflightSubmitAuth, isAuthFailure, sanitizeAuthMessage, AUTH_STATUS_MESSAGES,
+  updateQueueChip, getCurrentUser: () => currentUser, SESSION_KEY,
   OPENROUTER_BASE, DEFAULT_TRANS_MODEL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL,
   WFR_BOOTSTRAP_RECOMMENDATIONS, WFR_RECOMMENDATION_MODEL,
   normalizeOpenRouterModels, filterModelsFor, migrateModelId, initModelCatalog,
