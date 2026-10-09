@@ -1,0 +1,122 @@
+name: Overhead celestial data
+
+# Refreshes the two published datasets that Overhead's celestial planner reads:
+#   data/overhead/comet-ephemerides.json + data/overhead/comets.json  (JPL SBDB + Horizons + COBS)
+#   data/overhead/meteor-showers.json                                 (IMO Meteor Shower Calendar)
+# Both scripts publish atomically and refuse to write an artifact that fails validation, so a failed
+# run here leaves the last good data in place and the page keeps working with the older dataset.
+
+on:
+  schedule:
+    - cron: '23 6 * * *'      # daily: comet catalog, ephemerides and reported brightness
+    - cron: '17 6 1 * *'      # monthly: re-check the annual meteor shower calendar
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which dataset to rebuild
+        type: choice
+        options: [comets, meteors, both]
+        default: both
+
+permissions:
+  contents: write
+
+concurrency:
+  group: overhead-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pipeline dependencies
+        run: python3 -m pip install --disable-pip-version-check 'pypdf==6.16.2' 'requests==2.32.3'
+
+      - name: Record the artifacts as they are committed
+        run: |
+          for file in data/overhead/comets.json data/overhead/comet-ephemerides.json data/overhead/meteor-showers.json; do
+            if [ -f "$file" ]; then sha256sum "$file"; else echo "missing: $file"; fi
+          done | tee /tmp/before.sha256
+
+      - name: Refresh the comet catalog and ephemerides
+        id: comets
+        if: github.event.inputs.target != 'meteors'
+        continue-on-error: true
+        run: python3 tools/overhead_comets_build.py --horizon-days 180 --max-candidates 24 --step-hours 48
+
+      - name: Refresh the meteor shower calendar
+        id: meteors
+        if: github.event.schedule == '17 6 1 * *' || github.event.inputs.target == 'meteors' || github.event.inputs.target == 'both'
+        continue-on-error: true
+        run: python3 tools/overhead_meteors_build.py
+
+      - name: Validate whatever is now on disk (hard gate)
+        run: |
+          python3 tools/overhead_meteors_build.py --check
+          python3 tools/overhead_comets_build.py --check
+
+      - name: Validate the artifacts independently in Node
+        run: |
+          node tests/overhead-meteors-data.cjs
+          node tests/overhead-comets-data.cjs
+          node tests/overhead-comets.cjs
+
+      - name: Report what changed
+        run: |
+          set -o pipefail
+          changed=0
+          for file in data/overhead/comets.json data/overhead/comet-ephemerides.json data/overhead/meteor-showers.json; do
+            if [ -f "$file" ]; then
+              after=$(sha256sum "$file" | cut -d' ' -f1)
+              before=$(awk -v f="$file" '$2 == f {print $1}' /tmp/before.sha256)
+              if [ "$after" != "$before" ]; then changed=1; echo "changed: $file"; else echo "unchanged: $file"; fi
+            fi
+          done
+          {
+            echo '### Overhead celestial data refresh'
+            echo
+            echo "- changed files: $changed"
+            echo "- comet catalog: $(python3 -c "import json;d=json.load(open('data/overhead/comets.json'));print(len(d['comets']),'comets, generated',d['generated_at'])" 2>/dev/null || echo 'not available')"
+            echo "- meteor calendar: $(python3 -c "import json;d=json.load(open('data/overhead/meteor-showers.json'));print(len(d['showers']),'showers, calendar',d['calendar_year'])" 2>/dev/null || echo 'not available')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "changed=$changed" >> "$GITHUB_ENV"
+
+      - name: Report the outcome
+        run: |
+          {
+            echo '### Overhead celestial data refresh'
+            echo
+            echo "- comet refresh step: ${{ steps.comets.outcome || 'not run' }}"
+            echo "- meteor refresh step: ${{ steps.meteors.outcome || 'not run' }}"
+            echo "- changed files: ${changed}"
+            echo "- comet catalog: $(python3 -c "import json;d=json.load(open('data/overhead/comets.json'));print(len(d['comets']),'comets, generated',d['generated_at'])" 2>/dev/null || echo 'not available')"
+            echo "- meteor calendar: $(python3 -c "import json;d=json.load(open('data/overhead/meteor-showers.json'));print(len(d['showers']),'showers, calendar',d['calendar_year'])" 2>/dev/null || echo 'not available')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.comets.outcome }}" = "failure" ] || [ "${{ steps.meteors.outcome }}" = "failure" ]; then
+            echo "A refresh step failed. The committed artifacts were left untouched (the scripts only"
+            echo "publish validated data), so the page keeps serving the last good dataset - but this run"
+            echo "is reported as a failure so the retrieval problem is not missed."
+            exit 1
+          fi
+          echo "Every refresh step that ran completed."
+
+      - name: Commit the refreshed data
+        if: env.changed == '1'
+        run: |
+          git config user.name 'overhead-data-bot'
+          git config user.email 'overhead-data-bot@users.noreply.github.com'
+          git add data/overhead
+          git commit -m "Refresh Overhead celestial data ($(date -u +%Y-%m-%d))" \
+            -m "Generated by .github/workflows/overhead-data.yml. Sources, retrieval timestamps and SHA-256 digests are recorded inside each artifact."
+          git push

@@ -48,8 +48,10 @@ test('theme-only rendering, deployed dark parity, contrast and persistence',asyn
  try{
  await page.addInitScript(()=>requestAnimationFrame(()=>{window.__firstTheme=document.documentElement.dataset.theme||'dark';}));
  await page.emulateMedia({colorScheme:'light'});const errors=await boot(page,{url:origin+'/overhead.html'});const oldErrors=await boot(old,{url:origin+'/baseline/overhead.html'});
- // Isolate the pre-existing dark dashboard for pixel parity; the new card has its own QA below.
- await page.addStyleTag({content:'#weekly-card,#weekly-tonight,#weekly-ranking-diagnostics,#train-diagnostics,#about,[data-group="trains"]{display:none!important}'});
+ // Isolate the pre-existing dark dashboard for pixel parity; the new cards have their own QA below.
+ // #categories and #celestial are intentional additions of the celestial release (like the ABOUT tab
+ // already was) and are hidden here so the frozen satellite dashboard is still compared byte for byte.
+ await page.addStyleTag({content:'#weekly-card,#weekly-tonight,#weekly-ranking-diagnostics,#train-diagnostics,#about,#categories,#celestial,[data-group="trains"]{display:none!important}'});
  expect(await page.evaluate(()=>getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
  const boxes=()=>page.evaluate(()=>Object.fromEntries(['header','.toolbar','.briefing','.layout','#events','.chart-panel','.timeline-panel'].map(s=>{const r=document.querySelector(s).getBoundingClientRect();return [s,[r.x,r.y,r.width,r.height]];})));
  const application=()=>page.evaluate(()=>{const s=__OVERHEAD_TEST__.state;return JSON.stringify({site:s.site,settings:s.settings,selected:s.selected,results:s.results,view:s.view,day:s.day,favorites:s.favorites});});
