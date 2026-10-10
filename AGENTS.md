@@ -159,6 +159,110 @@ in `storage-manager.html` (growth/retention/re-creatable/health) — and an `APP
 entry if it uses new key or database names — so the Storage Manager can classify it. One small
 metadata object per app; no registry system.
 
+## Git Synchronization
+
+`origin/main` is a **shared, independently changing** source of truth. Local agents are no longer the
+only writers: GitHub Actions commits to `main` directly, starting with the Overhead celestial data
+refresh (`.github/workflows/overhead-data.yml`). A checkout that was current yesterday may be behind
+right now, and a push can be rejected because the remote moved while you were editing. Treat the
+remote as authoritative and the local branch as a copy that must be reconciled, never overwritten.
+
+Helper: `.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh` (`check`, `sync`, `pre-push`,
+`verify` — details in `.agents/skills/junkdrawer-git-sync/SKILL.md`). It never pushes, resets, cleans,
+stashes, checks out, rebases or force-updates, and never deletes untracked files.
+
+### Before beginning development
+
+1. Inspect the current branch and working-tree state (`git status`, `git-sync.sh check`).
+2. Fetch the latest remote references (`git fetch origin`; the helper does this for you).
+3. Check for incoming commits and divergence (`git rev-list --left-right --count HEAD...@{u}`).
+4. If on `main`, the working tree is clean and a fast-forward is possible, synchronize with
+   `git pull --ff-only` (`git-sync.sh sync` does exactly this).
+5. If the working tree is dirty, or local and remote histories have diverged, **preserve everything**
+   and reconcile deliberately: commit or stash your own work yourself, then merge (`git pull
+   --no-rebase`) or rebase (`git pull --rebase`) and resolve conflicts by hand. Report what you did.
+6. Never assume yesterday's local checkout is current, and never quietly claim the repository is
+   synchronized. A failed fetch must be reported as a failed fetch.
+
+### During development
+
+- GitHub Actions can commit to `main` at any time, including mid-session. The synchronization you did
+  at the start of a long session may already be stale.
+- Do not repeatedly pull while actively editing, and never overwrite working files to "refresh" them.
+- Integrate new upstream commits at a safe checkpoint — before starting an unrelated edit, after
+  finishing a coherent change, or before running tests you intend to trust.
+- Automated data commits are legitimate changes, not disposable generated artifacts (see below).
+- Do not run `git reset`, `git clean`, `git checkout -- .`, `git stash` or any branch-rewriting
+  command to make a synchronization problem disappear.
+
+### Before pushing
+
+1. Inspect the local repository state (`git status`, `git-sync.sh check`).
+2. Fetch `origin` again — the push is the moment when stale history becomes a real problem.
+3. Determine whether the outgoing history includes the latest upstream changes
+   (`git-sync.sh pre-push`, which exits non-zero when it does not).
+4. Reconcile if necessary: fast-forward when nothing local is ahead; otherwise merge or rebase
+   deliberately. Never silently discard local or remote commits.
+5. Run the tests appropriate to what changed and to the reconciliation (e.g. `bash tests/git-sync.sh`
+   for this helper, `bash tests/audit-storage-heuristics.sh` for page conventions, the relevant
+   `tests/overhead-*.cjs` suites for Overhead data).
+6. Push normally (`git push`), then verify the remote actually has the commit
+   (`git-sync.sh verify`).
+7. **A non-fast-forward rejection is a synchronization signal, not an error to bypass.** It means the
+   remote advanced: fetch, reconcile, re-run the tests, and push again.
+8. Never use `git push --force` or `--force-with-lease` on `main` as an automatic recovery mechanism.
+   If synchronization cannot be completed safely, stop and explain the conflict instead of guessing.
+
+### Automated data commits
+
+`.github/workflows/overhead-data.yml` (daily 06:23 UTC, monthly on the 1st, plus `workflow_dispatch`)
+publishes, as the `overhead-data-bot` identity:
+
+- `data/overhead/comets.json`
+- `data/overhead/comet-ephemerides.json`
+- `data/overhead/meteor-showers.json`
+- `tests/fixtures/overhead/horizons-comets.json` (re-pinned only when its pins drifted)
+
+Rules for these paths:
+
+- They are pipeline output. Do not hand-edit them, revert them, or "fix" them locally; change
+  `tools/overhead_comets_build.py` / `tools/overhead_meteors_build.py` and let the workflow publish.
+- A local commit that also touches them will meet the next refresh as a merge point — expect it, and
+  never resolve it by discarding the automated commit.
+- The race to expect: the bot commits between your fetch and your push. The push is then rejected as
+  non-fast-forward; that is the workflow working, not a failure to work around.
+- The workflow pushes with a plain `git push`, so if your commit lands first the run fails loudly
+  instead of rewriting anything. Do not "fix" that by adding a force-push to the workflow.
+- Never rewrite published data history. If an artifact looks wrong, fix the pipeline and republish.
+
+### Protecting work in progress
+
+This policy must hold with a clean tree, modified tracked files, untracked files, unpushed local
+commits, a remote that is ahead, diverged histories, a failing fetch, another agent editing the same
+checkout, and an automated commit arriving immediately before a push.
+
+- Never automatically reset, clean, discard or overwrite a developer's work — including untracked
+  files, which are reported but never removed.
+- Avoid automatic stashing; if work must be set aside, do it explicitly and restore it explicitly.
+- When a conflict is complex, produce diagnostics (what is local, what is incoming, which files
+  overlap) and let the developer decide. Do not guess which side to keep.
+
+### Daily workflow, in short
+
+```bash
+# start of session
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh check     # fetch + report; sync if behind
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh sync      # fast-forward when safe
+
+# ... edit, test ...
+
+# before publishing
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh pre-push  # must exit 0
+git add <intended files> && git commit -m "<brief, descriptive message>"
+git push
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh verify    # confirm origin/main has it
+```
+
 ## General Principles
 
 - Prefer single-file HTML tools with no build step
@@ -179,5 +283,6 @@ metadata object per app; no registry system.
 - [ ] For OpenRouter tools, add a provider-grouped model selector populated from OpenRouter after a key is provided
 - [ ] If the page persists anything beyond trivial preferences, add `APP_HEALTH` (and `APP_MAP` if new key/DB names) entries in `storage-manager.html`
 - [ ] Add entry to `junk-drawer.json` with title, description, emoji, and version
-- [ ] Commit with a brief, descriptive message
-- [ ] Push to remote
+- [ ] Synchronize before publishing (`git-sync.sh pre-push` must exit 0 — see Git Synchronization)
+- [ ] Commit only the intended files with a brief, descriptive message
+- [ ] Push to remote, then confirm it landed (`git-sync.sh verify`)

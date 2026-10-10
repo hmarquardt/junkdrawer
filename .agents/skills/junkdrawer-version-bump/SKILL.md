@@ -39,9 +39,16 @@ The script computes the new version from today's date, rewrites all occurrences 
 
 ```bash
 .agents/skills/junkdrawer-compliance-audit/scripts/audit.sh <filename.html>
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh pre-push   # must exit 0 before publishing
 git add <filename.html> junk-drawer.json
-git commit -m "Bump version for <change description>" && git push
+git commit -m "Bump version for <change description>"
+git push
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh verify     # confirm origin/main has the commit
 ```
+
+A non-fast-forward rejection means `origin/main` moved (often an automated Overhead data commit):
+fetch, reconcile, and push again — never force-push `main`. See the Git Synchronization section of
+`AGENTS.md`.
 
 ## Notes
 

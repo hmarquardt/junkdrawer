@@ -187,6 +187,23 @@ web-app-manifest-512x512.png
 
 Standalone pages can reference these with relative paths.
 
+## Git Workflow
+
+`main` is shared: local development and the Overhead data workflow both commit to it, so `origin/main`
+can advance while a checkout sits idle. The policy lives in [`AGENTS.md`](AGENTS.md) under **Git
+Synchronization**, with a helper for the mechanical parts:
+
+```bash
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh check      # fetch + report; sync if behind
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh sync       # fast-forward when unambiguously safe
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh pre-push   # gate a push (exit 0 = safe)
+.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh verify     # confirm origin/main has HEAD
+```
+
+The helper never pushes, resets, cleans, stashes, rebases or force-updates, and never deletes
+untracked files. A non-fast-forward push rejection means the remote moved — fetch, reconcile, and push
+again rather than forcing. Behaviour is covered by `bash tests/git-sync.sh` (disposable repositories).
+
 ## Agent Skills
 
 The `skills/` directory contains reusable agent workflows for common tasks. Skills are loaded by an agent when a task matches their description.
@@ -202,6 +219,7 @@ The `skills/` directory contains reusable agent workflows for common tasks. Skil
 | `.agents/skills/openrouter-model-selector/` | Auto-discovered SKILL.md: provider-grouped OpenRouter model selector pattern |
 | `.agents/skills/junkdrawer-compliance-audit/` | Auto-discovered SKILL.md + `scripts/audit.sh` repo convention checker |
 | `.agents/skills/junkdrawer-page-testing/` | Auto-discovered SKILL.md: Playwright testing pattern for file:// pages |
+| `.agents/skills/junkdrawer-git-sync/` | Auto-discovered SKILL.md + `scripts/git-sync.sh`: fetch/report, safe fast-forward, pre-push gate, push verification |
 
 Canonical skill location is `.agents/skills/` (the vendor-neutral Agent Skills path read by Codex, opencode, Cursor, Copilot, Gemini CLI, and others). `.claude/skills/` holds symlinks to each skill for Claude Code compatibility.
 

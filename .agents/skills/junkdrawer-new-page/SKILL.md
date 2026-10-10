@@ -106,7 +106,9 @@ any that mention localStorage patterns). Also open the page in a browser (see
 
 ### 9. Commit and push
 
-Brief message, e.g. `Add <tool name>`, then push to `origin main`.
+Fetch and reconcile first (`.agents/skills/junkdrawer-git-sync/scripts/git-sync.sh pre-push` must exit
+0), then commit with a brief message, e.g. `Add <tool name>`, push to `origin main`, and confirm it
+landed with `git-sync.sh verify`. See the Git Synchronization section of `AGENTS.md`.
 
 ## Files involved
 

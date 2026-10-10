@@ -24,6 +24,7 @@ Agents that support the `SKILL.md` format auto-discover these project skills. Th
 | `.agents/skills/openrouter-model-selector/` | Reference implementation of the provider-grouped OpenRouter model selector required on OpenRouter pages |
 | `.agents/skills/junkdrawer-compliance-audit/` | `scripts/audit.sh` checks footer/version sync, favicon, analytics rules, and JSON validity across all pages |
 | `.agents/skills/junkdrawer-page-testing/` | Playwright testing pattern for these file:// single-file apps (matches `tests/ground-grid-growth.spec.js`) |
+| `.agents/skills/junkdrawer-git-sync/` | Synchronize with `origin/main` before, during and after development; includes `scripts/git-sync.sh` (`check` / `sync` / `pre-push` / `verify`). Policy: **Git Synchronization** in `AGENTS.md` |
 | `.agents/skills/frontend-design/` | (Third-party, Anthropic) High-design-quality frontend generation guidance |
 
 ## Adding New Skills
