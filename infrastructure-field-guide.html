@@ -1,0 +1,2216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Infrastructure Field Guide — Less infrastructure. Better decisions.</title>
+<meta name="description" content="The entry point to a four-part infrastructure collection: a GitHub Actions automation manual, a Cloudflare developer-platform manual, a workload architecture workbench, and a hyperscaler necessity audit. Less infrastructure, better decisions — an editorial guide to choosing the least complicated thing that reliably does the job.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>" />
+<script
+  src="analytics-lite.js"
+  data-site-id="junkdrawer"
+  data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+  defer>
+</script>
+<script src="jd-storage.js" defer></script>
+<script id="ifg-theme">
+/* ------------------------------------------------------------------
+   Theme resolution for the field guide. Light is the reading surface
+   and the default; dark is explicit; system is opt-in. This runs in
+   <head> so a returning reader never sees the wrong theme flash.
+
+   The pure half (window.IFGThemeCore) is unit-tested in
+   tests/infrastructure-field-guide.cjs. No network access; the only
+   storage read is this page's own preference key.
+   ------------------------------------------------------------------ */
+(function (root) {
+  'use strict';
+  var KEY = 'ifg.prefs.v1';
+  var THEMES = ['light', 'dark', 'system'];
+  var DEFAULT = 'light';
+
+  function normalize(pref) { return THEMES.indexOf(pref) >= 0 ? pref : DEFAULT; }
+  /* Only the literal preference "system" consults the operating system. */
+  function resolve(pref, prefersDark) {
+    var p = normalize(pref);
+    return p === 'system' ? (prefersDark ? 'dark' : 'light') : p;
+  }
+  /* A stored value counts only when it is a recognised theme choice or a
+     recognised intent. Anything else means the defaults. */
+  function readStored(storage) {
+    var out = { theme: DEFAULT, intent: null };
+    try {
+      var raw = (storage && storage.getItem) ? storage.getItem(KEY) : null;
+      if (!raw) return out;
+      var data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') return out;
+      out.theme = normalize(data.theme);
+      out.intent = (typeof data.intent === 'string' && /^[a-z0-9-]{1,40}$/.test(data.intent)) ? data.intent : null;
+      return out;
+    } catch (e) { return out; }
+  }
+  root.IFGThemeCore = {
+    key: KEY, themes: THEMES.slice(), DEFAULT: DEFAULT,
+    normalize: normalize, resolve: resolve, readStored: readStored
+  };
+
+  var mql = null;
+  function osPrefersDark() { return !!(mql && mql.matches); }
+  function apply(pref) {
+    var theme = resolve(pref, osPrefersDark());
+    var el = root.document && root.document.documentElement;
+    if (el) el.setAttribute('data-theme', theme);
+    return theme;
+  }
+  try { mql = root.matchMedia ? root.matchMedia('(prefers-color-scheme: dark)') : null; }
+  catch (e) { mql = null; }
+  var stored = readStored(root.localStorage);
+  var current = stored.theme;
+  apply(current);
+  if (mql) {
+    var onChange = function () { if (current === 'system') apply('system'); };
+    if (mql.addEventListener) mql.addEventListener('change', onChange);
+    else if (mql.addListener) mql.addListener(onChange);
+  }
+  root.IFGTheme = {
+    state: function () { return current; },
+    effective: function () { return apply(current); },
+    set: function (pref) { current = normalize(pref); apply(current); return current; }
+  };
+})(typeof window !== 'undefined' ? window : this);
+</script>
+<style>
+/* ==========================================================================
+   Infrastructure Field Guide — the entry point to a four-part collection.
+
+   Visual identity: a printed technical field notebook. Warm paper stock,
+   deep ink, hairline rules, numbered plates, small-caps marginalia and one
+   accent colour per guide so each has its own cover without breaking the
+   binding. Serif display type over a sans reading face — deliberately not
+   the cream dossier (Do I Still Need AWS or GCP?), the slate workbench
+   (Right Tool for the Job) or the two field manuals. Light-first, with an
+   explicit dark reading mode.
+   ========================================================================== */
+:root {
+  --paper: #fbf9f3;             /* the page */
+  --paper-2: #f4f1e7;           /* tinted bands */
+  --paper-3: #ece7da;
+  --card: #ffffff;
+  --card-2: #fdfcf8;
+  --rule: #e0d9c9;
+  --rule-soft: #ece7da;
+  --rule-strong: #b9b0a0;
+  --ink: #16181d;
+  --ink-2: #3c414b;
+  --ink-3: #656b76;
+  --ink-4: #8f95a0;
+  --link: #1d4e79;
+  --link-ink: #163c5e;
+  --link-soft: #e8f0f7;
+  /* one accent per guide — a cover colour, never a ranking */
+  --gh: #2f4f6f;
+  --gh-soft: #e9eff5;
+  --gh-line: #b8c9d8;
+  --cf: #96590f;
+  --cf-soft: #fbf2e3;
+  --cf-line: #ddc194;
+  --rtj: #1f5f4a;
+  --rtj-soft: #e7f2ec;
+  --rtj-line: #a8cdbb;
+  --dng: #6d3a5d;
+  --dng-soft: #f4ecf1;
+  --dng-line: #cdb0c4;
+  --ok: #1d6647;
+  --ok-soft: #e7f2eb;
+  --warn: #7d5606;
+  --warn-soft: #fbf2dd;
+  --bad: #9c1f1c;
+  --note: #5b4a7a;
+  --code-bg: #f2eee3;
+  --shadow: 0 1px 0 rgba(22, 19, 12, 0.04), 0 10px 26px -20px rgba(22, 19, 12, 0.30);
+  --radius: 3px;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  --ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --measure: 68ch;
+  --wide: 1180px;
+}
+html[data-theme="dark"] {
+  --paper: #131519;
+  --paper-2: #191c21;
+  --paper-3: #21242b;
+  --card: #1a1d23;
+  --card-2: #1f2229;
+  --rule: #333844;
+  --rule-soft: #272b34;
+  --rule-strong: #4c5361;
+  --ink: #eceef2;
+  --ink-2: #c3c8d1;
+  --ink-3: #98a0ad;
+  --ink-4: #767e8b;
+  --link: #86b6de;
+  --link-ink: #a5cbec;
+  --link-soft: #1b2937;
+  --gh: #9dc0e0;
+  --gh-soft: #1a2530;
+  --gh-line: #35506b;
+  --cf: #e0b070;
+  --cf-soft: #2a2116;
+  --cf-line: #6a5227;
+  --rtj: #84c8ac;
+  --rtj-soft: #16281f;
+  --rtj-line: #2f5c48;
+  --dng: #d7aac8;
+  --dng-soft: #271d24;
+  --dng-line: #5d3f53;
+  --ok: #7dc9a6;
+  --ok-soft: #16281f;
+  --warn: #dfc07c;
+  --warn-soft: #2a2416;
+  --bad: #ef9a95;
+  --note: #b6a6d4;
+  --code-bg: #22252c;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 12px 30px -22px rgba(0, 0, 0, 0.8);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 17px/1.62 var(--ui);
+  font-feature-settings: "kern" 1;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 {
+  font-family: var(--serif);
+  font-weight: 600;
+  line-height: 1.14;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5em;
+  text-wrap: balance;
+}
+h1 { font-size: clamp(2.1rem, 5.2vw, 3.5rem); }
+h2 { font-size: clamp(1.5rem, 3.1vw, 2.05rem); }
+h3 { font-size: clamp(1.12rem, 2.1vw, 1.35rem); }
+h4 { font-size: 1rem; }
+p { margin: 0 0 1em; }
+a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--link-ink); }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+  outline: 2.5px solid var(--link);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+code, kbd, samp { font-family: var(--mono); font-size: 0.88em; }
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--rule-soft);
+  padding: 0.06em 0.34em;
+  border-radius: 2px;
+  overflow-wrap: break-word;
+}
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2.2rem 0; }
+::selection { background: var(--link-soft); }
+.skip {
+  position: absolute; left: -9999px; top: 0; z-index: 60;
+  background: var(--ink); color: var(--paper);
+  padding: 0.7rem 1rem; font: 600 0.85rem/1 var(--ui); border-radius: 0 0 3px 0;
+}
+.skip:focus { left: 0; }
+.visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* ---------------------------------------------------------------- chrome -- */
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+}
+@supports (backdrop-filter: blur(2px)) {
+  .topbar { background: rgba(251, 249, 243, 0.9); backdrop-filter: saturate(1.4) blur(8px); }
+  html[data-theme="dark"] .topbar { background: rgba(19, 21, 25, 0.9); }
+}
+.topbar-in {
+  max-width: var(--wide); margin: 0 auto; padding: 0.55rem 1.15rem;
+  display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: baseline; gap: 0.5rem; margin-right: auto; min-width: 0; }
+.brand b {
+  font-family: var(--serif); font-size: 1.02rem; font-weight: 600; letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.brand span { font-size: 0.72rem; color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; }
+.brand .mk { font-size: 1.05rem; }
+.tnav { display: flex; gap: 0.1rem; flex-wrap: wrap; align-items: center; }
+.tnav a {
+  font: 500 0.8rem/1 var(--ui); color: var(--ink-2); text-decoration: none;
+  padding: 0.42rem 0.55rem; border-radius: 2px; border-bottom: 2px solid transparent;
+}
+.tnav a:hover { background: var(--paper-2); color: var(--ink); }
+.tnav a[aria-current="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.seg {
+  display: inline-flex; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden;
+  background: var(--card);
+}
+.seg button {
+  appearance: none; background: none; border: 0; border-right: 1px solid var(--rule-soft);
+  font: 500 0.76rem/1 var(--ui); color: var(--ink-3); padding: 0.42rem 0.6rem; cursor: pointer;
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.prog {
+  font: 500 0.72rem/1 var(--mono); color: var(--ink-3);
+  border: 1px solid var(--rule); background: var(--card);
+  padding: 0.42rem 0.5rem; border-radius: 2px; white-space: nowrap;
+}
+@media (max-width: 900px) { .tnav { order: 3; width: 100%; } .tnav a { padding: 0.4rem 0.45rem; } }
+.wrap { max-width: var(--wide); margin: 0 auto; padding: 0 1.15rem; }
+main { display: block; }
+section.band { padding: 3.4rem 0 2.6rem; border-top: 1px solid var(--rule-soft); }
+section.band:first-of-type { border-top: 0; }
+.band-in { max-width: var(--wide); margin: 0 auto; padding: 0 1.15rem; }
+.lede { max-width: var(--measure); }
+.narrow { max-width: var(--measure); }
+
+/* numbered plate header — the device that binds the sections together */
+.plate { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.35rem; }
+.plate .n {
+  font: 600 0.72rem/1 var(--mono); letter-spacing: 0.16em; color: var(--ink-4);
+  border: 1px solid var(--rule); background: var(--card); padding: 0.3rem 0.42rem; border-radius: 2px;
+}
+.plate .kick {
+  font: 600 0.72rem/1 var(--ui); letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-3);
+}
+.plate-rule { display: flex; align-items: center; gap: 0.75rem; margin: 0.2rem 0 1.4rem; }
+.plate-rule::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.sub { color: var(--ink-3); max-width: var(--measure); margin-bottom: 1.4rem; }
+.eyebrow {
+  font: 600 0.7rem/1 var(--ui); letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-4); margin-bottom: 0.9rem;
+}
+.pill {
+  display: inline-block; font: 600 0.68rem/1 var(--ui); letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 0.28rem 0.45rem; border-radius: 2px; border: 1px solid var(--rule);
+  background: var(--card); color: var(--ink-3);
+}
+.pill.gh { color: var(--gh); border-color: var(--gh-line); background: var(--gh-soft); }
+.pill.cf { color: var(--cf); border-color: var(--cf-line); background: var(--cf-soft); }
+.pill.rtj { color: var(--rtj); border-color: var(--rtj-line); background: var(--rtj-soft); }
+.pill.dng { color: var(--dng); border-color: var(--dng-line); background: var(--dng-soft); }
+/* ----------------------------------------------------------------- hero -- */
+.hero { padding: 3.2rem 0 2.4rem; position: relative; overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: 0;
+  background-image: linear-gradient(var(--rule-soft) 1px, transparent 1px);
+  background-size: 100% 2.15rem;
+  opacity: 0.55; pointer-events: none; z-index: 0;
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent 78%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent 78%);
+}
+.hero > .band-in { position: relative; z-index: 1; }
+.hero .kicker {
+  font: 600 0.74rem/1 var(--ui); letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 1.1rem;
+}
+.hero h1 { margin-bottom: 0.25rem; }
+.tagline {
+  font-family: var(--serif); font-style: italic; font-size: clamp(1.15rem, 2.6vw, 1.6rem);
+  color: var(--ink-2); margin: 0 0 1.1rem;
+}
+.hero .standfirst {
+  font-size: clamp(1rem, 1.9vw, 1.12rem); color: var(--ink-2); max-width: 62ch; margin-bottom: 1.4rem;
+}
+.thesis {
+  border-left: 3px solid var(--ink); padding: 0.15rem 0 0.15rem 1.05rem; margin: 1.4rem 0 1.6rem;
+  max-width: 60ch;
+}
+.thesis p { font-family: var(--serif); font-size: 1.11rem; line-height: 1.5; margin: 0 0 0.6rem; }
+.thesis p:last-child { margin-bottom: 0; }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 2.2rem; align-items: start; }
+@media (max-width: 880px) { .hero-grid { grid-template-columns: 1fr; } }
+.hero-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1.3rem; }
+.btn {
+  display: inline-flex; align-items: center; gap: 0.45rem; text-decoration: none;
+  font: 600 0.86rem/1 var(--ui); padding: 0.68rem 0.95rem; border-radius: 2px;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+}
+.btn:hover { background: var(--ink-2); border-color: var(--ink-2); color: var(--paper); }
+.btn.ghost { background: var(--card); color: var(--ink); border-color: var(--rule-strong); }
+.btn.ghost:hover { background: var(--paper-2); color: var(--ink); }
+.btn small { font-weight: 500; opacity: 0.72; }
+
+/* the four-verb compass */
+.compass { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 1rem 1.05rem 1.15rem; box-shadow: var(--shadow); }
+.compass h2 { font-size: 0.78rem; font-family: var(--ui); font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 0.7rem; }
+.compass ol { list-style: none; margin: 0; padding: 0; counter-reset: cm; }
+.compass li {
+  position: relative; padding: 0.5rem 0 0.5rem 1.9rem; border-top: 1px solid var(--rule-soft);
+  font-size: 0.9rem; color: var(--ink-2);
+}
+.compass li:first-child { border-top: 0; }
+.compass li::before {
+  counter-increment: cm; content: counter(cm);
+  position: absolute; left: 0; top: 0.58rem;
+  width: 1.35rem; height: 1.35rem; border-radius: 50%;
+  border: 1px solid var(--rule-strong); color: var(--ink-3);
+  font: 600 0.72rem/1.3rem var(--mono); text-align: center;
+}
+.compass li b { display: block; color: var(--ink); font-family: var(--serif); font-size: 0.98rem; }
+.compass li.c1::before { border-color: var(--gh-line); color: var(--gh); }
+.compass li.c2::before { border-color: var(--cf-line); color: var(--cf); }
+.compass li.c3::before { border-color: var(--rtj-line); color: var(--rtj); }
+.compass li.c4::before { border-color: var(--dng-line); color: var(--dng); }
+.statrow { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1.8rem; padding-top: 1.1rem; border-top: 1px solid var(--rule); }
+.statrow div { min-width: 6rem; }
+.statrow b { display: block; font-family: var(--serif); font-size: 1.5rem; line-height: 1.1; }
+.statrow span { font: 600 0.68rem/1.3 var(--ui); letter-spacing: 0.11em; text-transform: uppercase; color: var(--ink-4); }
+/* --------------------------------------------------------- guide plates -- */
+.guides { display: grid; gap: 1.5rem; }
+.guide {
+  display: grid; grid-template-columns: 3.6rem minmax(0, 1fr); gap: 0 1.2rem;
+  background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.guide .spine { border-right: 1px solid var(--rule-soft); background: var(--card-2); padding: 1.2rem 0 0; }
+.guide .spine .verb {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  font: 700 0.7rem/1 var(--ui); letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-4); margin: 0 auto; display: block; text-align: center;
+}
+.guide .body { padding: 1.25rem 1.35rem 1.35rem; }
+.guide.gh { border-top: 3px solid var(--gh); }
+.guide.cf { border-top: 3px solid var(--cf); }
+.guide.rtj { border-top: 3px solid var(--rtj); }
+.guide.dng { border-top: 3px solid var(--dng); }
+.guide .headline { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.guide h3 { margin: 0; font-size: clamp(1.2rem, 2.3vw, 1.5rem); }
+.guide .q {
+  font-family: var(--serif); font-style: italic; font-size: 1.03rem; color: var(--ink-2);
+  margin: 0.5rem 0 0.7rem; max-width: 58ch;
+}
+.guide p.desc { margin-bottom: 0.9rem; max-width: 66ch; color: var(--ink-2); }
+.guide .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.4rem 1.6rem; margin: 0.2rem 0 1rem; }
+.guide .cols h4 {
+  font-family: var(--ui); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.13em;
+  text-transform: uppercase; color: var(--ink-4); margin: 0 0 0.4rem; padding-bottom: 0.28rem;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.guide ul { margin: 0; padding: 0; list-style: none; }
+.guide ul li { position: relative; padding-left: 0.85rem; font-size: 0.88rem; color: var(--ink-2); margin-bottom: 0.22rem; }
+.guide ul li::before { content: "·"; position: absolute; left: 0.15rem; color: var(--ink-4); }
+.guide .links { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 1.05rem; padding-top: 0.95rem; border-top: 1px solid var(--rule-soft); }
+.guide .deep { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.guide .deep a {
+  font: 500 0.78rem/1 var(--ui); text-decoration: none; color: var(--ink-2);
+  border: 1px solid var(--rule); background: var(--card-2); padding: 0.36rem 0.5rem; border-radius: 2px;
+}
+.guide .deep a:hover { border-color: var(--rule-strong); color: var(--ink); }
+.guide.gh .deep a:hover { border-color: var(--gh-line); background: var(--gh-soft); color: var(--gh); }
+.guide.cf .deep a:hover { border-color: var(--cf-line); background: var(--cf-soft); color: var(--cf); }
+.guide.rtj .deep a:hover { border-color: var(--rtj-line); background: var(--rtj-soft); color: var(--rtj); }
+.guide.dng .deep a:hover { border-color: var(--dng-line); background: var(--dng-soft); color: var(--dng); }
+.bestfor { font-size: 0.86rem; color: var(--ink-3); margin: 0.1rem 0 0; }
+.bestfor b { color: var(--ink-2); font-weight: 600; }
+@media (max-width: 620px) {
+  .guide { grid-template-columns: 1fr; }
+  .guide .spine { border-right: 0; border-bottom: 1px solid var(--rule-soft); padding: 0.55rem 1.2rem; }
+  .guide .spine .verb { writing-mode: horizontal-tb; transform: none; text-align: left; }
+}
+
+/* -------------------------------------------------------- the selector -- */
+.selector { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 1.6rem; align-items: start; }
+@media (max-width: 820px) { .selector { grid-template-columns: 1fr; } }
+.panel { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 1.1rem 1.15rem 1.25rem; box-shadow: var(--shadow); }
+.panel h3 { font-family: var(--ui); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 0.8rem; }
+.intents { display: flex; flex-direction: column; gap: 0.35rem; }
+.intent {
+  text-align: left; appearance: none; cursor: pointer;
+  background: var(--card-2); border: 1px solid var(--rule); border-radius: 2px;
+  font: 500 0.92rem/1.35 var(--ui); color: var(--ink-2); padding: 0.6rem 0.7rem;
+}
+.intent:hover { border-color: var(--rule-strong); color: var(--ink); background: var(--paper-2); }
+.intent[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.answer { min-height: 12rem; }
+.answer .verdict {
+  display: flex; align-items: baseline; gap: 0.55rem; flex-wrap: wrap; margin-bottom: 0.6rem;
+}
+.answer .verdict b { font-family: var(--serif); font-size: 1.25rem; }
+.answer .why { color: var(--ink-2); font-size: 0.95rem; }
+.answer .also { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px solid var(--rule-soft); }
+.answer .also h4 { font-family: var(--ui); font-size: 0.68rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 0.45rem; }
+.answer .also ul { margin: 0; padding: 0; list-style: none; }
+.answer .also li { font-size: 0.88rem; color: var(--ink-2); margin-bottom: 0.3rem; }
+.empty-state { color: var(--ink-3); font-size: 0.94rem; }
+.answer .cta { margin-top: 1rem; }
+.status { font: 500 0.8rem/1.4 var(--ui); color: var(--ink-3); margin-top: 0.7rem; min-height: 1.1rem; }
+/* ----------------------------------------------------------- the chain -- */
+.chain { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; margin: 1.4rem 0 0.4rem; }
+@media (max-width: 900px) { .chain { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .chain { grid-template-columns: 1fr; } }
+.chain .step { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.85rem 0.9rem 0.95rem; position: relative; }
+.chain .step + .step::before {
+  content: "→"; position: absolute; left: -0.72rem; top: 1.05rem; color: var(--ink-4);
+  font-size: 0.9rem; background: var(--paper); padding: 0 0.18rem;
+}
+@media (max-width: 900px) { .chain .step + .step::before { content: none; } }
+.chain .step .v { font: 700 0.66rem/1 var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-4); }
+.chain .step b { display: block; font-family: var(--serif); font-size: 1.02rem; margin: 0.3rem 0 0.35rem; }
+.chain .step p { font-size: 0.85rem; color: var(--ink-3); margin: 0; }
+.chain .step a { font-size: 0.82rem; display: inline-block; margin-top: 0.5rem; }
+.chain .step.gh { border-top: 3px solid var(--gh); }
+.chain .step.cf { border-top: 3px solid var(--cf); }
+.chain .step.rtj { border-top: 3px solid var(--rtj); }
+.chain .step.dng { border-top: 3px solid var(--dng); }
+.figcap { font-size: 0.82rem; color: var(--ink-4); margin-top: 0.9rem; max-width: var(--measure); }
+
+/* ------------------------------------------------------------- findings -- */
+.findings { display: grid; gap: 1rem; }
+.finding {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.2rem;
+  background: var(--card); border: 1px solid var(--rule); border-left: 3px solid var(--rule-strong);
+  border-radius: var(--radius); padding: 1.05rem 1.15rem 1.15rem;
+}
+.finding.gh { border-left-color: var(--gh); }
+.finding.cf { border-left-color: var(--cf); }
+.finding.rtj { border-left-color: var(--rtj); }
+.finding.dng { border-left-color: var(--dng); }
+.finding h3 { margin: 0 0 0.25rem; font-size: 1.12rem; }
+.finding .meta { font: 600 0.68rem/1.4 var(--ui); letter-spacing: 0.11em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 0.55rem; }
+.finding .obs { color: var(--ink-2); font-size: 0.94rem; margin-bottom: 0.7rem; max-width: 74ch; }
+.lesson {
+  display: flex; gap: 0.6rem; align-items: baseline;
+  background: var(--paper-2); border: 1px solid var(--rule-soft); border-radius: 2px;
+  padding: 0.6rem 0.75rem; max-width: 74ch;
+}
+.lesson .lbl { font: 700 0.66rem/1.5 var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); white-space: nowrap; }
+.lesson p { margin: 0; font-family: var(--serif); font-size: 0.98rem; color: var(--ink); }
+.finding .src { margin-top: 0.7rem; font-size: 0.83rem; color: var(--ink-4); }
+.finding .src a { color: var(--link); }
+
+/* ---------------------------------------------------------------- cards -- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 0.9rem; }
+.card { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.95rem 1rem 1.05rem; }
+.card h3 { font-size: 1.02rem; margin: 0 0 0.35rem; }
+.card p { font-size: 0.88rem; color: var(--ink-2); margin: 0 0 0.5rem; }
+.card .when { font-size: 0.82rem; color: var(--ink-3); border-top: 1px solid var(--rule-soft); padding-top: 0.5rem; }
+.card .when b { color: var(--ink-2); }
+.card.local { border-style: dashed; }
+.tagline-small { font: 600 0.66rem/1 var(--ui); letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-4); display: block; margin-bottom: 0.4rem; }
+/* ---------------------------------------------------------------- paths -- */
+.paths { display: grid; gap: 0.9rem; }
+.path {
+  background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius);
+  padding: 1rem 1.1rem 1.1rem;
+}
+.path h3 { margin: 0 0 0.2rem; font-size: 1.06rem; }
+.path .who { font-size: 0.86rem; color: var(--ink-3); margin: 0 0 0.75rem; }
+.path ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.path li { display: flex; }
+.path li a {
+  display: block; text-decoration: none; color: var(--ink-2); font-size: 0.85rem;
+  border: 1px solid var(--rule); background: var(--card-2); border-radius: 2px; padding: 0.4rem 0.55rem;
+}
+.path li a:hover { border-color: var(--ink); color: var(--ink); background: var(--paper-2); }
+.path li a b { color: var(--ink-4); font-weight: 600; font-family: var(--mono); font-size: 0.78rem; margin-right: 0.35rem; }
+.path .cost { margin: 0.8rem 0 0; font-size: 0.82rem; color: var(--ink-4); }
+
+/* ---------------------------------------------------------- principles -- */
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 0.9rem; counter-reset: pr; }
+.principle { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.95rem 1rem 1.05rem; }
+.principle h3 { font-family: var(--ui); font-size: 0.95rem; font-weight: 600; margin: 0 0 0.4rem; display: flex; gap: 0.5rem; align-items: baseline; }
+.principle h3::before { counter-increment: pr; content: counter(pr, decimal-leading-zero); font: 600 0.7rem/1 var(--mono); color: var(--ink-4); }
+.principle p { font-size: 0.89rem; color: var(--ink-2); margin: 0; }
+
+/* -------------------------------------------------------------- sources -- */
+.tblwrap { overflow-x: auto; }
+.metatable { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.metatable caption { text-align: left; font-size: 0.82rem; color: var(--ink-4); padding-bottom: 0.6rem; }
+.metatable th, .metatable td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.metatable th { font: 600 0.68rem/1.4 var(--ui); letter-spacing: 0.11em; text-transform: uppercase; color: var(--ink-4); border-bottom-color: var(--rule); }
+.metatable td.v { font-family: var(--mono); font-size: 0.82rem; white-space: nowrap; color: var(--ink-2); }
+.metatable tr:last-child td { border-bottom: 0; }
+.caveats { margin: 1.3rem 0 0; padding: 0; list-style: none; max-width: var(--measure); }
+.caveats li { position: relative; padding-left: 1.15rem; font-size: 0.9rem; color: var(--ink-2); margin-bottom: 0.55rem; }
+.caveats li::before { content: "—"; position: absolute; left: 0; color: var(--ink-4); }
+.note-box {
+  background: var(--paper-2); border: 1px solid var(--rule); border-left: 3px solid var(--note);
+  border-radius: var(--radius); padding: 0.95rem 1.05rem; max-width: 74ch;
+}
+.note-box p:last-child { margin-bottom: 0; }
+.note-box h3 { font-family: var(--ui); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 0.5rem; }
+
+/* --------------------------------------------------------------- footer -- */
+.pagefoot { border-top: 1px solid var(--rule); background: var(--paper-2); padding: 2rem 0 2.4rem; margin-top: 1rem; }
+.pagefoot .footgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1.2rem; }
+.pagefoot h3 { font-family: var(--ui); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 0.55rem; }
+.pagefoot ul { margin: 0; padding: 0; list-style: none; }
+.pagefoot li { font-size: 0.87rem; color: var(--ink-2); margin-bottom: 0.3rem; }
+
+/* ---------------------------------------------------------------- print -- */
+@media print {
+  .topbar, .hero-actions, .skip { display: none !important; }
+  body { background: #fff; color: #000; font-size: 10.5pt; }
+  section.band { border-top: 1px solid #ccc; padding: 1rem 0; break-inside: avoid; }
+  .guide, .finding, .card, .panel, .path, .principle, .compass, .chain .step { box-shadow: none; border-color: #bbb; }
+  .hero::before { display: none; }
+  a { color: #000; text-decoration: underline; }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 8.5pt; color: #555; word-break: break-all; }
+  .pagefoot { background: #fff; }
+  .intents, .answer { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <span class="mk" aria-hidden="true">🧭</span>
+      <b>Infrastructure Field Guide</b>
+      <span>Less infrastructure. Better decisions.</span>
+    </div>
+    <nav class="tnav" id="tnav" aria-label="Sections of this page">
+      <a href="#guides">The guides</a>
+      <a href="#start">Where to start</a>
+      <a href="#pieces">How they fit</a>
+      <a href="#findings">Findings</a>
+      <a href="#beyond">Beyond</a>
+      <a href="#paths">Paths</a>
+      <a href="#philosophy">Principles</a>
+      <a href="#sources">Sources</a>
+    </nav>
+    <span class="prog" id="progress" title="Guides opened in this browser">0/4 opened</span>
+    <div class="seg" role="group" aria-label="Colour theme">
+      <button type="button" data-theme-set="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+      <button type="button" data-theme-set="system" aria-pressed="false">System</button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============================================ 01 · the entrance ==== -->
+<section class="band hero" id="top" aria-labelledby="heroTitle">
+  <div class="band-in">
+    <p class="kicker">A four-part infrastructure collection</p>
+    <div class="hero-grid">
+      <div>
+        <h1 id="heroTitle">Infrastructure Field Guide</h1>
+        <p class="tagline">Less infrastructure. Better decisions.</p>
+        <p class="standfirst">
+          Four interactive technical guides exploring automation, application platforms,
+          architecture selection, and the enduring role of hyperscale cloud infrastructure.
+        </p>
+        <div class="thesis">
+          <p>
+            After decades of building software, working with cloud platforms, managing databases,
+            and maintaining deployment pipelines, I&rsquo;ve become increasingly interested in a
+            simple question:
+          </p>
+          <p><b>What&rsquo;s the least complicated infrastructure that will reliably do the job?</b></p>
+        </div>
+        <p class="narrow">
+          Lately I&rsquo;ve found myself gravitating toward GitHub for source control, automation, and
+          ephemeral compute, and Cloudflare for application hosting, APIs, data storage, and
+          distribution. Together they cover a surprising amount of territory.
+        </p>
+        <p class="narrow">
+          But this isn&rsquo;t a declaration that GitHub and Cloudflare are the only tools worth
+          using&thinsp;&mdash;&thinsp;or even always the best ones. There&rsquo;s a place for AWS and
+          Google Cloud, certainly. There&rsquo;s also a place for Railway, Vercel, Fly.io, Render,
+          DigitalOcean, Supabase, conventional virtual machines, managed services, and sometimes just
+          running a job on a computer I already own. The right answer depends on the workload, the
+          economics, the operational burden, and what infrastructure already exists.
+        </p>
+        <p class="narrow">
+          <b>These four guides represent where my thinking has landed today&thinsp;&mdash;&thinsp;not a
+          universal prescription for how everyone should build software.</b> They&rsquo;re part
+          reference library, part experimentation laboratory, and part an ongoing attempt to
+          challenge my own architectural assumptions.
+        </p>
+        <p class="narrow">
+          The goal isn&rsquo;t to eliminate cloud providers.
+          <b>It&rsquo;s to stop paying&thinsp;&mdash;&thinsp;in money, complexity, or
+          attention&thinsp;&mdash;&thinsp;for infrastructure I don&rsquo;t actually need.</b>
+        </p>
+        <div class="hero-actions">
+          <a class="btn" href="#guides">Open the four guides</a>
+          <a class="btn ghost" href="#start">Where should I start?</a>
+          <a class="btn ghost" href="#beyond">Why not only GitHub and Cloudflare</a>
+        </div>
+      </div>
+      <aside class="compass" aria-labelledby="compassTitle">
+        <h2 id="compassTitle">Four verbs, four guides</h2>
+        <ol>
+          <li class="c1"><b>Discover</b> what automation infrastructure you already have but have never used.</li>
+          <li class="c2"><b>Explore</b> how much application and data platform one vendor can provide.</li>
+          <li class="c3"><b>Decide</b> which architecture actually fits a specific workload.</li>
+          <li class="c4"><b>Challenge</b> the boundary where hyperscale infrastructure is still required.</li>
+        </ol>
+        <p class="bestfor" style="margin-top:0.85rem;border-top:1px solid var(--rule-soft);padding-top:0.7rem;">
+          They are not a curriculum. Enter at whichever verb describes your afternoon.
+        </p>
+      </aside>
+    </div>
+    <div class="statrow">
+      <div><b>4</b><span>Interactive guides</span></div>
+      <div><b id="statSections">102</b><span>Sections across them</span></div>
+      <div><b>6</b><span>Field findings</span></div>
+      <div><b>5</b><span>Guided paths</span></div>
+      <div><b>2026-10-10</b><span>Evidence date</span></div>
+    </div>
+  </div>
+</section>
+<!-- ============================================ 02 · the four guides == -->
+<section class="band" id="guides" aria-labelledby="guidesTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">02</span><span class="kick">The collection</span></div>
+    <h2 id="guidesTitle">The four field guides</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      Each guide stands on its own and is worth opening on its own. Read together, they cover a
+      single arc: what the platforms can do, what a specific workload needs, and where the
+      conventional hyperscalers still earn their complexity.
+    </p>
+
+    <div class="guides">
+      <article class="guide gh" id="guide-github-actions" aria-labelledby="g1t">
+        <div class="spine"><span class="verb">Discover</span></div>
+        <div class="body">
+          <div class="headline">
+            <span class="pill gh">Guide 01 · GitHub</span>
+            <span class="bestfor">21 sections · v2026.10.10.2</span>
+          </div>
+          <h3 id="g1t">GitHub Actions: The Automation Playground</h3>
+          <p class="q">&ldquo;What can I automate and execute using infrastructure GitHub already provides?&rdquo;</p>
+          <p class="desc">
+            A working field manual for Actions as a compute and scheduling platform rather than a
+            test runner. Runner specifications and their real limits, the trigger model, a copyable
+            YAML cookbook, scheduled automation, data pipelines, secrets and supply-chain security,
+            the billing boundary, and a set of experiments you can run in your own repository.
+            Everything is demonstrated against real workflows, including this repository&rsquo;s own
+            celestial data refresh.
+          </p>
+          <div class="cols">
+            <div>
+              <h4>Representative topics</h4>
+              <ul>
+                <li>Ephemeral hosted runners and larger runners</li>
+                <li>Workflow orchestration, triggers and concurrency</li>
+                <li>Scheduled automation and digest-gated commits</li>
+                <li>CI/CD, data pipelines and repository-as-platform patterns</li>
+                <li>Secrets, OIDC, least-privilege workflows and debugging</li>
+                <li>Billing, included minutes and where the free tier ends</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Interactive capabilities</h4>
+              <ul>
+                <li>YAML cookbook with copy-ready recipes</li>
+                <li>Cost and quota explorer for hosted runners</li>
+                <li>Workflow explorer that parses a real workflow file</li>
+                <li>Debugging decision tree for failed runs</li>
+                <li>Runner specification comparison</li>
+              </ul>
+            </div>
+          </div>
+          <p class="bestfor">
+            <b>Best for:</b> anyone who has used Actions only for tests, and wants to know whether a
+            scheduled job, a data pipeline, or a small deployment could live there instead of on a
+            server.
+          </p>
+          <div class="links">
+            <a class="btn" href="github-actions-playground.html">Open the playground</a>
+          </div>
+          <div class="deep" aria-label="Useful sections in GitHub Actions: The Automation Playground">
+            <a href="github-actions-playground.html#view-schedule">Scheduled automation</a>
+            <a href="github-actions-playground.html#view-runners">Runner infrastructure</a>
+            <a href="github-actions-playground.html#view-cookbook">YAML cookbook</a>
+            <a href="github-actions-playground.html#view-cost">Costs &amp; quotas</a>
+            <a href="github-actions-playground.html#view-opportunities">JunkDrawer opportunities</a>
+          </div>
+        </div>
+      </article>
+      <article class="guide cf" id="guide-cloudflare" aria-labelledby="g2t">
+        <div class="spine"><span class="verb">Explore</span></div>
+        <div class="body">
+          <div class="headline">
+            <span class="pill cf">Guide 02 · Cloudflare</span>
+            <span class="bestfor">41 sections · v2026.10.10.1</span>
+          </div>
+          <h3 id="g2t">Cloudflare: The Developer Platform</h3>
+          <p class="q">&ldquo;How much application infrastructure can Cloudflare provide without conventional server management?&rdquo;</p>
+          <p class="desc">
+            The broadest of the four. Compute at the edge, containers and sandboxes, the several
+            storage products and how to choose between them, orchestration primitives, delivery and
+            networking, identity, AI services, and the billing boundary where a free tier ends.
+            It is organised as an ecosystem atlas with deep dives, and it is grounded in a working
+            production configuration rather than documentation alone.
+          </p>
+          <div class="cols">
+            <div>
+              <h4>Representative topics</h4>
+              <ul>
+                <li>Workers, the runtime, limits and isolate execution</li>
+                <li>Containers and sandboxes for non-isolate workloads</li>
+                <li>D1, R2, KV and Durable Objects, and choosing among them</li>
+                <li>Queues, Workflows, Cron Triggers and retry semantics</li>
+                <li>Pages, static assets, DNS, CDN and Hyperdrive</li>
+                <li>Access, AI services, observability, email and IaC</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Interactive capabilities</h4>
+              <ul>
+                <li>Ecosystem atlas and dashboard navigation</li>
+                <li>Storage selection guide for a given data shape</li>
+                <li>Decision lab for platform choices</li>
+                <li>Costs and quotas, plus the billing boundary</li>
+                <li>Infrastructure inventory of a real account</li>
+              </ul>
+            </div>
+          </div>
+          <p class="bestfor">
+            <b>Best for:</b> anyone deciding whether an application can be built without a server,
+            and for anyone who has used Cloudflare only as a CDN or a DNS provider.
+          </p>
+          <div class="links">
+            <a class="btn" href="cloudflare-developer-playground.html">Open the platform manual</a>
+          </div>
+          <div class="deep" aria-label="Useful sections in Cloudflare: The Developer Platform">
+            <a href="cloudflare-developer-playground.html#view-workers">Workers</a>
+            <a href="cloudflare-developer-playground.html#view-storage">Storage selection</a>
+            <a href="cloudflare-developer-playground.html#view-decision">Decision lab</a>
+            <a href="cloudflare-developer-playground.html#view-pricing">Costs &amp; quotas</a>
+            <a href="cloudflare-developer-playground.html#view-inventory">My infrastructure</a>
+          </div>
+        </div>
+      </article>
+      <article class="guide rtj" id="guide-right-tool" aria-labelledby="g3t">
+        <div class="spine"><span class="verb">Decide</span></div>
+        <div class="body">
+          <div class="headline">
+            <span class="pill rtj">Guide 03 · Workbench</span>
+            <span class="bestfor">17 sections · v2026.10.10.1</span>
+          </div>
+          <h3 id="g3t">Right Tool for the Job</h3>
+          <p class="q">&ldquo;Given a particular workload, what&rsquo;s the most appropriate infrastructure?&rdquo;</p>
+          <p class="desc">
+            An evidence-based decision workbench. You describe a workload&thinsp;&mdash;&thinsp;memory,
+            duration, data volume, concurrency, dependencies, environment&thinsp;&mdash;&thinsp;and it
+            returns a recommendation with the alternatives it rejected and the reason for each
+            rejection. Dated cost models, break-even analysis, operational total cost of ownership,
+            hybrid GitHub/Cloudflare architectures, failure analysis, and reviews of eight real
+            projects including several from this drawer.
+          </p>
+          <div class="cols">
+            <div>
+              <h4>Representative topics</h4>
+              <ul>
+                <li>Workload-first architecture selection</li>
+                <li>Technical feasibility and hard resource constraints</li>
+                <li>Cost comparison and break-even against a status quo</li>
+                <li>Operational complexity and maintenance burden</li>
+                <li>Hybrid architectures that split work across platforms</li>
+                <li>Reviews of the projects in this drawer</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Interactive capabilities</h4>
+              <ul>
+                <li>Workload architect that produces a recommendation</li>
+                <li>Side-by-side comparison with rejected alternatives</li>
+                <li>Topology diagram for the chosen architecture</li>
+                <li>Break-even and TCO models you can drive</li>
+                <li>36 worked scenarios and eight project reviews</li>
+              </ul>
+            </div>
+          </div>
+          <p class="bestfor">
+            <b>Best for:</b> a real decision with a real deadline&thinsp;&mdash;&thinsp;when you want
+            a defensible answer with its reasoning attached, not a vendor comparison table.
+          </p>
+          <div class="links">
+            <a class="btn" href="right-tool-for-the-job.html">Open the workbench</a>
+          </div>
+          <div class="deep" aria-label="Useful sections in Right Tool for the Job">
+            <a href="right-tool-for-the-job.html#view-architect">Workload architect</a>
+            <a href="right-tool-for-the-job.html#view-compare">Comparison</a>
+            <a href="right-tool-for-the-job.html#view-breakeven">Break-even</a>
+            <a href="right-tool-for-the-job.html#view-projects">My projects</a>
+            <a href="right-tool-for-the-job.html#view-evidence">Evidence</a>
+          </div>
+        </div>
+      </article>
+      <article class="guide dng" id="guide-do-i-need-aws-gcp" aria-labelledby="g4t">
+        <div class="spine"><span class="verb">Challenge</span></div>
+        <div class="body">
+          <div class="headline">
+            <span class="pill dng">Guide 04 · Hyperscalers</span>
+            <span class="bestfor">23 sections · v2026.10.10.1</span>
+          </div>
+          <h3 id="g4t">Do I Still Need AWS or GCP?</h3>
+          <p class="q">&ldquo;Where do traditional hyperscalers still earn their complexity?&rdquo;</p>
+          <p class="desc">
+            The skeptic&rsquo;s companion, and deliberately the most cautious of the four. It prices
+            126 dated rates across AWS, Google Cloud, Cloudflare and GitHub, then asks the harder
+            question: which of the hyperscalers&rsquo; advantages are real boundaries and which are
+            just expensive defaults? It audits the workbench in the third guide against its own
+            scenarios, and it is allowed to answer that the evidence is insufficient.
+          </p>
+          <div class="cols">
+            <div>
+              <h4>Representative topics</h4>
+              <ul>
+                <li>Hyperscaler necessity, boundary by boundary</li>
+                <li>Specialized compute: GPU, high memory, multi-node</li>
+                <li>Managed databases and the operations they remove</li>
+                <li>Data engineering and analytical concurrency</li>
+                <li>Storage economics, retrieval and egress</li>
+                <li>Enterprise networking, residency and compliance</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Interactive capabilities</h4>
+              <ul>
+                <li>Necessity test with hard gates before any pricing</li>
+                <li>Cost laboratory with per-rate overrides</li>
+                <li>Storage-class crossover calculator</li>
+                <li>16 cost-surprise simulators</li>
+                <li>The nine-disagreement audit of Guide 03</li>
+              </ul>
+            </div>
+          </div>
+          <p class="bestfor">
+            <b>Best for:</b> anyone who suspects a hyperscaler is unnecessary, and equally for
+            anyone who suspects it is necessary and wants the boundary tested rather than assumed.
+          </p>
+          <div class="links">
+            <a class="btn" href="do-i-need-aws-gcp.html">Open the necessity audit</a>
+          </div>
+          <div class="deep" aria-label="Useful sections in Do I Still Need AWS or GCP?">
+            <a href="do-i-need-aws-gcp.html#view-necessity">Necessity test</a>
+            <a href="do-i-need-aws-gcp.html#view-boundary">Capability boundary</a>
+            <a href="do-i-need-aws-gcp.html#view-storage">Storage classes</a>
+            <a href="do-i-need-aws-gcp.html#view-surprises">Cost surprises</a>
+            <a href="do-i-need-aws-gcp.html#view-audit">The nine disagreements</a>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+<!-- ======================================= 03 · where should I start == -->
+<section class="band" id="start" aria-labelledby="startTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">03</span><span class="kick">Entry point</span></div>
+    <h2 id="startTitle">Where should I start?</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      One question, one answer. This is a navigation aid rather than a decision engine: it reads
+      your intent and names the guide to open first, with a sentence about why. It runs entirely in
+      this page and makes no network request.
+    </p>
+
+    <noscript>
+      <p class="note-box">
+        The selector needs JavaScript, which is switched off. The four guides are listed above with
+        direct links, and every one of them is a single static file that works the same way.
+      </p>
+    </noscript>
+
+    <div class="selector">
+      <div class="panel">
+        <h3 id="intentPrompt">What are you trying to understand?</h3>
+        <div class="intents" id="intents" role="group" aria-labelledby="intentPrompt"></div>
+        <p class="status" id="selectorStatus" role="status" aria-live="polite"></p>
+      </div>
+      <div class="panel answer" id="answer" aria-live="polite">
+        <p class="empty-state">
+          Pick a line on the left. If two of them are true, pick the one you would type into a search
+          box first.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- ========================================= 04 · how the pieces fit == -->
+<section class="band" id="pieces" aria-labelledby="piecesTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">04</span><span class="kick">The structure</span></div>
+    <h2 id="piecesTitle">How the pieces fit together</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      Two of the guides are reference manuals and two are decision tools. The manuals are where you
+      learn what a platform can and cannot do. The tools are where a specific workload gets
+      evaluated against that knowledge, including the option of not moving anything at all.
+    </p>
+
+    <div class="chain" role="list">
+      <div class="step gh" role="listitem">
+        <span class="v">Learn what&rsquo;s possible</span>
+        <b>Automation</b>
+        <p>Runners, triggers, schedules and pipelines &mdash; what ephemeral compute can do before you buy any.</p>
+        <a href="github-actions-playground.html#view-runners">Runner infrastructure &rarr;</a>
+      </div>
+      <div class="step cf" role="listitem">
+        <span class="v">Understand the platforms</span>
+        <b>Application platform</b>
+        <p>Compute, storage, orchestration and delivery &mdash; how far a serverless platform actually reaches.</p>
+        <a href="cloudflare-developer-playground.html#view-atlas">Ecosystem map &rarr;</a>
+      </div>
+      <div class="step rtj" role="listitem">
+        <span class="v">Evaluate the workload</span>
+        <b>Architecture</b>
+        <p>Describe the job, compare the candidates, and see why the rejected ones were rejected.</p>
+        <a href="right-tool-for-the-job.html#view-architect">Workload architect &rarr;</a>
+      </div>
+      <div class="step dng" role="listitem">
+        <span class="v">Challenge the alternatives</span>
+        <b>The boundary</b>
+        <p>Test whether the conventional cloud is genuinely required &mdash; and where it genuinely is.</p>
+        <a href="do-i-need-aws-gcp.html#view-necessity">Necessity test &rarr;</a>
+      </div>
+    </div>
+    <p class="figcap">
+      The order is a reading suggestion, not a curriculum. Plenty of decisions start at the
+      workbench, and the necessity audit is a reasonable first stop for anyone who already has a
+      bill to look at.
+    </p>
+
+    <div class="cards" style="margin-top:1.7rem;">
+      <div class="card">
+        <span class="tagline-small">Reference manuals</span>
+        <h3>Guides 01 and 02</h3>
+        <p>
+          Broad, deep, and organised by platform. These are the pages you keep open in a second tab
+          while you work: what a runner actually has, what D1 actually guarantees, what a cron
+          trigger actually promises, what each of those things costs.
+        </p>
+        <p class="when">
+          <b>Used by the decision tools.</b> The workbench links back to specific manual sections
+          rather than restating them, so there is one place where a platform fact lives.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tagline-small">Decision tools</span>
+        <h3>Guides 03 and 04</h3>
+        <p>
+          Narrow, opinionated, and organised by question. These are the pages you open when you have
+          to choose something: they produce an answer, name the alternatives they rejected, and
+          attach the reasoning so you can disagree with it.
+        </p>
+        <p class="when">
+          <b>They disagree with each other on purpose.</b> The workbench recommends; the audit
+          challenges. Where they contradict, the audit says so in public&thinsp;&mdash;&thinsp;see
+          <a href="#finding-disagreements">the nine disagreements</a>.
+        </p>
+      </div>
+      <div class="card local">
+        <span class="tagline-small">And a real answer</span>
+        <h3>Sometimes: nothing</h3>
+        <p>
+          All four guides are built to be able to conclude that the current architecture is fine and
+          should not change. On this drawer&rsquo;s own projects, that is the majority verdict, and
+          it is the most useful thing any of them does.
+        </p>
+        <p class="when">
+          <b>See</b> the <a href="#findings">field findings</a> below, and the project reviews in
+          <a href="right-tool-for-the-job.html#view-projects">Guide 03</a>.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- ============================================ 05 · field findings == -->
+<section class="band" id="findings" aria-labelledby="findingsTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">05</span><span class="kick">From the field</span></div>
+    <h2 id="findingsTitle">Findings from the field</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      These are the projects the collection was actually built around. Each one is a real
+      configuration that was read, not a hypothetical, and each verdict below is the one recorded in
+      the guides. Where a number is a measurement it is stated as one; where a verdict is uncertain,
+      the uncertainty is reported too.
+    </p>
+
+    <div class="findings">
+
+      <article class="finding gh">
+        <h3>Overhead</h3>
+        <p class="meta">Scheduled automation · GitHub Actions &amp; Pages</p>
+        <p class="obs">
+          A workflow runs at 06:23 UTC every day and at 06:17 on the first of the month, on an
+          ephemeral Ubuntu runner with a 45-minute timeout and <code>contents: write</code>. It
+          reads three public astronomical sources, validates them, and commits refreshed datasets
+          only when a SHA-256 comparison shows something actually changed. It holds no secrets:
+          authentication is the job&rsquo;s own token. The published datasets and the site that reads
+          them share one repository, so code and data version together, and a failed run leaves the
+          last good dataset in place. On a public repository the whole arrangement costs nothing per
+          month.
+        </p>
+        <div class="lesson"><span class="lbl">Lesson</span><p>A repository can be an automation platform as well as a place to store code.</p></div>
+        <p class="src">
+          <a href="github-actions-playground.html#view-schedule">Guide 01 &middot; Scheduled automation</a>
+          &nbsp;·&nbsp;
+          <a href="right-tool-for-the-job.html#view-projects">Guide 03 &middot; Overhead review</a>
+        </p>
+      </article>
+
+      <article class="finding rtj">
+        <h3>Road Naturalist</h3>
+        <p class="meta">Geospatial processing · local compute, edge endpoint</p>
+        <p class="obs">
+          Heavy geospatial work &mdash; tens of millions of source features, a peak working set in
+          the tens of gigabytes, hundreds of gigabytes of intermediate Parquet &mdash; stays on local
+          hardware, while a small Worker answering page-validation requests handles the online part.
+          The necessity audit ran nine execution options against that envelope and concluded that no
+          hyperscaler is justified as the workload runs today. Both the audit and the workbench name
+          the same missing ingredient: not compute, but a deadline. A rebuild with a deadline it
+          could miss is the condition that would change the answer, and the pipeline is already
+          partition-parallel with per-tile manifests, which is exactly what makes a Spot fleet safe
+          if that day arrives. The workbench&rsquo;s open question is where the derived dataset
+          should be served from.
+        </p>
+        <div class="lesson"><span class="lbl">Lesson</span><p>Moving computation into the cloud isn&rsquo;t automatically an improvement.</p></div>
+        <p class="src">
+          <a href="do-i-need-aws-gcp.html#view-roadnaturalist">Guide 04 &middot; Road Naturalist case study</a>
+          &nbsp;·&nbsp;
+          <a href="right-tool-for-the-job.html#view-projects">Guide 03 &middot; Road Naturalist review</a>
+        </p>
+      </article>
+
+      <article class="finding cf">
+        <h3>CFLab</h3>
+        <p class="meta">Application backend · Cloudflare Workers, D1, R2</p>
+        <p class="obs">
+          One Worker written in TypeScript serves an API and a machine-facing surface. Two D1
+          databases hold relational data with numbered migration directories; a private R2 bucket is
+          reachable only through the Worker binding; transactional email goes out through a
+          <code>send_email</code> binding; five separate rate-limit namespaces guard login, recovery,
+          reset, analytics and invitations. A second, independently deployable Worker serves its own
+          dashboard from static assets, validates sessions through a named service-binding entrypoint
+          rather than an HTTP route, and runs maintenance on an hourly cron. There is no container,
+          no queue and no background server in the main Worker &mdash; and the parts that would
+          traditionally have been a database server, a file host and a mail relay are bindings.
+        </p>
+        <div class="lesson"><span class="lbl">Lesson</span><p>Serverless infrastructure can replace substantial portions of conventional application hosting.</p></div>
+        <p class="src">
+          <a href="cloudflare-developer-playground.html#view-inventory">Guide 02 &middot; My infrastructure</a>
+        </p>
+      </article>
+      <article class="finding rtj">
+        <h3>JunkDrawer</h3>
+        <p class="meta">Static publication · GitHub Pages, with R2 where it matters</p>
+        <p class="obs">
+          This drawer publishes standalone single-file browser tools straight to GitHub Pages: no
+          build step, no server, and every tool opens from a local file as readily as from a URL. The
+          one dynamic dependency is a script tag pointing at an analytics collector, and it degrades
+          to nothing when unreachable. Where a tool genuinely needs large data, that data already
+          lives in object storage behind a custom domain rather than in the repository. The workbench
+          reviewed it and recommended keeping it exactly where it is, on the grounds that nothing
+          here needs request-time compute, and that the two places where Cloudflare genuinely helps
+          are already using Cloudflare. Uploading the repository to a different host would be nearly
+          trivial; owning a second deployment path would be the real cost.
+        </p>
+        <div class="lesson"><span class="lbl">Lesson</span><p>An existing simple architecture does not need migration merely because another platform offers more features.</p></div>
+        <p class="src">
+          <a href="right-tool-for-the-job.html#view-projects">Guide 03 &middot; JunkDrawer review</a>
+          &nbsp;·&nbsp;
+          <a href="cloudflare-developer-playground.html#view-static">Guide 02 &middot; Workers static assets</a>
+        </p>
+      </article>
+
+      <article class="finding gh">
+        <h3>Collecting Nichols</h3>
+        <p class="meta">Containerised service · a managed container host</p>
+        <p class="obs">
+          A container with a long-lived process, an attached database and a filesystem &mdash; the
+          shape that scale-to-zero platforms handle least well. The workbench recommends staying,
+          unless the workload turns out to be actually batch-shaped, and it says plainly that its
+          confidence is low: it did not read the configuration in detail, and it names three things
+          it would need &mdash; real resource usage, how often the process is idle, and how much
+          state lives on the local filesystem. The strongest argument for moving is the cost of idle
+          hours; the strongest argument against is state, because Cloudflare containers have no
+          persistent filesystem, so a migration would rework persistence on top of a platform move.
+        </p>
+        <div class="lesson"><span class="lbl">Lesson</span><p>Architecture migration must deliver enough value to justify the work.</p></div>
+        <p class="src">
+          <a href="right-tool-for-the-job.html#view-projects">Guide 03 &middot; Collecting Nichols review</a>
+          &nbsp;·&nbsp;
+          <a href="cloudflare-developer-playground.html#view-containers">Guide 02 &middot; Containers</a>
+        </p>
+      </article>
+
+      <article class="finding dng" id="finding-disagreements">
+        <h3>The nine disagreements</h3>
+        <p class="meta">Self-audit &middot; Guide 04 auditing Guide 03</p>
+        <p class="obs">
+          The workbench ships 36 scenarios with written recommendations and a deterministic engine.
+          The engine agreed with the written advice in 27 of them. The fourth guide reproduced all
+          nine disagreements by running the workbench&rsquo;s own engine headlessly against its own
+          scenario library, then classified them: two implementation defects, three scoring or
+          relevance weaknesses, two capability-data weaknesses, and two requirement-vocabulary
+          problems rather than engine problems. In six cases the written advice was better supported
+          by the evidence; in three, both answers are defensible. The audit also records a hypothesis
+          it tested and discarded, and states that no file in the audited artifact was modified to
+          make the agreement rate look better. The defects are documented, not patched&thinsp;&mdash;
+          that is the point being demonstrated.
+        </p>
+        <div class="lesson"><span class="lbl">Lesson</span><p>A recommendation engine should be inspectable, testable, and willing to expose its own limitations.</p></div>
+        <p class="src">
+          <a href="do-i-need-aws-gcp.html#view-audit">Guide 04 &middot; The nine disagreements</a>
+          &nbsp;·&nbsp;
+          <a href="docs/aws-gcp-disagreements-2026-10.json">Machine-readable audit report</a>
+        </p>
+      </article>
+
+    </div>
+  </div>
+</section>
+<!-- ================================= 06 · beyond github and cloudflare == -->
+<section class="band" id="beyond" aria-labelledby="beyondTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">06</span><span class="kick">The rest of the market</span></div>
+    <h2 id="beyondTitle">Beyond GitHub and Cloudflare</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      This is not a disclaimer, and it is not a consolation prize. GitHub and Cloudflare feature
+      prominently here because they are what I happen to have built on and learned well &mdash; not
+      because they won a comparison. There is a large, healthy field of providers I would recommend
+      without hesitation in the right circumstances.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <span class="tagline-small">Railway</span>
+        <h3>Conventional application and container hosting</h3>
+        <p>
+          A developer-friendly path to running a container or a service with an attached database,
+          without assembling the platform yourself. Deployments are a push, and the mental model is
+          a small number of long-lived services.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> an application already fits a conventional container or
+          process model and moving it would add complexity rather than remove it.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tagline-small">Vercel</span>
+        <h3>Frontend and framework-oriented deployment</h3>
+        <p>
+          Deployments, previews and edge delivery shaped around frontend frameworks. The workflow is
+          the product: a branch becomes a reviewable URL, and the framework&rsquo;s conventions are
+          first-class.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> the framework, the development workflow and the deployment model
+          all point the same way, and the preview loop is worth more than portability.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tagline-small">Fly.io</span>
+        <h3>Applications with regional placement</h3>
+        <p>
+          Runs ordinary application processes close to users, with a real filesystem and conventional
+          runtime expectations. Placement is an explicit decision rather than an emergent property
+          of a CDN.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> geographic placement matters, or when the application behaves in
+          ways an isolate cannot.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tagline-small">Render</span>
+        <h3>Managed applications, databases and workers</h3>
+        <p>
+          Application hosting, managed data and background services from one dashboard, with the
+          conventional service shapes most teams already know how to operate.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> straightforward deployment and familiar service models are the
+          priority, and the team would rather not learn a new execution model.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tagline-small">DigitalOcean</span>
+        <h3>Understandable, controllable compute</h3>
+        <p>
+          Virtual machines, managed databases and application hosting with pricing and limits that
+          are easy to reason about, and no serious abstraction between you and the machine.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> a small, predictable fleet you can log into is exactly what the
+          problem calls for, and predictability beats elasticity.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tagline-small">Supabase</span>
+        <h3>PostgreSQL as the architectural centre</h3>
+        <p>
+          A managed PostgreSQL core with authentication, storage and the services that grow around a
+          relational database. When the data model is relational and long-lived, that is a very good
+          place to stand.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> PostgreSQL is a requirement rather than an implementation detail,
+          and you would rather not run it yourself.
+        </p>
+      </div>
+      <div class="card">
+        <span class="tagline-small">A conventional VPS</span>
+        <h3>One small persistent Linux instance</h3>
+        <p>
+          A few dollars a month buys a machine with a real filesystem, no execution ceiling, no cold
+          start and no request-counting. It is unfashionable and frequently correct.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> the job wants a daemon, a cron entry, a volume and a stock
+          runtime &mdash; and you are willing to own patching it.
+        </p>
+      </div>
+      <div class="card local">
+        <span class="tagline-small">Local computing</span>
+        <h3>The hardware you already own</h3>
+        <p>
+          A laptop or workstation that is idle most of the evening is a legitimate processing
+          platform. Large data often costs more to move than to compute where it already is.
+        </p>
+        <p class="when">
+          <b>Reach for it when</b> the workload is heavy, native, occasional, and already sitting
+          next to the data. Ask what you would actually gain before uploading terabytes.
+        </p>
+      </div>
+    </div>
+
+    <div class="note-box" style="margin-top:1.5rem;">
+      <h3>Two things this list is not</h3>
+      <p>
+        It is not exhaustive. Specialized GPU hosts, managed database providers, storage and CDN
+        specialists, message brokers, observability vendors and serverless platforms are all better
+        than anything here at something specific, and a serious architecture will usually use
+        several of them. Nothing on this page should be read as a claim that GitHub and Cloudflare
+        cover every requirement &mdash; the fourth guide exists precisely because they do not.
+      </p>
+      <p>
+        It is also not a price comparison. No live pricing is published on this page, deliberately:
+        rates move, regions differ, and a number copied here would be wrong within a quarter. Where
+        the guides do quote a rate, they date it and name the rate card it came from, and they let
+        you override it with your own quote.
+      </p>
+      <p>
+        <b>A good architecture decision does not begin by excluding most of the market.</b> It begins
+        by writing down what the workload actually requires.
+      </p>
+    </div>
+  </div>
+</section>
+<!-- ======================================== 07 · guided exploration == -->
+<section class="band" id="paths" aria-labelledby="pathsTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">07</span><span class="kick">Curated routes</span></div>
+    <h2 id="pathsTitle">Guided exploration paths</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      Five routes through the collection for five different reasons to be here. Each is a sequence
+      of real sections, so you can follow one in ten minutes or spread it across an evening. Skip
+      any step that isn&rsquo;t your problem.
+    </p>
+    <div class="paths" id="pathsMount">
+      <noscript><p class="note-box">The paths are rendered by this page&rsquo;s own script. Every link they contain is also reachable from the four guides above.</p></noscript>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================== 08 · principles and limits = -->
+<section class="band" id="philosophy" aria-labelledby="philTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">08</span><span class="kick">The working principles</span></div>
+    <h2 id="philTitle">The philosophy and its limits</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      These are the principles that actually inform the collection &mdash; the ones I use to judge
+      my own work, not rules for anyone else. They are also the reason the fourth guide is allowed
+      to answer &ldquo;I can&rsquo;t tell&rdquo; and the third is allowed to answer &ldquo;change
+      nothing&rdquo;.
+    </p>
+
+    <div class="principles">
+      <div class="principle">
+        <h3>Prefer simplicity, not minimalism</h3>
+        <p>
+          A simpler system that cannot satisfy the requirements is not the right system. Simplicity
+          is a tiebreaker among architectures that all work, never a licence to skip a requirement.
+        </p>
+      </div>
+      <div class="principle">
+        <h3>Account for operational attention</h3>
+        <p>
+          A service that costs three dollars less and demands an hour of maintenance a month is
+          usually the more expensive one. Attention is the scarce resource, and it does not appear on
+          any invoice.
+        </p>
+      </div>
+      <div class="principle">
+        <h3>Respect the incumbents</h3>
+        <p>
+          Infrastructure that is stable and working has real value, and a migration is two projects:
+          moving the thing, and re-earning the operational knowledge you already have. The burden of
+          proof sits with the move.
+        </p>
+      </div>
+      <div class="principle">
+        <h3>Know the execution boundaries</h3>
+        <p>
+          CPU, memory, disk, wall-clock duration, scheduling, networking, consistency and
+          availability requirements decide more architecture than any feature comparison. Write them
+          down before shopping.
+        </p>
+      </div>
+      <div class="principle">
+        <h3>Recognize when managed is worth paying for</h3>
+        <p>
+          Database failover, private networking, compliance evidence, regional controls, specialized
+          hardware and genuinely distributed computation can justify substantial infrastructure. The
+          point is to pay deliberately, not to avoid paying.
+        </p>
+      </div>
+      <div class="principle">
+        <h3>Remain open to change</h3>
+        <p>
+          Capabilities, prices, limits and workloads all move. A conclusion reached eighteen months
+          ago is a hypothesis with a birthday, and the guides print the dates that let you see how
+          old they are.
+        </p>
+      </div>
+      <div class="principle">
+        <h3>Treat recommendations as hypotheses</h3>
+        <p>
+          Real measurements and production experience outrank elegant theoretical comparisons. The
+          nine-disagreement audit exists because the workbench&rsquo;s own engine needed checking
+          against its own written advice.
+        </p>
+      </div>
+      <div class="principle">
+        <h3>Say when you cannot tell</h3>
+        <p>
+          &ldquo;Insufficient information&rdquo; is one of the five verdicts in the necessity audit,
+          and it is a legitimate answer. A confident wrong recommendation costs more than an honest
+          unknown.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- ================================= 09 · sources and how this ages == -->
+<section class="band" id="sources" aria-labelledby="srcTitle">
+  <div class="band-in">
+    <div class="plate"><span class="n">09</span><span class="kick">Provenance</span></div>
+    <h2 id="srcTitle">Sources, methodology and how this ages</h2>
+    <div class="plate-rule"></div>
+    <p class="sub">
+      The collection is a snapshot of research at a particular moment. This table is the record of
+      which version of each guide that snapshot describes, how large each one is, and when its
+      evidence was read.
+    </p>
+
+    <div class="tblwrap">
+      <table class="metatable" id="metaTable">
+        <caption>
+          Bundled metadata snapshot (<span id="metaVerified">2026-10-10</span>). Versions match the
+          repository registry, <code>junk-drawer.json</code>.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Guide</th>
+            <th scope="col">Version</th>
+            <th scope="col">Sections</th>
+            <th scope="col">Evidence read</th>
+            <th scope="col">Open</th>
+          </tr>
+        </thead>
+        <tbody id="metaBody"></tbody>
+      </table>
+    </div>
+
+    <p class="figcap" id="landingMeta" style="margin-top:1.1rem;">
+      This page: <b>Infrastructure Field Guide</b>, version <span id="landingVersion">2026.10.10.1</span>,
+      last updated <span id="landingUpdated">2026-10-10</span>. It was written on that date and has not
+      been synchronised since; treat an older date here as a prompt to check the guides themselves.
+    </p>
+
+    <ul class="caveats">
+      <li>
+        <b>Pricing and platform limits change.</b> Every rate in the guides is dated and sourced, and
+        none of them should be trusted more than the rate card they came from. The guides let you
+        override any rate with a real quote, and they are built to say &ldquo;unknown&rdquo; rather
+        than guess.
+      </li>
+      <li>
+        <b>Architectural principles age more slowly than provider facts.</b> The reasoning on this
+        page &mdash; write the requirements down, count the operational attention, respect a working
+        incumbent &mdash; is meant to survive a price change. The specific numbers are not.
+      </li>
+      <li>
+        <b>The guides are independent single files.</b> Each one embeds its own evidence, so a guide
+        keeps working, and keeps its own dates, whether or not this landing page is ever updated.
+      </li>
+      <li>
+        <b>Nothing here is fetched at runtime.</b> This page renders from a snapshot bundled into the
+        file, so it works offline and needs no API call to draw its navigation.
+      </li>
+    </ul>
+
+    <div class="note-box" style="margin-top:1.4rem;">
+      <h3>Nothing here stays in sync by itself</h3>
+      <p>
+        There is no automatic synchronization mechanism between the four guides, the registry and
+        this page. The version numbers above were read from <code>junk-drawer.json</code> when this
+        page was last written, and they will be stale the moment a guide is updated. That is a
+        deliberate trade: a landing page that fetched the registry at load time would be a page that
+        shows nothing when the network is unavailable, and it would still be describing evidence
+        that is older than the fetch suggests.
+      </p>
+      <p>
+        When it matters, the authoritative record is the registry and each guide&rsquo;s own
+        &ldquo;Sources&rdquo; section, which carries per-rate read dates. This page is the map, not
+        the territory.
+      </p>
+    </div>
+
+    <div class="note-box" style="margin-top:1rem;">
+      <h3>About the author of these guides</h3>
+      <p>
+        One developer, working alone, on real projects: a celestial planner, a foraging tool, a
+        wildlife road-cruise investigator, an application backend, a drawer of small browser tools.
+        The guides exist because I kept answering the same infrastructure questions on each project
+        and wanted the answers written down once, with their reasoning and their dates attached.
+      </p>
+      <p>
+        <b>These are tools and conclusions I&rsquo;ve arrived at through experience and exploration.
+        They&rsquo;re not the only correct answers, and they&rsquo;re subject to revision as the
+        evidence changes.</b> If a guide recommends something that would not work in your
+        environment, the useful thing to do is find the requirement it missed.
+      </p>
+    </div>
+  </div>
+</section>
+
+</main>
+<footer class="pagefoot">
+  <div class="band-in">
+    <div class="footgrid">
+      <div>
+        <h3>The four guides</h3>
+        <ul>
+          <li><a href="github-actions-playground.html">GitHub Actions: The Automation Playground</a></li>
+          <li><a href="cloudflare-developer-playground.html">Cloudflare: The Developer Platform</a></li>
+          <li><a href="right-tool-for-the-job.html">Right Tool for the Job</a></li>
+          <li><a href="do-i-need-aws-gcp.html">Do I Still Need AWS or GCP?</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>On this page</h3>
+        <ul>
+          <li><a href="#guides">The four field guides</a></li>
+          <li><a href="#start">Where should I start?</a></li>
+          <li><a href="#pieces">How the pieces fit together</a></li>
+          <li><a href="#findings">Findings from the field</a></li>
+          <li><a href="#beyond">Beyond GitHub and Cloudflare</a></li>
+          <li><a href="#paths">Guided exploration paths</a></li>
+          <li><a href="#philosophy">The philosophy and its limits</a></li>
+          <li><a href="#sources">Sources and methodology</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Colophon</h3>
+        <p style="font-size:0.87rem;color:var(--ink-2);max-width:34ch;">
+          A single static HTML file with no build step, no server and no runtime fetch. Preferences
+          are kept in this browser only. The four guides are unchanged by it.
+        </p>
+        <p style="font-size:0.87rem;color:var(--ink-2);">
+          <a href="index.html">All JunkDrawer tools</a> &nbsp;·&nbsp;
+          <a href="storage-manager.html">Storage manager</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.10.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.10.10.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Infrastructure Field Guide · version 2026.10.10.1
+  <br />
+  Where my infrastructure thinking has landed today &mdash; a snapshot, not a prescription. Versions and section counts were read from <code>junk-drawer.json</code> on 2026-10-10.
+</footer>
+<script id="ifg-data">
+/* ==========================================================================
+   ifg-data — the collection snapshot. No DOM, no network.
+
+   This block is the single source of truth for the guide metadata, the
+   selector and the exploration paths. tests/infrastructure-field-guide.cjs
+   re-derives every version, section count and deep link from the four
+   artifact files and from junk-drawer.json, so a drift here fails a test
+   rather than silently misleading a reader.
+   ========================================================================== */
+(function (root) {
+  'use strict';
+
+  var VERIFIED = '2026-10-10';
+
+  /* Versions and section counts read from junk-drawer.json and from each
+     artifact's own section list on VERIFIED. */
+  var GUIDES = [
+    {
+      id: 'gh',
+      file: 'github-actions-playground.html',
+      verb: 'Discover',
+      pill: 'Guide 01 · GitHub',
+      title: 'GitHub Actions: The Automation Playground',
+      short: 'GitHub Actions',
+      question: 'What can I automate and execute using infrastructure GitHub already provides?',
+      version: '2026.10.10.2',
+      sections: 21,
+      cta: 'Open the playground',
+      deep: [
+        { view: 'view-schedule', label: 'Scheduled automation' },
+        { view: 'view-runners', label: 'Runner infrastructure' },
+        { view: 'view-cookbook', label: 'YAML cookbook' },
+        { view: 'view-cost', label: 'Costs & quotas' },
+        { view: 'view-opportunities', label: 'JunkDrawer opportunities' }
+      ]
+    },
+    {
+      id: 'cf',
+      file: 'cloudflare-developer-playground.html',
+      verb: 'Explore',
+      pill: 'Guide 02 · Cloudflare',
+      title: 'Cloudflare: The Developer Platform',
+      short: 'Cloudflare',
+      question: 'How much application infrastructure can Cloudflare provide without conventional server management?',
+      version: '2026.10.10.1',
+      sections: 41,
+      cta: 'Open the platform manual',
+      deep: [
+        { view: 'view-workers', label: 'Workers' },
+        { view: 'view-storage', label: 'Storage selection' },
+        { view: 'view-decision', label: 'Decision lab' },
+        { view: 'view-pricing', label: 'Costs & quotas' },
+        { view: 'view-inventory', label: 'My infrastructure' }
+      ]
+    },
+    {
+      id: 'rtj',
+      file: 'right-tool-for-the-job.html',
+      verb: 'Decide',
+      pill: 'Guide 03 · Workbench',
+      title: 'Right Tool for the Job',
+      short: 'Right Tool for the Job',
+      question: 'Given a particular workload, what is the most appropriate infrastructure?',
+      version: '2026.10.10.1',
+      sections: 17,
+      cta: 'Open the workbench',
+      deep: [
+        { view: 'view-architect', label: 'Workload architect' },
+        { view: 'view-compare', label: 'Comparison' },
+        { view: 'view-breakeven', label: 'Break-even' },
+        { view: 'view-projects', label: 'My projects' },
+        { view: 'view-evidence', label: 'Evidence' }
+      ]
+    },
+    {
+      id: 'dng',
+      file: 'do-i-need-aws-gcp.html',
+      verb: 'Challenge',
+      pill: 'Guide 04 · Hyperscalers',
+      title: 'Do I Still Need AWS or GCP?',
+      short: 'Do I Still Need AWS or GCP?',
+      question: 'Where do traditional hyperscalers still earn their complexity?',
+      version: '2026.10.10.1',
+      sections: 23,
+      cta: 'Open the necessity audit',
+      deep: [
+        { view: 'view-necessity', label: 'Necessity test' },
+        { view: 'view-boundary', label: 'Capability boundary' },
+        { view: 'view-storage', label: 'Storage classes' },
+        { view: 'view-surprises', label: 'Cost surprises' },
+        { view: 'view-audit', label: 'The nine disagreements' }
+      ]
+    }
+  ];
+
+  var META = {
+    verified: VERIFIED,
+    landing: { file: 'infrastructure-field-guide.html', version: '2026.10.10.1', updated: VERIFIED },
+    note: 'Versions and section counts were read from junk-drawer.json and from each artifact on ' + VERIFIED + '. There is no automatic synchronization; this snapshot is maintained by hand.'
+  };
+
+  /* Ten intents. Each names one guide to open first, the reason, and two
+     useful second stops. Deterministic: same answer every time, no scoring. */
+  var INTENTS = [
+    { id: 'automate', label: 'I want to automate something.',
+      guide: 'gh', view: 'view-schedule',
+      why: 'Scheduled automation is where a runner stops looking like a test harness and starts looking like a small platform. It covers cron behaviour, digest-gated commits and the failure modes that make a schedule trustworthy.',
+      also: [ { guide: 'gh', view: 'view-cookbook', label: 'The YAML cookbook' },
+              { guide: 'gh', view: 'view-triggers', label: 'Triggers & events' } ] },
+    { id: 'hosting', label: 'I want to explore modern application hosting.',
+      guide: 'cf', view: 'view-workers',
+      why: 'Workers is the smallest useful unit of a serverless application, and the manual starts there before widening to storage, orchestration and delivery. Read it to find out how much of an application has no server behind it.',
+      also: [ { guide: 'cf', view: 'view-storage', label: 'Choosing a storage product' },
+              { guide: 'cf', view: 'view-atlas', label: 'The ecosystem map' } ] },
+    { id: 'workload', label: 'I have a workload and need an architecture.',
+      guide: 'rtj', view: 'view-architect',
+      why: 'Describe the workload and get a recommendation with every rejected alternative and the reason it was rejected. That reasoning is the part worth arguing with.',
+      also: [ { guide: 'rtj', view: 'view-compare', label: 'Compare candidates' },
+              { guide: 'rtj', view: 'view-cost', label: 'The cost model' } ] },
+    { id: 'necessary', label: 'I wonder whether AWS or GCP is necessary.',
+      guide: 'dng', view: 'view-necessity',
+      why: 'The necessity test eliminates candidates on hard constraints before it prices anything, and it is allowed to answer that the evidence cannot support a verdict.',
+      also: [ { guide: 'dng', view: 'view-boundary', label: 'The capability boundary' },
+              { guide: 'dng', view: 'view-surprises', label: 'Cost surprises' } ] },
+    { id: 'ephemeral', label: 'I am curious about ephemeral compute.',
+      guide: 'gh', view: 'view-runners',
+      why: 'Runner infrastructure is an honest description of what you actually get: memory, disk, cores, network and a wall clock, all discarded afterwards.',
+      also: [ { guide: 'gh', view: 'view-model', label: 'How Actions works' },
+              { guide: 'gh', view: 'view-debug', label: 'Debugging & observability' } ] },
+    { id: 'costs', label: 'I want to understand cloud costs.',
+      guide: 'dng', view: 'view-surprises',
+      why: 'The cost surprises are calculators for the lines that arrive uninvited: gateway hours, address hours, idle databases, archive retrieval and early deletion.',
+      also: [ { guide: 'cf', view: 'view-pricing', label: 'Cloudflare costs & quotas' },
+              { guide: 'gh', view: 'view-cost', label: 'GitHub costs & quotas' } ] },
+    { id: 'storage', label: 'I want to compare storage options.',
+      guide: 'dng', view: 'view-storage',
+      why: 'Twelve storage classes priced through the four mechanics that actually decide the bill: minimum billable duration, minimum billable object size, retrieval charges and operation charges.',
+      also: [ { guide: 'cf', view: 'view-storage', label: 'Cloudflare storage selection' },
+              { guide: 'cf', view: 'view-r2', label: 'R2' } ] },
+    { id: 'experiments', label: 'I want practical experiments.',
+      guide: 'gh', view: 'view-experiments',
+      why: 'Runnable experiments with a stated expected result, so a claim about a platform can be checked in your own repository instead of believed.',
+      also: [ { guide: 'cf', view: 'view-experiments', label: 'Cloudflare experiments' },
+              { guide: 'cf', view: 'view-recipes', label: 'Recipes' } ] },
+    { id: 'cases', label: 'I want to see real project case studies.',
+      guide: 'rtj', view: 'view-projects',
+      why: 'Eight real projects reviewed with a verdict and the specific condition that would change it. Several of them are the tools in this drawer.',
+      also: [ { guide: 'dng', view: 'view-roadnaturalist', label: 'The Road Naturalist study' },
+              { guide: 'gh', view: 'view-opportunities', label: 'JunkDrawer opportunities' } ] },
+    { id: 'provider', label: 'I want to learn which provider fits my needs.',
+      guide: 'cf', view: 'view-boundary',
+      why: 'The billing boundary is where a free tier ends and a decision begins, and it is the most honest place to start comparing an application platform with anything else.',
+      also: [ { guide: 'rtj', view: 'view-compare', label: 'Compare candidates' },
+              { guide: 'rtj', view: 'view-diagram', label: 'Topology' } ] }
+  ];
+
+  /* Five routes. Every step is a real section in a real artifact. */
+  var PATHS = [
+    { id: 'automation', title: 'The Automation Explorer',
+      who: 'You suspect a scheduled job could run without a server.',
+      minutes: 'About 25 minutes',
+      steps: [
+        { guide: 'gh', view: 'view-schedule', label: 'Scheduled automation' },
+        { guide: 'gh', view: 'view-runners', label: 'Runner infrastructure' },
+        { guide: 'gh', view: 'view-opportunities', label: 'JunkDrawer opportunities' },
+        { guide: 'rtj', view: 'view-projects', label: 'The Overhead review' }
+      ] },
+    { id: 'serverless', title: 'The Serverless Builder',
+      who: 'You want to know how far an application can go with no server of your own.',
+      minutes: 'About 45 minutes',
+      steps: [
+        { guide: 'cf', view: 'view-workers', label: 'Workers' },
+        { guide: 'cf', view: 'view-d1', label: 'D1' },
+        { guide: 'cf', view: 'view-r2', label: 'R2' },
+        { guide: 'cf', view: 'view-storage', label: 'Storage selection' },
+        { guide: 'cf', view: 'view-inventory', label: 'My infrastructure' }
+      ] },
+    { id: 'optimizer', title: 'The Architecture Optimizer',
+      who: 'You have a real system and you want to know whether it is in the right place.',
+      minutes: 'About an hour',
+      steps: [
+        { guide: 'rtj', view: 'view-architect', label: 'Workload architect' },
+        { guide: 'rtj', view: 'view-compare', label: 'Comparison' },
+        { guide: 'rtj', view: 'view-cost', label: 'Cost model' },
+        { guide: 'rtj', view: 'view-breakeven', label: 'Break-even' },
+        { guide: 'rtj', view: 'view-projects', label: 'My projects' }
+      ] },
+    { id: 'skeptic', title: 'The Hyperscaler Skeptic',
+      who: 'You want to find out whether the conventional cloud is still earning its keep.',
+      minutes: 'About an hour',
+      steps: [
+        { guide: 'dng', view: 'view-necessity', label: 'Necessity test' },
+        { guide: 'dng', view: 'view-compute', label: 'Compute envelope' },
+        { guide: 'dng', view: 'view-data', label: 'Data and analytics' },
+        { guide: 'dng', view: 'view-boundary', label: 'Capability boundary' },
+        { guide: 'dng', view: 'view-roadnaturalist', label: 'Road Naturalist' }
+      ] },
+    { id: 'investigator', title: 'The Cost Investigator',
+      who: 'You have a bill, or you are afraid you are about to get one.',
+      minutes: 'About 50 minutes',
+      steps: [
+        { guide: 'gh', view: 'view-cost', label: 'GitHub costs & quotas' },
+        { guide: 'cf', view: 'view-pricing', label: 'Cloudflare costs & quotas' },
+        { guide: 'dng', view: 'view-surprises', label: 'Cost surprises' },
+        { guide: 'rtj', view: 'view-tco', label: 'Operational TCO' },
+        { guide: 'dng', view: 'view-storage', label: 'Storage classes' }
+      ] }
+  ];
+
+  root.IFGData = {
+    VERIFIED: VERIFIED, GUIDES: GUIDES, META: META, INTENTS: INTENTS, PATHS: PATHS
+  };
+})(typeof window !== 'undefined' ? window : this);
+</script>
+
+<script id="ifg-core">
+/* ==========================================================================
+   ifg-core — pure functions over the snapshot. No DOM, no network.
+
+   Everything here is unit-tested directly by tests/infrastructure-field-guide.cjs.
+   ========================================================================== */
+(function (root) {
+  'use strict';
+  var D = root.IFGData;
+  var GUIDES = D.GUIDES;
+  var INTENTS = D.INTENTS;
+  var PATHS = D.PATHS;
+
+  var FILES = GUIDES.map(function (g) { return g.file; });
+
+  function guideById(id) {
+    for (var i = 0; i < GUIDES.length; i++) { if (GUIDES[i].id === id) return GUIDES[i]; }
+    return null;
+  }
+  function intentById(id) {
+    for (var i = 0; i < INTENTS.length; i++) { if (INTENTS[i].id === id) return INTENTS[i]; }
+    return null;
+  }
+  function hasView(guideId, view) {
+    var g = guideById(guideId);
+    if (!g) return false;
+    for (var i = 0; i < g.deep.length; i++) { if (g.deep[i].view === view) return true; }
+    /* A view may be a legitimate target without being a promoted deep link;
+       the caller decides whether that matters. */
+    return /^view-[a-z0-9-]+$/.test(String(view || ''));
+  }
+  /* A deep link is a relative file, optionally with a #view- fragment.
+     Nothing else is permitted: no absolute URLs, no protocol-relative paths,
+     no bare fragments (those would point at this page instead). */
+  function link(guideId, view) {
+    var g = guideById(guideId);
+    if (!g) return null;
+    if (!view) return g.file;
+    return g.file + '#' + view;
+  }
+  function isSafeLink(href) {
+    if (typeof href !== 'string' || !href) return false;
+    if (/^[a-z]+:/i.test(href) || href.indexOf('//') === 0) return false;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.html(#view-[a-z0-9-]+)?$/.test(href)) return false;
+    return true;
+  }
+  function guideOfHref(href) {
+    var file = String(href || '').split('#')[0];
+    for (var i = 0; i < GUIDES.length; i++) { if (GUIDES[i].file === file) return GUIDES[i]; }
+    return null;
+  }
+
+  /* The selector. Deterministic: one intent, one answer, no scoring, and an
+     explicit failure shape rather than a silent default. */
+  function recommend(intentId) {
+    var intent = intentById(intentId);
+    if (!intent) return { ok: false, error: 'Unknown intent: ' + intentId + '. Nothing is recommended from a made-up question.' };
+    var g = guideById(intent.guide);
+    if (!g) return { ok: false, error: 'Intent ' + intentId + ' points at a guide that is not in the collection.' };
+    var also = [];
+    for (var i = 0; i < intent.also.length; i++) {
+      var a = intent.also[i];
+      var ag = guideById(a.guide);
+      if (ag) also.push({ href: link(a.guide, a.view), label: a.label, guide: ag.short });
+    }
+    var alternates = [];
+    for (var j = 0; j < GUIDES.length; j++) {
+      if (GUIDES[j].id !== g.id) {
+        alternates.push({ id: GUIDES[j].id, title: GUIDES[j].title, verb: GUIDES[j].verb, href: link(GUIDES[j].id) });
+      }
+    }
+    return {
+      ok: true,
+      intent: { id: intent.id, label: intent.label },
+      guide: { id: g.id, title: g.title, short: g.short, verb: g.verb },
+      why: intent.why,
+      primary: { href: link(g.id, intent.view), label: g.cta + ' — ' + viewLabel(g, intent.view) },
+      also: also,
+      alternates: alternates
+    };
+  }
+  function viewLabel(guide, view) {
+    for (var i = 0; i < guide.deep.length; i++) { if (guide.deep[i].view === view) return guide.deep[i].label; }
+    return 'a specific section';
+  }
+
+  /* Every link the page can produce, in one list. The test walks this. */
+  function allLinks() {
+    var out = [];
+    GUIDES.forEach(function (g) {
+      out.push({ guide: g.id, view: null, href: g.file, label: g.title });
+      g.deep.forEach(function (d) { out.push({ guide: g.id, view: d.view, href: link(g.id, d.view), label: d.label }); });
+    });
+    INTENTS.forEach(function (it) {
+      out.push({ guide: it.guide, view: it.view, href: link(it.guide, it.view), label: 'intent:' + it.id });
+      it.also.forEach(function (a) { out.push({ guide: a.guide, view: a.view, href: link(a.guide, a.view), label: 'also:' + it.id }); });
+    });
+    PATHS.forEach(function (p) {
+      p.steps.forEach(function (s) { out.push({ guide: s.guide, view: s.view, href: link(s.guide, s.view), label: 'path:' + p.id }); });
+    });
+    return out;
+  }
+  function sumSections() {
+    return GUIDES.reduce(function (n, g) { return n + g.sections; }, 0);
+  }
+  function metaRows() {
+    return GUIDES.map(function (g) {
+      return { file: g.file, title: g.title, version: g.version, sections: g.sections, verified: D.META.verified };
+    });
+  }
+
+  function selfTest() {
+    var checks = [];
+    function ok(name, cond, detail) { checks.push({ name: name, ok: !!cond, detail: cond ? '' : (detail || '') }); }
+    function unique(list) { var s = {}; for (var i = 0; i < list.length; i++) { if (s[list[i]]) return false; s[list[i]] = 1; } return true; }
+    var vre = /^\d{4}\.\d{2}\.\d{2}\.\d+$/;
+    var viewRe = /^view-[a-z0-9-]+$/;
+    var all = allLinks();
+
+    ok('four guides are present', GUIDES.length === 4, 'found ' + GUIDES.length);
+    ok('guide ids are unique', unique(GUIDES.map(function (g) { return g.id; })));
+    ok('guide files are unique', unique(GUIDES.map(function (g) { return g.file; })));
+    ok('every guide version is dated', GUIDES.every(function (g) { return vre.test(g.version); }));
+    ok('every guide has a positive section count', GUIDES.every(function (g) { return g.sections > 0; }));
+    ok('the sections total matches the page figure', sumSections() === 102, 'sum is ' + sumSections());
+    ok('every guide promotes at least three deep links', GUIDES.every(function (g) { return g.deep.length >= 3; }));
+    ok('every deep link is a view id', all.filter(function (l) { return l.view; }).every(function (l) { return viewRe.test(l.view); }));
+    ok('every guide poses a question', GUIDES.every(function (g) { return /\?$/.test(g.question); }));
+    ok('every guide names a call to action', GUIDES.every(function (g) { return !!g.cta; }));
+
+    ok('there are ten intents', INTENTS.length === 10, 'found ' + INTENTS.length);
+    ok('intent ids are unique', unique(INTENTS.map(function (i) { return i.id; })));
+    ok('every intent points at a real guide', INTENTS.every(function (i) { return !!guideById(i.guide); }));
+    ok('every intent points at a view id', INTENTS.every(function (i) { return viewRe.test(i.view); }));
+    ok('every intent offers two second stops', INTENTS.every(function (i) { return i.also.length >= 2; }));
+    ok('every second stop points at a real guide', INTENTS.every(function (i) { return i.also.every(function (a) { return !!guideById(a.guide); }); }));
+
+    ok('there are five paths', PATHS.length === 5, 'found ' + PATHS.length);
+    ok('path ids are unique', unique(PATHS.map(function (p) { return p.id; })));
+    ok('every path has at least three steps', PATHS.every(function (p) { return p.steps.length >= 3; }));
+    ok('every path step points at a real guide', PATHS.every(function (p) { return p.steps.every(function (s) { return !!guideById(s.guide); }); }));
+
+    ok('every produced link is a safe relative link', all.every(function (l) { return isSafeLink(l.href); }),
+      'offending: ' + all.filter(function (l) { return !isSafeLink(l.href); }).map(function (l) { return l.href; }).join(', '));
+    ok('no link leaves this origin', all.every(function (l) { return !/^[a-z]+:/i.test(l.href) && l.href.indexOf('//') !== 0; }));
+    ok('every link resolves to a known guide', all.every(function (l) { return !!guideOfHref(l.href); }));
+
+    ok('the snapshot carries a verification date', /^\d{4}-\d{2}-\d{2}$/.test(D.META.verified));
+    ok('the landing version is dated', vre.test(D.META.landing.version));
+    ok('the landing page does not claim to auto-sync', /no automatic synchronization/i.test(D.META.note));
+
+    ok('an unknown intent fails explicitly', recommend('not-a-real-intent').ok === false);
+    ok('every intent recommends successfully', INTENTS.every(function (i) { return recommend(i.id).ok; }));
+    ok('every recommendation carries a safe primary link', INTENTS.every(function (i) { return isSafeLink(recommend(i.id).primary.href); }));
+    ok('every recommendation lists the three other guides', INTENTS.every(function (i) { return recommend(i.id).alternates.length === 3; }));
+
+    var failed = checks.filter(function (c) { return !c.ok; }).length;
+    return { passed: checks.length - failed, failed: failed, total: checks.length, checks: checks };
+  }
+
+  root.IFGCore = {
+    VERIFIED: D.META.verified,
+    META: D.META,
+    guides: function () { return GUIDES.slice(); },
+    guideById: guideById,
+    intents: function () { return INTENTS.slice(); },
+    paths: function () { return PATHS.slice(); },
+    link: link,
+    isSafeLink: isSafeLink,
+    guideOfHref: guideOfHref,
+    recommend: recommend,
+    allLinks: allLinks,
+    sumSections: sumSections,
+    metaRows: metaRows,
+    hasView: hasView,
+    selfTest: selfTest
+  };
+})(typeof window !== 'undefined' ? window : this);
+</script>
+
+<script id="ifg-app">
+/* ==========================================================================
+   ifg-app — the reading surface. DOM only: it renders what ifg-data declares
+   and ifg-core resolves, and it never computes a recommendation itself.
+   ========================================================================== */
+(function (root) {
+  'use strict';
+  var C = root.IFGCore;
+  var D = root.IFGData;
+  var KEY = root.IFGThemeCore.key;
+
+  function $(sel, ctx) { return (ctx || document).querySelector(sel); }
+  function $$(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  /* Only link text and fragments assembled here ever reach innerHTML, and
+     every href is re-validated against the same rule the tests use. */
+  function anchor(href, label, cls) {
+    if (!C.isSafeLink(href)) return '<span class="pill">link withheld</span>';
+    return '<a' + (cls ? ' class="' + esc(cls) + '"' : '') + ' href="' + esc(href) + '">' + esc(label) + '</a>';
+  }
+
+  /* ------------------------------------------------------------- state -- */
+  function readAll() {
+    var raw = (root.JDStorage ? root.JDStorage.getJSON(KEY, null) : null) || {};
+    return raw && typeof raw === 'object' ? raw : {};
+  }
+  var prefs = {};
+  function guideIds() { return C.guides().map(function (g) { return g.id; }); }
+  function sanitizeVisited(v) {
+    var allowed = guideIds();
+    var out = [];
+    if (Array.isArray(v)) {
+      for (var i = 0; i < v.length; i++) {
+        if (allowed.indexOf(v[i]) >= 0 && out.indexOf(v[i]) < 0) out.push(v[i]);
+      }
+    }
+    return out.slice(0, 4);
+  }
+  var visited = [];
+  var currentIntent = null;
+  /* Stored state is read once the deferred helper is guaranteed to have run:
+     this inline block executes while the document is still parsing, and
+     jd-storage.js is deferred, so reading at evaluation time would see nothing
+     and silently forget every preference on reload. */
+  function initState() {
+    prefs = readAll();
+    visited = sanitizeVisited(prefs.visited);
+    var known = C.intents().filter(function (i) { return i.id === prefs.intent; });
+    currentIntent = known.length ? known[0].id : null;
+  }
+
+  function save(patch) {
+    prefs = Object.assign({}, prefs, patch);
+    prefs.visited = visited;
+    if (root.JDStorage) root.JDStorage.setJSON(KEY, prefs, { maxRetries: 2 });
+  }
+  function say(msg) { var el = $('#selectorStatus'); if (el) el.textContent = msg || ''; }
+
+  /* ------------------------------------------------------------- theme -- */
+  function paintThemeControls() {
+    var state = root.IFGTheme.state();
+    $$('[data-theme-set]').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-theme-set') === state ? 'true' : 'false');
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('[data-theme-set]') : null;
+    if (!b) return;
+    var pref = root.IFGTheme.set(b.getAttribute('data-theme-set'));
+    save({ theme: pref });
+    paintThemeControls();
+  });
+  paintThemeControls();
+
+  /* -------------------------------------------------------- navigation -- */
+  var SECTION_IDS = ['guides', 'start', 'pieces', 'findings', 'beyond', 'paths', 'philosophy', 'sources'];
+  function paintNav() {
+    /* The last section that has actually started, not the one nearest the top:
+       a section is "current" from the moment its heading passes the bar. */
+    var y = root.scrollY || root.pageYOffset || 0;
+    var best = null;
+    SECTION_IDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.offsetTop <= y + 150) best = id;
+    });
+    $$('#tnav a').forEach(function (a) {
+      var target = a.getAttribute('href').replace('#', '');
+      if (target === best) a.setAttribute('aria-current', 'true');
+      else a.removeAttribute('aria-current');
+    });
+  }
+  var ticking = false;
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    root.requestAnimationFrame(function () { paintNav(); ticking = false; });
+  }
+  root.addEventListener('scroll', onScroll, { passive: true });
+
+  function paintProgress() {
+    var el = $('#progress');
+    if (!el) return;
+    el.textContent = visited.length + '/' + C.guides().length + ' opened';
+  }
+  function markVisited(id) {
+    if (visited.indexOf(id) >= 0) return;
+    visited = sanitizeVisited(visited.concat([id]));
+    save({});
+    paintProgress();
+  }
+
+  /* ---------------------------------------------------- the selector ---- */
+  function renderIntents() {
+    var host = $('#intents');
+    if (!host) return;
+    host.innerHTML = C.intents().map(function (it) {
+      return '<button type="button" class="intent" data-intent="' + esc(it.id) + '" aria-pressed="'
+        + (it.id === currentIntent ? 'true' : 'false') + '">' + esc(it.label) + '</button>';
+    }).join('');
+  }
+  function renderAnswer() {
+    var host = $('#answer');
+    if (!host) return;
+    if (!currentIntent) {
+      host.innerHTML = '<p class="empty-state">Pick a line on the left. If two of them are true, pick the one you would type into a search box first.</p>';
+      return;
+    }
+    var r = C.recommend(currentIntent);
+    if (!r.ok) {
+      host.innerHTML = '<p class="empty-state">' + esc(r.error) + '</p>';
+      return;
+    }
+    var html = '';
+    html += '<div class="verdict"><span class="pill ' + esc(r.guide.id) + '">' + esc(r.guide.verb) + '</span><b>' + esc(r.guide.title) + '</b></div>';
+    html += '<p class="why">' + esc(r.why) + '</p>';
+    html += '<p class="cta">' + anchor(r.primary.href, r.primary.label, 'btn') + '</p>';
+    if (r.also.length) {
+      html += '<div class="also"><h4>Then, if it fits</h4><ul>';
+      r.also.forEach(function (a) {
+        html += '<li>' + anchor(a.href, a.label) + ' <span class="visually-hidden">in ' + esc(a.guide) + '</span><span aria-hidden="true" style="color:var(--ink-4)"> · ' + esc(a.guide) + '</span></li>';
+      });
+      html += '</ul></div>';
+    }
+    html += '<div class="also"><h4>Not what you expected?</h4><ul>';
+    r.alternates.forEach(function (a) {
+      html += '<li>' + anchor(a.href, a.title) + ' <span aria-hidden="true" style="color:var(--ink-4)"> · ' + esc(a.verb) + '</span></li>';
+    });
+    html += '</ul></div>';
+    host.innerHTML = html;
+  }
+  function selectIntent(id, quiet) {
+    var r = C.recommend(id);
+    if (!r.ok) { say(r.error); return null; }
+    currentIntent = id;
+    $$('#intents .intent').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-intent') === id ? 'true' : 'false');
+    });
+    renderAnswer();
+    markVisited(r.guide.id);
+    if (!quiet) say('Recommended guide: ' + r.guide.title + '.');
+    return r;
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('#intents .intent') : null;
+    if (!b) return;
+    var r = selectIntent(b.getAttribute('data-intent'));
+    if (r) save({ intent: r.intent.id });
+  });
+
+  /* ----------------------------------------------------------- paths ---- */
+  function renderPaths() {
+    var host = $('#pathsMount');
+    if (!host) return;
+    host.innerHTML = C.paths().map(function (p) {
+      var steps = p.steps.map(function (s, i) {
+        var g = C.guideById(s.guide);
+        return '<li>' + anchor(C.link(s.guide, s.view), String(i + 1).padStart(2, '0') + ' ' + s.label) + '</li>';
+      }).join('');
+      return '<article class="path" id="path-' + esc(p.id) + '">'
+        + '<h3>' + esc(p.title) + '</h3>'
+        + '<p class="who">' + esc(p.who) + '</p>'
+        + '<ol>' + steps + '</ol>'
+        + '<p class="cost">' + esc(p.minutes) + ' at a comfortable pace.</p>'
+        + '</article>';
+    }).join('');
+  }
+
+  /* ------------------------------------------------- metadata + stats --- */
+  function renderMeta() {
+    var body = $('#metaBody');
+    if (!body) return;
+    body.innerHTML = C.metaRows().map(function (r) {
+      return '<tr>'
+        + '<td>' + anchor(C.link((C.guides().filter(function (g) { return g.file === r.file; })[0] || {}).id), r.title) + '</td>'
+        + '<td class="v">' + esc(r.version) + '</td>'
+        + '<td class="v">' + esc(r.sections) + '</td>'
+        + '<td class="v">' + esc(r.verified) + '</td>'
+        + '<td>' + anchor(r.file, 'Open') + '</td>'
+        + '</tr>';
+    }).join('');
+    var v = $('#metaVerified');
+    if (v) v.textContent = C.VERIFIED;
+    var lv = $('#landingVersion');
+    if (lv) lv.textContent = C.META.landing.version;
+    var lu = $('#landingUpdated');
+    if (lu) lu.textContent = C.META.landing.updated;
+  }
+  function renderStats() {
+    var el = $('#statSections');
+    if (el) el.textContent = String(C.sumSections());
+  }
+
+  function boot() {
+    initState();
+    renderStats();
+    renderIntents();
+    renderAnswer();
+    renderPaths();
+    renderMeta();
+    paintProgress();
+    paintNav();
+  }
+  /* The test hook: everything a spec needs to assert behaviour, and nothing
+     that changes it. Published after the first boot so a spec never observes a
+     half-initialised page. */
+  function expose() {
+    root.__IFG_TEST__ = {
+    sections: function () { return SECTION_IDS.slice(); },
+    guides: function () { return C.guides().map(function (g) { return { id: g.id, file: g.file, sections: g.sections, version: g.version }; }); },
+    intents: function () { return C.intents().map(function (i) { return i.id; }); },
+    paths: function () { return C.paths().map(function (p) { return { id: p.id, steps: p.steps.length }; }); },
+    recommend: function (id) { return C.recommend(id); },
+    selectIntent: function (id) { return selectIntent(id, true); },
+    currentIntent: function () { return currentIntent; },
+    answerText: function () { var el = $('#answer'); return el ? el.textContent : ''; },
+    links: function () { return $$('#answer a, #pathsMount a, #metaBody a').map(function (a) { return a.getAttribute('href'); }); },
+    allLinks: function () { return C.allLinks(); },
+    metaRows: function () { return C.metaRows(); },
+    sumSections: function () { return C.sumSections(); },
+    statSections: function () { var el = $('#statSections'); return el ? el.textContent : null; },
+    prefs: function () { return JSON.parse(JSON.stringify(readAll())); },
+    visited: function () { return visited.slice(); },
+    markVisited: function (id) { markVisited(id); return visited.slice(); },
+    theme: function () { return { state: root.IFGTheme.state(), applied: document.documentElement.getAttribute('data-theme') }; },
+    setTheme: function (p) { var out = root.IFGTheme.set(p); save({ theme: out }); paintThemeControls(); return out; },
+    selfTest: function () { return C.selfTest(); },
+    boot: function () { boot(); return true; }
+    };
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { boot(); expose(); });
+  } else {
+    boot();
+    expose();
+  }
+})(typeof window !== 'undefined' ? window : this);
+</script>
+</body>
+</html>
