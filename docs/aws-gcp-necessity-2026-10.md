@@ -41,9 +41,11 @@ workload is one of five classifications, and only one of them is categorical:
    page exists to prevent. The gates are: category, memory, disk, duration, native execution,
    container control, accelerator count, VRAM, multi-node, region pinning, residency, process
    lifetime, database shape and database extensions.
-2. **Cost.** Survivors are priced by one of 19 cost models over a curated catalogue of 126 rates.
-   Fixed charges, included allowances, rounding and unknowns are kept separate. Every rate names its
-   source and its confidence, and every rate can be overridden with a real quote.
+2. **Cost.** Survivors are priced by one of 24 named platform cost models over a curated catalogue of
+   126 rates. A 25th model prices storage classes and is shared by all twelve of them, so the engine
+   exposes 36 pricing hooks in total. Fixed charges, included allowances, rounding and unknowns are
+   kept separate. Every rate names its source and its confidence, and every rate can be overridden
+   with a real quote.
 3. **Classification.** The verdict follows from a comparison between the cheapest surviving
    non-hyperscaler option and the cheapest surviving hyperscaler option, with capability differences
    treated as part of the comparison rather than as a tiebreak.
