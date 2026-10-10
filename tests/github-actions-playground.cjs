@@ -264,7 +264,7 @@ t('state: sanitizePrefs defaults safely and bounds everything', () => {
     experiments: { 1: true, 2: false },
     costInputs: { cMinutes: 12, cPlan: 'pro', bogus: { nested: true } },
     cronExpr: 'x'.repeat(400),
-    contrast: 'yes'
+    theme: 'System'
   });
   assert.equal(messy.tab, 'view-start', 'invalid tab rejected');
   assert.ok(messy.bookmarks.length <= 64);
@@ -274,7 +274,12 @@ t('state: sanitizePrefs defaults safely and bounds everything', () => {
   assert.deepEqual(json(Object.keys(messy.experiments)), ['1']);
   assert.equal(messy.costInputs.cMinutes, 12);
   assert.equal(messy.cronExpr.length, 120);
-  assert.equal(messy.contrast, true);
+  assert.equal(messy.theme, 'light', 'a theme that is not exactly light, dark or system falls back to light');
+  assert.equal(s.theme, 'light', 'fresh state starts light');
+  ['light', 'dark', 'system'].forEach(v => assert.equal(C.sanitizePrefs({ theme: v }).theme, v));
+  assert.equal(C.sanitizePrefs({ theme: { nested: 'dark' } }).theme, 'light');
+  assert.equal(C.sanitizePrefs({ theme: 1 }).theme, 'light');
+  assert.ok(!('contrast' in s), 'the removed contrast flag is no longer part of stored state');
 });
 t('state: the page writes only the three documented localStorage keys', () => {
   const uniq = Array.from(new Set(html.match(/gaPlayground\.[a-zA-Z0-9.]+/g) || [])).sort();
@@ -356,6 +361,210 @@ t('reference tables are populated', () => {
   assert.ok(C.REF.env.length >= 10);
   assert.ok(C.REF.funcs.length >= 6);
   assert.ok(C.REF.cli.length >= 8);
+});
+
+/* ---------------- theme resolution (gap-theme, extracted and run isolated) ---------------- */
+const themeMatch = html.match(/<script id="gap-theme">([\s\S]*?)<\/script>/);
+assert.ok(themeMatch, 'gap-theme script block must exist in the page');
+const themeSource = themeMatch[1];
+
+/* Runs the real resolver in a vm with a stubbed window, so every rule is exercised
+   as written rather than re-implemented in the test. */
+function loadTheme(opts) {
+  const o = opts || {};
+  const attrs = {};
+  const systemListeners = [];
+  const mql = {
+    matches: !!o.prefersDark,
+    addEventListener(type, fn) { systemListeners.push(fn); },
+  };
+  const stored = o.stored || {};
+  const storage = o.brokenStorage
+    ? { getItem() { throw new Error('storage disabled'); } }
+    : { getItem(k) { return Object.prototype.hasOwnProperty.call(stored, k) ? stored[k] : null; } };
+  const win = {
+    document: { documentElement: { setAttribute(k, v) { attrs[k] = v; } } },
+    matchMedia() { return mql; },
+    localStorage: storage,
+  };
+  win.window = win;
+  const sandbox = { window: win, console, JSON, Object, Array, String, RegExp, Math, Date, isFinite };
+  vm.createContext(sandbox);
+  vm.runInContext(themeSource, sandbox);
+  return {
+    attrs, mql, theme: win.GAPTheme, core: win.GAPThemeCore,
+    /* simulate the operating system switching appearance while the page is open */
+    changeSystem(dark) { mql.matches = dark; systemListeners.forEach(fn => fn()); },
+  };
+}
+const prefKey = 'gaPlayground.prefs.v1';
+
+t('theme: the core declares light as the default and only three choices', () => {
+  const { core } = loadTheme();
+  assert.deepEqual(json(core.themes), ['light', 'dark', 'system']);
+  assert.equal(core.DEFAULT, 'light');
+  assert.equal(core.key, prefKey);
+  assert.equal(core.normalize('dark'), 'dark');
+  assert.equal(core.normalize('system'), 'system');
+  assert.equal(core.resolve('light', true), 'light');
+  assert.equal(core.resolve('dark', false), 'dark');
+  assert.equal(core.resolve('system', true), 'dark');
+  assert.equal(core.resolve('system', false), 'light', 'system without an OS dark preference is light');
+});
+
+t('theme: anything that is not an explicit theme choice means light', () => {
+  const { core } = loadTheme();
+  ['', null, undefined, 'DARK', 'midnight', 'system ', 0, {}, [], 'true', 'auto'].forEach(v => {
+    assert.equal(core.normalize(v), 'light', 'normalize(' + JSON.stringify(v) + ')');
+    assert.equal(core.resolve(v, true), 'light', 'an OS dark preference must not override ' + JSON.stringify(v));
+  });
+  assert.equal(core.readStored(null), 'light', 'no storage at all');
+  assert.equal(core.readStored({ getItem: () => 'not json' }), 'light', 'unparseable payload');
+  assert.equal(core.readStored({ getItem: () => 'null' }), 'light', 'JSON null');
+  assert.equal(core.readStored({ getItem: () => '[]' }), 'light', 'JSON array');
+  assert.equal(core.readStored({ getItem: () => JSON.stringify({ bookmarks: ['view-cost'], contrast: true }) }), 'light',
+    'a legacy pref with no theme field carries no theme decision');
+  assert.equal(core.readStored({ getItem: () => JSON.stringify({ theme: 'dark' }) }), 'dark');
+});
+
+t('theme: a fresh visitor is light even when the operating system prefers dark', () => {
+  const fresh = loadTheme({ prefersDark: true });
+  assert.equal(fresh.attrs['data-theme'], 'light', 'default is light regardless of the OS preference');
+  assert.equal(fresh.attrs['data-theme-pref'], 'light');
+  assert.equal(fresh.theme.state().resolved, 'light');
+
+  const legacy = loadTheme({ prefersDark: true, stored: { [prefKey]: JSON.stringify({ bookmarks: [], contrast: true }) } });
+  assert.equal(legacy.attrs['data-theme'], 'light');
+  assert.equal(legacy.theme.state().pref, 'light');
+
+  const broken = loadTheme({ prefersDark: true, brokenStorage: true });
+  assert.equal(broken.attrs['data-theme'], 'light', 'a blocked localStorage must not break theming');
+});
+
+t('theme: the stored choice is applied to <html> before anything renders', () => {
+  const dark = loadTheme({ stored: { [prefKey]: JSON.stringify({ theme: 'dark' }) } });
+  assert.equal(dark.attrs['data-theme'], 'dark');
+  assert.equal(dark.attrs['data-theme-pref'], 'dark');
+  const light = loadTheme({ stored: { [prefKey]: JSON.stringify({ theme: 'light' }) }, prefersDark: true });
+  assert.equal(light.attrs['data-theme'], 'light', 'an explicit light choice beats an OS dark preference');
+});
+
+t('theme: system mode follows the OS, live, while the page is open', () => {
+  const sys = loadTheme({ prefersDark: true, stored: { [prefKey]: JSON.stringify({ theme: 'system' }) } });
+  assert.equal(sys.attrs['data-theme'], 'dark', 'system + OS dark = dark');
+  assert.equal(sys.attrs['data-theme-pref'], 'system', 'the preference itself stays system');
+  sys.changeSystem(false);
+  assert.equal(sys.attrs['data-theme'], 'light', 'the OS switches to light while the page is open');
+  sys.changeSystem(true);
+  assert.equal(sys.attrs['data-theme'], 'dark', 'and back again');
+
+  const explicit = loadTheme({ prefersDark: false, stored: { [prefKey]: JSON.stringify({ theme: 'dark' }) } });
+  assert.equal(explicit.attrs['data-theme'], 'dark');
+  explicit.changeSystem(true);
+  assert.equal(explicit.attrs['data-theme'], 'dark', 'explicit dark ignores OS changes');
+  assert.equal(explicit.theme.set('system'), 'system');
+  assert.equal(explicit.attrs['data-theme'], 'dark', 'switching to system re-resolves against the current OS');
+  assert.equal(explicit.theme.set('nonsense'), 'light', 'set() normalises anything unknown');
+});
+
+t('theme: the stylesheet never follows the OS on its own', () => {
+  const cssBlock = html.match(/<style>([\s\S]*?)<\/style>/)[1];
+  assert.equal(/@media\s*\(prefers-color-scheme/.test(cssBlock), false,
+    'the resolver owns that decision, so a stored choice always wins');
+  assert.equal((html.match(/prefers-color-scheme/g) || []).length, 1,
+    'exactly one prefers-color-scheme query in the page — the gap-theme resolver');
+  assert.ok(html.indexOf('<script id="gap-theme">') < html.indexOf('<style>'),
+    'the resolver runs before the stylesheet, so there is no flash of the wrong theme');
+  assert.ok(html.includes('<meta name="color-scheme" content="light dark">'));
+  assert.ok(!/#btnTheme|prefs\.contrast/.test(html), 'the old contrast toggle is gone');
+});
+
+t('theme: the control in the bar offers exactly light, dark and system', () => {
+  const sel = html.match(/<select id="themeSel"[^>]*>([\s\S]*?)<\/select>/);
+  assert.ok(sel, 'a theme selector exists');
+  assert.deepEqual(json([...sel[1].matchAll(/<option value="([a-z]+)"/g)].map(m => m[1])), ['light', 'dark', 'system']);
+  assert.ok(/<label class="sr-only" id="themeLab" for="themeSel">/.test(html), 'a real label is associated');
+  assert.ok(/id="themeIco"[^>]*aria-hidden="true"/.test(html), 'the sun/moon glyph is decorative');
+  assert.ok(/window\.GAPTheme\.onChange\(paint\)/.test(html), 'the control follows programmatic changes (system mode)');
+});
+
+/* ---------------- palette: token discipline and WCAG AA ---------------- */
+const cssText = html.match(/<style>([\s\S]*?)<\/style>/)[1];
+function tokenBlock(selector) {
+  const m = cssText.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}'));
+  const out = {};
+  if (!m) return out;
+  m[1].replace(/\/\*[\s\S]*?\*\//g, '').split(';').forEach(decl => {
+    const i = decl.indexOf(':');
+    if (i > 0) out[decl.slice(0, i).trim()] = decl.slice(i + 1).trim();
+  });
+  return out;
+}
+const light = tokenBlock(':root');
+const dark = tokenBlock('html[data-theme="dark"]');
+
+function luminance(hex) {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const [r, g, b] = [0, 2, 4].map(i => {
+    const s = parseInt(full.slice(i, i + 2), 16) / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrast(a, b) {
+  const l1 = luminance(a), l2 = luminance(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
+
+t('palette: light is the default set and the dark set is opt-in', () => {
+  assert.equal(light['--bg'], '#ffffff', 'white reading surface by default');
+  assert.equal(light['--surface'], '#ffffff');
+  assert.equal(light['--bg-app'], '#f8fafc');
+  assert.equal(light['--text'], '#172033');
+  assert.equal(light['--surface-code'], '#f6f8fa', 'code is light by default too');
+  assert.ok(/(^|\n)\s*:root\{[^}]*color-scheme:\s*light/.test(cssText), 'the default block declares a light colour scheme');
+  assert.equal(dark['--bg'], '#0d1117', 'dark lives in its own token set');
+  assert.equal(dark['--surface-code'], '#161b22');
+  const darkRule = cssText.match(/html\[data-theme="dark"\]\s*\{[^}]*\}/)[0];
+  assert.ok(/color-scheme:\s*dark/.test(darkRule));
+  // every colour-valued token must exist in both sets, or a component silently inherits the wrong theme
+  const colourKeys = Object.keys(light).filter(k => /^(#|rgba?\()/i.test(light[k]));
+  assert.ok(colourKeys.length >= 30, 'colour tokens in the light set: ' + colourKeys.length);
+  const missing = colourKeys.filter(k => !(k in dark));
+  assert.deepEqual(missing, [], 'colour tokens with no dark counterpart: ' + missing.join(', '));
+});
+
+t('palette: no component hardcodes a colour, a gradient or a glow', () => {
+  const withoutTokens = cssText.replace(/(:root|html\[data-theme[^{]*)\{[^}]*\}/g, '');
+  const hexes = [...withoutTokens.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m => m[0]);
+  assert.deepEqual(hexes, [], 'colour literals outside the token blocks: ' + hexes.join(' '));
+  assert.ok(!/gradient/.test(withoutTokens), 'no gradients in component rules');
+  assert.ok(!/blur\(|drop-shadow/.test(withoutTokens), 'no glow or blur effects');
+});
+
+t('palette: every text/background pair in both themes meets WCAG AA', () => {
+  const pairs = [
+    ['--text', '--bg'], ['--text', '--surface'], ['--text', '--surface-2'], ['--text', '--surface-3'],
+    ['--text-2', '--bg'], ['--text-2', '--surface'], ['--text-2', '--surface-2'], ['--text-2', '--surface-3'],
+    ['--text-3', '--bg'], ['--text-3', '--surface'], ['--text-3', '--surface-2'],
+    ['--accent', '--bg'], ['--accent', '--surface'], ['--accent', '--accent-soft'],
+    ['--success', '--surface'], ['--success', '--success-soft'],
+    ['--warning', '--surface'], ['--warning', '--warning-soft'],
+    ['--danger', '--surface'], ['--danger', '--danger-soft'],
+    ['--violet', '--surface'], ['--violet', '--violet-soft'],
+    ['--pink', '--surface'], ['--pink', '--pink-soft'],
+    ['--syn-key', '--surface-code'], ['--syn-str', '--surface-code'], ['--syn-num', '--surface-code'],
+    ['--syn-com', '--surface-code'], ['--syn-exp', '--surface-code'], ['--syn-bool', '--surface-code'],
+    ['--text', '--surface-code'],
+  ];
+  [['light', light], ['dark', dark]].forEach(([name, tokens]) => {
+    pairs.forEach(([fg, bg]) => {
+      assert.ok(tokens[fg] && tokens[bg], name + ': ' + fg + ' or ' + bg + ' is missing');
+      const r = contrast(tokens[fg], tokens[bg]);
+      assert.ok(r >= 4.5, name + ': ' + fg + ' on ' + bg + ' = ' + r.toFixed(2) + ':1 (AA needs 4.5:1)');
+    });
+  });
 });
 
 /* ---------------- report ---------------- */
