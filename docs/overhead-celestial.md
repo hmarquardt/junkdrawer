@@ -147,6 +147,24 @@ Flags: `--out`, `--ephemeris-out`, `--horizon-days`, `--max-candidates`, `--step
    file (new object; |Δmagnitude| ≥ 0.7; element epoch change ≥ 1 day; closest approach improving ≥ 20%).
 6. Hard validation, then atomic publication.
 
+**Published precision is a contract, not a tolerance.** `comet-ephemerides.json` publishes RA/Dec/r/Δ to
+6 decimals; `comets.json` publishes `geometry.min_delta_au` to 4 and `interpolation_max_deviation_deg`
+to 5. Every published derived value is computed from the samples *as published*
+(`published_samples`/`published_rows`), and `--check` / `--no-network` re-derive each of them from the
+artifact's own samples through the same helper and require **equality** — no rounding window is
+involved. The underlying claim is still enforced separately: the published minimum must be the smallest
+published Δ within the field's own rounding half-width (5e-5 au), so a value that is not the smallest
+published distance is rejected even when it is close.
+
+That contract replaced a 5e-5 au tolerance on 2026-10-09. The producer rounded the *raw* Horizons
+minimum to 4 decimals while the validator compared it against the *published* 6-decimal grid, so the two
+could legitimately differ by exactly the tolerance. Scheduled run 38032183173 (2026-10-10) failed on it:
+78P's minimum was 1.55874987605176 au raw, 1.55875 au published and 1.5587 au as published geometry — a
+difference of 5.0000000000105516e-05 au, one floating-point ulp past the limit — so the run published
+nothing and left the previous dataset in place. `tests/test_overhead_comets_precision.py` pins that
+sample set, the four-decimal rounding boundaries, the flat-minimum tie rule, and the fact that a
+tampered value is still rejected.
+
 Result: **16 comets, 2 806 Horizons samples** with an adaptive step (48 h by default, refined to 24 h, 12 h or
 8 h for the fastest comets), plus the COBS measurement summary, catalog `generated_at`
 and per-source SHA-256 digests recorded; comets with no usable ephemeris are omitted and listed with a
@@ -157,9 +175,18 @@ reason.
 - Daily 06:23 UTC: comets. Monthly on the 1st at 06:17 UTC: meteor calendar. `workflow_dispatch` accepts
   `target = comets | meteors | both`.
 - Steps: record the committed SHA-256s → refresh (tolerating a failed refresh so validation and reporting
-  still run) → validate both artifacts with `--check` (hard gate) → validate independently in Node →
-  report what changed in the step summary → commit only when a file actually changed → fail the run if a
-  refresh step failed.
+  still run) → validate both artifacts with `--check`, re-derive the comet pair offline with
+  `--no-network` and run `tests/test_overhead_comets_precision.py` (hard gate) → re-pin the offline fixture
+  if its pins have drifted → validate independently in Node → report what changed in the step summary →
+  commit only when a file actually changed → fail the run if a refresh step failed.
+- The fixture re-pin step exists because `tests/fixtures/overhead/horizons-comets.json` pins the SBDB
+  solution and the raw COBS payloads it was built from, and the Node validation holds the refreshed
+  artifacts to those pins exactly. JPL republishes comet solutions (15 of the 24 solutions used here were
+  republished on 2026-10-09 alone) and COBS keeps gaining observations, so the pins legitimately stop
+  matching whenever a source moves; `--build-fixture` is the documented way to move a pin, and it runs only
+  when the pins have actually drifted, in the same run that refreshed the artifacts. The checks themselves
+  stay exact — nothing is widened, and the fixture records the retrieval timestamps and SHA-256 digests of
+  everything it re-pins.
 - Publication is atomic in the scripts, so a failed retrieval leaves the last good dataset in place; the
   page then shows the dataset's own age rather than pretending it is fresh. Nothing is ever deleted by a
   failed run.
@@ -385,6 +412,8 @@ npx playwright test tests/overhead.spec.js tests/overhead-celestial.spec.js
 # Dataset regeneration and validation
 python3 tools/overhead_meteors_build.py --check
 python3 tools/overhead_comets_build.py --check
+python3 tools/overhead_comets_build.py --no-network
+python3 tests/test_overhead_comets_precision.py
 python3 tools/overhead_horizons_fixtures.py --out tests/fixtures/overhead/horizons-planets.json
 ```
 

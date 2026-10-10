@@ -64,6 +64,19 @@ Modes
 The build refuses to publish unless every documented invariant holds (see validate_artifact), and
 both artifacts are written atomically (temp file + os.replace) so a failure never leaves a partial
 file behind; on failure the previously committed artifacts are left untouched.
+
+Published precision and derived values
+    Both artifacts publish rounded decimals: ``comet-ephemerides.json`` stores ra/dec/r/delta to
+    ``EPHEMERIS_DECIMALS`` (6), ``comets.json`` stores ``geometry.min_delta_au`` to
+    ``MIN_DELTA_DECIMALS`` (4) and ``interpolation_max_deviation_deg`` to ``DEVIATION_DECIMALS`` (5).
+    Every derived number that is published is computed from the samples *as published*
+    (``published_samples``), never from the higher-precision Horizons response, and the offline
+    validator re-derives it from those same published numbers and requires *equality* - no tolerance
+    is involved.  Deriving from the raw response instead left the published value and its
+    re-derivation up to one rounding half-width apart, which is exactly the size of the old 5e-5 au
+    tolerance, so a minimum that landed on a rounding boundary failed on a floating-point ulp alone
+    (78P on the 2026-10-10 horizon: raw minimum delta 1.55874987605176 au, published 1.55875,
+    published ``min_delta_au`` 1.5587, difference 5.0000000000105516e-05).
 """
 from __future__ import annotations
 
@@ -125,6 +138,17 @@ HORIZONS_BRIGHT_ENOUGH_MAG = 12.0
 # deviation stays inside INTERPOLATION_MAX_DEG.  --step-hours is the requested maximum.
 STEP_CHOICES_HOURS = (1, 2, 3, 4, 6, 8, 12, 24, 48)
 INTERPOLATION_MAX_DEG = 0.02
+# Published decimal precision (see "Published precision and derived values" in the module docstring).
+# Every published derived value is a function of the samples *as published*, so the offline validator
+# reproduces it exactly instead of comparing it against a rounding half-width.
+EPHEMERIS_DECIMALS = 6         # ra_deg / dec_deg / r_au / delta_au in comet-ephemerides.json
+MIN_DELTA_DECIMALS = 4         # geometry.min_delta_au in comets.json
+DEVIATION_DECIMALS = 5         # interpolation_max_deviation_deg in comet-ephemerides.json
+# How far a MIN_DELTA_DECIMALS-decimal publication of a smaller-precision minimum can legitimately be
+# away from it: the rounding half-width plus the representation slack of two doubles (about 1e-16 au
+# at 1 au, rounded up to 1e-12 here).  This is the documented rounding bound of the published field,
+# not a data tolerance - the equality check in rederive_offline is exact.
+MIN_DELTA_HALF_WIDTH = 0.5 * 10 ** -MIN_DELTA_DECIMALS + 1e-12
 COBS_WINDOW_DAYS = 120
 COBS_MEDIAN_DAYS = 30
 COBS_PAGE_LIMIT = 3
@@ -983,11 +1007,14 @@ def build_comet(candidate: dict, ephemeris: dict, measured: dict, horizon: dict,
                 packed: str | None, cobs_note: str | None) -> dict:
     """One published comet record: elements, brightness, geometry, caveats, provenance."""
     record = candidate['record']
-    points = ephemeris['points']
+    # Everything published about this comet is derived from the samples *as published*, never from
+    # the higher-precision Horizons response: the offline validator re-derives the same numbers from
+    # the artifact's own samples and requires equality (see the module docstring).
+    points = published_samples(ephemeris['points'])
     m1, k1 = candidate['M1'], candidate['K1']
     tp = to_float(record['tp'])
     best = min(points, key=lambda point: total_magnitude(m1, k1, point['r_au'], point['delta_au']))
-    closest = min(points, key=lambda point: point['delta_au'])
+    closest = min_delta_sample(points)
     peak_mag = total_magnitude(m1, k1, best['r_au'], best['delta_au'])
     elements = {
         'equinox': (record.get('equinox') or '').strip() or None,
@@ -1058,7 +1085,9 @@ def build_comet(candidate: dict, ephemeris: dict, measured: dict, horizon: dict,
                           'source': 'Horizons geometry + JPL SBDB M1/K1'},
         },
         'geometry': {'peak_brightness_at': best['t_iso'],
-                     'min_delta_au': round_half_up(closest['delta_au'], 4),
+                     # The smallest *published* delta, rounded once to the published precision - the
+                     # same helper the offline validator uses on the published samples.
+                     'min_delta_au': min_delta_au_from_deltas([point['delta_au'] for point in points]),
                      'min_delta_at': closest['t_iso'],
                      'perihelion_iso': elements['tp_iso'],
                      'source': ('minimum geocentric distance and peak-brightness time from the '
@@ -1242,6 +1271,55 @@ EPHEMERIS_INTERPOLATION = ('linear between samples; samples are 1-2 day spaced (
                            'that moves fast enough to require it - see that comet\'s step_hours) so '
                            "interpolation error is far below the source's own accuracy; the worst "
                            'measured mid-way deviation is published next to it')
+
+
+# ------------------------------------------------------------ the published-precision contract
+# These helpers are the single source of truth for "what the artifact says".  The build derives every
+# published number from them and the validator re-derives the same numbers from the artifact's own
+# samples, so the two can only disagree if the published data itself is inconsistent - there is no
+# rounding tolerance anywhere in that comparison (see the module docstring).
+def published_sample(point: dict) -> dict:
+    """One Horizons sample at the precision comet-ephemerides.json publishes it with."""
+    return {'t_iso': point['t_iso'],
+            'ra_deg': round_half_up(point['ra_deg'], EPHEMERIS_DECIMALS),
+            'dec_deg': round_half_up(point['dec_deg'], EPHEMERIS_DECIMALS),
+            'r_au': round_half_up(point['r_au'], EPHEMERIS_DECIMALS),
+            'delta_au': round_half_up(point['delta_au'], EPHEMERIS_DECIMALS)}
+
+
+def published_samples(points: list[dict]) -> list[dict]:
+    """The samples as published: the only input a published derived value may be computed from."""
+    return [published_sample(point) for point in points]
+
+
+def published_rows(points: list[dict]) -> list[list]:
+    """The published sample arrays (EPHEMERIS_COLUMNS order) as stored in the artifact."""
+    return [[point['t_iso'], point['ra_deg'], point['dec_deg'], point['r_au'], point['delta_au']]
+            for point in published_samples(points)]
+
+
+def row_samples(rows: list[list]) -> list[dict]:
+    """Published rows back into sample dicts, so the validator reuses the build's own helpers."""
+    return [dict(zip(EPHEMERIS_COLUMNS, row)) for row in rows]
+
+
+def min_delta_au_from_deltas(deltas) -> float:
+    """The published geometry.min_delta_au: the smallest *published* delta, rounded once.
+
+    Producer and validator call this on the published deltas, so the invariant they check is an
+    equality between two identical transformations of identical numbers.
+    """
+    return round_half_up(min(deltas), MIN_DELTA_DECIMALS)
+
+
+def min_delta_sample(points: list[dict]) -> dict:
+    """The published sample carrying the smallest published delta (ties resolved by grid order)."""
+    return min(points, key=lambda point: point['delta_au'])
+
+
+def deviation_from_rows(rows: list[list]) -> float:
+    """The published interpolation error of a published sample grid, to its published precision."""
+    return round_half_up(midway_deviation(row_samples(rows)), DEVIATION_DECIMALS)
 
 
 def require(condition: bool, message: str) -> None:
@@ -1464,6 +1542,12 @@ def validate_ephemeris_artifact(ephemeris: dict, comets: list[dict], horizon: di
         require(span >= HORIZON_COVERAGE_MIN * requested_days,
                 f'{label} covers {span:.1f} of {requested_days:.0f} days '
                 f'(minimum {HORIZON_COVERAGE_MIN:.0%})')
+        # The published interpolation error is re-derived from the published samples through the same
+        # helper the build used, so the artifact's own grid has to reproduce its own claim exactly.
+        expected_deviation = deviation_from_rows(points)
+        require(deviation == expected_deviation,
+                f'{label}.interpolation_max_deviation_deg {deviation} is not the measured '
+                f'linear-interpolation error of the published samples ({expected_deviation} deg)')
         samples += len(points)
     return {'ephemeris_comets': len(entries), 'samples': samples, 'warnings': warnings}
 
@@ -1677,6 +1761,10 @@ def rederive_offline(data: dict, ephemeris: dict) -> dict:
     This is what `--no-network` adds on top of `--check`: it proves the published predictions and
     geometry really are the documented model applied to the published samples, and it re-runs the
     local two-body propagation against the Horizons samples to restate the model's measured error.
+
+    The derived numbers are compared with `==`, not with a rounding tolerance: the build publishes
+    them through the same helpers used here (see "Published precision and derived values" above), so
+    an inequality means the artifact no longer agrees with its own samples.
     """
     result = {'comets': 0, 'max_predicted_mag_delta': 0.0, 'max_min_delta_delta_au': 0.0,
               'max_kepler_mag_delta': 0.0, 'max_kepler_r_delta_au': 0.0,
@@ -1699,14 +1787,27 @@ def rederive_offline(data: dict, ephemeris: dict) -> dict:
         require(abs(magnitudes[peak_index] - brightest) <= 0.005,
                 f'{ident}: predicted.at is not a sample where the model is (tied for) brightest')
         deltas = [point[4] for point in points]
-        nearest = min(deltas)
+        published_minimum = min(deltas)
+        expected_min = min_delta_au_from_deltas(deltas)
+        value = float(comet['geometry']['min_delta_au'])
         result['max_min_delta_delta_au'] = max(
-            result['max_min_delta_delta_au'], abs(float(comet['geometry']['min_delta_au']) - nearest))
-        require(abs(float(comet['geometry']['min_delta_au']) - nearest) <= 5e-5,
-                f'{ident}: geometry.min_delta_au is not the smallest published delta')
+            result['max_min_delta_delta_au'], abs(value - published_minimum))
+        # Two checks, both strict.  The first is the scientific claim: the published minimum really is
+        # the smallest published delta, to within what publishing it at MIN_DELTA_DECIMALS decimals
+        # can represent (the rounding half-width, which is not a data tolerance).  The second is the
+        # precision contract: it must be *exactly* the value the shared helper derives from those same
+        # published deltas, so the artifact can never drift from its own numbers again.
+        require(abs(value - published_minimum) <= MIN_DELTA_HALF_WIDTH,
+                f'{ident}: geometry.min_delta_au {value} is not the smallest published delta '
+                f'{published_minimum} (limit {MIN_DELTA_HALF_WIDTH} = the published '
+                f'{MIN_DELTA_DECIMALS}-decimal rounding half-width)')
+        require(value == expected_min,
+                f'{ident}: geometry.min_delta_au {value} is not the smallest published delta '
+                f'{published_minimum} rounded to {MIN_DELTA_DECIMALS} decimals ({expected_min})')
         # A very flat minimum means several samples tie once the published 6-decimal delta is used
         # (measured: 260P's two nearest samples differ by 1.5e-7 au), so accept any tied sample.
-        tied = {point[0] for point in points if abs(point[4] - nearest) <= 1e-6}
+        tied = {point[0] for point in points
+                if abs(point[4] - published_minimum) <= 10 ** -EPHEMERIS_DECIMALS}
         require(comet['geometry']['min_delta_at'] in tied,
                 f'{ident}: geometry.min_delta_at is not a sample at the published minimum distance')
         elements = comet['elements']
@@ -2256,7 +2357,9 @@ def run_build(args) -> int:
                                  f'error: {reason}; nothing was written')
             continue
         consecutive_failures = 0
-        deviation = midway_deviation(ephemeris['points'])
+        # Measured on the samples as published, because that is the grid the browser interpolates and
+        # the number the validator re-derives from the artifact (see the precision contract above).
+        deviation = midway_deviation(published_samples(ephemeris['points']))
         # If the estimate above was too optimistic, refine once from the measured samples (the same
         # h^2 scaling, this time on the real curve) before giving up on this comet.
         if deviation > INTERPOLATION_MAX_DEG and step_hours > min(STEP_CHOICES_HOURS):
@@ -2271,7 +2374,7 @@ def run_build(args) -> int:
                                             horizon['end'][:10], step_hours, args.sleep,
                                             fallback_command=(item['record'].get('spkid') or None))
                 horizons_requests += int(ephemeris['provenance'].get('attempts_made') or 1)
-                deviation = midway_deviation(ephemeris['points'])
+                deviation = midway_deviation(published_samples(ephemeris['points']))
         if deviation > INTERPOLATION_MAX_DEG:
             raise BuildError(f'{item["id"]}: linear interpolation of the published samples would '
                              f'deviate by {deviation:.3f} deg mid-way (limit '
@@ -2292,15 +2395,18 @@ def run_build(args) -> int:
         print(f'  [{len(comets)}/{len(selected)}] {item["id"]}: {len(ephemeris["points"])} samples '
               f'at {step_hours} h, {len(assessment["observations"])} COBS observations, '
               f'interpolation error {deviation:.4f} deg', file=sys.stderr, flush=True)
+        # The published grid, computed once: the samples, the deviation the validator re-derives, and
+        # the record build_comet() derived its geometry from are all the same numbers.
+        rows = published_rows(ephemeris['points'])
         ephemeris_comets[item['id']] = {
             'start': horizon['start'], 'step_hours': step_hours,
             'columns': list(EPHEMERIS_COLUMNS),
-            'points': [[point['t_iso'], round_half_up(point['ra_deg'], 6),
-                        round_half_up(point['dec_deg'], 6), round_half_up(point['r_au'], 6),
-                        round_half_up(point['delta_au'], 6)] for point in ephemeris['points']],
-            'point_count': len(ephemeris['points']),
+            'points': rows,
+            'point_count': len(rows),
             'interpolation': EPHEMERIS_INTERPOLATION,
-            'interpolation_max_deviation_deg': round_half_up(deviation, 5),
+            # Published through the same helper the validator uses on these rows, so the artifact's
+            # own numbers reproduce it exactly.
+            'interpolation_max_deviation_deg': deviation_from_rows(rows),
             'target': ephemeris['target'] or None,
         }
         deviations.append(deviation)
@@ -2334,6 +2440,12 @@ def run_build(args) -> int:
         'page could not be retrieved (HTTP 500) to confirm the unit of its coma_diameter field',
         'comets.json carries no ephemeris samples on purpose: it is read on every page load, and the '
         'samples live in data/overhead/comet-ephemerides.json',
+        f'published precision: ephemeris samples carry ra/dec/r/delta to {EPHEMERIS_DECIMALS} '
+        f'decimals, geometry.min_delta_au to {MIN_DELTA_DECIMALS} and '
+        f'interpolation_max_deviation_deg to {DEVIATION_DECIMALS}; every derived value is computed '
+        'from the samples as published and the offline validator re-derives it from the artifact '
+        'with an exact comparison (no rounding tolerance), so the published numbers can never drift '
+        'from the published samples',
         f'COBS API signature versions asserted: obs_list.api {cobs_version or "unknown"}, '
         f'comet_list.api {listing["api_version"] or "unknown"}',
     ])
