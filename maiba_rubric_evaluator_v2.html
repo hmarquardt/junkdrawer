@@ -168,6 +168,12 @@
         </div>
         <label for="conversationInput">Paste conversation transcript below. Include user and assistant turns. Preserve quotes where possible. Remove PII if necessary.</label>
         <textarea id="conversationInput" rows="14" class="mt-1" placeholder="User: ...&#10;Assistant: ..."></textarea>
+        <label for="evaluatedModel" class="mt-1">Model being evaluated</label>
+        <select id="evaluatedModel" aria-label="Model being evaluated">
+          <option value="">Select model…</option>
+          <option value="Maiba">Maiba</option>
+          <option value="ChatGPT">ChatGPT</option>
+        </select>
         <input type="file" id="conversationFile" accept=".txt,.md,.json" class="mt-1" />
         <div class="evaluate-toolbar">
           <button id="btnEvaluate" class="btn">Evaluate</button>
@@ -241,6 +247,15 @@
                 <button id="btnDetailCopy" class="btn secondary">Copy Q1–Q8</button>
               </div>
             </div>
+          </div>
+          <div class="mt-2">
+            <label for="detailEvaluatedModel">Model being evaluated</label>
+            <select id="detailEvaluatedModel">
+              <option value="">Select model…</option>
+              <option value="Maiba">Maiba</option>
+              <option value="ChatGPT">ChatGPT</option>
+            </select>
+            <button id="btnDetailSaveModel" class="btn secondary">Save model</button>
           </div>
           <div class="mt-2">
             <h3>Audit / Q&A Comments</h3>
@@ -428,9 +443,9 @@
   </section>
 
   <!-- JUNKDRAWER_DEPLOY_FOOTER -->
-  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.06.10.1" bump="Update this version whenever this file changes in a commit." -->
-  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.06.10.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator v2 · version 2026.06.10.1
+  <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.13.1" bump="Update this version whenever this file changes in a commit." -->
+  <footer data-junkdrawer-deploy-footer data-deploy-version="2026.10.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+    &copy; 2026 Hank Marquardt · MAIBA Rubric Evaluator v2 · version 2026.10.13.1
   </footer>
 </div>
 
@@ -911,6 +926,27 @@ function parseReviewJson(text) {
   return extractJsonObject(text);
 }
 
+/* The evaluated model is distinct from the LLM used to process/review the rubric. */
+function formatEvaluationComment(comment, evaluatedModel) {
+  if (evaluatedModel !== 'Maiba' && evaluatedModel !== 'ChatGPT') {
+    throw new Error('Select the model being evaluated (Maiba or ChatGPT) before using comments.');
+  }
+  const reasoning = String(comment ?? '').replace(/^(?:[ \t]*Model:[^\r\n]*(?:\r?\n(?:[ \t]*\r?\n)*)?)+/i, '');
+  return `Model: ${evaluatedModel}\n\n${reasoning}`;
+}
+
+function formatEvaluationOutput(text, evaluatedModel) {
+  if (evaluatedModel !== 'Maiba' && evaluatedModel !== 'ChatGPT') {
+    throw new Error('Select the model being evaluated (Maiba or ChatGPT) before using comments.');
+  }
+  return String(text).replace(/(^|\n\n)(Q[24]\.[^\n]*\n)([\s\S]*?)(?=\n\nQ[1-8]\.|$)/g,
+    (_, separator, label, comment) => separator + label + formatEvaluationComment(comment, evaluatedModel));
+}
+
+function finalRecordOutput(record) {
+  return formatEvaluationOutput(record.renderedQ1ToQ8Output || '', record.evaluatedModel);
+}
+
 /* Generate plain-text Q1–Q8 from parsed JSON */
 function renderQ1ToQ8(parsed) {
   const fields = [
@@ -971,8 +1007,8 @@ function extractFieldFromText(text, labelRegex) {
   const m = text.match(labelRegex);
   if (!m) return '';
   const start = m.index + m[0].length;
-  const next = text.search(/\nQ\d\./);
-  const end = next > start ? next : text.length;
+  const next = text.slice(start).search(/\nQ\d\./);
+  const end = next >= 0 ? start + next : text.length;
   return text.slice(start, end).trim();
 }
 
@@ -1196,7 +1232,11 @@ $('#btnKeep500').addEventListener('click', async () => { await dbKeepLastN(500);
 
 $('#btnExportHistory').addEventListener('click', async () => {
   const all = await dbGetAll();
-  const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+  let exported;
+  try {
+    exported = all.map(rec => ({ ...rec, renderedQ1ToQ8Output: finalRecordOutput(rec) }));
+  } catch (e) { alert(e.message + ' Resolve older records in History before exporting.'); return; }
+  const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = `maiba-history-${new Date().toISOString().slice(0,10)}.json`; a.click();
@@ -1223,6 +1263,7 @@ $('#btnEvaluate').addEventListener('click', async () => {
   clearError('evaluationMeta');
   const rubric = lsGet(LS_KEY_RUBRIC) || '';
   const conversation = $('#conversationInput').value.trim();
+  const evaluatedModel = $('#evaluatedModel').value;
   const provider = lsGet(LS_KEY_PROVIDER_PROC) || 'openrouter';
   const model = lsGet(LS_KEY_MODEL_PROC);
   const key = getProviderKey(provider);
@@ -1233,6 +1274,7 @@ $('#btnEvaluate').addEventListener('click', async () => {
   if (!rubric) { showError('evaluationMeta', 'Missing rubric. Add it in the Admin tab.'); return; }
   if (!model) { showError('evaluationMeta', 'Missing processing model. Select one in the Admin tab.'); return; }
   if (!conversation) { showError('evaluationMeta', 'Paste a conversation to evaluate.'); return; }
+  if (!evaluatedModel) { showError('evaluationMeta', 'Select the model being evaluated.'); return; }
 
   $('#btnEvaluate').disabled = true;
   $('#evaluationOutput').textContent = 'Evaluating…';
@@ -1266,12 +1308,12 @@ $('#btnEvaluate').addEventListener('click', async () => {
     let parsed = parsePrimaryJson(raw);
     let rendered;
     if (parsed) {
-      rendered = renderQ1ToQ8(parsed);
+      rendered = formatEvaluationOutput(renderQ1ToQ8(parsed), evaluatedModel);
       $('#debugParsedPrimary').textContent = JSON.stringify(parsed, null, 2);
     } else {
       // fallback
       parsed = fallbackExtractQ1ToQ8(raw);
-      rendered = renderQ1ToQ8(parsed);
+      rendered = formatEvaluationOutput(renderQ1ToQ8(parsed), evaluatedModel);
       $('#debugParsedPrimary').textContent = 'JSON parse failed. Fallback extraction used.\n' + JSON.stringify(parsed, null, 2);
       showError('evaluationMeta', 'Warning: model did not return valid JSON. Fallback text extraction used. Check Debug tab.');
     }
@@ -1289,6 +1331,7 @@ $('#btnEvaluate').addEventListener('click', async () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       conversationText: conversation,
+      evaluatedModel,
       rubricHash: activeRubricHash,
       rubricSizeChars: rubric.length,
       processingProvider: provider,
@@ -1390,7 +1433,10 @@ $('#btnClearOutput').addEventListener('click', () => {
 });
 
 $('#btnCopyOutput').addEventListener('click', async () => {
-  const text = currentRecord?.renderedQ1ToQ8Output || '';
+  if (!currentRecord) return;
+  let text;
+  try { text = finalRecordOutput(currentRecord); }
+  catch (e) { showError('evaluationMeta', e.message); return; }
   if (!text) return;
   try { await navigator.clipboard.writeText(text); } catch(e){}
 });
@@ -1403,7 +1449,12 @@ function attachCopyHandler(container) {
     const section = btn.closest('.output-section');
     const pre = section?.querySelector('pre');
     if (!pre) return;
-    const text = pre.textContent;
+    const field = btn.dataset.copyField;
+    let text = pre.textContent;
+    if (field === 'Q2' || field === 'Q4') {
+      try { text = formatEvaluationComment(text, currentRecord?.evaluatedModel); }
+      catch (err) { showError('evaluationMeta', err.message); return; }
+    }
     try {
       await navigator.clipboard.writeText(text);
       const orig = btn.textContent;
@@ -1478,7 +1529,8 @@ $('#btnVerify').addEventListener('click', async () => {
     currentRecord.verificationTotalTokens = result.usage?.total_tokens ?? null;
 
     const comparison = String(parsed.comparison || '').trim();
-    const proposed = String(parsed.corrected_q1_to_q8 || '').trim();
+    const proposed = parsed.corrected_q1_to_q8
+      ? formatEvaluationOutput(String(parsed.corrected_q1_to_q8).trim(), currentRecord.evaluatedModel) : '';
 
     const vpt = result.usage?.prompt_tokens ?? '?';
     const vct = result.usage?.completion_tokens ?? '?';
@@ -1659,15 +1711,19 @@ async function refreshHistory() {
         // Switch to evaluate tab
         $$('.tab-btn')[0].click();
       } else if (action === 'restore-out') {
-        $('#evaluationOutput').innerHTML = displayQ1ToQ8(rec.renderedQ1ToQ8Output || '');
+        let output;
+        try { output = finalRecordOutput(rec); }
+        catch (err) { showHistoryDetail(rec); alert(err.message); return; }
+        $('#evaluationOutput').innerHTML = displayQ1ToQ8(output);
         $('#evaluationOutput').classList.remove('empty');
         $('#btnCopyOutput').disabled = false;
         $('#btnVerify').disabled = false;
         $('#btnSaveHistory').disabled = false;
-        currentRecord = JSON.parse(JSON.stringify(rec));
+        currentRecord = JSON.parse(JSON.stringify({ ...rec, renderedQ1ToQ8Output: output }));
         $$('.tab-btn')[0].click();
       } else if (action === 'copy') {
-        try { await navigator.clipboard.writeText(rec.renderedQ1ToQ8Output || ''); } catch(e){}
+        try { await navigator.clipboard.writeText(finalRecordOutput(rec)); }
+        catch (err) { showHistoryDetail(rec); alert(err.message); }
       } else if (action === 'note') {
         const note = prompt('Edit note:', rec.userNotes || '');
         if (note !== null) { rec.userNotes = note; await dbSave(rec); refreshHistory(); }
@@ -1681,7 +1737,10 @@ async function refreshHistory() {
 function showHistoryDetail(rec) {
   detailRecordId = rec.id;
   $('#detailConversation').textContent = rec.conversationText || '(empty)';
-  $('#detailOutput').innerHTML = displayQ1ToQ8(rec.renderedQ1ToQ8Output || '');
+  $('#detailEvaluatedModel').value = rec.evaluatedModel || '';
+  $('#detailOutput').innerHTML = (rec.evaluatedModel === 'Maiba' || rec.evaluatedModel === 'ChatGPT')
+    ? displayQ1ToQ8(finalRecordOutput(rec))
+    : '<div class="warn-box">Select and save the model being evaluated to view or copy this output.</div>';
   $('#detailAuditComments').value = rec.auditComments || '';
   const pt = rec.primaryPromptTokens ?? '?';
   const ct = rec.primaryCompletionTokens ?? '?';
@@ -1693,6 +1752,7 @@ function showHistoryDetail(rec) {
     <div><strong>Date:</strong> ${new Date(rec.createdAt).toLocaleString()}</div>
     <div><strong>Processing Provider:</strong> ${escapeHtml(rec.processingProvider || 'openrouter')}</div>
     <div><strong>Processing Model:</strong> ${escapeHtml(rec.processingModel || '')}</div>
+    <div><strong>Evaluated Model:</strong> ${escapeHtml(rec.evaluatedModel || 'Unspecified')}</div>
     <div><strong>Review Provider:</strong> ${escapeHtml(rec.reviewProvider || 'openrouter')}</div>
     <div><strong>Review Model:</strong> ${escapeHtml(rec.reviewModel || '')}</div>
     <div><strong>Verification Status:</strong> ${escapeHtml(rec.verificationStatus || 'none')}</div>
@@ -1717,12 +1777,15 @@ $('#btnDetailRestoreOut').addEventListener('click', async () => {
   if (!detailRecordId) return;
   const rec = (await dbGetAll()).find(x => x.id === detailRecordId);
   if (!rec) return;
-  $('#evaluationOutput').innerHTML = displayQ1ToQ8(rec.renderedQ1ToQ8Output || '');
+  let output;
+  try { output = finalRecordOutput(rec); }
+  catch (err) { alert(err.message); return; }
+  $('#evaluationOutput').innerHTML = displayQ1ToQ8(output);
   $('#evaluationOutput').classList.remove('empty');
   $('#btnCopyOutput').disabled = false;
   $('#btnVerify').disabled = false;
   $('#btnSaveHistory').disabled = false;
-  currentRecord = JSON.parse(JSON.stringify(rec));
+  currentRecord = JSON.parse(JSON.stringify({ ...rec, renderedQ1ToQ8Output: output }));
   $$('.tab-btn')[0].click();
 });
 
@@ -1730,7 +1793,23 @@ $('#btnDetailCopy').addEventListener('click', async () => {
   if (!detailRecordId) return;
   const rec = (await dbGetAll()).find(x => x.id === detailRecordId);
   if (!rec) return;
-  try { await navigator.clipboard.writeText(rec.renderedQ1ToQ8Output || ''); } catch(e){}
+  try { await navigator.clipboard.writeText(finalRecordOutput(rec)); }
+  catch (err) { alert(err.message); }
+});
+
+$('#btnDetailSaveModel').addEventListener('click', async () => {
+  if (!detailRecordId) return;
+  const rec = (await dbGetAll()).find(x => x.id === detailRecordId);
+  if (!rec) return;
+  rec.evaluatedModel = $('#detailEvaluatedModel').value;
+  try {
+    rec.renderedQ1ToQ8Output = finalRecordOutput(rec);
+    if (rec.proposedQ1ToQ8Output) rec.proposedQ1ToQ8Output = formatEvaluationOutput(rec.proposedQ1ToQ8Output, rec.evaluatedModel);
+  } catch (err) { alert(err.message); return; }
+  rec.updatedAt = new Date().toISOString();
+  await dbSave(rec);
+  showHistoryDetail(rec);
+  refreshHistory();
 });
 
 $('#btnDetailSaveAudit').addEventListener('click', async () => {
