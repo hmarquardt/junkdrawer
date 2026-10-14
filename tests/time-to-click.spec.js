@@ -199,7 +199,9 @@ test("refresh restores saved timers without a reminder storm", async ({ page }) 
   const errors = [];
   attachErrorCapture(page, errors);
   const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Persist A", minMinutes: 7, maxMinutes: 7 }));
-  await page.evaluate(i => window.__TTC_TEST__.setRemaining(i, 1), a);
+  // -1 ms, not +1 ms: the deadline must already be in the past when the next
+  // tick samples the clock, so this cannot race a 1 ms Date.now() boundary.
+  await page.evaluate(i => window.__TTC_TEST__.setRemaining(i, -1), a);
   await page.evaluate(() => window.__TTC_TEST__.tick());
   const before = await page.evaluate(i => window.__TTC_TEST__.find(i), a);
   expect(before.remindersCompleted).toBe(1);
@@ -760,7 +762,16 @@ async function readCompactRoot(page) {
       countdown: root.querySelector(".ttc-compact-countdown").textContent,
       meta: root.querySelector(".ttc-compact-meta-text").textContent,
       restoreLabel: root.querySelector(".ttc-compact-restore").getAttribute("aria-label"),
-      bellHidden: root.querySelector(".ttc-compact-bell").hidden
+      bellHidden: root.querySelector(".ttc-compact-bell").hidden,
+      // Multi-timer navigation controls.
+      navHidden: root.querySelector(".ttc-compact-nav").hidden,
+      navLabel: root.querySelector(".ttc-compact-nav").getAttribute("aria-label"),
+      position: root.querySelector(".ttc-compact-position").textContent,
+      positionTooltip: root.querySelector(".ttc-compact-position").title,
+      prevLabel: root.querySelector(".ttc-compact-prev").getAttribute("aria-label"),
+      prevTitle: root.querySelector(".ttc-compact-prev").title,
+      nextLabel: root.querySelector(".ttc-compact-next").getAttribute("aria-label"),
+      nextTitle: root.querySelector(".ttc-compact-next").title
     };
   }, COMPACT_ROOT);
 }
@@ -1089,5 +1100,469 @@ test("compact mode adds no second alarm path when two timers expire together", a
   expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(2);
   expect(await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.remindersCompleted))).toEqual([1, 1]);
   expect(await page.evaluate(() => document.querySelector("#ttcCompactProbe .ttc-compact").dataset.mode)).toBe("running");
+  expect(errors.length).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// Navigating between active timers in the compact / floating view.
+//
+// The production surface is exercised through the in-page probe: previous/next
+// are activated with real DOM clicks (the probe host is deliberately
+// pointer-inert), and wheel gestures are dispatched as real cancelable
+// WheelEvents on the surface, so the production listener, accumulation
+// threshold and gesture lock are what actually run.
+// ---------------------------------------------------------------------------
+
+function selectedId(page) {
+  return page.evaluate(() => window.__TTC_TEST__.compactView().id);
+}
+
+// The seconds the selected timer's own target timestamp says should be on
+// screen right now — the compact view owns no clock of its own.
+function modelSeconds(page, id) {
+  return page.evaluate((timerId) => {
+    const t = window.__TTC_TEST__.find(timerId);
+    const remaining = Math.max(0, t.targetTimestamp - Date.now());
+    const secs = Math.ceil(remaining / 1000);
+    return Math.floor(secs / 60) * 60 + (secs % 60);
+  }, id);
+}
+
+// Activate a navigation control the way the user does: a real DOM click.
+async function navigateWithButton(page, which) {
+  return page.evaluate(({ sel, which }) => {
+    const btn = document.querySelector(`${sel} .ttc-compact-${which === "prev" ? "prev" : "next"}`);
+    btn.click();
+    return btn.getAttribute("aria-label");
+  }, { sel: COMPACT_ROOT, which });
+}
+
+// One wheel gesture burst: events with no pause in between, exactly as a
+// trackpad — or a fast mouse wheel — delivers them.
+async function wheelBurst(page, deltas, deltaMode = 0) {
+  return page.evaluate(({ sel, deltas, deltaMode }) => {
+    const root = document.querySelector(sel);
+    return deltas.map(deltaY => {
+      const ev = new WheelEvent("wheel", { deltaY, deltaMode, cancelable: true, bubbles: true });
+      const notCancelled = root.dispatchEvent(ev);
+      return { defaultPrevented: ev.defaultPrevented, notCancelled };
+    });
+  }, { sel: COMPACT_ROOT, deltas, deltaMode });
+}
+
+// Create running timers with deterministic remaining times: [[prompt, ms], ...]
+function addTimers(page, specs) {
+  return page.evaluate(list => list.map(([prompt, ms]) => {
+    const id = window.__TTC_TEST__.addAndStart({ prompt, minMinutes: 5, maxMinutes: 5 });
+    window.__TTC_TEST__.setRemaining(id, ms);
+    return id;
+  }), specs);
+}
+
+// Model fields navigation must never change (no countdown samples in here).
+function timerCore(page) {
+  return page.evaluate(() => window.__TTC_TEST__.timers().map(t => ({
+    id: t.id, prompt: t.prompt, state: t.state, minMinutes: t.minMinutes,
+    maxMinutes: t.maxMinutes, targetTimestamp: t.targetTimestamp,
+    currentIntervalSeconds: t.currentIntervalSeconds, remindersCompleted: t.remindersCompleted
+  })));
+}
+
+test("a single active timer keeps the existing compact display and offers no navigation", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Solo task", minMinutes: 5, maxMinutes: 5 }));
+  await mountCompactProbe(page);
+
+  const view = await page.evaluate(() => window.__TTC_TEST__.compactView());
+  expect(view.id).toBe(a);
+  expect(view.mode).toBe("running");
+  expect(view.meta).toBe("1 timer active");
+  expect(view.navigable).toBe(false);
+  expect(view.position).toBe(1);
+  expect(view.total).toBe(1);
+
+  const root = await readCompactRoot(page);
+  expect(root.title).toBe("Solo task");
+  expect(root.countdown).toBe("05:00");
+  expect(root.navHidden).toBe(true);
+  expect(root.position).toBe("");
+
+  // Nothing to navigate: explicit navigation is a no-op and a wheel gesture
+  // changes nothing — while never escaping to the page behind it.
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactNavigate(1))).toBe(false);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactNavigate(-1))).toBe(false);
+  const burst = await wheelBurst(page, [120, 60, 30]);
+  expect(burst.every(e => e.defaultPrevented && e.notCancelled === false)).toBe(true);
+  expect(await selectedId(page)).toBe(a);
+  expect((await readCompactRoot(page)).title).toBe("Solo task");
+  expect(errors.length).toBe(0);
+});
+
+test("all active timers are navigable from the floating view, with wraparound and a position indicator", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const [a, b, c] = await addTimers(page, [["Alpha task", 300000], ["Bravo task", 240000], ["Charlie task", 180000]]);
+  await mountCompactProbe(page);
+
+  // Default selection is unchanged: the timer due next is Charlie (3 minutes).
+  expect(await selectedId(page)).toBe(c);
+  const initial = await readCompactRoot(page);
+  expect(initial.title).toBe("Charlie task");
+  expect(initial.meta).toBe("3 timers active");
+  expect(initial.navHidden).toBe(false);
+  expect(initial.position).toBe("3 / 3");
+  expect(initial.positionTooltip).toBe("Timer 3 of 3 active");
+  expect(initial.navLabel).toBe("Switch between active timers");
+  expect(initial.prevLabel).toBe("Previous active timer");
+  expect(initial.nextLabel).toBe("Next active timer");
+  expect(initial.prevTitle).toMatch(/scroll up/);
+  expect(initial.nextTitle).toMatch(/scroll down/);
+  expect(Math.abs(clockToSeconds(initial.countdown) - await modelSeconds(page, c))).toBeLessThanOrEqual(1);
+
+  // Next from the last timer wraps to the first, showing that timer's own live
+  // countdown.
+  await navigateWithButton(page, "next");
+  expect(await selectedId(page)).toBe(a);
+  let root = await readCompactRoot(page);
+  expect(root.title).toBe("Alpha task");
+  expect(root.position).toBe("1 / 3");
+  expect(Math.abs(clockToSeconds(root.countdown) - await modelSeconds(page, a))).toBeLessThanOrEqual(1);
+
+  await navigateWithButton(page, "next");
+  expect(await selectedId(page)).toBe(b);
+  root = await readCompactRoot(page);
+  expect(root.title).toBe("Bravo task");
+  expect(root.position).toBe("2 / 3");
+  expect(Math.abs(clockToSeconds(root.countdown) - await modelSeconds(page, b))).toBeLessThanOrEqual(1);
+
+  // Previous walks back, and previous from the first timer wraps to the last.
+  await navigateWithButton(page, "prev");
+  expect(await selectedId(page)).toBe(a);
+  await navigateWithButton(page, "prev");
+  expect(await selectedId(page)).toBe(c);
+  root = await readCompactRoot(page);
+  expect(root.position).toBe("3 / 3");
+  expect(Math.abs(clockToSeconds(root.countdown) - await modelSeconds(page, c))).toBeLessThanOrEqual(1);
+
+  // Keyboard operable: the arrow keys move the way the arrow buttons do, and a
+  // focused control still responds to Enter.
+  await page.evaluate(sel => document.querySelector(`${sel} .ttc-compact-next`).focus(), COMPACT_ROOT);
+  await page.keyboard.press("ArrowRight");
+  expect(await selectedId(page)).toBe(a);
+  await page.keyboard.press("ArrowLeft");
+  expect(await selectedId(page)).toBe(c);
+  await page.evaluate(sel => document.querySelector(`${sel} .ttc-compact-prev`).focus(), COMPACT_ROOT);
+  await page.keyboard.press("Enter");
+  expect(await selectedId(page)).toBe(b);
+
+  // Layout: navigation fits inside the existing footprint, nothing spills.
+  const layout = await page.evaluate(sel => {
+    const host = document.getElementById("ttcCompactProbe");
+    const root = document.querySelector(sel);
+    const nav = root.querySelector(".ttc-compact-nav");
+    const box = root.getBoundingClientRect();
+    const navBox = nav.getBoundingClientRect();
+    return {
+      root: [box.width, box.height],
+      host: [host.clientWidth, host.clientHeight, host.scrollWidth, host.scrollHeight],
+      navInside: navBox.left >= box.left - 1 && navBox.right <= box.right + 1
+        && navBox.top >= box.top - 1 && navBox.bottom <= box.bottom + 1
+    };
+  }, COMPACT_ROOT);
+  expect(layout.root[0]).toBeLessThanOrEqual(260);
+  expect(layout.root[1]).toBeLessThanOrEqual(80);
+  expect(layout.host[2]).toBeLessThanOrEqual(layout.host[0]);
+  expect(layout.host[3]).toBeLessThanOrEqual(layout.host[1]);
+  expect(layout.navInside).toBe(true);
+
+  // Even squeezed well below the default width, the controls cannot push the
+  // surface out of its box.
+  const squeezed = await page.evaluate(sel => {
+    const host = document.getElementById("ttcCompactProbe");
+    host.style.width = "120px";
+    window.__TTC_TEST__.compactRender();
+    const root = document.querySelector(sel);
+    return { host: [host.clientWidth, host.scrollWidth], root: [root.clientWidth, root.scrollWidth] };
+  }, COMPACT_ROOT);
+  expect(squeezed.host[1]).toBeLessThanOrEqual(squeezed.host[0]);
+  expect(squeezed.root[1]).toBeLessThanOrEqual(squeezed.root[0]);
+  expect(errors.length).toBe(0);
+});
+
+test("wheel and trackpad gestures advance exactly one timer per deliberate gesture", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const [a, b, c] = await addTimers(page, [["Alpha task", 300000], ["Bravo task", 240000], ["Charlie task", 180000]]);
+  await mountCompactProbe(page);
+  expect(await selectedId(page)).toBe(c);
+  const modelBeforeWheel = await timerCore(page);
+
+  // One wheel notch down, plus the momentum that follows it: exactly one step,
+  // and the gesture is consumed by the floating view instead of scrolling
+  // anything behind it.
+  const burst = await wheelBurst(page, [110, 60, 30, 18, 9, 5, 3]);
+  expect(burst).toHaveLength(7);
+  expect(burst.every(e => e.defaultPrevented && e.notCancelled === false)).toBe(true);
+  expect(await selectedId(page)).toBe(a);          // 3 / 3 wraps forward to 1 / 3
+  expect((await readCompactRoot(page)).position).toBe("1 / 3");
+
+  // A slow, high-resolution trackpad scroll is still one gesture: never more
+  // than one step, however many events it delivers.
+  await page.waitForTimeout(220);
+  const trackpad = await wheelBurst(page, [4, 4, 4, 3, 2, 1, 1, 1]);
+  expect(trackpad.every(e => e.defaultPrevented && e.notCancelled === false)).toBe(true);
+  expect(await selectedId(page)).toBe(b);
+  expect((await readCompactRoot(page)).position).toBe("2 / 3");
+
+  // Line-mode deltas (a wheel that reports lines rather than pixels) normalize
+  // the same way...
+  await page.waitForTimeout(220);
+  await wheelBurst(page, [3], 1);
+  expect(await selectedId(page)).toBe(c);
+  expect((await readCompactRoot(page)).position).toBe("3 / 3");
+
+  // ...and an upward gesture selects the previous timer.
+  await page.waitForTimeout(220);
+  await wheelBurst(page, [-120]);
+  expect(await selectedId(page)).toBe(b);
+  expect((await readCompactRoot(page)).position).toBe("2 / 3");
+
+  // A quiet gap starts a new gesture, with no stale accumulation left over.
+  await page.waitForTimeout(220);
+  await wheelBurst(page, [-120]);
+  expect(await selectedId(page)).toBe(a);
+  await page.waitForTimeout(220);
+  await wheelBurst(page, [-120]);
+  expect(await selectedId(page)).toBe(c);          // wrapped backwards past the first
+  expect((await readCompactRoot(page)).position).toBe("3 / 3");
+
+  // Navigation is a view: not one timer field moved.
+  expect(await timerCore(page)).toEqual(modelBeforeWheel);
+  expect(errors.length).toBe(0);
+});
+
+test("a timer added while the floating view is open leaves the selection alone and joins the collection", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const [a, b] = await addTimers(page, [["Alpha task", 60000], ["Bravo task", 300000]]);
+  await mountCompactProbe(page);
+  expect(await selectedId(page)).toBe(a);          // soonest by default
+  await navigateWithButton(page, "next");
+  expect(await selectedId(page)).toBe(b);
+  expect((await readCompactRoot(page)).position).toBe("2 / 2");
+
+  // The new timer becomes the soonest, so the default selection would have
+  // jumped to it; an explicit selection must not move.
+  const c = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Charlie task", minMinutes: 5, maxMinutes: 5 }));
+  await page.evaluate(id => window.__TTC_TEST__.setRemaining(id, 45000), c);
+  await page.evaluate(() => window.__TTC_TEST__.compactRender());
+
+  expect(await selectedId(page)).toBe(b);
+  const root = await readCompactRoot(page);
+  expect(root.title).toBe("Bravo task");
+  expect(root.meta).toBe("3 timers active");
+  expect(root.position).toBe("2 / 3");
+  // The navigable collection is exactly the active timers, in dashboard order.
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactActiveIds())).toEqual([a, b, c]);
+  expect(Math.abs(clockToSeconds(root.countdown) - await modelSeconds(page, b))).toBeLessThanOrEqual(1);
+
+  // It is reachable like any other active timer, and navigation still wraps.
+  await navigateWithButton(page, "next");
+  expect(await selectedId(page)).toBe(c);
+  const charlie = await readCompactRoot(page);
+  expect(charlie.title).toBe("Charlie task");
+  expect(charlie.position).toBe("3 / 3");
+  expect(Math.abs(clockToSeconds(charlie.countdown) - await modelSeconds(page, c))).toBeLessThanOrEqual(1);
+  await navigateWithButton(page, "next");
+  expect(await selectedId(page)).toBe(a);
+  expect((await readCompactRoot(page)).position).toBe("1 / 3");
+  expect(errors.length).toBe(0);
+});
+
+test("completing or removing a timer that is not selected leaves the selection and its countdown alone", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const [a, b, c] = await addTimers(page, [["Alpha task", 300000], ["Bravo task", 240000], ["Charlie task", 180000]]);
+  await mountCompactProbe(page);
+  await navigateWithButton(page, "prev");          // 3 / 3 -> 2 / 3 : Bravo
+  expect(await selectedId(page)).toBe(b);
+
+  // Alpha completes and rearms: it stays active, the selection does not move,
+  // the floating view shows no indication for a timer it is not showing, and
+  // exactly one alarm travels the existing queue.
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), a);
+  await page.waitForFunction(
+    () => window.__TTC_TEST__.alarmQueueLength() === 0 && !window.__TTC_TEST__.alarmBusy(),
+    { timeout: 30000 }
+  );
+  expect(await selectedId(page)).toBe(b);
+  const completed = await readCompactRoot(page);
+  expect(completed.title).toBe("Bravo task");
+  expect(completed.position).toBe("2 / 3");
+  expect(completed.alarm).toBe("false");
+  expect(completed.bellHidden).toBe(true);
+  expect(Math.abs(clockToSeconds(completed.countdown) - await modelSeconds(page, b))).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.remindersCompleted))).toEqual([1, 0, 0]);
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(1);
+
+  // A non-selected timer is removed: the selection holds, and its position is
+  // recomputed against the shorter collection.
+  await page.evaluate(id => window.__TTC_TEST__.deleteDirect(id), c);
+  expect(await selectedId(page)).toBe(b);
+  const afterDelete = await readCompactRoot(page);
+  expect(afterDelete.title).toBe("Bravo task");
+  expect(afterDelete.position).toBe("2 / 2");
+  expect(afterDelete.meta).toBe("2 timers active");
+  expect(Math.abs(clockToSeconds(afterDelete.countdown) - await modelSeconds(page, b))).toBeLessThanOrEqual(1);
+  expect(errors.length).toBe(0);
+});
+
+test("when the selected timer leaves the collection the nearest remaining timer takes over", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const [a, b, c] = await addTimers(page, [["Alpha task", 300000], ["Bravo task", 240000], ["Charlie task", 180000]]);
+  await mountCompactProbe(page);
+  await navigateWithButton(page, "prev");          // 2 / 3 : Bravo
+  expect(await selectedId(page)).toBe(b);
+
+  // Dismissed: the timer that filled its slot takes over — not a snap back to
+  // the soonest timer.
+  await page.evaluate(id => window.__TTC_TEST__.deleteDirect(id), b);
+  expect(await selectedId(page)).toBe(c);
+  const afterDelete = await readCompactRoot(page);
+  expect(afterDelete.title).toBe("Charlie task");
+  expect(afterDelete.position).toBe("2 / 2");
+
+  // Paused: the same rule, and a paused timer is not offered by the navigation.
+  await page.evaluate(id => window.__TTC_TEST__.pause(id), c);
+  expect(await selectedId(page)).toBe(a);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactActiveIds())).toEqual([a]);
+  const afterPause = await readCompactRoot(page);
+  expect(afterPause.title).toBe("Alpha task");
+  expect(afterPause.meta).toBe("1 timer active");
+  expect(afterPause.navHidden).toBe(true);
+  expect(afterPause.position).toBe("");
+
+  // Resumed: the surviving selection stays put while it is still active.
+  await page.evaluate(id => window.__TTC_TEST__.resume(id), c);
+  await page.evaluate(() => window.__TTC_TEST__.compactRender());
+  expect(await selectedId(page)).toBe(a);
+  const resumed = await readCompactRoot(page);
+  expect(resumed.position).toBe("1 / 2");
+  expect(resumed.navHidden).toBe(false);
+
+  // The selected timer can be the one deleted, too.
+  await page.evaluate(id => window.__TTC_TEST__.deleteDirect(id), a);
+  expect(await selectedId(page)).toBe(c);
+  const single = await readCompactRoot(page);
+  expect(single.title).toBe("Charlie task");
+  expect(single.navHidden).toBe(true);
+  expect(single.position).toBe("");
+
+  // Nothing left: the compact empty state, with no controls to offer.
+  await page.evaluate(id => window.__TTC_TEST__.deleteDirect(id), c);
+  const empty = await readCompactRoot(page);
+  expect(empty.mode).toBe("empty");
+  expect(empty.title).toBe("No active timer");
+  expect(empty.countdown).toBe("--:--");
+  expect(empty.meta).toBe("");
+  expect(empty.navHidden).toBe(true);
+  expect(empty.position).toBe("");
+
+  // A fresh timer restores the running view, again with nothing to navigate.
+  await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Delta task", minMinutes: 5, maxMinutes: 5 }));
+  await page.evaluate(() => window.__TTC_TEST__.compactRender());
+  const restored = await readCompactRoot(page);
+  expect(restored.mode).toBe("running");
+  expect(restored.title).toBe("Delta task");
+  expect(restored.navHidden).toBe(true);
+  expect(restored.position).toBe("");
+  expect(errors.length).toBe(0);
+});
+
+test("a navigated selection keeps its own live countdown and the single alarm path", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const [a, b] = await addTimers(page, [["Alpha task", 240000], ["Bravo task", 300000]]);
+  await mountCompactProbe(page);
+  await navigateWithButton(page, "next");           // 1 / 2 -> 2 / 2 : Bravo (not the soonest)
+  expect(await selectedId(page)).toBe(b);
+
+  // The selected timer — deliberately not the soonest one — expires: it rearms
+  // in place, the indication belongs to it, and exactly one alarm runs.
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), b);
+  const firing = await readCompactRoot(page);
+  expect(firing.title).toBe("Bravo task");
+  expect(firing.alarm).toBe("true");
+  expect(firing.bellHidden).toBe(false);
+  await page.waitForFunction(
+    () => window.__TTC_TEST__.alarmQueueLength() === 0 && !window.__TTC_TEST__.alarmBusy(),
+    { timeout: 30000 }
+  );
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(1);
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.remindersCompleted))).toEqual([0, 1]);
+  expect(await selectedId(page)).toBe(b);           // completion does not move the selection
+
+  // The countdown follows the rearmed target timestamp, second by second: one
+  // source of truth, no second clock inside the floating view.
+  await page.evaluate(() => window.__TTC_TEST__.compactRender());
+  const rearmed = await readCompactRoot(page);
+  expect(Math.abs(clockToSeconds(rearmed.countdown) - await modelSeconds(page, b))).toBeLessThanOrEqual(1);
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => window.__TTC_TEST__.compactRender());
+  const later = await readCompactRoot(page);
+  const laterExpected = await modelSeconds(page, b);
+  expect(clockToSeconds(later.countdown)).toBeGreaterThanOrEqual(laterExpected - 1);
+  expect(clockToSeconds(later.countdown)).toBeLessThanOrEqual(laterExpected);
+  expect(clockToSeconds(later.countdown)).toBeLessThan(clockToSeconds(rearmed.countdown));
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.state))).toEqual(["running", "running"]);
+
+  // Navigating away leaves the fired timer's indication behind.
+  await navigateWithButton(page, "prev");
+  expect(await selectedId(page)).toBe(a);
+  const away = await readCompactRoot(page);
+  expect(away.title).toBe("Alpha task");
+  expect(away.alarm).toBe("false");
+  expect(away.bellHidden).toBe(true);
+  expect(errors.length).toBe(0);
+});
+
+test("closing and reopening the floating view returns to the default timer and preserves every timer field", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const [a, b, c] = await addTimers(page, [["Alpha task", 300000], ["Bravo task", 240000], ["Charlie task", 180000]]);
+  await mountCompactProbe(page);
+  await navigateWithButton(page, "prev");
+  expect((await readCompactRoot(page)).position).toBe("2 / 3");
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactSelectedId())).toBe(b);
+  await wheelBurst(page, [120]);
+  expect(await selectedId(page)).toBe(c);
+  const before = await timerCore(page);
+
+  // The restore control closes the floating view; nothing about the timers
+  // changes, and no alarm, countdown or state was disturbed.
+  const closed = await page.evaluate(sel => {
+    document.querySelector(`${sel} .ttc-compact-restore`).click();
+    return document.querySelectorAll("#ttcCompactProbe").length;
+  }, COMPACT_ROOT);
+  expect(closed).toBe(0);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactOpen())).toBe(false);
+  expect(await timerCore(page)).toEqual(before);
+
+  // Reopening starts on the default selection again — the timer due next — and
+  // gestures work immediately, with no gesture state left over from before.
+  await mountCompactProbe(page);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactSelectedId())).toBeNull();
+  const reopened = await readCompactRoot(page);
+  expect(reopened.title).toBe("Charlie task");
+  expect(reopened.position).toBe("3 / 3");
+  const burst = await wheelBurst(page, [120]);
+  expect(burst[0].defaultPrevented).toBe(true);
+  expect(await selectedId(page)).toBe(a);           // 3 / 3 wraps forward to 1 / 3
+  const navigated = await readCompactRoot(page);
+  expect(navigated.title).toBe("Alpha task");
+  expect(navigated.position).toBe("1 / 3");
+  expect(await timerCore(page)).toEqual(before);
   expect(errors.length).toBe(0);
 });

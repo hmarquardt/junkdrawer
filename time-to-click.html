@@ -410,9 +410,9 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 <div class="sr-only" id="liveRegion" aria-live="polite"></div>
 <div class="sr-only" id="floatHint">Floating timers need Chrome&rsquo;s Document Picture-in-Picture API (Chrome 116 or newer).</div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.09.22.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.09.22.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Time to Click · version 2026.09.22.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.13.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.10.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Time to Click · version 2026.10.13.1
 </footer>
 
 <script>
@@ -1025,17 +1025,25 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   // -------------------------------------------------------------------
   // Compact / Float Timer (Document Picture-in-Picture). A tiny always-on-top
   // presentation of the SAME timer state: it owns no timers, no scheduler and
-  // no alarm logic. It picks its timer with the existing soonestRunning(),
-  // derives remaining time from that timer's absolute targetTimestamp, and
-  // renders from the existing `timers` array. Expiration, rearming, speech,
-  // chime, notifications, reminder counts and persistence stay in the engine
-  // above. The PiP window may own a render-only refresh interval so its visible
+  // no alarm logic. It derives remaining time from the shown timer's absolute
+  // targetTimestamp and renders from the existing `timers` array. It opens on
+  // the existing soonestRunning() default and can be navigated across every
+  // active timer — mouse wheel, arrow buttons or arrow keys — with the
+  // selection held by timer id. Expiration, rearming, speech, chime,
+  // notifications, reminder counts and persistence stay in the engine above.
+  // The PiP window may own a render-only refresh interval so its visible
   // countdown stays smooth while the full window is minimized.
   // -------------------------------------------------------------------
   var COMPACT_WIDTH = 260;
   var COMPACT_HEIGHT = 80;
   var COMPACT_REFRESH_MS = 250;   // PiP-owned and render-only: it expires nothing
   var COMPACT_ALARM_MS = 4000;    // transient "this timer just fired" indication
+  // Mouse-wheel navigation: accumulated pixels that count as one deliberate
+  // step, and the quiet gap that ends a gesture burst. Every wheel event that
+  // arrives inside one continuous burst (trackpad momentum, high-resolution
+  // scrolling, a fast mouse-wheel spin) shares a single step.
+  var COMPACT_WHEEL_STEP = 12;
+  var COMPACT_WHEEL_GESTURE_MS = 140;
 
   // Document-level reset for the PiP document only. The component rules below
   // are self-contained (no document-level selectors), so the identical surface
@@ -1087,6 +1095,22 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;',
     '}',
     '.ttc-compact-meta-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }',
+    // Multi-timer navigation (previous / position / next). It shares the
+    // existing meta line, so the surface keeps its current height and the
+    // countdown and timer name stay the primary elements. Hidden outright when
+    // there is only one timer to show.
+    '.ttc-compact-nav { display: flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; overflow: hidden; }',
+    '.ttc-compact-nav[hidden] { display: none; }',
+    '.ttc-compact-navbtn {',
+    '  flex: 0 0 auto; appearance: none; margin: 0; padding: 0 4px;',
+    '  border: 1px solid var(--ttc-border); border-radius: 6px;',
+    '  background: rgba(255, 255, 255, 0.04); color: var(--ttc-muted); cursor: pointer;',
+    "  font: 600 0.7rem/1.35 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
+    '  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;',
+    '}',
+    '.ttc-compact-navbtn:hover { color: var(--ttc-text); border-color: var(--ttc-accent); background: rgba(91, 140, 255, 0.16); }',
+    '.ttc-compact-navbtn:focus-visible { outline: 2px solid #a8c1ff; outline-offset: 1px; }',
+    '.ttc-compact-position { flex: 0 0 auto; font-size: 0.66rem; font-variant-numeric: tabular-nums; letter-spacing: 0.03em; color: var(--ttc-muted); white-space: nowrap; }',
     '.ttc-compact-bell[hidden] { display: none; }',
     '@keyframes ttcCompactPulse {',
     '  0%, 100% { box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.35); }',
@@ -1098,7 +1122,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     '}',
     '.ttc-compact[data-alarm="true"] .ttc-compact-countdown { color: var(--ttc-accent); }',
     '@media (prefers-reduced-motion: reduce) {',
-    '  .ttc-compact, .ttc-compact-restore { animation: none !important; transition: none !important; }',
+    '  .ttc-compact, .ttc-compact-restore, .ttc-compact-navbtn { animation: none !important; transition: none !important; }',
     '  .ttc-compact[data-alarm="true"] { box-shadow: inset 0 0 22px rgba(91, 140, 255, 0.5); }',
     '}'
   ].join('\n');
@@ -1114,6 +1138,12 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   var compactRefreshRealm = null;
   var compactAlarmUntil = 0;       // until when the display shows the "just fired" state
   var compactShownId = null;       // timer id the compact display is currently showing
+  var compactPinnedId = null;      // explicit selection by timer id; null = follow the soonest
+  var compactPinnedIndex = 0;      // that timer's slot in the navigable collection
+  // Wheel gesture state (see handleCompactWheel): one burst, one step.
+  var compactWheelAccum = 0;
+  var compactWheelLastAt = 0;
+  var compactWheelSpent = false;
 
   function supportsDocumentPip() {
     // 'documentPictureInPicture' in window is the documented signal;
@@ -1129,21 +1159,138 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     return !!(compactWindow && !compactWindow.closed && compactRefs);
   }
 
+  // The navigable collection: every timer the compact display can show, in
+  // dashboard order. It is a filter over the authoritative `timers` array — the
+  // same set the floating view has always represented (running timers with a
+  // live target) — never a second timer collection, scheduler or clock.
+  function compactActiveTimers() {
+    return timers.filter(function (t) { return t.state === 'running' && t.targetTimestamp > 0; });
+  }
+
+  function indexOfTimerId(list, id) {
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i].id === id) return i;
+    }
+    return -1;
+  }
+
+  // Resolves which active timer the compact display shows.
+  //
+  //  * No explicit selection (compactPinnedId === null): the application's
+  //    existing default — the running timer due next (the same soonestRunning()
+  //    the page title uses).
+  //  * Explicitly selected: stable by timer id, so creating, completing,
+  //    reordering or removing other timers cannot move the selection.
+  //  * Selected timer no longer active (completing into a fresh cycle keeps a
+  //    timer active; pausing, dismissing or deleting does not): the nearest
+  //    remaining timer takes over — the one that filled its slot, else the
+  //    last one.
+  function compactSelection(now) {
+    var list = compactActiveTimers();
+    var total = list.length;
+    if (!total) return { list: list, timer: null, index: -1, total: 0 };
+    var index = -1;
+    if (compactPinnedId !== null) {
+      index = indexOfTimerId(list, compactPinnedId);
+      if (index === -1) index = Math.min(Math.max(compactPinnedIndex, 0), total - 1);
+      compactPinnedId = list[index].id;
+    } else {
+      var soonest = soonestRunning(now);
+      index = soonest ? indexOfTimerId(list, soonest.id) : -1;
+      if (index === -1) index = 0;
+    }
+    compactPinnedIndex = index;
+    return { list: list, timer: list[index], index: index, total: total };
+  }
+
+  // One deliberate navigation step through the navigable collection, wrapping
+  // at both ends. Returns false when there is nowhere to go.
+  function compactNavigate(step) {
+    var list = compactActiveTimers();
+    if (list.length < 2) return false;
+    var current = compactSelection(Date.now());
+    var from = current.index < 0 ? 0 : current.index;
+    var next = (from + (step < 0 ? -1 : 1) + list.length) % list.length;
+    compactPinnedId = list[next].id;
+    compactPinnedIndex = next;
+    // The "just fired" indication belongs to the timer that fired, never to
+    // whichever timer the user navigated to afterwards.
+    compactAlarmUntil = 0;
+    renderCompactWindow(Date.now());
+    return true;
+  }
+
+  function resetCompactWheelGesture() {
+    compactWheelAccum = 0;
+    compactWheelLastAt = 0;
+    compactWheelSpent = false;
+  }
+
+  function normalizeWheelDelta(event) {
+    var d = event.deltaY;
+    if (!isFinite(d) || d === 0) return 0;
+    if (event.deltaMode === 1) return d * 16;   // lines
+    if (event.deltaMode === 2) return d * 100;  // pages
+    return d;                                   // pixels
+  }
+
+  // Mouse wheel / trackpad: scrolling up selects the previous timer, scrolling
+  // down selects the next. One continuous burst of events advances exactly one
+  // timer, so trackpad momentum and high-resolution scrolling cannot skip
+  // through the collection; a quiet gap starts a fresh gesture. Only the
+  // compact surface listens — wheel events elsewhere in the application are
+  // untouched.
+  function handleCompactWheel(event) {
+    // The compact surface has nothing to scroll: never let the gesture reach
+    // the document behind it.
+    if (event.cancelable) event.preventDefault();
+    var now = Date.now();
+    if (now - compactWheelLastAt > COMPACT_WHEEL_GESTURE_MS) {
+      compactWheelAccum = 0;
+      compactWheelSpent = false;
+    }
+    compactWheelLastAt = now;
+    if (compactWheelSpent) return;
+    var delta = normalizeWheelDelta(event);
+    if (!delta) return;
+    if (compactWheelAccum !== 0 && (delta > 0) !== (compactWheelAccum > 0)) compactWheelAccum = 0;
+    compactWheelAccum += delta;
+    if (Math.abs(compactWheelAccum) < COMPACT_WHEEL_STEP) return;
+    compactWheelAccum = 0;
+    compactWheelSpent = compactNavigate(delta > 0 ? 1 : -1);
+  }
+
+  // Arrow keys do the same job as the two arrow buttons, which stay operable by
+  // mouse, Enter and Space on their own.
+  function handleCompactKeydown(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    var step = 0;
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') step = -1;
+    else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') step = 1;
+    if (!step) return;
+    if (compactNavigate(step)) event.preventDefault();
+  }
+
   // Compact display state, derived entirely from the existing `timers` array
-  // through the same soonestRunning() the page title uses: no separate
-  // "selected timer", no independent countdown.
+  // through the navigable collection above: the selected timer is one existing
+  // record and the countdown is that record's authoritative targetTimestamp —
+  // no separate timer, no independent clock.
   function compactViewState(now) {
-    var soonest = soonestRunning(now);
-    if (soonest) {
-      var remaining = Math.max(0, soonest.targetTimestamp - now);
-      var active = countRunning();
+    var selection = compactSelection(now);
+    if (selection.timer) {
+      var active = selection.total;
+      var remaining = Math.max(0, selection.timer.targetTimestamp - now);
       return {
         mode: 'running',
-        id: soonest.id,
-        title: shortHead(soonest.prompt),
-        fullTitle: soonest.prompt,
+        id: selection.timer.id,
+        title: shortHead(selection.timer.prompt),
+        fullTitle: selection.timer.prompt,
         countdown: formatClock(Math.ceil(remaining / 1000)),
-        meta: active + (active === 1 ? ' timer active' : ' timers active')
+        meta: active + (active === 1 ? ' timer active' : ' timers active'),
+        // Navigation exists only when there is somewhere to navigate.
+        navigable: active > 1,
+        position: selection.index + 1,
+        total: active
       };
     }
     var paused = 0;
@@ -1155,7 +1302,10 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
         title: 'All timers paused',
         fullTitle: 'All timers paused',
         countdown: '--:--',
-        meta: paused + (paused === 1 ? ' timer paused' : ' timers paused')
+        meta: paused + (paused === 1 ? ' timer paused' : ' timers paused'),
+        navigable: false,
+        position: 0,
+        total: 0
       };
     }
     return {
@@ -1164,7 +1314,10 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
       title: 'No active timer',
       fullTitle: 'No active timer',
       countdown: '--:--',
-      meta: ''
+      meta: '',
+      navigable: false,
+      position: 0,
+      total: 0
     };
   }
 
@@ -1207,6 +1360,40 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 
     var metaEl = doc.createElement('div');
     metaEl.className = 'ttc-compact-meta';
+
+    // Previous / position indicator / next. The two buttons are ordinary
+    // buttons: keyboard-operable on their own, and the only way to move through
+    // timers when wheel events are unavailable or unreliable.
+    var navEl = doc.createElement('div');
+    navEl.className = 'ttc-compact-nav';
+    navEl.setAttribute('role', 'group');
+    navEl.setAttribute('aria-label', 'Switch between active timers');
+    navEl.hidden = true;
+
+    var prevBtn = doc.createElement('button');
+    prevBtn.type = 'button';
+    prevBtn.className = 'ttc-compact-navbtn ttc-compact-prev';
+    prevBtn.textContent = '‹';
+    prevBtn.setAttribute('aria-label', 'Previous active timer');
+    prevBtn.title = 'Previous timer (scroll up)';
+    prevBtn.addEventListener('click', function () { compactNavigate(-1); });
+
+    var positionEl = doc.createElement('span');
+    positionEl.className = 'ttc-compact-position';
+    positionEl.setAttribute('aria-live', 'polite');
+
+    var nextBtn = doc.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'ttc-compact-navbtn ttc-compact-next';
+    nextBtn.textContent = '›';
+    nextBtn.setAttribute('aria-label', 'Next active timer');
+    nextBtn.title = 'Next timer (scroll down)';
+    nextBtn.addEventListener('click', function () { compactNavigate(1); });
+
+    navEl.appendChild(prevBtn);
+    navEl.appendChild(positionEl);
+    navEl.appendChild(nextBtn);
+
     var bellEl = doc.createElement('span');
     bellEl.className = 'ttc-compact-bell';
     bellEl.textContent = '🔔';
@@ -1214,6 +1401,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     bellEl.setAttribute('aria-hidden', 'true');
     var metaTextEl = doc.createElement('span');
     metaTextEl.className = 'ttc-compact-meta-text';
+    metaEl.appendChild(navEl);
     metaEl.appendChild(bellEl);
     metaEl.appendChild(metaTextEl);
 
@@ -1221,9 +1409,16 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     root.appendChild(countdownEl);
     root.appendChild(metaEl);
 
+    // The compact surface is the only place in the application that listens for
+    // wheel gestures, and it can be rendered inside any document (the PiP
+    // document or the in-page test probe), so both listeners attach to the root.
+    root.addEventListener('wheel', handleCompactWheel, { passive: false });
+    root.addEventListener('keydown', handleCompactKeydown);
+
     return {
       root: root, title: titleEl, restore: restoreBtn,
       countdown: countdownEl, meta: metaTextEl, bell: bellEl,
+      nav: navEl, prev: prevBtn, next: nextBtn, position: positionEl,
       style: null
     };
   }
@@ -1239,6 +1434,17 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     refs.title.title = state.fullTitle;
     refs.countdown.textContent = state.countdown;
     refs.meta.textContent = state.meta;
+    // A single timer (or none) has nowhere to navigate: the controls and the
+    // position indicator disappear rather than sitting there inert.
+    var navigable = !!state.navigable;
+    refs.nav.hidden = !navigable;
+    if (navigable) {
+      refs.position.textContent = state.position + ' / ' + state.total;
+      refs.position.title = 'Timer ' + state.position + ' of ' + state.total + ' active';
+    } else {
+      refs.position.textContent = '';
+      refs.position.removeAttribute('title');
+    }
   }
 
   function restoreFromCompact() {
@@ -1266,6 +1472,11 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     compactRefs = refs;
     compactShownId = null;
     compactAlarmUntil = 0;
+    // A freshly opened floating view starts on the application's existing
+    // default — the timer due next — not on whatever was selected last time.
+    compactPinnedId = null;
+    compactPinnedIndex = 0;
+    resetCompactWheelGesture();
     renderCompactWindow(Date.now());
   }
 
@@ -2210,6 +2421,9 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     compactSupported: function () { return supportsDocumentPip(); },
     compactOpen: function () { return isCompactOpen(); },
     compactView: function () { return compactViewState(Date.now()); },
+    compactSelectedId: function () { return compactPinnedId; },
+    compactNavigate: function (step) { return compactNavigate(step); },
+    compactActiveIds: function () { return compactActiveTimers().map(function (t) { return t.id; }); },
     compactRender: function () { renderCompactWindow(Date.now()); },
     compactProbeMount: function () { return mountCompactProbe(); },
     compactProbeUnmount: function () { if (compactProbe) unmountCompactPresentation(false); },
