@@ -394,6 +394,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
           <button type="button" id="testChimeBtn">Test Chime</button>
           <button type="button" id="testVoiceBtn">Test Voice</button>
         </div>
+        <p class="field-note" id="speechNote" role="status" aria-live="polite" hidden></p>
       </div>
       <div class="toggles">
         <label class="toggle"><input id="muteVoice" type="checkbox" /> Mute voice</label>
@@ -410,9 +411,9 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
 <div class="sr-only" id="liveRegion" aria-live="polite"></div>
 <div class="sr-only" id="floatHint">Floating timers need Chrome&rsquo;s Document Picture-in-Picture API (Chrome 116 or newer).</div>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.13.1" bump="Update this version whenever this file changes in a commit." -->
-<footer data-junkdrawer-deploy-footer data-deploy-version="2026.10.13.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · Time to Click · version 2026.10.13.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.14.1" bump="Update this version whenever this file changes in a commit." -->
+<footer data-junkdrawer-deploy-footer data-deploy-version="2026.10.14.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · Time to Click · version 2026.10.14.1
 </footer>
 
 <script>
@@ -623,6 +624,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
   var visualFlashInput = $('visualFlash');
   var testChimeBtn = $('testChimeBtn');
   var testVoiceBtn = $('testVoiceBtn');
+  var speechNote = $('speechNote');
 
   // -------------------------------------------------------------------
   // Formatting helpers
@@ -738,22 +740,18 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     return Math.max(5000, estimatedMs + 5000, s.length * 100 + 3000);
   }
 
+  // A reminder is spoken through the one shared speech path below, which repairs
+  // a wedged or paused speech queue, retries once, and reports failures instead
+  // of swallowing them. Serialization stays the alarm queue's job: this never
+  // cancels an announcement that is in flight.
   function speakAlarmText(text, onDone) {
-    if (settings.muteVoice || !('speechSynthesis' in window)) { onDone(); return; }
-    try {
-      var utter = new SpeechSynthesisUtterance(text);
-      var uri = settings.voiceURI || voiceSelect.value;
-      for (var i = 0; i < voices.length; i += 1) {
-        if (voices[i].voiceURI === uri) { utter.voice = voices[i]; break; }
-      }
-      utter.volume = settings.speechVolume;
-      utter.rate = settings.speechRate;
-      var fired = false;
-      var finish = function () { if (!fired) { fired = true; onDone(); } };
-      utter.onend = finish;
-      utter.onerror = finish;
-      window.speechSynthesis.speak(utter);
-    } catch (e) { onDone(); }
+    if (settings.muteVoice) { onDone(); return; }
+    if (!speechSupported()) {
+      reportSpeechIssue('speech synthesis is not available in this browser, so reminders cannot be spoken.');
+      onDone();
+      return;
+    }
+    speakWithRetry(text, onDone, 0);
   }
 
   // -------------------------------------------------------------------
@@ -1834,15 +1832,109 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     scheduleNote(ctx, master, 660, ctx.currentTime + 0.02, 0.14, 0.5);
   }
 
-  // Some browsers only permit speech after a user gesture; a silent
-  // utterance on the first run keeps later spoken reminders reliable.
+  // -------------------------------------------------------------------
+  // Spoken reminders: one shared speech path.
+  //
+  // Chrome can leave its speech queue paused, or holding an utterance that
+  // never starts (a minimized or hidden window, an OS audio-device change, a
+  // stalled silent unlock probe). From then on speak() is accepted and silently
+  // ignored for the rest of the session: announcements go quiet while the
+  // chime — a separate Web Audio path — keeps working. So the queue is repaired
+  // before every utterance, a start watchdog retries once, and failures are
+  // reported instead of swallowed. Nothing is ever cancelled while an
+  // announcement is audibly in flight, so a second timer — or navigating in the
+  // floating view — can never cut off a prompt.
+  // -------------------------------------------------------------------
+  var SPEECH_START_TIMEOUT_MS = 1500;  // no start event by then == stalled engine
+  var SPEECH_START_MAX_ARMS = 8;       // never wait on a queued utterance forever
+  var SPEECH_PROBE_MAX_MS = 1200;      // the silent unlock probe must not block
+  var SPEECH_RETRY_LIMIT = 1;          // one transparent retry per announcement
+  var speechProbe = null;              // silent unlock utterance, while outstanding
+  var speechInFlight = 0;              // our utterances currently queued or speaking
+  var speechStartHandle = null;
+
+  function speechSupported() {
+    return ('speechSynthesis' in window) && !!window.speechSynthesis
+      && (typeof SpeechSynthesisUtterance === 'function');
+  }
+
+  function describeSpeechError(err) {
+    if (!err) return 'unknown error';
+    if (typeof err === 'string') return err;
+    return err.error || err.message || err.name || String(err);
+  }
+
+  // Visible status, console line and screen-reader announcement for a speech
+  // failure. Never throws, never blocks the alarm queue.
+  function reportSpeechIssue(message) {
+    speechNote.textContent = 'Voice: ' + message;
+    speechNote.hidden = false;
+    try { console.warn('[Time to Click] ' + message); } catch (e) {}
+    announce('Voice problem: ' + message);
+  }
+
+  function clearSpeechIssue() {
+    if (speechNote.hidden) return;
+    speechNote.textContent = '';
+    speechNote.hidden = true;
+  }
+
+  function clearSpeechStartWatch() {
+    if (speechStartHandle === null) return;
+    clearTimeout(speechStartHandle);
+    speechStartHandle = null;
+  }
+
+  // Repair the engine before handing it an utterance: un-pause a paused queue,
+  // and drop a queue that is not audible (wedged behind an utterance that never
+  // started — in practice the silent unlock probe). A queue that is actually
+  // speaking is left completely alone.
+  function repairSpeechQueue() {
+    if (!speechSupported()) return;
+    var synth = window.speechSynthesis;
+    try {
+      if (synth.paused) synth.resume();
+      if (!synth.speaking && (synth.pending || speechProbe)) {
+        synth.cancel();
+        speechProbe = null;
+      }
+    } catch (e) { /* best effort: speak() below reports anything worse */ }
+  }
+
+  // The user's saved voice preferences, applied to one utterance (unchanged
+  // selection behavior: saved voice, else the selected/auto-picked one).
+  function applyVoiceSettings(utter) {
+    var uri = settings.voiceURI || voiceSelect.value;
+    for (var i = 0; i < voices.length; i += 1) {
+      if (voices[i].voiceURI === uri) { utter.voice = voices[i]; break; }
+    }
+    utter.volume = settings.speechVolume;
+    utter.rate = settings.speechRate;
+  }
+
+  // Some browsers only permit speech after a user gesture; a silent utterance on
+  // the first interaction keeps later spoken reminders reliable. It is also the
+  // utterance that can wedge the queue when it never starts, so it is tracked
+  // and dropped as soon as it looks stuck.
   function unlockSpeech() {
-    if (!('speechSynthesis' in window)) return;
+    if (!speechSupported()) return;
+    var synth = window.speechSynthesis;
     try {
       var u = new SpeechSynthesisUtterance(' ');
       u.volume = 0;
-      window.speechSynthesis.speak(u);
-    } catch (e) {}
+      var release = function () { if (speechProbe === u) speechProbe = null; };
+      u.onend = release;
+      u.onerror = release;
+      speechProbe = u;
+      synth.speak(u);
+      setTimeout(function () {
+        if (speechProbe !== u) return;
+        // Still outstanding: drop the inaudible probe rather than let it hold
+        // the queue open. A real announcement is never touched.
+        if (speechInFlight === 0) { try { synth.cancel(); } catch (e) {} }
+        speechProbe = null;
+      }, SPEECH_PROBE_MAX_MS);
+    } catch (e) { speechProbe = null; }
   }
 
   // -------------------------------------------------------------------
@@ -1881,18 +1973,86 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     }
   }
 
-  function speakTestPhrase() {
-    if (settings.muteVoice || !('speechSynthesis' in window)) return;
+  // Hands one utterance to the engine, watches for it to actually start, retries
+  // once on a repaired queue, and reports the reason when it cannot be spoken.
+  function speakWithRetry(text, onDone, attempt) {
+    var synth = window.speechSynthesis;
+    var utter;
     try {
-      var utter = new SpeechSynthesisUtterance('This is a reminder voice test.');
-      var uri = settings.voiceURI || voiceSelect.value;
-      for (var i = 0; i < voices.length; i += 1) {
-        if (voices[i].voiceURI === uri) { utter.voice = voices[i]; break; }
+      utter = new SpeechSynthesisUtterance(text);
+      applyVoiceSettings(utter);
+    } catch (e) {
+      reportSpeechIssue('the reminder could not be prepared (' + describeSpeechError(e) + ').');
+      onDone();
+      return;
+    }
+    var settled = false;
+    var started = false;
+    var arms = 0;
+    var finish = function (reason, detail) {
+      if (settled) return;
+      settled = true;
+      clearSpeechStartWatch();
+      speechInFlight = Math.max(0, speechInFlight - 1);
+      if (reason === 'ended') {
+        clearSpeechIssue();
+      } else if (reason === 'error' || reason === 'stalled') {
+        if (attempt < SPEECH_RETRY_LIMIT) {
+          // Clear whatever is wedged in the queue and try once more.
+          try { synth.cancel(); synth.resume(); } catch (e2) {}
+          speechProbe = null;
+          repairSpeechQueue();
+          speakWithRetry(text, onDone, attempt + 1);
+          return;
+        }
+        reportSpeechIssue('the reminder could not be spoken (' + detail + ').');
       }
-      utter.volume = settings.speechVolume;
-      utter.rate = settings.speechRate;
-      window.speechSynthesis.speak(utter);
-    } catch (e) {}
+      // 'superseded' (interrupted/canceled): another announcement took the
+      // engine — serialization, not a failure.
+      onDone();
+    };
+    var watchForStart = function () {
+      speechStartHandle = setTimeout(function () {
+        speechStartHandle = null;
+        if (started || settled) return;
+        if (speechInFlight > 1 && arms < SPEECH_START_MAX_ARMS) {
+          // Another announcement of ours is still queued or speaking: ours is
+          // waiting its turn, not stalled. Keep waiting, but never forever.
+          arms += 1;
+          watchForStart();
+          return;
+        }
+        finish('stalled', 'the speech engine did not respond');
+      }, SPEECH_START_TIMEOUT_MS);
+    };
+    utter.onstart = function () { started = true; clearSpeechStartWatch(); };
+    utter.onend = function () { finish('ended'); };
+    utter.onerror = function (e) {
+      var code = (e && e.error) ? String(e.error) : 'unknown error';
+      if (code === 'interrupted' || code === 'canceled') { finish('superseded'); return; }
+      finish('error', code);
+    };
+    speechInFlight += 1;
+    try {
+      synth.speak(utter);
+    } catch (e) {
+      finish('error', describeSpeechError(e));
+      return;
+    }
+    watchForStart();
+  }
+
+  function speakTestPhrase() {
+    if (settings.muteVoice) {
+      reportSpeechIssue('voice is muted, so reminders will not be spoken.');
+      return;
+    }
+    if (!speechSupported()) {
+      reportSpeechIssue('speech synthesis is not available in this browser.');
+      return;
+    }
+    repairSpeechQueue();
+    speakWithRetry('This is a reminder voice test.', function () {}, 0);
   }
 
   // -------------------------------------------------------------------
@@ -2411,6 +2571,23 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); border-colo
     alarmBusy: function () { return alarmBusy; },
     processedAlarmCount: function () { return processedAlarmCount; },
     speechSafetyTimeoutMs: speechSafetyTimeoutMs,
+    // Speech dispatch (non-visual): the same path timer expirations use, so the
+    // repair/retry/reporting logic is testable without an audible engine.
+    speechStatus: function () { return speechNote.hidden ? '' : speechNote.textContent; },
+    speechDiag: function () {
+      var supported = speechSupported();
+      var synth = supported ? window.speechSynthesis : null;
+      return {
+        supported: supported,
+        paused: synth ? !!synth.paused : false,
+        speaking: synth ? !!synth.speaking : false,
+        pending: synth ? !!synth.pending : false,
+        probeOutstanding: !!speechProbe,
+        inFlight: speechInFlight,
+        startTimeoutMs: SPEECH_START_TIMEOUT_MS
+      };
+    },
+    speakText: function (text) { speakAlarmText(text, function () {}); return true; },
     setSpeechRate: function (r) { settings.speechRate = clampNumber(r, 0.5, 2, 1); saveSettings(); },
     tick: function () { tick(); },
     find: findTimer,

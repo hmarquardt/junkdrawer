@@ -1566,3 +1566,315 @@ test("closing and reopening the floating view returns to the default timer and p
   expect(await timerCore(page)).toEqual(before);
   expect(errors.length).toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// Spoken reminders (voice announcements).
+//
+// An automated browser cannot be listened to, so these tests drive the
+// production dispatch path — queue repair, start watchdog, retry, error
+// reporting, alarm-queue sequencing — and record exactly what the app hands to
+// speechSynthesis. Engine modes decide how the engine responds:
+//   "ok"            the utterance starts and ends (deterministic)
+//   "ok-slow"       starts at once, ends after 3 s (a long announcement)
+//   "silent"        accepted and never answered: the wedged-engine case
+//   "throws"        speak() refuses outright
+//   "error-network" the engine reports a synthesis error
+//   "real"          the browser's own engine, for integration checks
+// Real audio is verified separately in a headed browser.
+// ---------------------------------------------------------------------------
+
+async function instrumentSpeech(page, mode = "ok") {
+  await page.evaluate((mode) => {
+    const synth = window.speechSynthesis;
+    if (!synth.__ttcOriginalSpeak) {
+      synth.__ttcOriginalSpeak = synth.speak.bind(synth);
+      synth.__ttcOriginalCancel = synth.cancel.bind(synth);
+      synth.__ttcOriginalResume = synth.resume.bind(synth);
+    }
+    window.__speech = { mode, calls: [], events: [], cancels: 0, resumes: 0 };
+    synth.cancel = function () { window.__speech.cancels += 1; return synth.__ttcOriginalCancel(); };
+    synth.resume = function () { window.__speech.resumes += 1; return synth.__ttcOriginalResume(); };
+    synth.speak = function (u) {
+      window.__speech.calls.push({ text: u.text, volume: u.volume, rate: u.rate, voice: u.voice ? u.voice.name : null });
+      const record = (name, detail) => window.__speech.events.push(name + ":" + u.text + (detail ? ":" + detail : ""));
+      if (mode === "silent") return;                    // accepted, never answered
+      if (mode === "throws") throw new Error("synthesis unavailable");
+      if (mode === "error-network") { record("error", "network"); if (u.onerror) u.onerror({ error: "network" }); return; }
+      if (mode === "ok" || mode === "ok-slow") {
+        const endDelay = mode === "ok-slow" ? 3000 : 20;
+        setTimeout(() => { record("start"); if (u.onstart) u.onstart(); }, 0);
+        setTimeout(() => { record("end"); if (u.onend) u.onend(); }, endDelay);
+        return;
+      }
+      ["start", "end", "error"].forEach(ev => u.addEventListener(ev, (e) => record(ev, e && e.error)));
+      return synth.__ttcOriginalSpeak(u);
+    };
+  }, mode);
+}
+
+// Counts Web Audio oscillators, so the chime path can be asserted without sound.
+async function instrumentChime(page) {
+  await page.evaluate(() => {
+    const proto = (window.AudioContext || window.webkitAudioContext).prototype;
+    if (!proto.__ttcWrapped) {
+      const orig = proto.createOscillator;
+      proto.createOscillator = function () { window.__osc = (window.__osc || 0) + 1; return orig.apply(this, arguments); };
+      proto.__ttcWrapped = true;
+    }
+    window.__osc = 0;
+  });
+}
+
+const speechLog = (page) => page.evaluate(() => window.__speech);
+const speechStatus = (page) => page.evaluate(() => window.__TTC_TEST__.speechStatus());
+
+// Spoken text only: the silent user-gesture unlock probe (" ") never counts.
+async function spokenTexts(page) {
+  const log = await speechLog(page);
+  return log.calls.filter(c => c.text !== " ").map(c => c.text);
+}
+
+const waitForSpeech = (page, marker, count = 1) => page.waitForFunction(
+  ({ marker, count }) => window.__speech.events.filter(e => e.startsWith(marker)).length >= count,
+  { marker, count },
+  { timeout: 15000 }
+);
+
+test("a timer completing with the floating window closed speaks its prompt once", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Voice Alpha", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page);
+  expect(await page.evaluate(() => window.__TTC_TEST__.compactOpen())).toBe(false);
+
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), a);
+  await waitForSpeech(page, "end:Voice Alpha");
+
+  expect(await spokenTexts(page)).toEqual(["Voice Alpha"]);
+  expect((await speechLog(page)).events).toContain("start:Voice Alpha");
+  expect(await speechStatus(page)).toBe("");
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(1);
+  expect(errors.length).toBe(0);
+});
+
+test("chime and voice fire together, and each can be disabled on its own", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => { document.querySelector("details.settings").open = true; });
+
+  // Both enabled.
+  const both = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Both Alpha", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page);
+  await instrumentChime(page);
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), both);
+  await waitForSpeech(page, "end:Both Alpha");
+  expect(await spokenTexts(page)).toEqual(["Both Alpha"]);
+  expect(await page.evaluate(() => window.__osc)).toBeGreaterThanOrEqual(3);
+
+  // Chime muted, voice still on.
+  await page.click("#muteChime");
+  const noChime = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "NoChime Alpha", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page);
+  await instrumentChime(page);
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), noChime);
+  await waitForSpeech(page, "end:NoChime Alpha");
+  expect(await spokenTexts(page)).toEqual(["NoChime Alpha"]);
+  expect(await page.evaluate(() => window.__osc)).toBe(0);
+
+  // Voice muted, chime still on: nothing is spoken, the chime still rings.
+  await page.click("#muteChime");
+  await page.click("#muteVoice");
+  const noVoice = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "NoVoice Alpha", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page);
+  await instrumentChime(page);
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), noVoice);
+  await page.waitForFunction(() => window.__osc >= 3, null, { timeout: 10000 });
+  await page.waitForFunction(() => window.__TTC_TEST__.processedAlarmCount() >= 1, null, { timeout: 10000 });
+  expect(await spokenTexts(page)).toEqual([]);
+  expect(await speechStatus(page)).toBe("");
+  expect(errors.length).toBe(0);
+});
+
+test("announcements work with the floating window open and are never spoken from the PiP document", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Floating Alpha", minMinutes: 5, maxMinutes: 5 }));
+
+  // Real Document PiP window, opened from the real control.
+  await page.click("#floatTimerBtn");
+  await page.waitForFunction(() => window.__TTC_TEST__.compactOpen(), null, { timeout: 10000 });
+  await page.evaluate(() => {
+    const pip = window.documentPictureInPicture.window;
+    window.__pipSpeech = { speaks: 0, cancels: 0 };
+    const s = pip.speechSynthesis;
+    const origSpeak = s.speak.bind(s);
+    const origCancel = s.cancel.bind(s);
+    s.speak = function () { window.__pipSpeech.speaks += 1; return origSpeak.apply(null, arguments); };
+    s.cancel = function () { window.__pipSpeech.cancels += 1; return origCancel.apply(null, arguments); };
+  });
+  await instrumentSpeech(page);
+
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), a);
+  await waitForSpeech(page, "end:Floating Alpha");
+
+  expect(await spokenTexts(page)).toEqual(["Floating Alpha"]);
+  // Speech stays in the document that owns the alarm engine: the floating
+  // window never runs a competing speech implementation.
+  expect(await page.evaluate(() => window.__pipSpeech)).toEqual({ speaks: 0, cancels: 0 });
+  expect(await page.evaluate(() => window.documentPictureInPicture.window.speechSynthesis.speaking)).toBe(false);
+  expect(errors.length).toBe(0);
+});
+
+test("two timers completing together each get their own spoken announcement", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Twin One", minMinutes: 5, maxMinutes: 5 }));
+  const b = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Twin Two", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page);
+
+  await page.evaluate(([x, y]) => { window.__TTC_TEST__.expireNow(x); window.__TTC_TEST__.expireNow(y); }, [a, b]);
+  await waitForSpeech(page, "end:", 2);
+
+  expect((await spokenTexts(page)).sort()).toEqual(["Twin One", "Twin Two"]);
+  expect(await speechStatus(page)).toBe("");
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(2);
+  expect(errors.length).toBe(0);
+});
+
+test("navigating timers in the floating view never cancels an announcement in flight", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await addTimers(page, [["Nav Alpha", 300000], ["Nav Bravo", 240000], ["Nav Charlie", 180000]]);
+  await mountCompactProbe(page);
+  await instrumentSpeech(page, "ok-slow");
+
+  // A long announcement is speaking while the user moves through the timers.
+  await page.evaluate(() => window.__TTC_TEST__.speakText("A long spoken reminder that stays in flight"));
+  await waitForSpeech(page, "start:A long spoken reminder that stays in flight");
+  const before = (await speechLog(page)).cancels;
+
+  await navigateWithButton(page, "next");
+  await navigateWithButton(page, "prev");
+  await page.evaluate(() => window.__TTC_TEST__.compactRender());
+
+  expect((await speechLog(page)).cancels).toBe(before);
+  await waitForSpeech(page, "end:A long spoken reminder that stays in flight");
+  expect(await speechStatus(page)).toBe("");
+  expect(errors.length).toBe(0);
+});
+
+test("a paused speech engine still delivers the announcement instead of going silent", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Wedged Alpha", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page, "real");
+
+  // The reproduced failure: Chrome's speech queue left paused or stuck (a
+  // minimized/hidden window, an OS audio-device change) accepts speak() and
+  // never starts it, firing no error at all. The dispatch path must repair it.
+  await page.evaluate(() => { window.speechSynthesis.pause(); });
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), a);
+  await page.waitForFunction(
+    () => window.__speech.events.some(e => e.startsWith("start:Wedged Alpha")) || window.__TTC_TEST__.speechStatus() !== "",
+    null, { timeout: 15000 }
+  );
+
+  const started = (await speechLog(page)).events.some(e => e.startsWith("start:Wedged Alpha"));
+  const note = await speechStatus(page);
+  // Never silent: the repaired queue speaks it, or the failure is reported.
+  expect(started || note !== "").toBe(true);
+  if (started) expect(note).toBe("");
+  expect(errors.length).toBe(0);
+});
+
+test("an engine that accepts an utterance and never answers is repaired, retried and reported", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Silent Alpha", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page, "silent");
+
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), a);
+  await page.waitForFunction(() => window.__TTC_TEST__.speechStatus() !== "", null, { timeout: 15000 });
+
+  const log = await speechLog(page);
+  expect(log.calls.filter(c => c.text === "Silent Alpha")).toHaveLength(2);   // original + one retry
+  expect(log.cancels).toBeGreaterThanOrEqual(1);                            // wedged queue cleared
+  expect(log.resumes).toBeGreaterThanOrEqual(1);                            // engine un-paused
+  const note = await speechStatus(page);
+  expect(note).toMatch(/^Voice: /);
+  expect(note).toMatch(/did not respond/);
+  // A wedged engine must never wedge the timers themselves.
+  await page.waitForFunction(
+    () => window.__TTC_TEST__.alarmQueueLength() === 0 && !window.__TTC_TEST__.alarmBusy(),
+    null, { timeout: 20000 }
+  );
+  expect(errors.length).toBe(0);
+});
+
+test("an engine that refuses to speak reports the reason, and a later success clears it", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await instrumentSpeech(page, "throws");
+
+  await page.evaluate(() => window.__TTC_TEST__.speakText("Unavailable reminder"));
+  await page.waitForFunction(() => window.__TTC_TEST__.speechStatus() !== "", null, { timeout: 15000 });
+  const note = await speechStatus(page);
+  expect(note).toMatch(/^Voice: /);
+  expect(note).toMatch(/synthesis unavailable/);
+  expect((await speechLog(page)).calls.filter(c => c.text === "Unavailable reminder")).toHaveLength(2);
+
+  // A working engine clears the note again.
+  await instrumentSpeech(page, "ok");
+  await page.evaluate(() => window.__TTC_TEST__.speakText("Recovered reminder"));
+  await waitForSpeech(page, "end:Recovered reminder");
+  expect(await speechStatus(page)).toBe("");
+  expect(errors.length).toBe(0);
+});
+
+test("spoken reminders keep the saved voice, volume and rate", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  await page.evaluate(() => { document.querySelector("details.settings").open = true; });
+  const picked = await page.evaluate(() => {
+    const sel = document.getElementById("voiceSelect");
+    const option = Array.from(sel.options).find(o => o.value && o.value !== sel.value);
+    if (option) { sel.value = option.value; sel.dispatchEvent(new Event("change")); }
+    const vol = document.getElementById("speechVolume"); vol.value = "0.35"; vol.dispatchEvent(new Event("input"));
+    const rate = document.getElementById("speechRate"); rate.value = "1.6"; rate.dispatchEvent(new Event("input"));
+    return { uri: sel.value, label: option ? option.textContent : null };
+  });
+
+  const a = await page.evaluate(() => window.__TTC_TEST__.addAndStart({ prompt: "Prefs Alpha", minMinutes: 5, maxMinutes: 5 }));
+  await instrumentSpeech(page);
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), a);
+  await waitForSpeech(page, "end:Prefs Alpha");
+
+  const call = (await speechLog(page)).calls.find(c => c.text === "Prefs Alpha");
+  expect(call.volume).toBeCloseTo(0.35, 5);
+  expect(call.rate).toBeCloseTo(1.6, 5);
+  if (picked.label) expect(call.voice).toBe(picked.label.replace(/ \(.*\)$/, ""));
+
+  // The same preferences are what persist for the next visit.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => Boolean(window.__TTC_TEST__));
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("timeToClick.settings.v2")));
+  expect(saved.speechVolume).toBeCloseTo(0.35, 5);
+  expect(saved.speechRate).toBeCloseTo(1.6, 5);
+  expect(saved.voiceURI).toBe(picked.uri);
+  expect(errors.length).toBe(0);
+});
+
+test("with several timers running, only the completed one is announced", async ({ page }) => {
+  const errors = [];
+  attachErrorCapture(page, errors);
+  const ids = await addTimers(page, [["Multi Alpha", 300000], ["Multi Bravo", 240000], ["Multi Charlie", 180000]]);
+  await instrumentSpeech(page);
+
+  await page.evaluate(id => window.__TTC_TEST__.expireNow(id), ids[1]);
+  await waitForSpeech(page, "end:Multi Bravo");
+
+  expect(await spokenTexts(page)).toEqual(["Multi Bravo"]);
+  expect(await page.evaluate(() => window.__TTC_TEST__.timers().map(t => t.remindersCompleted))).toEqual([0, 1, 0]);
+  expect(await page.evaluate(() => window.__TTC_TEST__.processedAlarmCount())).toBe(1);
+  expect(errors.length).toBe(0);
+});
