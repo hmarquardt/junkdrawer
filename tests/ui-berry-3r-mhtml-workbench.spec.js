@@ -416,3 +416,181 @@ test('real 112 MB capture: mapping, request and diff verified', async ({ page })
   expect(errors).toEqual([]);
 });
 
+/* ------------- OpenRouter credential / header hygiene (regression) -------------
+   Root cause of "Failed to read the 'headers' property from 'RequestInit': String contains non
+   ISO-8859-1 code point.": a key pasted with CJK, an emoji, a typographic quote or a
+   non-breaking space was placed straight into the Authorization header, and the platform
+   rejects the whole header map before any request leaves the browser. */
+const KEY_GOOD = 'sk-or-v1-' + 'a1b2c3d4'.repeat(8);
+const KEY_CJK = 'sk-or-v1-abc\u5bc6def\u2019\uD83D\uDD11-0123456789abcdef';
+const KEY_NBSP = 'sk-or-v1-a1b2c3d4\u00a0a1b2c3d4a1b2c3d4';
+const KEY_ZERO_WIDTH = 'sk-or-v1-a1b2c3d4\u200ba1b2c3d4a1b2c3d4';
+const KEY_INNER_SPACE = 'sk-or-v1-a1b2c3d4 a1b2c3d4';
+const KEY_SHORT = 'sk-or-v1-abc';
+const CATALOGUE = { data: [{ id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 mini' }, { id: 'anthropic/claude-3', name: 'Claude 3' }] };
+
+async function openWithOpenRouter(page, opts = {}) {
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  await page.route('**/api/analytics/**', r => r.fulfill({ status: 204, body: '' }));
+  const sent = [];
+  await page.route('**openrouter.ai/api/v1/models', r => {
+    sent.push({ kind: 'catalogue', auth: r.request().headers()['authorization'] || null });
+    if (opts.catalogueStatus && opts.catalogueStatus !== 200) { r.fulfill({ status: opts.catalogueStatus, body: '{}' }); return; }
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CATALOGUE) });
+  });
+  await page.route('**openrouter.ai/api/v1/chat/completions', r => {
+    sent.push({ kind: 'inference', auth: r.request().headers()['authorization'] || null, title: r.request().headers()['x-title'] || null, model: (r.request().postDataJSON() || {}).model });
+    if (opts.inferenceStatus && opts.inferenceStatus !== 200) { r.fulfill({ status: opts.inferenceStatus, body: '{}' }); return; }
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: '{"requirements":[]}' } }] }) });
+  });
+  await page.goto(PAGE, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__BERRY3W_TEST__));
+  return { errors, sent };
+}
+const text = (page, sel) => page.textContent(sel).then(t => (t || '').trim());
+
+test('root cause: the platform itself rejects a non ISO-8859-1 header value before sending', async ({ page }) => {
+  await open(page);
+  const constructed = await page.evaluate(() => {
+    try { new Request('https://openrouter.ai/api/v1/models', { headers: { Authorization: 'Bearer sk-or-v1-\u5bc6' } }); return 'constructed'; }
+    catch (e) { return e.name + ': ' + e.message; }
+  });
+  expect(constructed).toContain('non ISO-8859-1');
+  const fetched = await page.evaluate(async () => {
+    try { await fetch('https://openrouter.ai/api/v1/models', { headers: { 'X-Title': '\u6807\u9898' } }); return 'sent'; }
+    catch (e) { return e.message; }
+  });
+  expect(fetched).toContain('non ISO-8859-1');
+});
+
+test('a Unicode-contaminated key is rejected, never stored, and never reaches a request', async ({ page }) => {
+  const { errors, sent } = await openWithOpenRouter(page);
+  await page.fill('#apiKey', KEY_CJK);
+  const st = await page.evaluate(() => ({
+    active: window.__BERRY3W_TEST__.settings().apiKey,
+    stored: JSON.parse(localStorage.getItem('berry3w.settings') || '{}').apiKey || '',
+    aria: document.querySelector('#apiKey').getAttribute('aria-invalid'),
+    notice: document.querySelector('#modelStatus').textContent
+  }));
+  expect(st.active).toBe('');
+  expect(st.stored).toBe('');
+  expect(st.aria).toBe('true');
+  expect(st.notice).toContain('U+5BC6');            // names the offending code point
+  expect(st.notice).toContain('position 13');       // and its position, so the paste can be fixed
+  expect(st.notice).toContain('ISO-8859-1');        // explains why it can never work
+  expect(st.notice).not.toContain('sk-or-v1-');     // never echoes key material
+  await page.click('#refreshModels');
+  await page.waitForFunction(() => /models listed/.test(document.querySelector('#modelStatus').textContent));
+  expect(sent.filter(r => r.kind === 'catalogue')).toHaveLength(1);
+  expect(sent.every(r => r.auth === null)).toBe(true);
+  expect(await text(page, '#modelStatus')).toContain('no key was sent');
+  expect(errors).toEqual([]);
+});
+
+test('invisible and interior contamination is rejected with the exact code point', async ({ page }) => {
+  await openWithOpenRouter(page);
+  for (const [key, marker] of [[KEY_NBSP, 'U+00A0'], [KEY_ZERO_WIDTH, 'U+200B'], [KEY_INNER_SPACE, 'U+0020'], [KEY_SHORT, 'at least 16']]) {
+    await page.fill('#apiKey', key);
+    const notice = await text(page, '#modelStatus');
+    expect(notice).toContain(marker);
+    expect(notice).toContain('not used or saved');
+    expect(await page.evaluate(() => window.__BERRY3W_TEST__.settings().apiKey)).toBe('');
+  }
+});
+
+test('outer whitespace is trimmed while the inside of a key is never rewritten', async ({ page }) => {
+  await openWithOpenRouter(page);
+  await page.fill('#apiKey', '  ' + KEY_GOOD + '\n');
+  expect(await page.evaluate(() => window.__BERRY3W_TEST__.settings().apiKey)).toBe(KEY_GOOD);
+});
+test('catalogue loads anonymously; only a real inference marks the model verified', async ({ page }) => {
+  const { errors, sent } = await openWithOpenRouter(page);
+  await page.fill('#apiKey', KEY_GOOD);
+  expect(await text(page, '#modelStatus')).toContain('Key saved in this browser (validated ASCII)');
+  expect(await text(page, '#providerChip')).toContain('not verified yet');
+  await page.click('#refreshModels');
+  await page.waitForFunction(() => /models listed/.test(document.querySelector('#modelStatus').textContent));
+  const groups = await page.evaluate(() => [...document.querySelectorAll('#model optgroup')].map(g => g.label));
+  expect(groups).toContain('openai');
+  expect(groups).toContain('anthropic');
+  expect(sent.filter(r => r.kind === 'catalogue').every(r => r.auth === null)).toBe(true);
+  expect(await text(page, '#modelStatus')).toContain('does not prove');
+  expect(await text(page, '#providerChip')).toContain('not verified yet');
+  const out = await page.evaluate(() => window.__BERRY3W_TEST__.openrouter([{ role: 'user', content: 'ping' }], 'test'));
+  expect(out).toEqual({ requirements: [] });
+  const inf = sent.filter(r => r.kind === 'inference');
+  expect(inf).toHaveLength(1);
+  expect(inf[0].auth).toBe('Bearer ' + KEY_GOOD);
+  expect(inf[0].title).toBe('UI Berry 3R MHTML Evaluation Workbench');
+  expect(inf[0].model).toBe('openai/gpt-4.1-mini');
+  expect(await text(page, '#providerChip')).toContain('AI passes verified');
+  expect(errors).toEqual([]);
+});
+
+test('a failed inference leaves the model unverified and no secret reaches logs, diagnostics or records', async ({ page }) => {
+  await openWithOpenRouter(page, { inferenceStatus: 500 });
+  await page.fill('#apiKey', KEY_GOOD);
+  const threw = await page.evaluate(async () => {
+    try { await window.__BERRY3W_TEST__.openrouter([{ role: 'user', content: 'ping' }], 'test'); return 'no throw'; }
+    catch (e) { return e.message; }
+  });
+  expect(threw).toContain('HTTP 500');
+  expect(await text(page, '#providerChip')).toContain('not verified yet');       // no unfounded claim
+  const diag = await page.evaluate(() => { window.__BERRY3W_TEST__.renderDiag(); return document.querySelector('#diagBody').textContent; });
+  expect(diag).toContain('key present, validated');
+  expect(diag).toContain('not verified by a request yet');
+  expect(diag).not.toContain(KEY_GOOD.slice(0, 16));
+  expect(diag).not.toContain('chars)');
+  const record = await page.evaluate(() => JSON.stringify(window.__BERRY3W_TEST__.buildRecord()));
+  expect(record).not.toContain(KEY_GOOD.slice(0, 16));
+  const logged = await page.evaluate(k => { window.__BERRY3W_TEST__.pushErr('test', 'Authorization: Bearer ' + k); const b = window.__BERRY3W_TEST__.errBuffer(); return b[b.length - 1].message; }, KEY_GOOD);
+  expect(logged).not.toContain(KEY_GOOD);
+  expect(logged).toContain('[REDACTED]');
+});
+test('a contaminated key already in localStorage is discarded on load, with an explanation', async ({ page }) => {
+  await page.route('**/api/analytics/**', r => r.fulfill({ status: 204, body: '' }));
+  await page.route('**openrouter.ai**', r => r.abort());
+  await page.addInitScript(k => { try { localStorage.setItem('berry3w.settings', JSON.stringify({ apiKey: k, model: 'openai/gpt-4.1-mini', temperature: 0.2 })); } catch (e) {} }, KEY_CJK);
+  await page.goto(PAGE, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__BERRY3W_TEST__));
+  expect(await page.evaluate(() => window.__BERRY3W_TEST__.settings().apiKey)).toBe('');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('berry3w.settings') || '{}').apiKey || '')).toBe('');
+  const notice = await text(page, '#modelStatus');
+  expect(notice).toContain('discarded before use');
+  expect(notice).toContain('U+5BC6');
+});
+
+test('every dynamic header value is validated or rendered ASCII-safe', async ({ page }) => {
+  await open(page);
+  const r = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    const out = {};
+    out.encoded = t.headerValue('X-Title', 'A \u6807 title', { encode: true });
+    out.latin1Kept = t.headerValue('X-Title', 'Caf\u00e9 \u2014 test', { encode: true });
+    try { t.headerValue('Authorization', 'Bearer sk-\u5bc6', {}); out.thrown = 'none'; } catch (e) { out.thrown = e.message; }
+    out.anon = Object.keys(t.openrouterHeaders({}));
+    try { t.openrouterHeaders({ auth: true }); out.authThrown = 'none'; } catch (e) { out.authThrown = e.message; }
+    return out;
+  });
+  expect(r.encoded).toBe('A %E6%A0%87 title');           // >0xFF is percent-encoded, nothing is dropped
+  expect(r.latin1Kept).toBe('Caf\u00e9 %E2%80%94 test');  // Latin-1 characters stay literal
+  expect(r.thrown).toContain('U+5BC6');
+  expect(r.thrown).toContain('cannot be sent');
+  expect(r.anon).not.toContain('Authorization');          // no credential unless it is asked for
+  expect(r.anon).toContain('HTTP-Referer');
+  expect(r.authThrown).toContain('No OpenRouter key is set');
+});
+
+test('an imported record cannot smuggle a key back into storage', async ({ page }) => {
+  await open(page);
+  const stored = await page.evaluate(async k => {
+    await window.__BERRY3W_TEST__.importTask(JSON.stringify({ id: 'smuggle', apiKey: k, settings: { apiKey: k }, task: { id: 'smuggle' } }));
+    const all = await window.__BERRY3W_TEST__.idbGetAll('tasks');
+    const rec = all.find(x => x.task && x.task.id === 'smuggle');
+    return JSON.stringify(rec || {});
+  }, KEY_GOOD);
+  expect(stored).not.toContain(KEY_GOOD.slice(0, 16));
+  expect(stored).not.toContain('apiKey');
+});

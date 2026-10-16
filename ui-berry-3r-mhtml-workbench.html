@@ -62,6 +62,7 @@ main{max-width:1500px;margin:0 auto;padding:16px 16px 64px}
 label.field{display:block;margin-bottom:9px}
 label.field>span{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:4px}
 input[type=text],input[type=url],input[type=number],input[type=password],textarea,select{width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:7px 9px}
+input.invalid{border-color:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 16%,transparent)}
 textarea{min-height:118px;resize:vertical;line-height:1.5}
 textarea.short{min-height:70px}
 .chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-size:11.5px;background:var(--panel2);color:var(--muted);white-space:nowrap}
@@ -141,7 +142,7 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 <body>
 <header class="top">
   <span class="brand">UI&nbsp;Berry&nbsp;3R <em>MHTML Workbench</em></span>
-  <span class="ver" id="verLabel">version 2026.10.16.1</span>
+  <span class="ver" id="verLabel">version 2026.10.16.2</span>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Workbench sections">
     <button class="tab" role="tab" data-view="setup" aria-selected="true"><span class="dot"></span>1 · Upload &amp; setup</button>
     <button class="tab" role="tab" data-view="archive" aria-selected="false"><span class="dot"></span>2 · Archive</button>
@@ -231,7 +232,7 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
       <button class="btn ghost" id="clearKey">Forget key</button>
       <span class="status" id="modelStatus" role="status"></span>
     </div>
-    <p class="help">Keys and the selected model stay in this browser only, are never sent to archived content, and are stripped from every export and log.</p>
+    <p class="help">Keys and the selected model stay in this browser only, are never sent to archived content, and are stripped from every export and log. A key is checked as you type: leading and trailing spaces are trimmed, but the inside of a key must be plain ASCII — CJK characters, emoji, typographic quotes or a non-breaking space pasted in from a chat window are rejected with the exact position, never silently repaired, because an HTTP header can only carry ISO-8859-1 bytes. The catalogue endpoint is public, so loading the model list sends no key at all; a model counts as verified only after a real request with your key succeeds.</p>
   </section>
 </section>
 
@@ -536,9 +537,9 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 </section>
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.1" bump="Update this version whenever this file changes in a commit." -->
-<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.1" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.1
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.2" bump="Update this version whenever this file changes in a commit." -->
+<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.2
 </footer>
 
 <!-- Parser worker. Kept as text so the page stays one self-contained file; it is
@@ -1522,7 +1523,14 @@ function loadSettings() {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const o = JSON.parse(raw) || {};
-      if (typeof o.apiKey === 'string') settings.apiKey = o.apiKey.slice(0, 400);
+      if (typeof o.apiKey === 'string') {
+        const res = checkApiKey(o.apiKey);            // a stored key passes the same gate as a typed one
+        settings.apiKey = res.ok ? res.value : '';
+        if (!res.ok && !res.empty) {
+          keyNotice = res.message.replace(/^The key was not used or saved:/, 'A key stored in this browser was discarded before use:');
+          saveSettings();                             // remove the unusable value once, and say so
+        }
+      }
       if (typeof o.model === 'string' && o.model) settings.model = o.model.slice(0, 200);
       if (typeof o.temperature === 'number') settings.temperature = Math.max(0, Math.min(2, o.temperature));
     }
@@ -1539,6 +1547,75 @@ function saveSettings() {
     status('#settingsState', 'Could not save to localStorage — using session memory only.', 'warn');
   }
 }
+/* ------------------------ credentials and headers ------------------------ */
+/* Why this exists: fetch() materialises RequestInit.headers into a byte-string header map and
+   throws "Failed to read the 'headers' property from 'RequestInit': String contains non
+   ISO-8859-1 code point." before a single packet leaves the browser. A key pasted from a chat
+   UI routinely carries CJK, an emoji, a typographic quote or a non-breaking space, so every
+   credential is validated where it enters the app — and a rejected key is never stored, never
+   used, and never silently rewritten. */
+const KEY_MIN = 16, KEY_MAX = 400;
+const NON_PRINTABLE_ASCII = /[^\u0021-\u007e]/;   // bearer-token alphabet limit (no spaces, no >0xFF)
+const NON_LATIN1_TEST = /[^\u0020-\u00ff]/;       // HTTP header value limit, non-global for .test()
+const NON_LATIN1_GLOBAL = /[^\u0020-\u00ff]/g;    // same, for .replace()
+let keyNotice = '', lastKeyNotice = '';
+function codePointLabel(ch) {
+  const cp = 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+  if (/[\u0000-\u001f\u007f]/.test(ch)) return 'a control character (' + cp + ')';
+  if (/[\u00a0\u1680\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]/u.test(ch)) return 'a non-standard space character (' + cp + ')';
+  if (/\s/u.test(ch)) return 'whitespace (' + cp + ')';
+  return '“' + ch + '” (' + cp + ')';
+}
+function describeHeaderBlocked(name, value) {
+  const m = NON_LATIN1_TEST.exec(String(value == null ? '' : value));
+  return 'The ' + name + ' header value contains ' + (m ? codePointLabel(m[0]) : 'a non-ISO-8859-1 code point') + ', which cannot be sent.';
+}
+/* Trim the outside; never touch the inside. Reject the rest with an actionable message. The
+   offending character is safe to quote: a character that is not printable ASCII is by
+   definition not part of a valid key, so no secret material can appear in the message. */
+function checkApiKey(raw) {
+  const value = String(raw == null ? '' : raw).trim();
+  if (!value) return { ok: false, empty: true, value: '', message: 'No OpenRouter key is set.' };
+  const bad = NON_PRINTABLE_ASCII.exec(value);
+  if (bad) {
+    const ch = bad[0], at = value.indexOf(ch) + 1;
+    return { ok: false, empty: false, value: '', message: 'The key was not used or saved: it contains ' + codePointLabel(ch) +
+      ' at position ' + at + '. HTTP header values carry ISO-8859-1 bytes only, so a key like this fails before any request is sent. ' +
+      'Copy the key again from openrouter.ai and paste it as one plain-ASCII run — leading and trailing spaces are trimmed, but the inside of a key must contain nothing else.' };
+  }
+  if (value.length < KEY_MIN) return { ok: false, empty: false, value: '', message: 'The key was not used or saved: it is only ' + value.length + ' characters long, and a valid OpenRouter key is at least ' + KEY_MIN + '. Copy the whole key from openrouter.ai.' };
+  if (value.length > KEY_MAX) return { ok: false, empty: false, value: '', message: 'The key was not used or saved: it is ' + value.length + ' characters long, over the ' + KEY_MAX + '-character limit. Copy the key from openrouter.ai without any surrounding text.' };
+  return { ok: true, empty: false, value, message: '' };
+}
+/* Every dynamically built header value goes through here. encode=true percent-encodes
+   characters outside ISO-8859-1 (HTTP-Referer and X-Title are optional attribution headers, so
+   an ASCII-safe rendering is better than failing the request); otherwise the caller gets a clear
+   error instead of a platform TypeError. */
+function headerValue(name, value, opts) {
+  const v = String(value == null ? '' : value);
+  if (!NON_LATIN1_TEST.test(v)) return v;
+  if (opts && opts.encode) {
+    pushErr('header', 'percent-encoded non-Latin-1 characters in ' + name + ' before sending');
+    return v.replace(NON_LATIN1_GLOBAL, ch => encodeURIComponent(ch));
+  }
+  throw new Error(describeHeaderBlocked(name, v));
+}
+function openrouterHeaders(opts) {
+  const o = opts || {};
+  const headers = {};
+  const referer = headerValue('HTTP-Referer', location.href, { encode: true });
+  if (referer) headers['HTTP-Referer'] = referer;          // optional attribution, see docs
+  const title = headerValue('X-Title', document.title, { encode: true });
+  if (title) headers['X-Title'] = title;                   // optional attribution
+  if (o.json) headers['Content-Type'] = 'application/json';
+  if (o.auth) {
+    const res = checkApiKey(settings.apiKey);              // never send an unvalidated credential
+    if (!res.ok) throw new Error(res.message);
+    headers.Authorization = 'Bearer ' + res.value;
+  }
+  return headers;
+}
+
 /* ------------------------------ IndexedDB ------------------------------- */
 function idb() {
   return new Promise((ok, no) => {
@@ -1570,7 +1647,7 @@ function blankState() {
     request: { text: '', translation: '', source: '', method: '', confidence: 0, edited: false },
     requirements: [], facts: { A: [], B: [] }, verification: [], comparison: null,
     decisions: { satisfaction: { option: '', reason: '' }, overall: { option: '', reason: '' } },
-    validation: null, ai: { model: '', at: '', errors: [], passes: {} },
+    validation: null, ai: { model: '', at: '', errors: [], passes: {}, verifiedModel: '', verifiedAt: '' },
     historyId: null, createdAt: null, updatedAt: null, evidenceTab: 'A:after', diffTab: 'A'
   };
 }
@@ -2505,7 +2582,8 @@ function renderDiag() {
   $('#diagBody').innerHTML = '<dl class="kv">' +
     '<dt>version</dt><dd>' + esc(DEPLOY_VER) + '</dd>' +
     '<dt>parser worker</dt><dd>' + (worker ? 'active' : 'not started') + '</dd>' +
-    '<dt>model</dt><dd>' + esc(settings.model) + (settings.apiKey ? ' · key present (' + settings.apiKey.length + ' chars)' : ' · no key') + '</dd>' +
+    '<dt>model</dt><dd>' + esc(settings.model) + (settings.apiKey ? ' · key present, validated' : ' · no key') +
+      (state.ai && state.ai.verifiedAt && state.ai.verifiedModel === settings.model ? ' · verified by a successful request at ' + esc(state.ai.verifiedAt) : ' · not verified by a request yet') + '</dd>' +
     '<dt>models cached</dt><dd>' + modelCatalog.length + '</dd>' +
     '<dt>task record</dt><dd class="mono">' + esc(state.historyId || '—') + '</dd>' +
     '<dt>archive handle</dt><dd>' + (state.file ? fmtBytes(state.file.size) + ' (a File handle, never copied into storage)' : 'none') + '</dd>' +
@@ -2539,10 +2617,11 @@ async function importTask(text) {
 /* ------------------------------- model passes ------------------------------- */
 async function openrouter(messages, stage) {
   if (state.aiTransport) return state.aiTransport(stage, messages);
-  if (!settings.apiKey) throw new Error('No OpenRouter key is set — the deterministic analysis is still available.');
+  if (!settings.apiKey) throw new Error(keyNotice || 'No OpenRouter key is set — the deterministic analysis is still available.');
+  state.ai.verifiedModel = ''; state.ai.verifiedAt = '';        // a new attempt invalidates the earlier proof
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + settings.apiKey, 'Content-Type': 'application/json', 'HTTP-Referer': location.href, 'X-Title': document.title },
+    headers: openrouterHeaders({ auth: true, json: true }),    // validated key, header-safe optional values
     body: JSON.stringify({ model: settings.model, temperature: settings.temperature, response_format: { type: 'json_object' }, messages })
   });
   if (!res.ok) throw new Error('OpenRouter HTTP ' + res.status);
@@ -2550,6 +2629,9 @@ async function openrouter(messages, stage) {
   const text = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
   const a = String(text).indexOf('{'), b = String(text).lastIndexOf('}');
   if (a < 0 || b < a) throw new Error('The model did not return JSON.');
+  state.ai.verifiedModel = settings.model;                     // only a real answer proves a model usable
+  state.ai.verifiedAt = new Date().toISOString();
+  try { renderProviderChip(); } catch (e) { pushErr('chip', e.message || String(e)); }
   return JSON.parse(String(text).slice(a, b + 1));
 }
 function evidencePayload() {
@@ -2708,6 +2790,8 @@ async function runAiAnalysis() {
     status('#analyzeStatus', 'Analysis stopped: ' + (e.message || 'unknown error') + '. The deterministic evidence below is unaffected.', 'bad');
   } finally {
     btn.disabled = false;
+    renderProviderChip();                                     // shows "verified" only after a real answer
+    if (state.ai.verifiedAt) renderDiag();
   }
 }
 /* --------------------------- archive intake flow --------------------------- */
@@ -2908,11 +2992,25 @@ function renderModels() {
   sel.innerHTML = html;
   if (![...sel.options].some(o => o.value === settings.model)) sel.value = defaultModel;
 }
+const MODELS_URL = 'https://openrouter.ai/api/v1/models';
+/* The catalogue is public. Verified 2026-10-16: GET /api/v1/models answers 200 with 466 models and
+   no Authorization header, and the API reference requires Authorization only on inference calls.
+   So a catalogue load sends no credential; the key is attached only if OpenRouter ever answers
+   401/403 here. */
 async function fetchModels() {
-  if (!settings.apiKey) { status('#modelStatus', 'Enter an OpenRouter key first.', 'warn'); return; }
+  const btn = $('#refreshModels');
+  if (btn) btn.disabled = true;
   status('#modelStatus', 'Loading the model catalogue…', 'info');
   try {
-    const res = await fetch('https://openrouter.ai/api/v1/models', { headers: { Authorization: 'Bearer ' + settings.apiKey, 'HTTP-Referer': location.href, 'X-Title': document.title } });
+    let res = await fetch(MODELS_URL, { headers: openrouterHeaders() });
+    let keySent = false;
+    if (res.status === 401 || res.status === 403) {
+      const probe = checkApiKey(settings.apiKey);
+      if (!probe.ok) throw new Error('OpenRouter now requires a key to list models, and ' + (/^No OpenRouter key/.test(probe.message) ? 'none is saved.' : probe.message));
+      res = await fetch(MODELS_URL, { headers: openrouterHeaders({ auth: true }) });
+      keySent = true;
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' even with the saved key');
+    }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const list = (data.data || []).filter(m => m && m.id).map(m => ({ id: String(m.id), name: String(m.name || m.id) })).slice(0, 800);
@@ -2920,13 +3018,26 @@ async function fetchModels() {
     modelCatalog = list;
     try { localStorage.setItem(SETTINGS_KEY + '.models', JSON.stringify(list)); } catch (e) { pushErr('model-cache', e.message || String(e), 'cached catalogue not persisted'); }
     renderModels();
-    status('#modelStatus', list.length + ' models loaded. The saved model stays selected if the catalogue does not list it.', 'ok');
+    status('#modelStatus', list.length + ' models listed' + (keySent ? ' (a key had to be sent — the catalogue began requiring one)' : ' — no key was sent, because the catalogue endpoint is public') +
+      '. Listing a model does not prove that it answers: run an analysis pass to verify ' + settings.model + '.', 'ok');
   } catch (e) {
     renderModels();
-    status('#modelStatus', 'Model loading failed (' + (e.message || e) + '). The saved or default model is still usable.', 'warn');
+    status('#modelStatus', 'Model catalogue failed (' + redact(e.message || String(e)) + '). The deterministic analysis is unaffected' +
+      (settings.apiKey ? '; the saved model stays unverified until a request succeeds.' : '; no key is set.'), 'warn');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 /* -------------------------------- render all -------------------------------- */
+function renderProviderChip() {
+  const chipEl = $('#providerChip');
+  if (!chipEl) return;
+  const verified = !!(state.ai && state.ai.verifiedAt && state.ai.verifiedModel === settings.model);
+  chipEl.textContent = !settings.apiKey ? 'deterministic only — no key set'
+    : verified ? 'AI passes verified (' + settings.model + ')'
+      : 'AI key saved — ' + settings.model + ' not verified yet (no successful request)';
+  chipEl.className = 'help';
+}
 function renderAll() {
   const steps = [[renderTabs, 'renderTabs'], [renderArchiveView, 'renderArchiveView'], [renderCompare, 'renderCompare'], [renderVerify, 'renderVerify'], [renderDecision, 'renderDecision'], [renderFinal, 'renderFinal']];
   for (const [fn, name] of steps) {
@@ -2934,10 +3045,7 @@ function renderAll() {
     catch (e) { pushErr('render', name + ': ' + (e.message || String(e)), (e.stack || '').split('\n')[1] || ''); }
   }
   const chipEl = $('#providerChip');
-  if (chipEl) {
-    chipEl.textContent = settings.apiKey ? 'AI passes available (' + settings.model + ')' : 'deterministic only — no key set';
-    chipEl.className = 'help';
-  }
+  if (chipEl) renderProviderChip();
   $('#verLabel').textContent = 'version ' + DEPLOY_VER;
 }
 /* ---------------------------------- bind ---------------------------------- */
@@ -3121,11 +3229,31 @@ function bind() {
     requirements: state.requirements.map(r => ({ id: r.id, text: r.text, a: r.statusA, b: r.statusB }))
   }, null, 2), '#copyStatus'));
   /* settings and bookmarklet */
-  $('#apiKey').addEventListener('input', e => { settings.apiKey = e.target.value.trim(); saveSettings(); });
-  $('#model').addEventListener('change', e => { settings.model = e.target.value; saveSettings(); renderAll(); });
+  $('#apiKey').addEventListener('input', e => {
+    const res = checkApiKey(e.target.value);
+    settings.apiKey = res.ok ? res.value : '';                     // an unusable key is never stored or sent
+    state.ai.verifiedModel = ''; state.ai.verifiedAt = '';         // a changed credential proves nothing
+    e.target.setAttribute('aria-invalid', res.ok || res.empty ? 'false' : 'true');
+    e.target.classList.toggle('invalid', !res.ok && !res.empty);
+    saveSettings();                                                // outer spaces trimmed, inside untouched
+    if (res.ok) { keyNotice = ''; status('#modelStatus', 'Key saved in this browser (validated ASCII). Load the catalogue, then run an analysis pass to confirm ' + settings.model + ' answers.', 'ok'); }
+    else if (res.empty) status('#modelStatus', 'No key set — parsing, the diff, the matrix and every rule work without one.', '');
+    else {
+      status('#modelStatus', res.message, 'bad');
+      if (res.message !== lastKeyNotice) { lastKeyNotice = res.message; pushErr('api-key', 'rejected key input: ' + res.message); }
+    }
+    renderProviderChip();
+  });
+  $('#model').addEventListener('change', e => { settings.model = e.target.value; state.ai.verifiedModel = ''; state.ai.verifiedAt = ''; saveSettings(); renderAll(); });
   $('#temperature').addEventListener('input', e => { settings.temperature = Math.max(0, Math.min(2, Number(e.target.value) || 0)); saveSettings(); });
   $('#refreshModels').addEventListener('click', fetchModels);
-  $('#clearKey').addEventListener('click', () => { settings.apiKey = ''; $('#apiKey').value = ''; saveSettings(); renderAll(); status('#modelStatus', 'Key removed from this browser.', 'ok'); });
+  $('#clearKey').addEventListener('click', () => {
+    settings.apiKey = ''; $('#apiKey').value = ''; keyNotice = '';
+    $('#apiKey').setAttribute('aria-invalid', 'false'); $('#apiKey').classList.remove('invalid');
+    state.ai.verifiedModel = ''; state.ai.verifiedAt = '';
+    saveSettings(); renderAll();
+    status('#modelStatus', 'Key removed from this browser. The deterministic analysis is unaffected.', 'ok');
+  });
   $('#bmCopy').addEventListener('click', () => copy(bookmarkletUrl(), '#bmStatus'));
   $('#bmCopyCode').addEventListener('click', () => copy(BOOKMARKLET, '#bmStatus'));
   $('#bmTest').addEventListener('click', () => runBookmarkletTest());
@@ -3254,7 +3382,8 @@ async function init() {
   } else {
     renderTabs();
   }
-  if (settings.apiKey) status('#modelStatus', 'A key is stored locally. Refresh models to load the catalogue.', '');
+  if (settings.apiKey) status('#modelStatus', 'A key is stored locally and passed validation. The catalogue is public and needs no key, and no request with this key has succeeded yet, so ' + settings.model + ' is unverified.', '');
+  else if (keyNotice) status('#modelStatus', keyNotice, 'bad');
 }
 if (typeof window !== 'undefined') {
   window.__BERRY3W_TEST__ = {
@@ -3268,7 +3397,8 @@ if (typeof window !== 'undefined') {
     idbGetAll, idbPut, idbDelete, idbClear, idbGet,
     requestPreview, evidencePayload,
     setAiTransport: fn => { state.aiTransport = fn; },
-    settings: () => settings, modelCatalog: () => modelCatalog, renderModels, errBuffer: () => errBuffer,
+    settings: () => settings, modelCatalog: () => modelCatalog, renderModels, renderProviderChip, errBuffer: () => errBuffer,
+    checkApiKey, headerValue, openrouterHeaders, openrouter, fetchModels, keyNotice: () => keyNotice, renderDiag,
     pushErr, copy, allFieldsText, fieldText
   };
 }
