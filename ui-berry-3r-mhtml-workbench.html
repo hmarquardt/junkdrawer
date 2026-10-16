@@ -169,8 +169,10 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 .qa .f.pass{color:var(--ok)}
 .saved{position:fixed;right:14px;bottom:14px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;box-shadow:var(--shadow);font-size:12.5px;z-index:70}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-/* Next-action indicator: one compact bar under the navigation, derived from live state. */
-.nextbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px;padding:7px 11px;border:1px solid var(--line);border-left:4px solid var(--faint);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
+/* Next-action indicator: one compact bar under the navigation, derived from live state.
+   It sticks below the (sticky) header so it is still on screen when the operator returns to
+   the tab after work finished in the background. */
+.nextbar{position:sticky;top:var(--naTop,0px);z-index:40;display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px;padding:7px 11px;border:1px solid var(--line);border-left:4px solid var(--faint);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
 .nextbar .na-tag{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:700}
 .nextbar .na-why{font-size:12.5px;color:var(--muted);flex:1 1 240px;min-width:0}
 .nextbar[data-na-kind="ready"]{border-left-color:var(--ok)}
@@ -190,7 +192,7 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 <body>
 <header class="top">
   <span class="brand">UI&nbsp;Berry&nbsp;3R <em>MHTML Workbench</em></span>
-  <span class="ver" id="verLabel">version 2026.10.16.7</span>
+  <span class="ver" id="verLabel">version 2026.10.16.8</span>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Workbench sections">
     <button class="tab" role="tab" data-view="setup" aria-selected="true"><span class="dot"></span>1 · Upload &amp; setup</button>
     <button class="tab" role="tab" data-view="archive" aria-selected="false"><span class="dot"></span>2 · Analyze &amp; findings</button>
@@ -662,9 +664,9 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 </section>
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.7" bump="Update this version whenever this file changes in a commit." -->
-<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.7
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.8" bump="Update this version whenever this file changes in a commit." -->
+<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.8" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.8
 </footer>
 
 <!-- Parser worker. Kept as text so the page stays one self-contained file; it is
@@ -2992,6 +2994,12 @@ function nextActionDescriptor() {
   /* 8 · nothing left */
   return { kind: 'ready', label: 'Ready to copy the four fields', why: 'Both selections are confirmed, the drafts are reviewed and every rule check passes.', view: 'decide', targets: ['#finalPreview'], focus: true };
 }
+function syncStickyOffset() {
+  const header = $('header.top');
+  if (!header) return;
+  const h = Math.round(header.getBoundingClientRect().height);
+  if (h > 0) document.documentElement.style.setProperty('--naTop', h + 'px');
+}
 function renderNextAction() {
   const bar = $('#nextAction'), btn = $('#nextActionBtn'), why = $('#nextActionWhy');
   if (!bar || !btn) return state.nextAction;
@@ -3005,6 +3013,7 @@ function renderNextAction() {
   btn.disabled = !!na.busy;
   btn.setAttribute('aria-disabled', String(!!na.busy));
   if (why) why.textContent = na.why || '';
+  syncStickyOffset();                                       // the header grows and shrinks with its status text
   return state.nextAction;
 }
 function resolveTarget(selectors) {
@@ -4449,6 +4458,7 @@ function renderAll() {
 /* ---------------------------------- bind ---------------------------------- */
 function bind() {
   $$('#tabs .tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+  window.addEventListener('resize', syncStickyOffset);
   $('#soundBtn').addEventListener('click', () => setSound(settings.sound === false));
   /* The next-action button must never steal focus from a field the operator is typing in: the
      browser would blur it on mousedown, before the handler could even look. */

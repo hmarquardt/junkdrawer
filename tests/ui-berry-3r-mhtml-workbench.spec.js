@@ -1547,6 +1547,19 @@ test('clicking the indicator switches tab, expands the panel, highlights and foc
   expect(out.focused).toBe(true);
   expect(out.status).toContain('Moved to');
   expect(out.disabled).toBe(false);
+  // the bar stays on screen below the sticky header, so the operator sees it on return
+  const sticky = await page.evaluate(() => {
+    const bar = document.querySelector('#nextAction');
+    const r = bar.getBoundingClientRect();
+    return {
+      position: getComputedStyle(bar).position, onScreen: r.top >= 0 && r.top < window.innerHeight && r.height > 20,
+      offset: getComputedStyle(document.documentElement).getPropertyValue('--naTop').trim(),
+      header: Math.round(document.querySelector('header.top').getBoundingClientRect().height) + 'px'
+    };
+  });
+  expect(sticky.position).toBe('sticky');
+  expect(sticky.onScreen).toBe(true);
+  expect(sticky.offset).toBe(sticky.header);
   // a collapsed panel that holds the target opens first
   const folded = await page.evaluate(c => {
     const t = window.__BERRY3W_TEST__;
