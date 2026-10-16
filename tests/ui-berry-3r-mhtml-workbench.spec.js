@@ -639,14 +639,26 @@ async function openForAnalysis(page, opts = {}) {
       window.__STAGES__ = [];
       window.__BERRY3W_TEST__.setAiTransport(async stage => {
         window.__STAGES__.push(stage);
+        if (canned.throwOn && canned.throwOn.some(x => stage === x || stage.indexOf(x) === 0)) throw new Error('model unavailable for ' + stage);
         if (stage === 'request') return canned.request;
         if (stage === 'facts-A') return canned.factsA;
         if (stage === 'facts-B') return canned.factsB;
         if (stage === 'assess') return canned.first;
         if (stage === 'assess:2') return canned.second;
+        if (stage === 'drafts') return canned.firstDrafts;
+        if (stage === 'drafts:2') return canned.secondDrafts;
+        if (stage.indexOf('draft-repair:') === 0) {
+          const dim = stage.split(':')[1];
+          if (canned.repairs && canned.repairs[dim]) return { reason: canned.repairs[dim] };
+          throw new Error('no repair available for ' + dim);
+        }
         throw new Error('unexpected stage ' + stage);
       });
-    }, { request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'), first: DECIDED, second: REVISED });
+    }, {
+      request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'), first: DECIDED, second: REVISED,
+      firstDrafts: opts.drafts || FIRST_DRAFTS, secondDrafts: opts.drafts2 || SECOND_DRAFTS,
+      repairs: opts.repairs || null, throwOn: opts.throwOn || null
+    });
   }
   await uploadSynthetic(page);
   return errors;
@@ -673,7 +685,7 @@ test('one-click Analyze returns a provisional reading of both questions and only
       translated: t.state().request.translation
     };
   });
-  expect(out.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess']);   // four calls, nothing extra
+  expect(out.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess', 'drafts']);   // five calls, nothing extra
   expect(out.sat.option).toBe('A is better');
   expect(out.sat.confidence).toBe('medium');
   expect(out.ovr.option).toBe('B is better');
@@ -709,7 +721,7 @@ test('an answered clarification is recorded as a human observation and can chang
   const before = await page.evaluate(() => ({ sat: window.__BERRY3W_TEST__.assessment().satisfaction.option, ovr: window.__BERRY3W_TEST__.assessment().overall.option, open: window.__BERRY3W_TEST__.openClarifications().length }));
   expect(before.sat).toBe('A is better');
   expect(before.open).toBe(2);
-  await page.click('#clarifyBody [data-cl-opt="1"]');                      // "It did nothing" -> broken
+  await page.click('#reviewBody [data-cl-opt="1"]');                       // "It did nothing" -> broken, answered on the review screen
   await page.waitForFunction(() => window.__BERRY3W_TEST__.assessment().round === 2, null, { timeout: 30000 });
   const after = await page.evaluate(() => {
     const t = window.__BERRY3W_TEST__, a = t.assessment(), c = t.clarifications()[0];
@@ -727,7 +739,7 @@ test('an answered clarification is recorded as a human observation and can chang
       verifyPanel: document.querySelector('#verifyBody').textContent.slice(0, 80)
     };
   });
-  expect(after.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess', 'assess:2']);
+  expect(after.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess', 'drafts', 'assess:2', 'drafts:2']);
   expect(after.sat).toBe('B is better');                                     // the suggestion moved
   expect(after.changed).toBe(true);
   expect(after.note).toContain('A is better');
@@ -749,16 +761,15 @@ test('an answered clarification is recorded as a human observation and can chang
   expect(after.verifyPanel).toContain('Asked by the assessment');
   expect(errors).toEqual([]);
 });
-test('keeps the four submission fields human-authored while offering advisory suggestions', async ({ page }) => {
+test('keeps the four submission fields human-authored while the review screen carries the drafts', async ({ page }) => {
   const errors = await openForAnalysis(page);
   await page.click('#analyzeBtn');
-  await page.waitForFunction(analyzed, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
   const view = await page.evaluate(() => {
-    window.__BERRY3W_TEST__.switchView('decide');
     return {
       satReason: document.querySelector('#satReason').value,
       ovrReason: document.querySelector('#ovrReason').value,
-      suggestion: document.querySelector('#suggestionBody').textContent,
+      review: document.querySelector('#reviewBody').textContent,
       chip: document.querySelector('#suggestChip').textContent,
       options: document.querySelectorAll('#satOptions .opt').length,
       draft: window.__BERRY3W_TEST__.assessmentText()
@@ -766,10 +777,10 @@ test('keeps the four submission fields human-authored while offering advisory su
   });
   expect(view.satReason).toBe('');                       // never pre-filled with model prose
   expect(view.ovrReason).toBe('');
-  expect(view.suggestion).toContain('A is better');
-  expect(view.suggestion).toContain('Use suggestion');
-  expect(view.suggestion).toContain('must be your own writing');
-  expect(view.chip).toContain('suggestion');
+  expect(view.review).toContain('A is better');
+  expect(view.review).toContain('Use this recommendation');
+  expect(view.review).toContain('AI-generated draft');
+  expect(view.chip).toContain('recommendation');
   expect(view.options).toBe(4);
   expect(view.draft).toContain('the four submission fields are written by the operator');
   const applied = await page.evaluate(() => {
@@ -777,7 +788,7 @@ test('keeps the four submission fields human-authored while offering advisory su
     const d = window.__BERRY3W_TEST__.state().decisions.satisfaction;
     return { option: d.option, reason: d.reason, checked: document.querySelectorAll('#satOptions input[type=radio]:checked').length };
   });
-  expect(applied.option).toBe('A is better');            // confirming a suggestion sets the selection ...
+  expect(applied.option).toBe('A is better');            // confirming a recommendation sets the selection ...
   expect(applied.reason).toBe('');                       // ... and nothing else
   expect(applied.checked).toBe(1);
   // the rubric still governs what the operator writes
@@ -810,5 +821,459 @@ test('without a model the workflow still returns a labelled deterministic baseli
   expect(out.caveat).toContain('no model weighed the candidates');
   expect(out.clar).toBe(0);                              // no invented questions without a model
   expect(out.panel).toContain(out.sat);
+  expect(errors).toEqual([]);
+});
+
+/* ---------------- AI draft explanations: generation, naming, QA and regeneration ----------------
+   Draft fixtures below were tuned against the workbench's own validator, so a clean fixture is
+   clean for the same reason a real submission would be: word range, naming, lens and tie rules. */
+const SAT_A = 'Website A is better because it provides the requested text loader together with a URL import control, so the whole requested flow sits in one place, while Website B presents a loader only and does not expose a way to bring the required text in from a source. Both candidates show the reader panel and the chapter list the request names, and both keep the navigation the task depends on, but Website A includes the extra control the requested flow needs and Website B leaves that part of the request unaddressed.';
+const SAT_B = 'Website B is better because it provides the requested text loader, the reader panel and the chapter list in one place, while Website A adds a URL import control that the request did not ask for and keeps the loader behind another step. Both candidates show the requested sections, and both keep the navigation the task depends on, but Website B places every requested control where the request describes it, so the flow the user asked for is easier to follow from the top of the page.';
+const OVR_B = 'Website B is better because its typography and spacing make the long text easier to read, and its section headings sit in a clearer hierarchy, so the page can be taken in at a glance, while Website A groups its blocks more tightly and its text runs edge to edge. Website A does provide more of the requested controls, and that counts in its favour, but its plain presentation makes the reading experience more tiring overall. Weighing the two, the missing import control costs the user less than clearer typography and calmer spacing gain, so Website B offers the better complete experience.';
+const TIE_SAT = 'Website A and Website B are tied as good options because both provide the requested text loader, the reader panel and the chapter list, and neither candidate leaves a requested section out. Website A includes a URL import control that Website B does not expose, but Website B keeps the loader control at the top of the panel where the request places it, so the two pages cover the same request from slightly different angles. Both satisfy the requested content and components equally well, so the pair sits at solid or good on the quality scale.';
+const TIE_OVR = 'Website A and Website B are tied as good options because each one covers what the other leaves out: Website B has clearer typography, calmer spacing and a tidier hierarchy, while Website A provides more of the requested controls, including the URL import the request names. Weighing functionality against presentation, the extra control in Website A matters about as much as the easier reading in Website B. Since neither advantage clearly outweighs the other, the pair sits at solid or good on the quality scale.';
+const FIRST_DRAFTS = {
+  satisfaction: { option: 'A is better', reason: SAT_A, why: ['r2: the loader and the URL import control both appear in the After state'] },
+  overall: { option: 'B is better', reason: OVR_B, why: ['typography and spacing differ between the two After states'] }
+};
+const SECOND_DRAFTS = {
+  satisfaction: { option: 'B is better', reason: SAT_B, why: ['your observation: the Website A loader did nothing'] },
+  overall: { option: 'B is better', reason: OVR_B, why: ['typography and spacing differ between the two After states'] }
+};
+test('Analyze delivers a complete assessment plus two AI draft explanations in the review screen', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, d = t.drafts();
+    return {
+      stages: window.__STAGES__, view: t.state().view,
+      sat: { option: d.satisfaction.option, words: d.satisfaction.words, ok: d.satisfaction.qa.ok, unrepaired: d.satisfaction.unrepaired, text: d.satisfaction.text },
+      ovr: { option: d.overall.option, words: d.overall.words, ok: d.overall.qa.ok, text: d.overall.text },
+      review: document.querySelector('#reviewBody').textContent,
+      badges: [...document.querySelectorAll('#reviewBody .badge')].map(b => b.textContent),
+      finalSat: document.querySelector('#satReason').value, finalOvr: document.querySelector('#ovrReason').value,
+      readiness: document.querySelector('#readinessNote').textContent,
+      regenerate: document.querySelector('#regenerateDraftsBtn').disabled,
+      draftsPersistence: JSON.stringify(t.state().drafts).length
+    };
+  });
+  expect(out.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess', 'drafts']);   // five calls, nothing extra
+  expect(out.view).toBe('decide');                                                    // review screen first
+  expect(out.sat.option).toBe('A is better');
+  expect(out.ovr.option).toBe('B is better');
+  expect(out.sat.ok).toBe(true);
+  expect(out.ovr.ok).toBe(true);
+  expect(out.sat.unrepaired).toEqual([]);
+  expect(out.sat.words).toBeGreaterThanOrEqual(40);
+  expect(out.sat.words).toBeLessThanOrEqual(160);
+  expect(out.ovr.words).toBeGreaterThanOrEqual(40);
+  expect(out.ovr.words).toBeLessThanOrEqual(160);
+  expect(out.sat.text.startsWith('Website A is better because ')).toBe(true);         // required opener
+  expect(out.ovr.text.startsWith('Website B is better because ')).toBe(true);
+  expect(out.badges.filter(b => /not submission-ready under the project authorship rule/.test(b))).toHaveLength(2);
+  expect(out.review).toContain('Use this recommendation');
+  expect(out.review).toContain('Your selection: not chosen yet');
+  expect(out.finalSat).toBe('');                                                     // never pre-filled
+  expect(out.finalOvr).toBe('');
+  expect(out.readiness).toContain('2 of the four submission fields still empty');
+  expect(out.regenerate).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('drafts are normalised into the handbook style: naming, opener, punctuation and word range', async ({ page }) => {
+  const sloppy = {
+    satisfaction: { option: 'A is better', reason: 'Site A is better \u2014 it has a \u201ccleaner\u201d loader. B has none. A also wins.', why: [] },
+    overall: { option: 'B is better', reason: 'Page B is better because its typography is clearer than the first website, although the second website has more controls.' }
+  };
+  const errors = await openForAnalysis(page, { drafts: sloppy, repairs: { satisfaction: SAT_A, overall: OVR_B } });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, d = t.drafts();
+    return {
+      stages: window.__STAGES__,
+      sat: { text: d.satisfaction.text, words: d.satisfaction.words, ok: d.satisfaction.qa.ok, repairs: d.satisfaction.repairs },
+      ovr: { text: d.overall.text, ok: d.overall.qa.ok, repairs: d.overall.repairs },
+      canon: t.canonicalizeCandidates('Site A beats Site B and the first website wins'),
+      house: t.sanitizeHouseStyle('say \u201cyes\u201d \u2014 then go'),
+      opening: t.openingFor('Both are bad')
+    };
+  });
+  expect(out.stages.filter(s => s.indexOf('draft-repair:') === 0)).toEqual(['draft-repair:satisfaction', 'draft-repair:overall']);
+  expect(out.sat.text).toBe(SAT_A);                        // the repair replaced the invalid draft
+  expect(out.sat.words).toBeGreaterThanOrEqual(40);
+  expect(out.sat.ok).toBe(true);
+  expect(out.ovr.ok).toBe(true);
+  expect(out.sat.repairs.length).toBeGreaterThan(0);
+  expect(out.sat.text).not.toMatch(/\bSite\s+A\b/);        // no invented labels
+  expect(out.sat.text).not.toMatch(/(?<!Website\s)\b[AB]\b/);   // no bare letters
+  expect(out.sat.text).not.toContain('\u2014');            // no em dashes
+  expect(out.sat.text).not.toContain('\u201c');
+  expect(out.ovr.text).toContain('Website B');
+  expect(out.canon).toBe('Website A beats Website B and Website A wins');   // idempotent canonicalisation
+  expect(out.canon).toBe('Website A beats Website B and Website A wins');
+  expect(out.house).toBe('say "yes", then go');
+  expect(out.opening).toBe('Website A and Website B are tied as bad options because ');
+  expect(errors).toEqual([]);
+});
+test('a defect the repair pass cannot fix is reported, never silently accepted', async ({ page }) => {
+  const sloppy = {
+    satisfaction: { option: 'A is better', reason: 'Site A is better because its palette is cleaner and B looks dated.', why: [] },
+    overall: { option: 'B is better', reason: OVR_B, why: [] }
+  };
+  const errors = await openForAnalysis(page, { drafts: sloppy });          // the repair stage throws
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, d = t.drafts().satisfaction;
+    return { codes: d.unrepaired, ok: d.qa.ok, findings: d.qa.findings.map(f => f.code),
+      chip: [...document.querySelectorAll('#reviewBody .chip')].map(c => c.textContent),
+      readiness: document.querySelector('#readinessNote').textContent,
+      text: d.text, status: document.querySelector('#draftStatus').textContent };
+  });
+  expect(out.codes.length).toBeGreaterThan(0);                             // reported, not hidden
+  expect(out.codes).toContain('word-min');
+  expect(out.ok).toBe(false);
+  expect(out.chip.join(' | ')).toMatch(/rule\(s\) still failing/);
+  expect(out.readiness).toContain('satisfaction draft still breaks a rule');
+  expect(out.status.length).toBeGreaterThan(0);
+  expect(out.text.startsWith('Website A is better because ')).toBe(true);   // naming/opener still normalised
+  expect(errors).toEqual([]);
+});
+
+test('ties obey the 1-6 threshold and are never presented as settled while evidence is open', async ({ page }) => {
+  const tieAssessment = Object.assign({}, DECIDED, {
+    satisfaction: { option: 'Both are good', confidence: 'low', because: ['both cover the requested controls'], decidingRequirementIds: ['r2'] },
+    overall: { option: 'Both are good', confidence: 'low', because: ['each covers what the other leaves out'], tradeOff: 'Functionality and presentation pull in opposite directions.', decidingRequirementIds: [] }
+  });
+  const tieDrafts = {
+    satisfaction: { option: 'Both are good', reason: TIE_SAT, tieScale: 5, why: [] },
+    overall: { option: 'Both are good', reason: TIE_OVR, tieScale: 5, why: [] }
+  };
+  const errors = await openForAnalysis(page);
+  await page.evaluate(c => {
+    const t = window.__BERRY3W_TEST__;
+    t.setAiTransport(async stage => {
+      if (stage === 'request') return c.request;
+      if (stage === 'facts-A') return c.factsA;
+      if (stage === 'facts-B') return c.factsB;
+      if (stage === 'assess') return c.assess;
+      if (stage === 'drafts') return c.drafts;
+      throw new Error('unexpected ' + stage);
+    });
+  }, { assess: tieAssessment, drafts: tieDrafts, request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B') });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, d = t.drafts();
+    const withScale = (scale) => t.validateFields({ satisfaction: { option: 'Both are good', reason: d.satisfaction.text, tieScale: scale }, overall: { option: 'Both are good', reason: d.overall.text, tieScale: scale } }).findings.filter(f => f.level === 'error').map(f => f.code);
+    return {
+      satOk: d.satisfaction.qa.ok, ovrOk: d.overall.qa.ok, satScale: d.satisfaction.tieScale,
+      satText: d.satisfaction.text, ovrText: d.overall.text,
+      lowThreshold: withScale(2), highThreshold: withScale(5),
+      review: document.querySelector('#reviewBody').textContent,
+      open: t.openClarifications().length
+    };
+  });
+  expect(out.satScale).toBe(5);
+  expect(out.satText.startsWith('Website A and Website B are tied as good options because ')).toBe(true);
+  expect(out.satText).toContain('Website A');
+  expect(out.satText).toContain('Website B');
+  expect(out.satOk).toBe(true);
+  expect(out.ovrOk).toBe(true);
+  expect(out.highThreshold).not.toContain('tie-threshold');
+  expect(out.lowThreshold).toContain('tie-threshold');                      // 1-6 rule enforced
+  expect(out.open).toBeGreaterThan(0);
+  expect(out.review).toContain('This tie is provisional');                  // not presented as certain
+  expect(errors).toEqual([]);
+});
+test('Satisfaction and Overall drafts stay independent and never copy each other', async ({ page }) => {
+  const sameOption = Object.assign({}, DECIDED, { satisfaction: { option: 'B is better', confidence: 'medium', because: ['r2: Website B places every requested control at the top'], decidingRequirementIds: ['r2'] } });
+  const errors = await openForAnalysis(page);
+  await page.evaluate(c => {
+    window.__BERRY3W_TEST__.setAiTransport(async stage => {
+      if (stage === 'request') return c.request;
+      if (stage === 'facts-A') return c.factsA;
+      if (stage === 'facts-B') return c.factsB;
+      if (stage === 'assess') return c.assess;
+      if (stage === 'drafts') return c.drafts;
+      throw new Error('unexpected ' + stage);
+    });
+  }, {
+    assess: sameOption, request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'),
+    drafts: { satisfaction: { option: 'B is better', reason: SAT_B, why: [] }, overall: { option: 'B is better', reason: OVR_B, why: [] } }
+  });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, d = t.drafts();
+    const codes = t.validateFields({ satisfaction: { option: 'B is better', reason: d.satisfaction.text }, overall: { option: 'B is better', reason: d.overall.text } }).findings;
+    return {
+      satText: d.satisfaction.text, ovrText: d.overall.text, satOk: d.satisfaction.qa.ok, ovrOk: d.overall.qa.ok,
+      sameOption: codes.filter(f => f.code === 'same-option' || f.code === 'reuse').map(f => f.level + ':' + f.code),
+      identical: d.satisfaction.text === d.overall.text,
+      overallOnly: codes.filter(f => f.field === 'overall').map(f => f.code)
+    };
+  });
+  expect(out.identical).toBe(false);
+  expect(out.satText.startsWith('Website B is better because ')).toBe(true);
+  expect(out.ovrText.startsWith('Website B is better because ')).toBe(true);
+  expect(out.satOk).toBe(true);
+  expect(out.ovrOk).toBe(true);
+  expect(out.sameOption).toContain('info:same-option');          // allowed, but flagged as needing the weighing
+  expect(out.sameOption).not.toContain('error:reuse');           // not a copy of the Satisfaction reasoning
+  expect(out.overallOnly).not.toContain('no-weighing');
+  expect(errors).toEqual([]);
+});
+
+test('a clarification regenerates the affected draft and reports what changed', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const before = await page.evaluate(() => ({ sat: window.__BERRY3W_TEST__.drafts().satisfaction.text, stages: window.__STAGES__.slice() }));
+  expect(before.sat.startsWith('Website A is better because ')).toBe(true);
+  await page.click('#reviewBody [data-cl-opt="1"]');                        // answer on the review screen
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().satisfaction && window.__BERRY3W_TEST__.drafts().satisfaction.round === 2, null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    return {
+      stages: window.__STAGES__, sat: t.drafts().satisfaction, ovr: t.drafts().overall,
+      assessment: t.assessment().satisfaction.option, changed: t.assessment().changed,
+      review: document.querySelector('#reviewBody').textContent,
+      status: document.querySelector('#draftStatus').textContent,
+      readiness: document.querySelector('#readinessNote').textContent
+    };
+  });
+  expect(out.stages).toContain('drafts:2');
+  expect(out.sat.round).toBe(2);
+  expect(out.sat.text).toBe(SAT_B);
+  expect(out.sat.text.startsWith('Website B is better because ')).toBe(true);   // follows the recalculation
+  expect(out.sat.trigger).toContain('what happened');
+  expect(out.sat.changeShare).toBeGreaterThan(0);
+  expect(out.sat.qa.ok).toBe(true);
+  expect(out.assessment).toBe('B is better');
+  expect(out.changed).toBe(true);
+  expect(out.review).toContain('B is better');
+  expect(out.status).toMatch(/updated from the new evidence|already matched/);
+  expect(errors).toEqual([]);
+});
+test('operator edits survive regeneration, and the new draft is offered rather than imposed', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const mine = 'Website A is better because the requested loader and the URL import control are both present on the page, while Website B offers the loader alone, so the requested flow cannot be completed there. Both candidates show the reader panel and the chapter list the request names. This paragraph is my own wording for the draft box.';
+  await page.evaluate(text => window.__BERRY3W_TEST__.editDraft('satisfaction', text), mine);
+  const edited = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    return { edited: t.draftEdited().satisfaction, current: t.currentDraftText('satisfaction'), ai: t.drafts().satisfaction.text };
+  });
+  expect(edited.edited).toBe(true);
+  expect(edited.current).toBe(mine);
+  expect(edited.ai).not.toBe(mine);
+  await page.click('#reviewBody [data-cl-opt="1"]');                       // the analysis changes underneath
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.draftPending().satisfaction !== null, null, { timeout: 30000 });
+  const pending = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    return { current: t.currentDraftText('satisfaction'), ai: t.drafts().satisfaction.text, pending: t.draftPending().satisfaction.text,
+      review: document.querySelector('#reviewBody').textContent, log: t.draftLog().satisfaction.map(e => e.kind) };
+  });
+  expect(pending.current).toBe(mine);                                        // my wording is untouched
+  expect(pending.ai).not.toBe(SAT_B);                                        // the AI draft slot was not overwritten either
+  expect(pending.pending).toBe(SAT_B);
+  expect(pending.review).toContain('Updated draft available for the new analysis');
+  expect(pending.review).toContain('Keep my wording');
+  expect(pending.log).toContain('edit');
+  await page.click('#reviewBody [data-draft-keep="satisfaction"]');
+  const kept = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    return { current: t.currentDraftText('satisfaction'), pending: t.draftPending().satisfaction, log: t.draftLog().satisfaction.map(e => e.kind) };
+  });
+  expect(kept.current).toBe(mine);
+  expect(kept.pending).toBe(null);
+  expect(kept.log).toContain('ai-unused');
+  const applied = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    return { ovr: t.drafts().overall.text, prevOvr: !!(t.draftsPrev().overall), pendingOvr: t.draftPending().overall };
+  });
+  expect(applied.ovr).toBe(OVR_B);                        // never edited, so the new draft applied directly
+  expect(applied.prevOvr).toBe(true);                     // and the replaced draft stays restorable
+  expect(applied.pendingOvr).toBe(null);
+  await page.click('#reviewBody [data-draft-restore="overall"]');
+  const restoredPrev = await page.evaluate(() => ({ prev: window.__BERRY3W_TEST__.draftsPrev().overall, text: window.__BERRY3W_TEST__.drafts().overall.text }));
+  expect(restoredPrev.prev).toBe(null);
+  expect(restoredPrev.text).toBe(OVR_B);
+  // my wording is still in the box, so a new draft is offered again and this time accepted
+  await page.evaluate(async () => { await window.__BERRY3W_TEST__.regenerateDrafts(['satisfaction']); });
+  const offered = await page.evaluate(() => ({ pending: window.__BERRY3W_TEST__.draftPending().satisfaction, current: window.__BERRY3W_TEST__.currentDraftText('satisfaction') }));
+  expect(offered.current).toBe(mine);
+  expect(offered.pending.text).toBe(SAT_B);
+  await page.click('#reviewBody [data-draft-accept="satisfaction"]');
+  const accepted = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    return { text: t.drafts().satisfaction.text, edited: t.draftEdited().satisfaction, current: t.currentDraftText('satisfaction'), pending: t.draftPending().satisfaction, log: t.draftLog().satisfaction.map(e => e.kind), prev: !!t.draftsPrev().satisfaction };
+  });
+  expect(accepted.text).toBe(SAT_B);                      // the accepted draft is now the shown one
+  expect(accepted.current).toBe(SAT_B);
+  expect(accepted.edited).toBe(false);
+  expect(accepted.pending).toBe(null);
+  expect(accepted.prev).toBe(true);
+  expect(accepted.log).toContain('edit');                 // the replaced wording is filed, not lost
+  expect(errors).toEqual([]);
+});
+
+test('AI drafts stay separate from the human submission fields, and seeding them is explicit and flagged', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const before = await page.evaluate(() => ({
+    satReason: window.__BERRY3W_TEST__.state().decisions.satisfaction.reason,
+    ovrReason: window.__BERRY3W_TEST__.state().decisions.overall.reason,
+    draft: window.__BERRY3W_TEST__.drafts().satisfaction.text,
+    seeded: window.__BERRY3W_TEST__.state().decisions.satisfaction.seededFromDraft || null
+  }));
+  expect(before.satReason).toBe('');
+  expect(before.ovrReason).toBe('');
+  expect(before.seeded).toBe(null);
+  await page.evaluate(() => window.__BERRY3W_TEST__.seedFinalFromDraft('satisfaction'));
+  const seeded = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    return {
+      field: t.state().decisions.satisfaction.reason,
+      draft: t.drafts().satisfaction.text,
+      flag: !!t.state().decisions.satisfaction.seededFromDraft,
+      codes: t.validateAll().findings.map(f => f.code),
+      satStatus: document.querySelector('#draftStatus').textContent,
+      banner: document.querySelector('#readinessNote').textContent
+    };
+  });
+  expect(seeded.field).toBe(seeded.draft);                                  // explicit copy, same words
+  expect(seeded.flag).toBe(true);
+  expect(seeded.codes).toContain('ai-seeded');                              // flagged while unchanged
+  expect(seeded.satStatus).toContain('rewrite it in your own words');
+  await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    t.state().decisions.satisfaction.reason = t.state().decisions.satisfaction.reason.replace('provides the requested text loader', 'includes the text loader the request names');
+  });
+  const rewritten = await page.evaluate(() => window.__BERRY3W_TEST__.validateAll().findings.map(f => f.code));
+  expect(rewritten).not.toContain('ai-seeded');                             // the flag clears once the wording is theirs
+  expect(errors).toEqual([]);
+});
+test('a failed draft step degrades gracefully and can be retried', async ({ page }) => {
+  const errors = await openForAnalysis(page, { throwOn: ['drafts'] });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => /model assessment/.test(window.__BERRY3W_TEST__.assessment().source), null, { timeout: 30000 });
+  const failed = await page.evaluate(() => ({
+    sat: window.__BERRY3W_TEST__.drafts().satisfaction,
+    panel: document.querySelector('#reviewBody').textContent,
+    status: document.querySelector('#draftStatus').textContent,
+    components: window.__BERRY3W_TEST__.errBuffer().map(e => e.component),
+    regenerateDisabled: document.querySelector('#regenerateDraftsBtn').disabled
+  }));
+  expect(failed.sat).toBe(null);
+  expect(failed.panel).toContain('No draft for this field yet');
+  expect(failed.panel).toContain('Regenerate drafts');
+  expect(failed.status).toMatch(/Regenerate drafts|model step failed/);
+  expect(failed.components).toContain('drafts');
+  expect(failed.regenerateDisabled).toBe(false);
+  await page.evaluate(c => {
+    window.__BERRY3W_TEST__.setAiTransport(async stage => {
+      if (stage === 'drafts') return c;
+      throw new Error('unexpected ' + stage);
+    });
+  }, FIRST_DRAFTS);
+  await page.click('#regenerateDraftsBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const retried = await page.evaluate(() => ({
+    sat: window.__BERRY3W_TEST__.drafts().satisfaction.text,
+    ovr: window.__BERRY3W_TEST__.drafts().overall.text,
+    status: document.querySelector('#draftStatus').textContent
+  }));
+  expect(retried.sat).toBe(SAT_A);
+  expect(retried.ovr).toBe(OVR_B);
+  expect(retried.status).toContain('ready');
+  expect(errors).toEqual([]);
+});
+
+test('drafts, edits and their rule checks survive export and re-import', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const mine = 'Website A is better because the requested loader is present on the page while Website B exposes nothing of the kind, so the request cannot be carried out there. Both candidates show the reader panel the request names. This is my own wording.';
+  await page.evaluate(text => window.__BERRY3W_TEST__.editDraft('overall', text), mine);
+  const out = await page.evaluate(async () => {
+    const t = window.__BERRY3W_TEST__;
+    t.settings().apiKey = 'sk-or-v1-secretsecretsecret';
+    const rec = t.buildRecord();
+    const json = JSON.stringify(rec);
+    t.applyRecord(JSON.parse(json));
+    const d = t.drafts();
+    return {
+      jsonHasKey: /sk-or-v1-secretsecretsecret/.test(json),
+      recDrafts: !!rec.drafts.satisfaction,
+      recEdit: rec.draftEdits.overall,
+      words: d.satisfaction.words,
+      qaOk: d.satisfaction.qa.ok,
+      option: d.overall.option,
+      edited: t.draftEdited().overall,
+      current: t.currentDraftText('overall'),
+      log: t.draftLog().overall.length,
+      finalField: t.state().decisions.overall.reason
+    };
+  });
+  expect(out.jsonHasKey).toBe(false);                    // credentials still never leave in a record
+  expect(out.recDrafts).toBe(true);
+  expect(out.words).toBeGreaterThanOrEqual(40);
+  expect(out.qaOk).toBe(true);
+  expect(out.option).toBe('B is better');
+  expect(out.recEdit).toBe(mine);
+  expect(out.edited).toBe(true);
+  expect(out.current).toBe(mine);
+  expect(out.log).toBeGreaterThan(0);
+  expect(out.finalField).toBe('');                       // an AI draft never becomes the submission field
+  expect(errors).toEqual([]);
+});
+
+test('real capture: Analyze writes both drafts from the archived evidence', async ({ page }) => {
+  test.setTimeout(300000);
+  test.skip(!REAL_FIXTURE || !fs.existsSync(REAL_FIXTURE), 'set BERRY3W_REAL_FIXTURE to the captured .mhtml path');
+  const errors = await open(page);
+  await page.evaluate(c => {
+    window.__STAGES__ = [];
+    window.__BERRY3W_TEST__.setAiTransport(async stage => {
+      window.__STAGES__.push(stage);
+      if (stage === 'request') return c.request;
+      if (stage === 'facts-A') return c.factsA;
+      if (stage === 'facts-B') return c.factsB;
+      if (stage === 'assess') return c.assess;
+      if (stage === 'drafts') return c.drafts;
+      throw new Error('unexpected ' + stage);
+    });
+  }, { request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'), assess: DECIDED, drafts: FIRST_DRAFTS });
+  await page.setInputFiles('#fileInput', REAL_FIXTURE);
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.state().archive !== null, null, { timeout: 300000 });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 120000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, d = t.drafts();
+    return {
+      stages: window.__STAGES__, parts: t.state().archive.partCount,
+      requirements: t.state().requirements.length,
+      sat: { open: d.satisfaction.text.slice(0, 40), words: d.satisfaction.words, ok: d.satisfaction.qa.ok },
+      ovr: { open: d.overall.text.slice(0, 40), words: d.overall.words, ok: d.overall.qa.ok },
+      bare: t.validateFields({ satisfaction: { option: d.satisfaction.option, reason: d.satisfaction.text }, overall: { option: d.overall.option, reason: d.overall.text } }).findings.filter(f => f.level === 'error' && (f.code === 'bare-letter' || f.code === 'label')).length,
+      payload: JSON.stringify(t.draftPayload(['satisfaction', 'overall'], 1)).length
+    };
+  });
+  expect(out.parts).toBeGreaterThan(10);
+  expect(out.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess', 'drafts']);
+  expect(out.sat.open.startsWith('Website A is better because ')).toBe(true);
+  expect(out.ovr.open.startsWith('Website B is better because ')).toBe(true);
+  expect(out.sat.words).toBeGreaterThanOrEqual(40);
+  expect(out.ovr.words).toBeGreaterThanOrEqual(40);
+  expect(out.sat.ok).toBe(true);
+  expect(out.ovr.ok).toBe(true);
+  expect(out.bare).toBe(0);
+  expect(out.payload).toBeLessThan(200000);               // bounded prompt on a 112 MB capture
   expect(errors).toEqual([]);
 });
