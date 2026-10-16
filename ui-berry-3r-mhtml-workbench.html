@@ -42,6 +42,7 @@ nav.tabs{display:flex;gap:2px;flex-wrap:wrap}
 .tab .dot.todo{background:var(--warn)}
 .grow{flex:1}
 main{max-width:1500px;margin:0 auto;padding:16px 16px 64px}
+html{scroll-padding-top:110px}
 .view[hidden],.sub[hidden],.hide{display:none}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:15px;margin-bottom:14px;box-shadow:var(--shadow)}
 .head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
@@ -168,12 +169,28 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 .qa .f.pass{color:var(--ok)}
 .saved{position:fixed;right:14px;bottom:14px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;box-shadow:var(--shadow);font-size:12.5px;z-index:70}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+/* Next-action indicator: one compact bar under the navigation, derived from live state. */
+.nextbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px;padding:7px 11px;border:1px solid var(--line);border-left:4px solid var(--faint);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
+.nextbar .na-tag{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:700}
+.nextbar .na-why{font-size:12.5px;color:var(--muted);flex:1 1 240px;min-width:0}
+.nextbar[data-na-kind="ready"]{border-left-color:var(--ok)}
+.nextbar[data-na-kind="failure"],.nextbar[data-na-kind="clarify"]{border-left-color:var(--accent)}
+.nextbar[data-na-kind="draft-qa"]{border-left-color:var(--warn)}
+.nextbar.na-attention{animation:naPulse 1.1s ease-in-out 2}
+@keyframes naPulse{0%,100%{box-shadow:var(--shadow)}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 32%,transparent)}}
+.na-flash{animation:naFlash 1.6s ease-out 1}
+@keyframes naFlash{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 55%,transparent)}35%{box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 36%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto !important}
+  .nextbar.na-attention,.na-flash{animation:none}
+  .na-flash{outline:3px solid var(--accent);outline-offset:2px}
+}
 </style>
 </head>
 <body>
 <header class="top">
   <span class="brand">UI&nbsp;Berry&nbsp;3R <em>MHTML Workbench</em></span>
-  <span class="ver" id="verLabel">version 2026.10.16.6</span>
+  <span class="ver" id="verLabel">version 2026.10.16.7</span>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Workbench sections">
     <button class="tab" role="tab" data-view="setup" aria-selected="true"><span class="dot"></span>1 · Upload &amp; setup</button>
     <button class="tab" role="tab" data-view="archive" aria-selected="false"><span class="dot"></span>2 · Analyze &amp; findings</button>
@@ -185,12 +202,18 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
   <span class="grow"></span>
   <div class="row">
     <span class="status" id="topStatus" role="status"></span>
+    <button class="btn small" id="soundBtn" aria-pressed="true" title="Completion chime on or off">🔊 Sound On</button>
     <button class="btn small" id="themeBtn" aria-label="Toggle light and dark theme">◐ Theme</button>
     <button class="btn small primary" id="saveBtn">Save task</button>
   </div>
 </header>
 
 <main>
+<div class="nextbar" id="nextAction" data-na-kind="upload" role="status" aria-live="polite" aria-label="Next action">
+  <span class="na-tag">Next action</span>
+  <button class="btn small primary" id="nextActionBtn" type="button">Upload a capture and press Analyze</button>
+  <span class="na-why" id="nextActionWhy"></span>
+</div>
 <!-- ============================ 1. SETUP ============================ -->
 <section class="view" id="view-setup" role="tabpanel" aria-label="Upload and setup">
   <div class="grid2">
@@ -553,7 +576,7 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
     </section>
   </div>
 
-  <details class="fold">
+  <details class="fold" id="qaFold">
     <summary>Full QA checks on the four fields</summary>
     <section class="panel">
       <div class="head"><div><span class="eyebrow">Validation</span><h2>Rule checks before you submit</h2></div>
@@ -562,7 +585,7 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
     </section>
   </details>
 
-  <details class="fold">
+  <details class="fold" id="transferFold">
     <summary>Copy the four fields out</summary>
     <section class="panel">
       <div class="head"><div><span class="eyebrow">Transfer</span><h2>The four final fields</h2></div>
@@ -639,9 +662,9 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 </section>
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.6" bump="Update this version whenever this file changes in a commit." -->
-<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.6" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.6
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.7" bump="Update this version whenever this file changes in a commit." -->
+<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.7" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.7
 </footer>
 
 <!-- Parser worker. Kept as text so the page stays one self-contained file; it is
@@ -1616,9 +1639,79 @@ window.addEventListener('error', e => pushErr('window', e.message, (e.filename |
 window.addEventListener('unhandledrejection', e => pushErr('promise', (e.reason && e.reason.message) || String(e.reason), ''));
 function status(el, text, kind = '') { if (typeof el === 'string') el = $(el); if (!el) return; el.textContent = text; el.className = 'status ' + kind; }
 
+/* --------------------------- completion chime ---------------------------
+   Adapted from ui-berry-3r-visual-evaluator.html (which adapted ui-berry-3r-evaluator.html):
+   four ascending sine notes, no audio files, no dependencies. Audio is unlocked by the click that
+   starts the work; one chime per successful user-initiated workflow; every failure path is silent;
+   the whole thing degrades to nothing when audio is unavailable or blocked. */
+const CHIME_NOTES = [587.33, 739.99, 880.0, 1046.5];
+let chimeCtx = null, chimeCount = 0, lastChimeAt = 0;
+function audioAvailable() { return typeof window !== 'undefined' && !!(window.AudioContext || window.webkitAudioContext); }
+function prefersReducedMotion() {
+  try { return !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
+}
+/* Called from a real user gesture only — never from load, restore or background maintenance. */
+function primeAudio() {
+  if (settings.sound === false || !audioAvailable()) return false;
+  try {
+    if (!chimeCtx || chimeCtx.state === 'closed') chimeCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (chimeCtx.state === 'suspended' && chimeCtx.resume) chimeCtx.resume();
+    return true;
+  } catch (e) { pushErr('audio-prime', e.message || String(e)); return false; }
+}
+function playCompletionChime() {
+  if (settings.sound === false || !audioAvailable()) return false;
+  if (Date.now() - lastChimeAt < 900) return false;            // overlapping operations cannot double up
+  try {
+    if (!primeAudio()) return false;
+    const ctx = chimeCtx;
+    if (!ctx || ctx.state === 'closed') return false;
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 1);
+    CHIME_NOTES.forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, now + i * 0.13);
+      osc.connect(gain);
+      osc.start(now + i * 0.13);
+      osc.stop(now + i * 0.13 + 0.5);
+    });
+    chimeCount++;
+    lastChimeAt = Date.now();
+    return true;
+  } catch (e) { pushErr('chime', e.message || String(e)); return false; }
+}
+/* One token per user-initiated workflow: the token is minted when the work starts and claimed when
+   a successful finish asks for the chime, so a run can never chime twice. */
+function newWorkflowToken() { return 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function chimeOnce(token, ok) {
+  if (!token || ok !== true) return false;
+  if (state.chimedToken === token) return false;
+  state.chimedToken = token;
+  return playCompletionChime();
+}
+function setSound(on) {
+  settings.sound = !!on;
+  saveSettings();
+  renderSoundBtn();
+  if (settings.sound) primeAudio();                            // the toggle click is the gesture
+  status('#topStatus', settings.sound ? 'Completion chime on.' : 'Completion chime off.', settings.sound ? 'ok' : 'info');
+}
+function renderSoundBtn() {
+  const b = $('#soundBtn');
+  if (!b) return;
+  const on = settings.sound !== false;
+  b.textContent = on ? '🔊 Sound On' : '🔇 Sound Off';
+  b.setAttribute('aria-pressed', String(on));
+  b.setAttribute('aria-label', on ? 'Completion chime is on. Press to mute.' : 'Completion chime is off. Press to unmute.');
+  b.title = audioAvailable() ? 'Completion chime on or off' : 'Completion chime on or off (this browser has no Web Audio)';
+}
 /* ------------------------------- settings ------------------------------- */
 const defaultModel = 'openai/gpt-4.1-mini';
-let settings = { apiKey: '', model: defaultModel, temperature: 0.2 };
+let settings = { apiKey: '', model: defaultModel, temperature: 0.2, sound: true };
 let aiTransport = null;         // test seam: a transport stub, deliberately outside state so a reset cannot drop it
 let modelCatalog = [];
 function loadSettings() {
@@ -1636,6 +1729,7 @@ function loadSettings() {
       }
       if (typeof o.model === 'string' && o.model) settings.model = o.model.slice(0, 200);
       if (typeof o.temperature === 'number') settings.temperature = Math.max(0, Math.min(2, o.temperature));
+      if (typeof o.sound === 'boolean') settings.sound = o.sound;
     }
     const c = JSON.parse(localStorage.getItem(SETTINGS_KEY + '.models') || 'null');
     if (Array.isArray(c)) modelCatalog = c.slice(0, 800);
@@ -1750,7 +1844,8 @@ function blankState() {
     request: { text: '', translation: '', source: '', method: '', confidence: 0, edited: false },
     requirements: [], facts: { A: [], B: [] }, verification: [], comparison: null,
     decisions: { satisfaction: { option: '', reason: '' }, overall: { option: '', reason: '' } },
-    validation: null, ai: { model: '', at: '', errors: [], passes: {}, verifiedModel: '', verifiedAt: '' },
+    validation: null, ai: { model: '', at: '', errors: [], passes: {}, verifiedModel: '', verifiedAt: '', failed: null },
+    aiRunning: false, chimedToken: '', nextAction: null, analyzeTriedAt: '',
     assessment: null, clarifications: [], assessRound: 0, assessBusy: false, assessLog: [],
     /* Four separate slots for the two explanations, so regeneration can never confuse an AI
        draft with a human edit or with the human-authored submission field. */
@@ -2188,6 +2283,7 @@ function runValidation() {
   renderDecisionChip();
   renderValidation();
   renderCounters();
+  renderNextAction();
   return state.validation;
 }
 /* ------------------------------- rendering ------------------------------- */
@@ -2784,6 +2880,222 @@ function refreshReadiness() {
     ? 'To finish: ' + parts.join(' · ') + '. Field checks: ' + errs + ' error(s), ' + v.warnings + ' warning(s).'
     : 'Both recommendations are confirmed, both drafts are reviewed, and the four fields pass the checks.';
   el.className = 'status ' + (parts.length ? (errs ? 'bad' : 'warn') : 'ok');
+  renderNextAction();
+}
+/* ------------------- next action: one derived answer, one click -------------------
+   The indicator reads the state the rest of the page already keeps, so there is no second workflow
+   status to drift. Priority: running > failure > decisive clarification > missing live observation
+   > draft QA > unreviewed recommendations > submission fields > ready to copy. */
+const NA_FLASH_MS = 1700;
+let naFlashTimer = null, naPulseTimer = null;
+function shortText(s, n) { const t = norm(s); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; }
+function affectsText(c) { return c.affects === 'both' ? 'both questions' : c.affects === 'overall' ? 'the Overall question' : 'the Satisfaction question'; }
+function firstUnverifiedFor(site) {
+  const list = state.verification.filter(v => v.site === site && v.status === 'unverified');
+  return list.find(v => v.clarificationId) || list[0] || null;
+}
+function draftClaimSites() {              /* draft sentences the QA flagged as unproven behaviour */
+  const sites = new Set();
+  for (const dim of ['satisfaction', 'overall']) {
+    const d = state.drafts[dim];
+    if (!d || !d.qa) continue;
+    for (const f of d.qa.findings || []) {
+      if (f.code !== 'unverified-claim') continue;
+      for (const m of String(f.message || '').matchAll(/Website\s+([AB])/g)) sites.add(m[1]);
+    }
+  }
+  return [...sites];
+}
+function nextActionDescriptor() {
+  const key = canUseModel();
+  const drafts = ['satisfaction', 'overall'].filter(d => state.drafts[d]);
+  const aiMade = !!(state.assessment && !assessmentIsBaseline(state.assessment));   /* a real AI reading exists */
+  /* 1 · work in progress: offer nothing unrelated */
+  if (state.aiRunning || state.assessBusy || state.draftBusy) {
+    return {
+      kind: 'running', busy: true, focus: false, view: state.view, targets: [],
+      label: state.draftBusy ? 'Writing the draft explanations…' : state.assessBusy ? 'Updating the assessment with your answer…' : 'Analyzing — this tab can stay in the background',
+      why: 'The next action appears here the moment this finishes.'
+    };
+  }
+  /* 2 · a failure the operator has to clear */
+  const failed = state.ai.failed;
+  if (failed && failed.at) {
+    return { kind: 'failure', label: 'Retry the ' + failed.component + ' step', why: shortText(failed.message, 180), view: failed.view || 'archive', targets: failed.targets || ['#analyzeBtn'], focus: true };
+  }
+  if (state.archive && !key && state.analyzeTriedAt) {
+    return { kind: 'failure', label: 'Add an OpenRouter key for the full assessment', why: 'Without a key the workbench can only return the deterministic baseline, and it cannot write the two draft explanations.', view: 'setup', targets: ['#apiKey'], focus: true };
+  }
+  if (aiMade && !drafts.length) {
+    return { kind: 'failure', label: 'Write the missing draft explanations', why: 'The assessment is in, but the step that writes the two drafts did not finish.', view: 'decide', targets: ['#regenerateDraftsBtn'], focus: true };
+  }
+  if (!state.archive) {
+    return { kind: 'upload', label: 'Upload a capture and press Analyze', why: state.fileName ? 'Reading ' + state.fileName + ' now.' : 'An MHTML or MWEB capture from the task.', view: 'setup', targets: ['#drop'], focus: false };
+  }
+  if (!state.analyzeTriedAt) {
+    return { kind: 'analyze', label: 'Press Analyze to run the assessment', why: key ? 'One click runs the request reading, both candidates, the weighing and the two drafts.' : 'No key is set, so Analyze returns the labelled deterministic baseline.', view: 'setup', targets: ['#analyzeBtn'], focus: true };
+  }
+  /* 3 · the highest-impact unresolved question */
+  const risky = openClarifications().filter(c => c.importance === 'decisive' || c.importance === 'material');
+  if (risky.length) {
+    const c = risky[0];
+    return {
+      kind: 'clarify', label: 'Answer: ' + shortText(c.question, 96), clarificationId: c.id,
+      why: (c.importance === 'decisive' ? 'Decisive for ' : 'Material to ') + affectsText(c) + (risky.length > 1 ? ' · ' + (risky.length - 1) + ' more question(s) after this one' : ''),
+      view: 'decide', targets: ['#reviewBody [data-cl="' + c.id + '"]', '#clarifyBody [data-cl="' + c.id + '"]'], focus: true
+    };
+  }
+  /* 4 · a live observation something actually depends on */
+  const claimSites = draftClaimSites();
+  if (claimSites.length) {
+    const site = claimSites[0], claim = firstUnverifiedFor(site);
+    return {
+      kind: 'verify', label: 'Record what Website ' + site + ' actually does', site,
+      why: 'A draft sentence rests on behaviour the archive cannot prove, so the rule check stays open until you record what you saw.',
+      view: 'verify', targets: claim ? ['#verifyBody [data-ver-status="' + claim.id + '"]'] : ['#addVerifyBtn'], focus: true
+    };
+  }
+  const winners = [...new Set(['satisfaction', 'overall'].map(d => state.decisions[d].option).filter(o => o === 'A is better' || o === 'B is better').map(o => (o === 'A is better' ? 'A' : 'B')))];
+  const unobserved = winners.filter(letter => !humanConfirmed(letter));
+  if (unobserved.length) {
+    const letter = unobserved[0], obs = firstUnverifiedFor(letter);
+    return {
+      kind: 'verify', label: 'Record one live observation for Website ' + letter, site: letter,
+      why: 'A confirmed selection rests on that website, and the handbook expects both websites to be inspected in their own tabs. General prompts stay advisory.',
+      view: 'verify', targets: obs ? ['#verifyBody [data-ver-status="' + obs.id + '"]'] : ['#addVerifyBtn'], focus: true
+    };
+  }
+  /* 5 · drafts that need a decision or a fix */
+  const pendingDim = ['satisfaction', 'overall'].find(d => state.draftPending[d]);
+  if (pendingDim) {
+    return { kind: 'draft-qa', label: 'Choose: accept or keep your ' + pendingDim + ' wording', why: 'The analysis moved after you edited that draft, so the new wording is waiting on your decision.', view: 'decide', targets: ['#reviewBody [data-draft-accept="' + pendingDim + '"]'], focus: true };
+  }
+  const badDim = ['satisfaction', 'overall'].find(d => state.drafts[d] && state.drafts[d].unrepaired && state.drafts[d].unrepaired.length);
+  if (badDim) {
+    return { kind: 'draft-qa', label: 'Fix the ' + badDim + ' draft (' + state.drafts[badDim].unrepaired.join(', ') + ')', why: 'The draft broke a handbook rule and the automatic repair did not settle it. Edit the wording, or regenerate it.', view: 'decide', targets: ['#reviewBody [data-draft="' + badDim + '"]'], focus: true, typingSafe: true };
+  }
+  /* 6 · recommendations that have not been reviewed */
+  const unconfirmed = ['satisfaction', 'overall'].filter(d => !state.decisions[d].option);
+  if (unconfirmed.length) {
+    return { kind: 'review', label: 'Confirm the ' + unconfirmed.join(' and ') + ' recommendation', why: 'The recommendations come from the analysis; confirm or correct each one before writing your own wording.', view: 'decide', targets: ['#reviewBody [data-use="' + unconfirmed[0] + '"]'], focus: true };
+  }
+  /* 7 · the four submission fields */
+  const v = state.validation || validateAll();
+  const emptyField = ['satisfaction', 'overall'].find(d => !String(state.decisions[d].reason || '').trim());
+  if (emptyField) {
+    return { kind: 'fields', label: 'Write the ' + emptyField + ' justification', why: 'The four submission fields are yours to write; the rule checks run as you type.', view: 'decide', targets: ['#' + (emptyField === 'satisfaction' ? 'satReason' : 'ovrReason')], focus: true, typingSafe: true };
+  }
+  const firstError = v.findings.find(f => f.level === 'error');
+  if (v.errors) {
+    return { kind: 'fields', label: 'Fix ' + v.errors + ' rule check' + (v.errors > 1 ? 's' : ''), why: firstError ? shortText(firstError.message, 180) : '', view: 'decide', targets: ['#qaFold'], focus: true };
+  }
+  /* 8 · nothing left */
+  return { kind: 'ready', label: 'Ready to copy the four fields', why: 'Both selections are confirmed, the drafts are reviewed and every rule check passes.', view: 'decide', targets: ['#finalPreview'], focus: true };
+}
+function renderNextAction() {
+  const bar = $('#nextAction'), btn = $('#nextActionBtn'), why = $('#nextActionWhy');
+  if (!bar || !btn) return state.nextAction;
+  let na;
+  try { na = nextActionDescriptor(); }
+  catch (e) { pushErr('next-action', e.message || String(e)); return state.nextAction; }
+  state.nextAction = { kind: na.kind, label: na.label, why: na.why || '', view: na.view || state.view, targets: na.targets || [], busy: !!na.busy, focus: na.focus !== false, clarificationId: na.clarificationId || '' };
+  bar.dataset.naKind = na.kind;
+  bar.setAttribute('aria-label', 'Next action: ' + na.label);
+  btn.textContent = na.label;
+  btn.disabled = !!na.busy;
+  btn.setAttribute('aria-disabled', String(!!na.busy));
+  if (why) why.textContent = na.why || '';
+  return state.nextAction;
+}
+function resolveTarget(selectors) {
+  for (const sel of selectors || []) {
+    try { const el = $(sel); if (el) return el; } catch (e) { /* an unknown selector is skipped, never fatal */ }
+  }
+  return null;
+}
+function expandAncestors(el) {
+  const opened = [];
+  let node = el.parentElement, hops = 0;
+  while (node && hops++ < 12) {
+    if (node.tagName === 'DETAILS' && !node.open) { node.open = true; opened.push(node); }
+    node = node.parentElement;
+  }
+  return opened;
+}
+function isEditingElsewhere(el) {
+  const a = document.activeElement;
+  if (!a || a === el || !document.body.contains(a)) return false;
+  const editing = a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['radio', 'checkbox', 'button', 'submit', 'range', 'file'].includes(String(a.type || '').toLowerCase()));
+  return editing && !!a.value;
+}
+function flashElement(el) {
+  if (!el || !el.classList) return;
+  el.classList.remove('na-flash');
+  void el.offsetWidth;                                    // restart the animation
+  el.classList.add('na-flash');
+  clearTimeout(naFlashTimer);
+  naFlashTimer = setTimeout(() => { try { el.classList.remove('na-flash'); } catch (e) { /* element is gone */ } }, NA_FLASH_MS);
+}
+function focusTarget(el) {
+  if (!el || !el.focus) return false;
+  try { el.focus({ preventScroll: true }); return document.activeElement === el; } catch (e) { try { el.focus(); return true; } catch (e2) { return false; } }
+}
+function pulseNextAction(ms = 2500) {
+  const bar = $('#nextAction');
+  if (!bar) return;
+  bar.classList.remove('na-attention');
+  void bar.offsetWidth;
+  bar.classList.add('na-attention');
+  clearTimeout(naPulseTimer);
+  naPulseTimer = setTimeout(() => { try { bar.classList.remove('na-attention'); } catch (e) { /* page gone */ } }, ms);
+}
+function goToNextAction() {
+  const na = state.nextAction || renderNextAction();
+  if (!na) return false;
+  if (na.busy) { status('#topStatus', 'Still working — the next action appears here when it finishes.', 'info'); return false; }
+  const el = resolveTarget(na.targets);
+  if (na.view && $('#view-' + na.view)) switchView(na.view);
+  if (!el) { status('#topStatus', 'Nothing to jump to yet: ' + na.label, 'info'); return false; }
+  expandAncestors(el);
+  const editing = isEditingElsewhere(el);
+  const returnTo = editing ? document.activeElement : null;
+  try { el.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }); } catch (e) { try { el.scrollIntoView(); } catch (e2) { /* detached */ } }
+  flashElement(el);
+  const focused = (!editing && na.focus !== false) ? focusTarget(el) : false;
+  if (editing && returnTo) focusTarget(returnTo);            // the writer keeps their place and their caret
+  status('#topStatus', editing
+    ? 'Highlighted: ' + na.label + ' — your edit was left untouched.'
+    : focused ? 'Moved to: ' + na.label : 'Highlighted: ' + na.label, editing ? 'info' : 'ok');
+  renderNextAction();
+  return true;
+}
+/* Attention only, for work that finished in the background: never steal focus and never scroll the
+   operator away from a field they are typing in. */
+function autoJumpNextAction() {
+  const na = state.nextAction || renderNextAction();
+  if (!na || na.busy || !na.targets.length) return false;
+  const el = resolveTarget(na.targets);
+  if (!el) return false;
+  if (isEditingElsewhere(el)) { pulseNextAction(); return false; }
+  if (na.view && na.view !== state.view && $('#view-' + na.view)) switchView(na.view);
+  expandAncestors(el);
+  /* 'nearest' keeps the jump small, so the next-action bar above stays on screen */
+  try { el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }); } catch (e) { /* detached */ }
+  flashElement(el);
+  return true;
+}
+/* One place where a user-initiated AI workflow reports its outcome: one chime when it succeeded,
+   silence on failure, and the indicator pointing at what comes next. */
+function workflowFinished(opts) {
+  const ok = opts.ok === true;
+  const chimed = chimeOnce(opts.token, ok);          // never on failure, never twice for one token
+  state.aiRunning = false;
+  renderNextAction();
+  if (!ok) return false;
+  pulseNextAction();
+  if (opts.message) status('#topStatus', opts.message, 'ok');
+  if (opts.jump !== false) autoJumpNextAction();
+  return chimed;
 }
 function renderAssessmentLog() {
   const el = $('#assessmentLog');
@@ -3492,19 +3804,31 @@ async function regenerateDrafts(dims, trigger) {
   if (!state.assessment) { status('#draftStatus', 'Run the analysis first.', 'warn'); return; }
   if (!canUseModel()) { status('#draftStatus', 'No OpenRouter key is set, so no draft can be written. Add a key in History & settings.', 'warn'); return; }
   if (state.draftBusy) return;
+  primeAudio();                                     // this click is the gesture that unlocks audio
+  const token = newWorkflowToken();
+  state.ai.failed = null;
   status('#draftStatus', 'Writing the draft explanations…', 'info');
+  renderNextAction();
   try {
     const qa = await generateDrafts(target, Math.max(1, state.assessRound), trigger || 'regenerated on request');
     renderAll();
     const bad = ['satisfaction', 'overall'].filter(d => state.drafts[d] && state.drafts[d].unrepaired.length);
     status('#draftStatus', bad.length
       ? 'Drafts generated, but ' + bad.join(' and ') + ' still break a rule after repair: ' + [...new Set(bad.flatMap(d => state.drafts[d].unrepaired))].join(', ') + '. Rewrite those by hand or press Regenerate again.'
-      : 'Draft explanations ready — review them, then write your own final wording.', 'ok');
+      : 'Draft explanations ready — review them, then write your own final wording.', bad.length ? 'warn' : 'ok');
     scheduleAutosave();
+    workflowFinished({
+      token, ok: !bad.length, jump: true,
+      message: bad.length ? '' : 'Draft explanations written — ' + target.map(d => d + ' updated').join(', ') + '.'
+    });
     return qa;
   } catch (e) {
     pushErr('drafts', e.message || String(e));
     status('#draftStatus', 'The draft explanations could not be written (' + redact(e.message || String(e)) + '). The assessment above is unaffected — press Regenerate drafts to try again.', 'bad');
+    state.ai.failed = { component: 'draft explanations', message: 'The draft step failed: ' + redact(e.message || String(e)), at: new Date().toISOString(), view: 'decide', targets: ['#regenerateDraftsBtn'] };
+    workflowFinished({ token, ok: false });
+  } finally {
+    renderNextAction();
   }
 }
 
@@ -3653,8 +3977,14 @@ function localAssessment(reason) {
 async function runAnalyze() {
   const btn = $('#analyzeBtn');
   const reBtn = $('#reassessBtn');
+  primeAudio();                                              // this click unlocks audio for the completion chime
+  const token = newWorkflowToken();
+  state.aiRunning = true;
+  state.ai.failed = null;
+  state.analyzeTriedAt = new Date().toISOString();            // the operator has run the analysis, key or no key
   btn.disabled = true;
   if (reBtn) reBtn.disabled = true;
+  renderNextAction();
   const failures = [];
   try {
     if (!canUseModel()) {
@@ -3716,14 +4046,35 @@ async function runAnalyze() {
       ? 'The draft explanations are missing because a model step failed. Press Regenerate drafts to try again.'
       : 'Review the recommendations and the drafts, then move to your own final wording.', failures.length ? 'warn' : '');
     refreshReadiness();
+    const complete = !failures.length && !!(state.assessment && state.assessment.satisfaction && state.assessment.satisfaction.option);
+    if (!complete) {
+      const draftOnly = failures.length > 0 && failures.every(f => /^drafts:/.test(f));
+      state.ai.failed = {
+        component: draftOnly ? 'draft explanations' : 'analysis',
+        message: (failures.join('; ') || 'The analysis did not return a provisional selection.') + (draftOnly ? ' The assessment is unaffected; the draft step can be run again on its own.' : ' Press Analyze again — your capture and matrix are untouched.'),
+        at: new Date().toISOString(),
+        view: draftOnly ? 'decide' : 'archive',
+        targets: draftOnly ? ['#regenerateDraftsBtn'] : ['#analyzeBtn']
+      };
+    }
+    workflowFinished({
+      token, ok: complete, jump: true,
+      message: complete
+        ? (open.length ? 'Analysis complete — answer the question below to settle it.' : 'Analysis complete — both drafts are ready for your review.')
+        : ''
+    });
+    renderNextAction();
   } catch (e) {
     pushErr('ai-analysis', e.message || String(e));
     status('#analyzeStatus', 'Analysis stopped: ' + redact(e.message || 'unknown error') + '. The deterministic evidence below is unaffected.', 'bad');
+    state.ai.failed = { component: 'analysis', message: 'Analysis stopped: ' + redact(e.message || 'unknown error'), at: new Date().toISOString(), view: 'setup', targets: ['#analyzeBtn'] };
   } finally {
+    state.aiRunning = false;
     btn.disabled = false;
     if (reBtn) reBtn.disabled = !state.assessment;
     renderProviderChip();                                     // shows "verified" only after a real answer
     if (state.ai.verifiedAt) renderDiag();
+    renderNextAction();                                       // no chime on this path: the work did not finish
   }
 }
 /* --------------------------- clarification loop --------------------------- */
@@ -3770,7 +4121,11 @@ function answerClarification(id, optionIndex, note) {
    observation can actually affect. One assessment call plus, at most, one draft call. */
 async function reassess(context) {
   if (state.assessBusy) return;
+  primeAudio();                                     // a user-initiated recompute unlocks audio for the chime
+  const token = newWorkflowToken();
   state.assessBusy = true;
+  state.ai.failed = null;
+  renderNextAction();
   const answered = context && context.question ? context : null;
   const affects = answered && ['satisfaction', 'overall', 'both'].includes(answered.affects) ? answered.affects : 'both';
   const dims = affects === 'both' ? ['satisfaction', 'overall'] : [affects];
@@ -3808,13 +4163,20 @@ async function reassess(context) {
         ? 'The ' + changed.join(' and ') + ' draft ' + (changed.length > 1 ? 'were' : 'was') + ' updated from the new evidence (' + changed.map(d => state.drafts[d].changeShare + '% of the wording changed').join(', ') + '). You can still restore the earlier draft.'
         : 'The drafts already matched the updated analysis, so they were left as they are.', 'ok');
     }
+    workflowFinished({
+      token, ok: true, jump: true,
+      message: moved ? 'Reassessment complete — ' + shortText(state.assessment.changedNote, 140) : 'Reassessment complete — the reading is unchanged.'
+    });
   } catch (e) {
     pushErr('reassess', e.message || String(e));
     status('#clarifyStatus', 'Re-assessment failed (' + redact(e.message || String(e)) + '). Your observation is recorded and the deterministic evidence is unaffected.', 'warn');
+    state.ai.failed = { component: 're-assessment', message: 'Re-assessment failed: ' + redact(e.message || String(e)), at: new Date().toISOString(), view: 'decide', targets: ['#reassessBtn'] };
+    workflowFinished({ token, ok: false });
   } finally {
     state.assessBusy = false;
     renderClarifications();
     refreshReadiness();
+    renderNextAction();
   }
 }
 /* Confirming a recommendation sets the selection only; the justification stays human-authored. */
@@ -4075,7 +4437,7 @@ function renderProviderChip() {
   chipEl.className = 'help';
 }
 function renderAll() {
-  const steps = [[renderTabs, 'renderTabs'], [renderArchiveView, 'renderArchiveView'], [renderAssessment, 'renderAssessment'], [renderClarifications, 'renderClarifications'], [renderCompare, 'renderCompare'], [renderVerify, 'renderVerify'], [renderDecision, 'renderDecision'], [renderFinal, 'renderFinal']];
+  const steps = [[renderTabs, 'renderTabs'], [renderArchiveView, 'renderArchiveView'], [renderAssessment, 'renderAssessment'], [renderClarifications, 'renderClarifications'], [renderCompare, 'renderCompare'], [renderVerify, 'renderVerify'], [renderDecision, 'renderDecision'], [renderFinal, 'renderFinal'], [renderNextAction, 'renderNextAction']];
   for (const [fn, name] of steps) {
     try { fn(); }
     catch (e) { pushErr('render', name + ': ' + (e.message || String(e)), (e.stack || '').split('\n')[1] || ''); }
@@ -4087,6 +4449,11 @@ function renderAll() {
 /* ---------------------------------- bind ---------------------------------- */
 function bind() {
   $$('#tabs .tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+  $('#soundBtn').addEventListener('click', () => setSound(settings.sound === false));
+  /* The next-action button must never steal focus from a field the operator is typing in: the
+     browser would blur it on mousedown, before the handler could even look. */
+  $('#nextActionBtn').addEventListener('mousedown', e => e.preventDefault());
+  $('#nextActionBtn').addEventListener('click', () => goToNextAction());
   $('#themeBtn').addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
@@ -4441,6 +4808,7 @@ async function init() {
   $('#temperature').value = String(settings.temperature);
   document.documentElement.dataset.theme = (() => { try { return localStorage.getItem(THEME_KEY) || 'light'; } catch (e) { return 'light'; } })();
   renderModels();
+  renderSoundBtn();                                          // the chime preference, before any audio exists
   initBookmarklet();
   bind();
   bindHistory();
@@ -4480,6 +4848,11 @@ if (typeof window !== 'undefined') {
     editDraft, acceptPendingDraft, keepMyDraft, restorePrevDraft, restoreDraftFromLog, seedFinalFromDraft, copyDrafts,
     drafts: () => state.drafts, draftsPrev: () => state.draftsPrev, draftPending: () => state.draftPending, draftLog: () => state.draftLog,
     draftEdited: () => state.draftEdited, refreshReadiness, renderAssessmentLog,
+    aiRunning: () => state.aiRunning, workflowFinished, runValidation,
+    playCompletionChime, primeAudio, chimeCount: () => chimeCount, prefersReducedMotion, setSound,
+    renderSoundBtn, soundOn: () => settings.sound !== false, audioAvailable,
+    renderNextAction, nextActionDescriptor, goToNextAction, autoJumpNextAction, nextAction: () => state.nextAction,
+    expandAncestors, isEditingElsewhere, flashElement, resolveTarget, workflowFinished, chimeOnce, newWorkflowToken,
     pushErr, copy, allFieldsText, fieldText
   };
 }

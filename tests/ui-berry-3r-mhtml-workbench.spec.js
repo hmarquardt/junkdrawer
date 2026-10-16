@@ -1277,3 +1277,409 @@ test('real capture: Analyze writes both drafts from the archived evidence', asyn
   expect(out.payload).toBeLessThan(200000);               // bounded prompt on a 112 MB capture
   expect(errors).toEqual([]);
 });
+
+/* ---------------- completion chime and the next-action indicator ----------------
+   The chime is observed through a fake Web Audio context, so the test sees the real oscillator
+   calls the page makes rather than a flag the page sets about itself. */
+async function installChimeProbe(page) {
+  await page.addInitScript(() => {
+    window.__CHIME__ = { contexts: 0, resumes: 0, notes: [], gains: 0 };
+    function FakeGain() { this.gain = { setValueAtTime() {}, exponentialRampToValueAtTime() {} }; }
+    FakeGain.prototype.connect = function () { window.__CHIME__.gains++; return { connect() {} }; };
+    function FakeOsc() { this.type = 'sine'; this._f = 0; const self = this; this.frequency = { setValueAtTime(f) { self._f = f; } }; }
+    FakeOsc.prototype.connect = function () { return { connect() {} }; };
+    FakeOsc.prototype.start = function () { window.__CHIME__.notes.push(this._f); };
+    FakeOsc.prototype.stop = function () {};
+    function FakeAudioContext() {
+      window.__CHIME__.contexts++;
+      this.state = 'suspended';
+      this.currentTime = 0;
+      this.destination = {};
+      const self = this;
+      this.resume = () => { window.__CHIME__.resumes++; self.state = 'running'; return Promise.resolve(); };
+      this.close = () => { self.state = 'closed'; };
+      this.createGain = () => new FakeGain();
+      this.createOscillator = () => new FakeOsc();
+    }
+    window.AudioContext = FakeAudioContext;
+    window.webkitAudioContext = FakeAudioContext;
+  });
+}
+test('exactly one ascending chime per successful workflow, none on failure', async ({ page }) => {
+  await installChimeProbe(page);
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  const first = await page.evaluate(() => window.__CHIME__);
+  expect(first.notes).toEqual([587.33, 739.99, 880, 1046.5]);        // one ascending chime, four notes
+  expect(first.contexts).toBe(1);                                     // one context, unlocked by the click
+  expect(first.resumes).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__BERRY3W_TEST__.chimeCount())).toBe(1);
+  // a second user-initiated workflow chimes again, but never twice for the same run
+  await page.waitForTimeout(950);
+  await page.click('#reviewBody [data-cl-opt="1"]');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.assessment().round === 2, null, { timeout: 30000 });
+  const second = await page.evaluate(() => window.__CHIME__.notes.length);
+  expect(second).toBe(8);
+  await page.waitForTimeout(950);
+  await page.click('#regenerateDraftsBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().satisfaction.round === 2, null, { timeout: 30000 });
+  expect(await page.evaluate(() => window.__CHIME__.notes.length)).toBe(12);
+  expect(await page.evaluate(() => window.__CHIME__.contexts)).toBe(1);
+  // the same token can never chime twice (the short overlap guard is given time to clear first)
+  await page.waitForTimeout(950);
+  const repeat = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    const token = t.newWorkflowToken();
+    const a = t.chimeOnce(token, true), b = t.chimeOnce(token, true);
+    return { a, b };
+  });
+  expect(repeat.a).toBe(true);
+  expect(repeat.b).toBe(false);
+  // overlapping calls cannot stack: the short guard swallows the second one
+  await page.waitForTimeout(950);
+  const overlap = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    const before = window.__CHIME__.notes.length;
+    const a = t.playCompletionChime(), b = t.playCompletionChime();
+    return { a, b, added: window.__CHIME__.notes.length - before };
+  });
+  expect(overlap.a).toBe(true);
+  expect(overlap.b).toBe(false);
+  expect(overlap.added).toBe(4);
+  expect(errors).toEqual([]);
+});
+test('no chime when a model step fails', async ({ page }) => {
+  await installChimeProbe(page);
+  const errors = await openForAnalysis(page, { throwOn: ['drafts'] });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.nextAction().kind === 'failure', null, { timeout: 30000 });
+  const out = await page.evaluate(() => ({
+    notes: window.__CHIME__.notes.length, count: window.__BERRY3W_TEST__.chimeCount(),
+    kind: window.__BERRY3W_TEST__.nextAction().kind, label: window.__BERRY3W_TEST__.nextAction().label,
+    targets: window.__BERRY3W_TEST__.nextAction().targets
+  }));
+  expect(out.notes).toBe(0);
+  expect(out.count).toBe(0);
+  expect(out.kind).toBe('failure');
+  expect(out.label).toMatch(/draft explanations/i);
+  expect(out.targets).toEqual(['#regenerateDraftsBtn']);             // the specific recovery action
+  expect(errors).toEqual([]);
+});
+test('the sound preference persists, defaults to on, and silences the chime', async ({ page }) => {
+  await installChimeProbe(page);
+  const errors = await openForAnalysis(page);
+  const initial = await page.evaluate(() => ({
+    on: window.__BERRY3W_TEST__.soundOn(), pressed: document.querySelector('#soundBtn').getAttribute('aria-pressed'),
+    text: document.querySelector('#soundBtn').textContent
+  }));
+  expect(initial.on).toBe(true);                                      // default is on
+  expect(initial.pressed).toBe('true');
+  expect(initial.text).toContain('Sound On');
+  await page.click('#soundBtn');
+  const off = await page.evaluate(() => ({
+    on: window.__BERRY3W_TEST__.soundOn(), pressed: document.querySelector('#soundBtn').getAttribute('aria-pressed'),
+    stored: JSON.parse(localStorage.getItem('berry3w.settings')).sound
+  }));
+  expect(off.on).toBe(false);
+  expect(off.pressed).toBe('false');
+  expect(off.stored).toBe(false);                                      // written where every other pref lives
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__BERRY3W_TEST__));
+  const restored = await page.evaluate(() => ({
+    on: window.__BERRY3W_TEST__.soundOn(), pressed: document.querySelector('#soundBtn').getAttribute('aria-pressed'),
+    label: document.querySelector('#soundBtn').textContent
+  }));
+  expect(restored.on).toBe(false);
+  expect(restored.pressed).toBe('false');
+  expect(restored.label).toContain('Sound Off');
+  // a muted workbench stays silent even on a successful run
+  await page.evaluate(c => {
+    window.__STAGES__ = [];
+    window.__BERRY3W_TEST__.setAiTransport(async stage => {
+      window.__STAGES__.push(stage);
+      if (stage === 'request') return c.request;
+      if (stage === 'facts-A') return c.factsA;
+      if (stage === 'facts-B') return c.factsB;
+      if (stage === 'assess') return c.assess;
+      if (stage === 'drafts') return c.drafts;
+      throw new Error('unexpected ' + stage);
+    });
+  }, { request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'), assess: DECIDED, drafts: FIRST_DRAFTS });
+  await page.setInputFiles('#fileInput', FIXTURE);
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.state().archive !== null, null, { timeout: 60000 });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  expect(await page.evaluate(() => window.__CHIME__.notes.length)).toBe(0);
+  expect(await page.evaluate(() => window.__CHIME__.contexts)).toBe(0);   // audio is never even created
+  // and turning it back on restores one chime per workflow
+  await page.click('#soundBtn');
+  await page.waitForTimeout(950);
+  await page.evaluate(async () => { await window.__BERRY3W_TEST__.regenerateDrafts(['satisfaction']); });
+  expect(await page.evaluate(() => window.__CHIME__.notes.length)).toBe(4);
+  expect(errors).toEqual([]);
+});
+test('the next-action indicator keeps the documented priority order', async ({ page }) => {
+  const errors = await open(page);
+  const fresh = await page.evaluate(() => ({ kind: window.__BERRY3W_TEST__.nextAction().kind, label: document.querySelector('#nextActionBtn').textContent, targets: window.__BERRY3W_TEST__.nextAction().targets }));
+  expect(fresh.kind).toBe('upload');                                   // nothing uploaded yet
+  expect(fresh.label).toContain('Upload a capture');
+  expect(fresh.targets).toEqual(['#drop']);
+  await page.click('#nextActionBtn');                                  // and it really points at the drop zone
+  expect(await page.evaluate(() => ({ view: window.__BERRY3W_TEST__.state().view, flash: document.querySelector('#drop').classList.contains('na-flash') })))
+    .toEqual({ view: 'setup', flash: true });
+  await page.evaluate(c => {
+    window.__STAGES__ = [];
+    window.__BERRY3W_TEST__.setAiTransport(async stage => {
+      window.__STAGES__.push(stage);
+      if (stage === 'request') return c.request;
+      if (stage === 'facts-A') return c.factsA;
+      if (stage === 'facts-B') return c.factsB;
+      if (stage === 'assess') return c.assess;
+      if (stage === 'drafts') return c.drafts;
+      throw new Error('unexpected ' + stage);
+    });
+  }, { request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'), assess: DECIDED, drafts: FIRST_DRAFTS });
+  await page.setInputFiles('#fileInput', FIXTURE);
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.state().archive !== null, null, { timeout: 60000 });
+  const uploaded = await page.evaluate(() => window.__BERRY3W_TEST__.nextAction());
+  expect(uploaded.kind).toBe('analyze');                               // the automatic baseline is not a review state
+  expect(uploaded.targets).toEqual(['#analyzeBtn']);
+  // 1 · running
+  await page.evaluate(c => {
+    window.__BERRY3W_TEST__.setAiTransport(async stage => {
+      await new Promise(r => setTimeout(r, 700));
+      if (stage === 'request') return c.request;
+      if (stage === 'facts-A') return c.factsA;
+      if (stage === 'facts-B') return c.factsB;
+      if (stage === 'assess') return c.assess;
+      if (stage === 'drafts') return c.drafts;
+      throw new Error('unexpected ' + stage);
+    });
+  }, { request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'), assess: DECIDED, drafts: FIRST_DRAFTS });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.nextAction().kind === 'running', null, { timeout: 30000 });
+  const running = await page.evaluate(() => ({
+    kind: window.__BERRY3W_TEST__.nextAction().kind, label: document.querySelector('#nextActionBtn').textContent,
+    disabled: document.querySelector('#nextActionBtn').disabled, targets: window.__BERRY3W_TEST__.nextAction().targets
+  }));
+  expect(running.disabled).toBe(true);                                  // no unrelated action on offer
+  expect(running.targets).toEqual([]);
+  expect(running.label).toMatch(/Analyzing|Writing/);
+  // 3 · a decisive question outranks everything below it
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.nextAction().kind === 'clarify', null, { timeout: 60000 });
+  const clarify = await page.evaluate(() => ({
+    na: window.__BERRY3W_TEST__.nextAction(), open: window.__BERRY3W_TEST__.openClarifications().map(c => c.id),
+    important: window.__BERRY3W_TEST__.openClarifications().filter(c => c.importance === 'decisive' || c.importance === 'material').map(c => c.id)
+  }));
+  expect(clarify.na.clarificationId).toBe(clarify.important[0]);
+  expect(clarify.na.targets[0]).toContain('#reviewBody [data-cl="' + clarify.important[0] + '"]');
+  expect(clarify.na.why).toMatch(/Decisive|Material/);
+  expect(errors).toEqual([]);
+});
+test('the indicator walks from review to ready as the work is finished', async ({ page }) => {
+  const errors = await openForAnalysis(page, { drafts: { satisfaction: { option: 'A is better', reason: SAT_A, why: [] }, overall: { option: 'B is better', reason: OVR_B, why: [] } } });
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.drafts().overall !== null, null, { timeout: 30000 });
+  // answer the two questions so nothing decisive is left open
+  await page.click('#reviewBody [data-cl-opt="1"]');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.openClarifications().filter(c => c.importance !== 'minor').length === 0, null, { timeout: 30000 });
+  const after = await page.evaluate(() => ({ kind: window.__BERRY3W_TEST__.nextAction().kind, label: window.__BERRY3W_TEST__.nextAction().label, drafts: ['satisfaction', 'overall'].filter(d => window.__BERRY3W_TEST__.drafts()[d]).length }));
+  expect(after.drafts).toBe(2);
+  expect(after.kind).toBe('review');                                    // 6 · recommendations not reviewed yet
+  expect(after.label).toContain('recommendation');
+  // 4 · a live observation the confirmed selection depends on comes before the fields
+  await page.evaluate(() => { for (const d of ['satisfaction', 'overall']) window.__BERRY3W_TEST__.applySuggestion(d); });
+  const verify = await page.evaluate(() => ({ na: window.__BERRY3W_TEST__.nextAction(), winners: ['satisfaction', 'overall'].map(d => window.__BERRY3W_TEST__.state().decisions[d].option) }));
+  expect(verify.na.kind).toBe('verify');
+  expect(verify.na.label).toMatch(/Record (one live observation for|what) Website [AB]/);
+  expect(verify.na.targets[0]).toMatch(/^#verifyBody \[data-ver-status="v/);
+  const letter = /Website ([AB])/.exec(verify.na.label)[1];
+  // record the observation for that website
+  await page.evaluate(l => {
+    const t = window.__BERRY3W_TEST__;
+    const row = t.state().verification.find(v => v.site === l);
+    row.status = 'confirmed working';
+    row.note = 'Checked in its own tab during the test.';
+    t.renderAll();
+  }, letter);
+  const nextAfterObs = await page.evaluate(() => window.__BERRY3W_TEST__.nextAction());
+  expect(['verify', 'fields', 'review']).toContain(nextAfterObs.kind);    // moves on without demanding a second blocker
+  // 7 · the fields, then 8 · ready
+  const ready = await page.evaluate(c => {
+    const t = window.__BERRY3W_TEST__;
+    const st = t.state();
+    st.decisions.satisfaction.option = 'A is better';
+    st.decisions.satisfaction.reason = c.sat;
+    st.decisions.overall.option = 'B is better';
+    st.decisions.overall.reason = c.ovr;
+    for (const l of ['A', 'B']) { const row = st.verification.find(x => x.site === l); if (row) { row.status = 'confirmed working'; row.note = 'seen'; } }
+    const v = t.runValidation();                 // exactly what every field handler in the app does
+    return { errors: v.errors, kind: t.nextAction().kind, label: t.nextAction().label, targets: t.nextAction().targets, warnings: v.warnings, why: t.nextAction().why, lens: ['satisfaction', 'overall'].map(d => String(st.decisions[d].reason || '').length) };
+  }, { sat: SAT_A, ovr: OVR_B });
+  expect(ready.errors).toBe(0);
+  expect(ready).toMatchObject({ kind: 'ready' });                        // 8 · nothing left
+  expect(ready.label).toBe('Ready to copy the four fields');
+  expect(ready.targets).toEqual(['#finalPreview']);
+  expect(ready.warnings).toBeGreaterThanOrEqual(0);                     // advisory live prompts never block
+  expect(errors).toEqual([]);
+});
+test('clicking the indicator switches tab, expands the panel, highlights and focuses the target', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.nextAction().kind === 'clarify', null, { timeout: 30000 });
+  await page.evaluate(() => { document.querySelector('#transferFold').open = false; document.querySelector('#qaFold').open = false; });
+  await page.click('#nextActionBtn');
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    const na = t.nextAction();
+    const el = document.querySelector(na.targets[0]);
+    return {
+      view: t.state().view, visible: !document.querySelector('#view-' + t.state().view).hidden,
+      target: na.targets[0], hasFlash: el.classList.contains('na-flash'),
+      focused: document.activeElement === el, status: document.querySelector('#topStatus').textContent,
+      disabled: document.querySelector('#nextActionBtn').disabled
+    };
+  });
+  expect(out.view).toBe('decide');
+  expect(out.visible).toBe(true);
+  expect(out.hasFlash).toBe(true);                                      // brief visual highlight
+  expect(out.focused).toBe(true);
+  expect(out.status).toContain('Moved to');
+  expect(out.disabled).toBe(false);
+  // a collapsed panel that holds the target opens first
+  const folded = await page.evaluate(c => {
+    const t = window.__BERRY3W_TEST__;
+    const st = t.state();
+    st.decisions.satisfaction.option = 'A is better';
+    st.decisions.satisfaction.reason = c.sat;
+    st.decisions.overall.option = 'B is better';
+    st.decisions.overall.reason = c.ovr;
+    for (const l of ['A', 'B']) { const row = st.verification.find(x => x.site === l); if (row) { row.status = 'confirmed working'; row.note = 'seen'; } }
+    t.runValidation();
+    const na = t.nextAction();
+    document.querySelector('#transferFold').open = false;
+    return { kind: na.kind, target: na.targets[0], before: document.querySelector('#transferFold').open };
+  }, { sat: SAT_A, ovr: OVR_B });
+  if (folded.kind === 'ready') {
+    await page.click('#nextActionBtn');
+    const opened = await page.evaluate(() => ({
+      open: document.querySelector('#transferFold').open, flash: document.querySelector('#finalPreview').classList.contains('na-flash'),
+      view: document.querySelector('#view-decide').hidden === false
+    }));
+    expect(folded.before).toBe(false);
+    expect(opened.open).toBe(true);                                     // the collapsed panel is expanded
+    expect(opened.flash).toBe(true);
+    expect(opened.view).toBe(true);
+  }
+  // the indicator recalculates after the action is taken
+  const recalculated = await page.evaluate(() => window.__BERRY3W_TEST__.nextAction().kind);
+  expect(recalculated).not.toBe('running');
+  expect(errors).toEqual([]);
+});
+test('the indicator never moves the operator away from a field they are editing', async ({ page }) => {
+  await installChimeProbe(page);
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.nextAction().kind === 'clarify', null, { timeout: 30000 });
+  // type in the final field, then take the next action
+  await page.click('#satReason');
+  await page.type('#satReason', 'Website A is better because the requested loader is present');
+  const caret = await page.evaluate(() => document.querySelector('#satReason').selectionStart);
+  await page.click('#nextActionBtn');
+  const afterClick = await page.evaluate(() => ({
+    active: document.activeElement.id, value: document.querySelector('#satReason').value,
+    caret: document.querySelector('#satReason').selectionStart, status: document.querySelector('#topStatus').textContent,
+    targetFocused: document.activeElement === document.querySelector(window.__BERRY3W_TEST__.nextAction().targets[0])
+  }));
+  expect(afterClick.active).toBe('satReason');                        // focus is left where the operator is typing
+  expect(afterClick.value).toContain('the requested loader is present');
+  expect(afterClick.caret).toBe(caret);                               // caret included
+  expect(afterClick.targetFocused).toBe(false);                       // highlighted, never focused away from the writer
+  expect(afterClick.status).toMatch(/left untouched/i);
+  // a regeneration finishing in the background must not steal focus either
+  await page.click('#satReason');
+  await page.evaluate(async () => { await window.__BERRY3W_TEST__.regenerateDrafts(['satisfaction']); });
+  const afterBackground = await page.evaluate(() => ({
+    active: document.activeElement.id, caret: document.querySelector('#satReason').selectionStart,
+    value: document.querySelector('#satReason').value
+  }));
+  expect(afterBackground.active).toBe('satReason');
+  expect(afterBackground.caret).toBe(caret);
+  expect(afterBackground.value).toContain('the requested loader is present');
+  expect(errors).toEqual([]);
+});
+test('reduced motion keeps the highlight but drops the animation', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.nextAction().kind === 'clarify', null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    const reduced = t.prefersReducedMotion();
+    document.querySelector('#nextActionBtn').click();
+    const na = t.nextAction();
+    const el = document.querySelector(na.targets[0]);
+    const cs = getComputedStyle(el);
+    const bar = getComputedStyle(document.querySelector('#nextAction'));
+    t.flashElement(el);
+    return {
+      reduced, flash: el.classList.contains('na-flash'), outline: cs.outlineStyle, animation: cs.animationName,
+      inView: (() => { const r = el.getBoundingClientRect(); return r.top < window.innerHeight && r.bottom > 0; })(),
+      barAnimation: bar.animationName, btnLabel: document.querySelector('#nextActionBtn').textContent
+    };
+  });
+  expect(out.reduced).toBe(true);
+  expect(out.flash).toBe(true);                                       // still highlighted, now without motion
+  expect(out.animation).toBe('none');
+  expect(out.outline).not.toBe('none');
+  expect(out.inView).toBe(true);                                      // the target is brought into view either way
+  expect(out.barAnimation).toBe('none');
+  expect(errors).toEqual([]);
+});
+test('page load, restore and background saves stay silent', async ({ page }) => {
+  await installChimeProbe(page);
+  const errors = await openForAnalysis(page);
+  await page.evaluate(async () => {
+    const t = window.__BERRY3W_TEST__;
+    t.state().task.id = 'quiet-task';
+    await t.saveTask('manual');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__BERRY3W_TEST__));
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.state().task.id === 'quiet-task', null, { timeout: 20000 });
+  await page.waitForTimeout(1500);                                     // give autosave and any stray timer a chance
+  const out = await page.evaluate(() => ({
+    notes: window.__CHIME__.notes.length, contexts: window.__CHIME__.contexts,
+    kinds: window.__BERRY3W_TEST__.nextAction().kind, sound: window.__BERRY3W_TEST__.soundOn()
+  }));
+  expect(out.notes).toBe(0);
+  expect(out.contexts).toBe(0);                                        // no audio object before a real gesture
+  expect(out.sound).toBe(true);
+  expect(['upload', 'analyze', 'review', 'clarify', 'fields', 'verify', 'ready']).toContain(out.kinds);
+  expect(errors).toEqual([]);
+});
+test('the no-key path stays silent and sends the operator to the key field', async ({ page }) => {
+  await installChimeProbe(page);
+  const errors = await open(page);
+  await page.setInputFiles('#fileInput', FIXTURE);
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.state().archive !== null, null, { timeout: 60000 });
+  await page.click('#analyzeBtn');                       // deterministic baseline: no model call at all
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.state().analyzeTriedAt !== '', null, { timeout: 30000 });
+  const noKey = await page.evaluate(() => ({ na: window.__BERRY3W_TEST__.nextAction(), chime: window.__CHIME__.notes.length, count: window.__BERRY3W_TEST__.chimeCount() }));
+  expect(noKey.chime).toBe(0);
+  expect(noKey.count).toBe(0);
+  expect(noKey.na.kind).toBe('failure');                 // the specific recovery action, not a generic hint
+  expect(noKey.na.label).toMatch(/Add an OpenRouter key/);
+  expect(noKey.na.targets).toEqual(['#apiKey']);
+  await page.click('#nextActionBtn');
+  const jumped = await page.evaluate(() => ({
+    view: window.__BERRY3W_TEST__.state().view, hidden: document.querySelector('#view-setup').hidden,
+    active: document.activeElement.id, flash: document.querySelector('#apiKey').classList.contains('na-flash')
+  }));
+  expect(jumped.view).toBe('setup');
+  expect(jumped.hidden).toBe(false);
+  expect(jumped.active).toBe('apiKey');                  // ready for the key, without hunting through tabs
+  expect(jumped.flash).toBe(true);
+  expect(errors).toEqual([]);
+});
