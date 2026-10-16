@@ -135,6 +135,24 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 .progress>i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 .delta.add{color:var(--ok)}
 .delta.del{color:var(--bad)}
+.fold{margin-top:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.fold>summary{cursor:pointer;padding:10px 12px;font-weight:600;font-size:13px;color:var(--muted);list-style:none}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::before{content:'▸ '}
+.fold[open]>summary::before{content:'▾ '}
+.fold>.panel{border:none;border-top:1px solid var(--line);border-radius:0;margin:0;box-shadow:none}
+.verdicts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:1000px){.verdicts{grid-template-columns:1fr}}
+.verdict{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;padding:11px 13px;background:var(--panel)}
+.verdict.a{border-left-color:var(--a)}
+.verdict.b{border-left-color:var(--b)}
+.verdict .pick{font-size:19px;font-weight:750;margin:2px 0 4px}
+.qcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--panel)}
+.qcard.done{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.qcard .rank{font:11px/1.6 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);display:block}
+.qcard .q{font-weight:650;margin:4px 0 3px}
+.qopts{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.tp{border-left:3px solid color-mix(in srgb,var(--accent) 55%,var(--line));background:color-mix(in srgb,var(--accent) 5%,var(--panel));border-radius:0 8px 8px 0;padding:7px 10px;margin-bottom:6px;font-size:12.5px}
 .saved{position:fixed;right:14px;bottom:14px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;box-shadow:var(--shadow);font-size:12.5px;z-index:70}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 </style>
@@ -142,13 +160,13 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 <body>
 <header class="top">
   <span class="brand">UI&nbsp;Berry&nbsp;3R <em>MHTML Workbench</em></span>
-  <span class="ver" id="verLabel">version 2026.10.16.2</span>
+  <span class="ver" id="verLabel">version 2026.10.16.3</span>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Workbench sections">
     <button class="tab" role="tab" data-view="setup" aria-selected="true"><span class="dot"></span>1 · Upload &amp; setup</button>
-    <button class="tab" role="tab" data-view="archive" aria-selected="false"><span class="dot"></span>2 · Archive</button>
-    <button class="tab" role="tab" data-view="compare" aria-selected="false"><span class="dot"></span>3 · Compare</button>
-    <button class="tab" role="tab" data-view="verify" aria-selected="false"><span class="dot"></span>4 · Live verify</button>
-    <button class="tab" role="tab" data-view="decide" aria-selected="false"><span class="dot"></span>5 · Decision</button>
+    <button class="tab" role="tab" data-view="archive" aria-selected="false"><span class="dot"></span>2 · Analyze &amp; findings</button>
+    <button class="tab" role="tab" data-view="verify" aria-selected="false"><span class="dot"></span>3 · Live checks &amp; delivery</button>
+    <button class="tab" role="tab" data-view="decide" aria-selected="false"><span class="dot"></span>4 · Finalize</button>
+    <button class="tab" role="tab" data-view="compare" aria-selected="false"><span class="dot"></span>Detail · comparison</button>
     <button class="tab" role="tab" data-view="history" aria-selected="false"><span class="dot"></span>History &amp; settings</button>
   </nav>
   <span class="grow"></span>
@@ -240,34 +258,33 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 <section class="view" id="view-archive" role="tabpanel" aria-label="Archive analysis" hidden>
   <section class="panel">
     <div class="head">
-      <div><span class="eyebrow">Step 2</span><h2>Archive report</h2></div>
+      <div><span class="eyebrow">Step 2</span><h2>Assessment · provisional</h2></div>
       <div class="row">
-        <span class="chip" id="archiveChip">no archive</span>
-        <button class="btn small" id="reparseBtn" disabled>Re-parse last file</button>
-        <button class="btn small" id="analyzeBtn" disabled>Run AI analysis</button>
+        <span class="chip" id="assessChip">not analysed</span>
+        <button class="btn primary" id="analyzeBtn" disabled>Analyze</button>
+        <button class="btn small ghost" id="reassessBtn" disabled>Recompute after answers</button>
+        <button class="btn small ghost" id="copyAssessBtn">Copy findings</button>
       </div>
     </div>
-    <div class="grid2">
-      <div><h3>Archive facts</h3><dl class="kv" id="archiveFacts"></dl></div>
-      <div><h3>Parse log</h3><div class="scroll" id="parseLog" style="padding:8px"></div></div>
-    </div>
+    <div class="note info">One click: the model reads the request in its own language, decomposes the requirements, examines both After candidates with the Before states as context, and returns a provisional reading of both questions with the uncertainties that could still change them. It never writes the justifications — those stay yours.</div>
+    <div id="assessBody"><p class="help">Parse an archive, then press <strong>Analyze</strong>.</p></div>
     <p class="status" id="analyzeStatus" role="status"></p>
+    <p class="status" id="assessCaveat" role="status"></p>
+  </section>
+
+  <section class="panel" id="clarifyPanel">
+    <div class="head">
+      <div><span class="eyebrow">Step 2b</span><h2>Clarifications the model needs</h2></div>
+      <div class="row"><span class="chip info" id="clarifyChip">none yet</span></div>
+    </div>
+    <p class="help">Only observations that could change a decision are asked, ranked by how much they matter, with quick answers so each one takes seconds. Answering one records your observation, re-runs the assessment with it and revises the provisional reading of both questions.</p>
+    <div id="clarifyBody"><p class="help">No clarifications yet — run the analysis first.</p></div>
+    <p class="status" id="clarifyStatus" role="status"></p>
   </section>
 
   <section class="panel">
-    <div class="head"><div><span class="eyebrow">Resolution</span><h2>Candidate and Before/After mapping</h2></div>
-      <span class="help">Resolved by MIME Content-ID references, never by part order or filename</span></div>
-    <div id="mappingBody"></div>
-    <details>
-      <summary>Manual mapping correction</summary>
-      <p class="help">Use this only when the resolver reports low confidence or the archive structure is unusual. Each field lists HTML parts by their 1-based MIME part number.</p>
-      <div class="grid4" id="mappingFix"></div>
-      <div class="row"><button class="btn small" id="applyMapping">Apply manual mapping</button><span class="status" id="mappingStatus" role="status"></span></div>
-    </details>
-  </section>
-
-  <section class="panel">
-    <div class="head"><div><span class="eyebrow">Request</span><h2>Original user request</h2></div>
+    <div class="head">
+      <div><span class="eyebrow">Context</span><h2>Original user request</h2></div>
       <span class="chip info" id="requestConfidence"></span></div>
     <div class="grid2">
       <div>
@@ -299,23 +316,60 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
     <div id="taskMetaBody" style="margin-top:12px"></div>
   </section>
 
-  <section class="panel">
-    <div class="head"><div><span class="eyebrow">Evidence</span><h2>Extracted candidate evidence</h2></div>
-      <span class="help">Compact, provenance-aware · no archived script is ever executed</span></div>
-    <div class="pill-nav" id="evidencePills"></div>
-    <div id="evidenceBody"><p class="help">Parse an archive to extract evidence.</p></div>
-  </section>
+  <details class="fold">
+    <summary>Technical diagnostics · archive facts, parse log, re-parse</summary>
+    <section class="panel">
+      <div class="head">
+        <div><span class="eyebrow">Diagnostics</span><h2>Archive report</h2></div>
+        <div class="row">
+          <span class="chip" id="archiveChip">no archive</span>
+          <button class="btn small" id="reparseBtn" disabled>Re-parse last file</button>
+        </div>
+      </div>
+      <div class="grid2">
+        <div><h3>Archive facts</h3><dl class="kv" id="archiveFacts"></dl></div>
+        <div><h3>Parse log</h3><div class="scroll" id="parseLog" style="padding:8px"></div></div>
+      </div>
+    </section>
+  </details>
 
-  <section class="panel">
-    <div class="head"><div><span class="eyebrow">Limits</span><h2>Warnings, incomplete resources and uncertainties</h2></div></div>
-    <div id="warningsBody"></div>
-  </section>
+  <details class="fold">
+    <summary>Resolution detail · candidate and Before/After mapping</summary>
+    <section class="panel">
+      <div class="head"><div><span class="eyebrow">Resolution</span><h2>Candidate and Before/After mapping</h2></div>
+        <span class="help">Resolved by MIME Content-ID references, never by part order or filename</span></div>
+      <div id="mappingBody"></div>
+      <details>
+        <summary>Manual mapping correction</summary>
+        <p class="help">Use this only when the resolver reports low confidence or the archive structure is unusual. Each field lists HTML parts by their 1-based MIME part number.</p>
+        <div class="grid4" id="mappingFix"></div>
+        <div class="row"><button class="btn small" id="applyMapping">Apply manual mapping</button><span class="status" id="mappingStatus" role="status"></span></div>
+      </details>
+    </section>
+  </details>
+
+  <details class="fold">
+    <summary>Extracted candidate evidence · provenance-aware, no archived script is ever executed</summary>
+    <section class="panel">
+      <div class="head"><div><span class="eyebrow">Evidence</span><h2>Extracted candidate evidence</h2></div></div>
+      <div class="pill-nav" id="evidencePills"></div>
+      <div id="evidenceBody"><p class="help">Parse an archive to extract evidence.</p></div>
+    </section>
+  </details>
+
+  <details class="fold">
+    <summary>Limits · warnings, incomplete resources and uncertainties</summary>
+    <section class="panel">
+      <div class="head"><div><span class="eyebrow">Limits</span><h2>Warnings, incomplete resources and uncertainties</h2></div></div>
+      <div id="warningsBody"></div>
+    </section>
+  </details>
 </section>
 
 <!-- ============================ 3. COMPARE ============================ -->
 <section class="view" id="view-compare" role="tabpanel" aria-label="Candidate comparison" hidden>
   <section class="panel">
-    <div class="head"><div><span class="eyebrow">Step 3</span><h2>Side-by-side inspection</h2></div>
+    <div class="head"><div><span class="eyebrow">Detail</span><h2>Side-by-side inspection</h2></div>
       <div class="row">
         <button class="btn small" id="showBefore">Before</button>
         <button class="btn small" id="showAfter">After</button>
@@ -337,38 +391,47 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
     <div id="diffBody"><p class="help">Parse an archive to compute the Before/After difference for each candidate.</p></div>
   </section>
 
-  <section class="panel">
-    <div class="head"><div><span class="eyebrow">Matrix</span><h2>Requested-feature matrix</h2></div>
-      <div class="row">
-        <button class="btn small" id="addReqBtn">Add requirement</button>
-        <button class="btn small" id="seedReqBtn">Seed from diff</button>
-        <button class="btn small ghost" id="copyMatrix">Copy matrix</button>
-      </div></div>
-    <p class="help">Every row names the evidence that produced it. Confirm, reject or correct a cell and the override is recorded with its source, so archive inference never silently becomes fact.</p>
-    <div class="scroll tall"><table id="reqTable"><thead><tr>
-      <th style="width:30%">Requirement</th><th>Lens</th><th>Website A</th><th>Website B</th><th>Evidence / override</th><th></th>
-    </tr></thead><tbody id="reqRows"></tbody></table></div>
-    <p class="status" id="reqStatus" role="status"></p>
-  </section>
+  <details class="fold">
+    <summary>Requirement matrix · every row names the evidence that produced it</summary>
+    <section class="panel">
+      <div class="head"><div><span class="eyebrow">Matrix</span><h2>Requested-feature matrix</h2></div>
+        <div class="row">
+          <button class="btn small" id="addReqBtn">Add requirement</button>
+          <button class="btn small" id="seedReqBtn">Seed from diff</button>
+          <button class="btn small ghost" id="copyMatrix">Copy matrix</button>
+        </div></div>
+      <p class="help">Confirm, reject or correct a cell and the override is recorded with its source, so archive inference never silently becomes fact.</p>
+      <div class="scroll tall"><table id="reqTable"><thead><tr>
+        <th style="width:30%">Requirement</th><th>Lens</th><th>Website A</th><th>Website B</th><th>Evidence / override</th><th></th>
+      </tr></thead><tbody id="reqRows"></tbody></table></div>
+      <p class="status" id="reqStatus" role="status"></p>
+    </section>
+  </details>
 
-  <section class="panel">
-    <div class="head"><div><span class="eyebrow">Evidence classes</span><h2>Facts and archive-derived claims</h2></div>
-      <div class="row">
-        <select id="factFilter" aria-label="Filter facts by website" style="width:auto">
-          <option value="all">All websites</option><option value="A">Website A only</option><option value="B">Website B only</option>
-        </select>
-        <button class="btn small ghost" id="copyFacts">Copy facts</button>
-      </div></div>
-    <div id="factsBody"><p class="help">No facts extracted yet.</p></div>
-  </section>
+  <details class="fold">
+    <summary>Facts and archive-derived claims · evidence classes</summary>
+    <section class="panel">
+      <div class="head"><div><span class="eyebrow">Evidence classes</span><h2>Facts and archive-derived claims</h2></div>
+        <div class="row">
+          <select id="factFilter" aria-label="Filter facts by website" style="width:auto">
+            <option value="all">All websites</option><option value="A">Website A only</option><option value="B">Website B only</option>
+          </select>
+          <button class="btn small ghost" id="copyFacts">Copy facts</button>
+        </div></div>
+      <div id="factsBody"><p class="help">No facts extracted yet.</p></div>
+    </section>
+  </details>
 
-  <section class="panel">
-    <div class="head"><div><span class="eyebrow">Preview</span><h2>Sanitized full-page preview</h2></div>
-      <span class="chip warn">scripts stripped · sandboxed frame</span></div>
-    <p class="help">The archived page is rebuilt with every script, event handler, external resource and data-URL link removed, then loaded in a script-blocked sandboxed frame. Layout and content below the fold render for inspection; nothing in it can reach this page, its storage or your model key. Rendered-only evidence is still unverified behaviour until you confirm it in the real tab.</p>
-    <div class="row" id="previewPicker"></div>
-    <div id="previewBody" style="margin-top:10px"><p class="help">No candidate document parsed yet.</p></div>
-  </section>
+  <details class="fold">
+    <summary>Sanitized full-page preview · scripts stripped, sandboxed frame</summary>
+    <section class="panel">
+      <div class="head"><div><span class="eyebrow">Preview</span><h2>Sanitized full-page preview</h2></div>
+        <span class="chip warn">scripts stripped · sandboxed frame</span></div>
+      <p class="help">The archived page is rebuilt with every script, event handler, external resource and data-URL link removed, then loaded in a script-blocked sandboxed frame. Layout and content below the fold render for inspection; nothing in it can reach this page, its storage or your model key. Rendered-only evidence is still unverified behaviour until you confirm it in the real tab.</p>
+      <div class="row" id="previewPicker"></div>
+      <div id="previewBody" style="margin-top:10px"><p class="help">No candidate document parsed yet.</p></div>
+    </section>
+  </details>
 </section>
 
 <!-- ============================ 4. LIVE VERIFY ============================ -->
@@ -430,7 +493,16 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 <!-- ============================ 5. DECISION ============================ -->
 <section class="view" id="view-decide" role="tabpanel" aria-label="Final decision and validation" hidden>
   <section class="panel">
-    <div class="head"><div><span class="eyebrow">Step 5</span><h2>Two independent questions</h2></div>
+    <div class="head">
+      <div><span class="eyebrow">Step 4</span><h2>Decisions · review the analysis, then choose</h2></div>
+      <div class="row"><span class="chip info" id="suggestChip">no assessment yet</span></div>
+    </div>
+    <p class="help">The assessment below is evidence-linked and advisory. Confirm or override each selection, then write the two justifications yourself: no model prose is ever placed in the four submission fields, and the checks enforce the handbook's rules on what you write.</p>
+    <div id="suggestionBody"><p class="help">Run the analysis in step 2 to see the provisional reading here.</p></div>
+  </section>
+
+  <section class="panel">
+    <div class="head"><div><span class="eyebrow">Step 4b</span><h2>Two independent questions</h2></div>
       <div class="row">
         <span class="chip" id="decisionChip">incomplete</span>
         <button class="btn small ghost" id="copyAllBtn">Copy all four fields</button>
@@ -537,9 +609,9 @@ iframe.preview{width:100%;height:440px;border:1px solid var(--line);border-radiu
 </section>
 </main>
 
-<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.2" bump="Update this version whenever this file changes in a commit." -->
-<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.2" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.2
+<!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.10.16.3" bump="Update this version whenever this file changes in a commit." -->
+<footer class="jd" data-junkdrawer-deploy-footer data-deploy-version="2026.10.16.3" style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: rgba(148, 163, 184, 0.88); font: 0.85rem/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+  &copy; 2026 Hank Marquardt · UI Berry 3R MHTML Evaluation Workbench · version 2026.10.16.3
 </footer>
 
 <!-- Parser worker. Kept as text so the page stays one self-contained file; it is
@@ -1517,6 +1589,7 @@ function status(el, text, kind = '') { if (typeof el === 'string') el = $(el); i
 /* ------------------------------- settings ------------------------------- */
 const defaultModel = 'openai/gpt-4.1-mini';
 let settings = { apiKey: '', model: defaultModel, temperature: 0.2 };
+let aiTransport = null;         // test seam: a transport stub, deliberately outside state so a reset cannot drop it
 let modelCatalog = [];
 function loadSettings() {
   try {
@@ -1648,6 +1721,7 @@ function blankState() {
     requirements: [], facts: { A: [], B: [] }, verification: [], comparison: null,
     decisions: { satisfaction: { option: '', reason: '' }, overall: { option: '', reason: '' } },
     validation: null, ai: { model: '', at: '', errors: [], passes: {}, verifiedModel: '', verifiedAt: '' },
+    assessment: null, clarifications: [], assessRound: 0, assessBusy: false, assessLog: [],
     historyId: null, createdAt: null, updatedAt: null, evidenceTab: 'A:after', diffTab: 'A'
   };
 }
@@ -2072,7 +2146,7 @@ function switchView(name) {
 function renderTabs() {
   const done = {
     setup: !!state.archive,
-    archive: !!state.archive && !!state.request.text,
+    archive: !!state.archive && !!state.assessment,
     compare: state.requirements.length > 0,
     verify: state.verification.length > 0 && state.verification.every(v => v.status !== 'unverified'),
     decide: !!(state.validation && state.validation.ok),
@@ -2339,21 +2413,120 @@ function requestPreview(key) {
   w.addEventListener('message', handler);
   w.postMessage({ type: 'preview', token, partIndex: res.index });
 }
+/* --------------------------- assessment rendering --------------------------- */
+function assessmentIsBaseline(a) { return !a || /deterministic/i.test(a.source || ''); }
+function evidenceTag(point) {
+  const rel = point.relevance === 'explicit' ? 'requested' : point.relevance === 'lens-quality' ? 'lens quality' : 'extra, not decisive';
+  const cert = point.certainty === 'human-confirmed' ? 'observed by you' : point.certainty === 'behaviour-unverified' ? 'behaviour unverified' : 'presence only';
+  return rel + ' · ' + cert;
+}
+function verdictCard(dim, d) {
+  const cls = d.option === 'A is better' ? ' a' : d.option === 'B is better' ? ' b' : '';
+  return '<div class="verdict' + cls + '">' +
+    '<span class="rank">' + (dim === 'satisfaction' ? 'Satisfaction · which website better fulfils the request' : 'Overall · the better complete experience') + '</span>' +
+    '<div class="pick">' + esc(d.option) + ' ' + chip(d.confidence + ' confidence', d.confidence === 'high' ? 'ok' : d.confidence === 'medium' ? 'warn' : 'bad') + '</div>' +
+    '<ul class="tight">' + (d.because.length ? d.because.map(x => '<li>' + esc(x) + '</li>').join('') : '<li class="help">no supporting finding returned</li>') + '</ul>' +
+    (dim === 'overall' && d.tradeOff ? '<p class="help"><strong>trade-off:</strong> ' + esc(d.tradeOff) + '</p>' : '') +
+    '<div class="row">' + (d.decidingRequirementIds.length ? '<span class="help">decided by ' + esc(d.decidingRequirementIds.join(', ')) + '</span>' : '') +
+    '<button class="btn small" data-use="' + dim + '">Use this selection</button></div></div>';
+}
+function renderAssessment() {
+  const body = $('#assessBody');
+  if (!body) return;
+  const a = state.assessment;
+  const chipEl = $('#assessChip'), caveat = $('#assessCaveat');
+  if (!a) {
+    body.innerHTML = '<p class="help">Parse an archive, then press <strong>Analyze</strong>. The assessment arrives as a provisional reading of both questions with the uncertainties that could change them.</p>';
+    if (chipEl) { chipEl.textContent = state.archive ? 'ready to analyse' : 'not analysed'; chipEl.className = 'chip'; }
+    if (caveat) caveat.textContent = '';
+    return;
+  }
+  const baseline = assessmentIsBaseline(a);
+  if (chipEl) {
+    chipEl.textContent = (baseline ? 'baseline' : 'AI assessment') + ' · round ' + a.round + (a.model ? ' · ' + a.model : '') + ' · ' + new Date(a.at).toLocaleTimeString();
+    chipEl.className = 'chip ' + (baseline ? 'warn' : 'ok');
+  }
+  const open = openClarifications();
+  const list = (title, points, empty) => '<h3>' + title + ' <span class="help">(' + points.length + ')</span></h3>' +
+    (points.length ? points.map(p => '<div class="tp"><strong>Website ' + esc(p.site) + '</strong> · ' + esc(p.point) +
+      '<br><span class="help">' + esc(evidenceTag(p)) + (p.requirementIds.length ? ' · ' + esc(p.requirementIds.join(', ')) : '') + '</span></div>').join('')
+      : '<p class="help">' + empty + '</p>');
+  body.innerHTML =
+    '<div class="verdicts">' + verdictCard('satisfaction', a.satisfaction) + verdictCard('overall', a.overall) + '</div>' +
+    (a.changedNote ? '<div class="note">' + esc(a.changedNote) + '</div>' : '') +
+    '<div class="grid2" style="margin-top:12px"><div>' + list('Relative strengths', a.strengths, 'none returned') + '</div>' +
+    '<div>' + list('Relative weaknesses', a.weaknesses, 'none returned') + '</div></div>' +
+    '<details class="fold"><summary>Evidence-linked talking points for your own justification (' + a.talkingPoints.length + ')</summary>' +
+    '<div style="padding:10px 12px">' + (a.talkingPoints.length ? a.talkingPoints.map(p => '<div class="tp"><strong>Website ' + esc(p.site) + '</strong> · ' + esc(p.point) + '</div>').join('') : '<p class="help">none returned</p>') +
+    '<p class="help">These are prompts to write from, never text to submit. The four submission fields are never filled from the model.</p></div></details>' +
+    '<h3 style="margin-top:12px">Unresolved questions, ranked by importance</h3>' +
+    (open.length ? '<ol class="tight">' + open.map(c => '<li>' + chip(c.importance, c.importance === 'decisive' ? 'bad' : c.importance === 'material' ? 'warn' : '') + ' ' + esc(c.question) + '</li>').join('') + '</ol>'
+      : '<p class="help">None open — every question the assessment raised has an answer.</p>');
+  if (caveat) {
+    caveat.textContent = baseline
+      ? 'Deterministic baseline: no model weighed the candidates, so this reading rests on the requirement matrix and the Before/After diff. Add a key for the full assessment.'
+      : 'Provisional model reading of archive evidence. Presence in markup is not proof of behaviour, so every behaviour claim it relies on stays a clarification until you observe it in the live tab.';
+    caveat.className = 'status' + (baseline ? ' warn' : '');
+  }
+}
+function clarificationCard(c, index) {
+  const answered = c.status === 'answered';
+  const opts = c.options.map((o, i) => '<button class="btn small' + (answered && c.answer && c.answer.optionLabel === o.label ? ' primary' : '') +
+    '" data-cl="' + c.id + '" data-cl-opt="' + i + '"' + (answered ? ' disabled' : '') + '>' + esc(o.label) + '</button>').join('');
+  return '<div class="qcard' + (answered ? ' done' : '') + '">' +
+    '<span class="rank">' + (index + 1) + ' · ' + esc(c.importance) + ' · affects ' + esc(c.affects) + ' · website ' + esc(c.site) + ' · round ' + c.round + (c.status === 'superseded' ? ' · superseded' : '') + '</span>' +
+    '<div class="q">' + esc(c.question) + '</div>' +
+    (c.why ? '<p class="help">' + esc(c.why) + '</p>' : '') +
+    (c.ifYes || c.ifNo ? '<p class="help">' + (c.ifYes ? 'Observed working would support: ' + esc(c.ifYes) + '. ' : '') + (c.ifNo ? 'Observed missing or broken would support: ' + esc(c.ifNo) + '.' : '') + '</p>' : '') +
+    (answered ? '<p class="help">You answered <strong>' + esc(c.answer.optionLabel) + '</strong> — ' + esc(c.answer.status) + (c.answer.note ? ' · ' + esc(c.answer.note) : '') + '</p>' : '') +
+    '<div class="qopts">' + opts + '</div>' +
+    (!answered ? '<div class="row" style="margin-top:6px"><input type="text" data-cl-note="' + c.id + '" placeholder="optional: what you actually saw" aria-label="Observation note" style="max-width:420px"></div>' : '') +
+    '</div>';
+}
+function renderClarifications() {
+  const body = $('#clarifyBody');
+  if (!body) return;
+  const chipEl = $('#clarifyChip');
+  const open = openClarifications();
+  if (!state.clarifications.length) {
+    body.innerHTML = '<p class="help">No clarifications yet — run the analysis first. Only observations that could change a decision are asked.</p>';
+    if (chipEl) { chipEl.textContent = 'none yet'; chipEl.className = 'chip info'; }
+    return;
+  }
+  if (chipEl) {
+    chipEl.textContent = open.length ? open.length + ' open · ' + state.clarifications.filter(c => c.status === 'answered').length + ' answered'
+      : 'all answered (' + state.clarifications.filter(c => c.status === 'answered').length + ')';
+    chipEl.className = 'chip ' + (open.length ? 'warn' : 'ok');
+  }
+  const done = state.clarifications.filter(c => c.status !== 'open');
+  body.innerHTML = (open.map((c, i) => clarificationCard(c, i)).join('') || '<p class="help">Nothing left to check: every question the assessment raised has an answer.</p>') +
+    (done.length ? '<details class="fold"><summary>Answered and superseded questions (' + done.length + ')</summary><div style="padding:10px 12px">' + done.map((c, i) => clarificationCard(c, open.length + i)).join('') + '</div></details>' : '');
+}
+
 /* ---------------------------- verify rendering ---------------------------- */
 const VERIFY_STATUS = ['unverified', 'confirmed working', 'broken', 'not present', 'could not inspect'];
+function verifyTable(list) {
+  return '<div class="scroll tall"><table><thead><tr><th>Website</th><th>Question</th><th>Why it needs the live tab</th><th>Status</th><th>Your note (what you actually saw)</th><th></th></tr></thead><tbody>' +
+    list.map(v => '<tr data-ver="' + v.id + '">' +
+      '<td><span class="chip ' + v.site + '">Website ' + v.site + '</span></td>' +
+      '<td>' + esc(v.question) + '</td>' +
+      '<td class="help">' + esc(v.why) + '</td>' +
+      '<td><select data-ver-status="' + v.id + '" aria-label="Verification status">' + VERIFY_STATUS.map(s => '<option value="' + s + '"' + (s === v.status ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
+      '<td><input type="text" data-ver-note="' + v.id + '" value="' + esc(v.note || '') + '" placeholder="observed behaviour" aria-label="Observation note"></td>' +
+      '<td><button class="btn small danger" data-ver-del="' + v.id + '">Delete</button></td></tr>').join('') + '</tbody></table></div>';
+}
 function renderVerify() {
   const body = $('#verifyBody');
+  const asked = state.verification.filter(v => v.clarificationId);
+  const derived = state.verification.filter(v => !v.clarificationId);
   if (!state.verification.length) {
-    body.innerHTML = '<p class="help">No verification questions yet. They are generated when an archive is analysed, or add your own.</p>';
+    body.innerHTML = '<p class="help">No verification questions yet. The step 2 analysis raises only the ones that could change a decision; add your own here at any time.</p>';
   } else {
-    body.innerHTML = '<div class="scroll tall"><table><thead><tr><th>Website</th><th>Question</th><th>Why it needs the live tab</th><th>Status</th><th>Your note (what you actually saw)</th><th></th></tr></thead><tbody>' +
-      state.verification.map(v => '<tr data-ver="' + v.id + '">' +
-        '<td><span class="chip ' + v.site + '">Website ' + v.site + '</span></td>' +
-        '<td>' + esc(v.question) + '</td>' +
-        '<td class="help">' + esc(v.why) + '</td>' +
-        '<td><select data-ver-status="' + v.id + '" aria-label="Verification status">' + VERIFY_STATUS.map(s => '<option value="' + s + '"' + (s === v.status ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
-        '<td><input type="text" data-ver-note="' + v.id + '" value="' + esc(v.note || '') + '" placeholder="observed behaviour" aria-label="Observation note"></td>' +
-        '<td><button class="btn small danger" data-ver-del="' + v.id + '">Delete</button></td></tr>').join('') + '</tbody></table></div>';
+    body.innerHTML = (asked.length
+      ? '<h3>Asked by the assessment (' + asked.length + ')</h3>' + verifyTable(asked)
+      : '<p class="help">The assessment has not needed any live check yet. Run the analysis in step 2 to see which observations, if any, would change its reading.</p>') +
+      (derived.length ? '<details class="fold"><summary>Archive-derived prompts (' + derived.length + ') · general behaviour checks the archive cannot settle</summary><div style="padding:8px 0">' + verifyTable(derived) +
+        '<p class="help">These come from the requirement matrix and the diff, not from a specific uncertainty. Keep them for the handbook\'s own-tab inspection, and record what you saw.</p></div></details>' : '');
   }
   const confirmed = state.verification.filter(v => v.status === 'confirmed working').length;
   const decided = state.verification.filter(v => v.status !== 'unverified').length;
@@ -2420,7 +2593,54 @@ function renderFinal() {
   const s = state.decisions.satisfaction, o = state.decisions.overall;
   $('#finalPreview').textContent = ['Satisfaction selection: ' + (s.option || '(empty)'), 'Satisfaction justification: ' + (s.reason || '(empty)'), '', 'Overall selection: ' + (o.option || '(empty)'), 'Overall justification: ' + (o.reason || '(empty)')].join('\n');
 }
+/* A compact, copyable summary of the analysis for the operator's own notes. */
+function assessmentText() {
+  const a = state.assessment;
+  if (!a) return 'No assessment yet — press Analyze in step 2.';
+  const block = (d, title) => [title + ': ' + d.option + ' (' + d.confidence + ' confidence)'].concat(d.because.map(x => '  - ' + x)).concat(d.tradeOff ? ['  trade-off: ' + d.tradeOff] : []).join('\n');
+  const points = (arr, title) => title + '\n' + (arr.length ? arr.map(p => '  Website ' + p.site + ': ' + p.point + ' [' + evidenceTag(p) + (p.requirementIds.length ? ' · ' + p.requirementIds.join(',') : '') + ']').join('\n') : '  none');
+  const open = openClarifications();
+  return [
+    'UI Berry 3R provisional assessment · ' + a.source + (a.model ? ' · ' + a.model : '') + ' · round ' + a.round + ' · ' + a.at,
+    block(a.satisfaction, 'Satisfaction'), '', block(a.overall, 'Overall'), '',
+    points(a.strengths, 'Relative strengths'), '', points(a.weaknesses, 'Relative weaknesses'), '',
+    points(a.talkingPoints, 'Talking points (write your own justifications from these)'), '',
+    'Unresolved questions, most important first', open.length ? open.map((c, i) => '  ' + (i + 1) + '. [' + c.importance + '] Website ' + c.site + ': ' + c.question).join('\n') : '  none',
+    '', 'Provisional analysis only: the four submission fields are written by the operator, never by the model.'
+  ].join('\n');
+}
+function renderSuggestionPanel() {
+  const body = $('#suggestionBody');
+  if (!body) return;
+  const a = state.assessment;
+  const chipEl = $('#suggestChip');
+  if (!a) {
+    body.innerHTML = '<p class="help">Run the analysis in step 2 to see the provisional reading here.</p>';
+    if (chipEl) { chipEl.textContent = 'no assessment yet'; chipEl.className = 'chip info'; }
+    return;
+  }
+  if (chipEl) {
+    chipEl.textContent = (assessmentIsBaseline(a) ? 'baseline: ' : 'suggestion: ') + a.satisfaction.option + ' · ' + a.overall.option;
+    chipEl.className = 'chip ' + (assessmentIsBaseline(a) ? 'warn' : 'ok');
+  }
+  const row = (dim, label) => {
+    const d = a[dim], chosen = state.decisions[dim].option;
+    return '<tr><td><strong>' + esc(label) + '</strong><div class="help">' + esc(d.confidence) + ' confidence' + (d.because.length ? ' · ' + esc(d.because[0]) : '') + '</div></td>' +
+      '<td>' + esc(d.option) + '</td>' +
+      '<td>' + (chosen ? esc(chosen) + (chosen !== d.option ? ' ' + chip('you differ', 'warn') : '') : '<span class="help">not chosen yet</span>') + '</td>' +
+      '<td><button class="btn small" data-use="' + dim + '">Use suggestion</button></td></tr>';
+  };
+  const open = openClarifications();
+  body.innerHTML = '<div class="scroll"><table><thead><tr><th>Question</th><th>Assessment suggests</th><th>Your selection</th><th></th></tr></thead><tbody>' +
+    row('satisfaction', 'Satisfaction') + row('overall', 'Overall') + '</tbody></table></div>' +
+    '<div class="grid2" style="margin-top:10px"><div><h3>Talking points</h3>' +
+    (a.talkingPoints.length ? a.talkingPoints.slice(0, 8).map(p => '<div class="tp"><strong>Website ' + esc(p.site) + '</strong> · ' + esc(p.point) + '</div>').join('') : '<p class="help">none returned</p>') +
+    '</div><div><h3>Still unresolved</h3>' +
+    (open.length ? '<ol class="tight help">' + open.map(c => '<li>' + esc(c.question) + '</li>').join('') + '</ol>' : '<p class="help">None.</p>') +
+    '<p class="help">Confirming a suggestion fills only the selection. Both justifications must be your own writing, and the rule checks below enforce that.</p></div></div>';
+}
 function renderDecision() {
+  renderSuggestionPanel();
   renderOptions('satisfaction');
   renderOptions('overall');
   $('#satReason').value = state.decisions.satisfaction.reason;
@@ -2454,6 +2674,9 @@ function buildRecord() {
     request: JSON.parse(JSON.stringify(state.request)),
     requirements: JSON.parse(JSON.stringify(state.requirements)),
     verification: JSON.parse(JSON.stringify(state.verification)),
+    assessment: state.assessment ? JSON.parse(JSON.stringify(state.assessment)) : null,
+    clarifications: JSON.parse(JSON.stringify(state.clarifications)),
+    assessLog: JSON.parse(JSON.stringify(state.assessLog)),
     decisions: JSON.parse(JSON.stringify(state.decisions)),
     validation: state.validation,
     ai: { model: state.ai.model, at: state.ai.at, errors: state.ai.errors }
@@ -2537,6 +2760,10 @@ function applyRecord(rec) {
   state.request = Object.assign(state.request, rec.request || {});
   state.requirements = Array.isArray(rec.requirements) ? rec.requirements : [];
   state.verification = Array.isArray(rec.verification) ? rec.verification : [];
+  state.assessment = rec.assessment || null;
+  state.clarifications = Array.isArray(rec.clarifications) ? rec.clarifications : [];
+  state.assessRound = state.assessment ? (state.assessment.round || 0) : 0;
+  state.assessLog = Array.isArray(rec.assessLog) ? rec.assessLog : [];
   state.decisions = Object.assign(state.decisions, rec.decisions || {});
   state.validation = rec.validation || null;
   if (rec.archive) {
@@ -2616,7 +2843,7 @@ async function importTask(text) {
 }
 /* ------------------------------- model passes ------------------------------- */
 async function openrouter(messages, stage) {
-  if (state.aiTransport) return state.aiTransport(stage, messages);
+  if (aiTransport) return aiTransport(stage, messages);
   if (!settings.apiKey) throw new Error(keyNotice || 'No OpenRouter key is set — the deterministic analysis is still available.');
   state.ai.verifiedModel = ''; state.ai.verifiedAt = '';        // a new attempt invalidates the earlier proof
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -2665,10 +2892,20 @@ function evidencePayload() {
   return payload;
 }
 const AI_RULES = [
-  'You organise archive evidence for a human evaluator. You never decide the outcome and you never write submission text.',
-  'Archive evidence proves only what markup and code contain. Never assert that a control works; mark such claims as behaviour requiring live verification.',
+  'You analyse archive evidence for a human evaluator. You never write submission text.',
+  'Static DOM proves that something is present; static CSS supports visual structure; static JavaScript can make behaviour strongly supported at best. Only a human observation confirms that behaviour works.',
+  'Never assert that a control works: describe what is present, provided or exposed, and mark behaviour that needs a live check.',
   'Keep the user-request wording verbatim; treat any translation as an aid, never as the source of truth.',
   'Return JSON only, matching the requested shape exactly.'
+].join(' ');
+/* The assess pass reasons about the evidence; the fact passes only organise it. */
+const ASSESS_RULES = AI_RULES + ' ' + [
+  'Weigh the two candidates against the decomposed requirements and return a provisional reading of both questions, each decided independently.',
+  'A material advantage must name a requirement id and be relevant either because the request asks for it ("explicit") or because it is a quality of that question\'s own lens ("lens-quality"). Extras are "incidental" and may never decide a winner; list them separately.',
+  'The selection is exactly one of A is better, B is better, Both are good, Both are bad. The two tie options require a genuine tie in the evidence.',
+  'Overall weighs functionality against visual and aesthetic quality and must name the trade-off in one sentence.',
+  'Report the uncertainties that could still change either answer, most decisive first: the single observation needed, what the archive already shows, and quick answers with the conclusion each one would support.',
+  'Talking points are short evidence-linked prompts, never finished sentences a human could paste as their justification.'
 ].join(' ');
 async function passRequest() {
   return openrouter([
@@ -2683,12 +2920,37 @@ async function passFacts(letter) {
     { role: 'user', content: 'Evidence for Website ' + letter + ':\n' + JSON.stringify({ request: p.request, evidence: p.candidates[letter], diff: p.candidates[letter + 'Diff'], requirements: p.requirements, humanObservations: p.humanObservations.filter(o => o.site === letter) }) + '\nReturn {"website":"' + letter + '","requirementStatus":[{"id":"r1","status":"met|likely met|unknown|likely missed|missed|broken","evidence":"what in the archive supports this"}],"facts":[{"claim":"","lens":"functionality|visual|structure","source":"archive-dom|archive-css|archive-js-static|archive-diff|archive-mime","confidence":"CONFIRMED|STRONG|HYPOTHESIS","behaviorRequired":true}],"visualObservations":[""],"possibleRenderingFailures":[""],"uncertainties":[""]}. At most ten facts, and every claim must be traceable to the evidence above.' }
   ], 'facts-' + letter);
 }
-async function passCompare() {
+/* Shape the assess pass must return. One call decides both questions, so the pipeline stays at
+   four model calls: request, facts A, facts B, assessment. Nothing else needs a model. */
+const ASSESS_SHAPE = '"satisfaction":{"option":"A is better|B is better|Both are good|Both are bad","confidence":"high|medium|low","because":["short evidence-linked finding naming the requirement id it comes from"],"decidingRequirementIds":["r2"]},' +
+  '"overall":{"option":"A is better|B is better|Both are good|Both are bad","confidence":"high|medium|low","because":["same style, weighing functionality against visual quality"],"tradeOff":"which shortcoming costs the user more for this request, one sentence","decidingRequirementIds":[]},' +
+  '"relativeStrengths":[{"site":"A|B","point":"what this candidate does better, tied to the evidence","relevance":"explicit|lens-quality|incidental","requirementIds":["r1"],"certainty":"presence-only|behaviour-unverified|human-confirmed"}],' +
+  '"relativeWeaknesses":[{"site":"A|B","point":"what it lacks or what it costs the user","requirementIds":[],"certainty":"presence-only|behaviour-unverified|human-confirmed"}],' +
+  '"talkingPoints":[{"site":"A|B","point":"a short factual prompt the operator can build their own justification from"}],' +
+  '"uncertainties":[{"site":"A|B","question":"the one observation needed, phrased so the operator knows exactly what to try","why":"what the archive already shows and why this could change a decision","importance":"decisive|material|minor","affects":"satisfaction|overall|both","ifYes":"what that observation would support","ifNo":"what the opposite would support","requirementIds":["r1"],"options":[{"label":"a quick answer the operator can click","status":"confirmed working|broken|not present|could not inspect","note":"what that answer means for the decision"}]}]';
+function assessPayload(round) {
   const p = evidencePayload();
+  p.round = round;
+  p.answeredObservations = state.clarifications.filter(c => c.answer).map(c => ({
+    site: c.site, askedInRound: c.round, question: c.question, observed: c.answer.status, note: c.answer.note || '', verifiedBy: 'human operator'
+  }));
+  p.openQuestions = state.clarifications.filter(c => c.status === 'open').map(c => ({ site: c.site, question: c.question, importance: c.importance }));
+  p.previousAssessment = state.assessment ? {
+    round: state.assessment.round,
+    satisfaction: state.assessment.satisfaction.option, satisfactionConfidence: state.assessment.satisfaction.confidence,
+    overall: state.assessment.overall.option, overallConfidence: state.assessment.overall.confidence
+  } : null;
+  return p;
+}
+async function passAssess(round) {
+  const instruction = round <= 1
+    ? 'First pass. Using the request, the decomposed requirements, both After candidates, the Before states and the Before/After diffs, decide the likely winner of each question provisionally, and list what is still uncertain.'
+    : 'Round ' + round + '. The operator has answered some of your earlier questions; those observations are human-verified and override your earlier inference about behaviour. Reconsider both questions from scratch with that evidence, keep whatever the observations confirm, and state plainly whether your earlier provisional selection changed and why.';
   return openrouter([
-    { role: 'system', content: AI_RULES },
-    { role: 'user', content: 'Compare the two candidates using only this evidence:\n' + JSON.stringify(p) + '\nReturn {"perRequirement":[{"id":"r1","better":"A|B|equal|unknown","why":""}],"liveVerification":[{"site":"A|B","question":"a question only a live Chrome tab can answer","why":""}],"visualDifferences":[""],"possibleRenderingFailures":[""],"notes":[""]}. Do not pick a winner and do not write any justification text.' }
-  ], 'compare');
+    { role: 'system', content: ASSESS_RULES },
+    { role: 'user', content: instruction + '\nEvidence:\n' + JSON.stringify(assessPayload(round)) +
+      '\nReturn {"sourceLanguage":"","requestTranslation":"English rendering for analysis only, or empty if one is already supplied","requestPurpose":"one sentence","requirementStatus":[{"id":"r1","A":"met|likely met|unknown|likely missed|missed|broken","B":"same scale","evidence":"what in the archive supports this"}],' + ASSESS_SHAPE + '}' }
+  ], round <= 1 ? 'assess' : 'assess:' + round);
 }
 async function passTranslate() {
   return openrouter([
@@ -2729,27 +2991,184 @@ function applyFactsFromAi(letter, out) {
   (out.possibleRenderingFailures || []).slice(0, 6).forEach(v => pushAiFact(letter, 'possible rendering failure (model — needs live confirmation): ' + v, 'visual'));
   (out.uncertainties || []).slice(0, 6).forEach(v => pushAiFact(letter, 'uncertainty (model): ' + v, 'structure'));
 }
-function applyCompareFromAi(out) {
-  if (!out) return;
-  (out.liveVerification || []).slice(0, 10).forEach(q => {
-    const site = String(q.site || 'A').toUpperCase() === 'B' ? 'B' : 'A';
-    const question = norm(String(q.question || '')).slice(0, 300);
-    if (!question || state.verification.some(v => norm(v.question) === question)) return;
-    state.verification.push({ id: 'v' + (state.verification.length + 1), site, question, why: norm(String(q.why || 'Requires the live page.')).slice(0, 240), status: 'unverified', note: '', source: 'AI comparison pass' });
+/* Normalise whatever the model returned into the shape the UI and the record can trust. */
+function sanitizeAssessment(out, round) {
+  if (!out || typeof out !== 'object') throw new Error('The assessment came back empty.');
+  const list = (x, n) => (Array.isArray(x) ? x : []).slice(0, n);
+  const text = (x, n) => norm(x).slice(0, n);
+  const side = x => (String(x || 'A').toUpperCase() === 'B' ? 'B' : 'A');
+  const ids = x => (Array.isArray(x) ? x : []).filter(id => state.requirements.some(r => r.id === id)).slice(0, 8);
+  const pick = x => (OPTIONS.includes(x) ? x : '');
+  const conf = x => (['high', 'medium', 'low'].includes(x) ? x : 'low');
+  const certainty = x => (['human-confirmed', 'behaviour-unverified', 'presence-only'].includes(x) ? x : 'presence-only');
+  const decision = d => ({
+    option: pick(d && d.option), confidence: conf(d && d.confidence),
+    because: list(d && d.because, 6).map(x => text(x, 240)).filter(Boolean),
+    decidingRequirementIds: ids(d && d.decidingRequirementIds), tradeOff: text(d && d.tradeOff, 300)
   });
-  state.aiComparison = {
-    perRequirement: Array.isArray(out.perRequirement) ? out.perRequirement.slice(0, 12) : [],
-    visualDifferences: (out.visualDifferences || []).slice(0, 8),
-    possibleRenderingFailures: (out.possibleRenderingFailures || []).slice(0, 8),
-    notes: (out.notes || []).slice(0, 8)
+  const satisfaction = decision(out.satisfaction), overall = decision(out.overall);
+  if (!satisfaction.option) throw new Error('The assessment did not return a usable Satisfaction selection.');
+  if (!overall.option) throw new Error('The assessment did not return a usable Overall selection.');
+  const points = (x, n) => list(x, n).map(v => ({
+    site: side(v && v.site), point: text(v && v.point, 300),
+    relevance: ['explicit', 'lens-quality', 'incidental'].includes(v && v.relevance) ? v.relevance : 'incidental',
+    requirementIds: ids(v && v.requirementIds), certainty: certainty(v && v.certainty)
+  })).filter(v => v.point);
+  const uncertainties = list(out.uncertainties, 8).map((u, i) => ({
+    id: 'u' + round + '-' + (i + 1), site: side(u && u.site), question: text(u && u.question, 300), why: text(u && u.why, 300),
+    importance: ['decisive', 'material', 'minor'].includes(u && u.importance) ? u.importance : 'minor',
+    affects: ['satisfaction', 'overall', 'both'].includes(u && u.affects) ? u.affects : 'both',
+    ifYes: text(u && u.ifYes, 200), ifNo: text(u && u.ifNo, 200), requirementIds: ids(u && u.requirementIds),
+    options: list(u && u.options, 4).map(o => ({
+      label: text(o && o.label, 120),
+      status: VERIFY_STATUS.includes(o && o.status) && o.status !== 'unverified' ? o.status : 'confirmed working',
+      note: text(o && o.note, 160)
+    })).filter(o => o.label)
+  })).filter(u => u.question && u.options.length);
+  const requirementStatus = list(out.requirementStatus, 20).map(s => ({
+    id: state.requirements.some(r => r.id === (s && s.id)) ? s.id : '',
+    A: MATRIX_STATUS.includes(s && s.A) && s.A !== 'human confirmed' ? s.A : '',
+    B: MATRIX_STATUS.includes(s && s.B) && s.B !== 'human confirmed' ? s.B : '',
+    evidence: text(s && s.evidence, 300)
+  })).filter(s => s.id);
+  return {
+    satisfaction, overall, strengths: points(out.relativeStrengths, 10), weaknesses: points(out.relativeWeaknesses, 10),
+    talkingPoints: points(out.talkingPoints, 14), uncertainties, requirementStatus,
+    purpose: text(out.requestPurpose, 240), translation: text(out.requestTranslation, 1500),
+    round, provisional: true, model: settings.model, at: new Date().toISOString(),
+    source: round <= 1 ? 'model assessment (AI)' : 'model re-assessment after clarification (AI)',
+    previous: '', changed: false, changedNote: ''
   };
 }
-async function runAiAnalysis() {
+/* Matrix cells proposed by the assessment. A cell the operator set by hand is never overwritten. */
+function applyAssessmentMatrix(a) {
+  for (const s of a.requirementStatus) {
+    const r = state.requirements.find(x => x.id === s.id);
+    if (!r) continue;
+    for (const letter of ['A', 'B']) {
+      if (!s[letter]) continue;
+      if (r.override && r.override[letter]) continue;
+      if (r.human && r.human[letter]) continue;
+      r['status' + letter] = s[letter];
+      r['evidence' + letter] = (s.evidence ? s.evidence + ' — ' : '') + '[model proposal, confirm or override]';
+    }
+  }
+}
+/* One clarification per uncertainty worth asking. Answered and operator-authored questions are
+   never dropped; questions the model no longer raises stay visible as superseded. */
+function syncClarifications(uncertainties, round) {
+  const key = q => norm(q).toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').slice(0, 120);
+  const existing = new Map(state.clarifications.map(c => [key(c.question), c]));
+  const seen = new Set();
+  const next = [];
+  for (const u of uncertainties) {
+    const k = key(u.question);
+    seen.add(k);
+    const prior = existing.get(k);
+    if (prior) {
+      prior.importance = u.importance; prior.why = u.why || prior.why;
+      prior.options = u.options; prior.requirementIds = u.requirementIds;
+      next.push(prior);
+      continue;
+    }
+    next.push({
+      id: 'c' + (state.clarifications.length + next.length + 1), site: u.site, question: u.question, why: u.why,
+      importance: u.importance, affects: u.affects, ifYes: u.ifYes, ifNo: u.ifNo, options: u.options,
+      requirementIds: u.requirementIds, round, status: 'open', answer: null, source: 'model assessment (round ' + round + ')'
+    });
+  }
+  for (const c of state.clarifications) {
+    if (seen.has(key(c.question))) continue;
+    if (c.status === 'answered' || c.source === 'operator') { next.push(c); continue; }
+    c.status = 'superseded';
+    next.push(c);
+  }
+  const order = { decisive: 0, material: 1, minor: 2 };
+  next.sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || (order[a.importance] - order[b.importance]) || a.round - b.round);
+  state.clarifications = next.slice(0, 12);
+}
+function applyAssessmentFromAi(out, round) {
+  const before = state.assessment ? state.assessment.satisfaction.option + ' / ' + state.assessment.overall.option : '';
+  const a = sanitizeAssessment(out, round);
+  const after = a.satisfaction.option + ' / ' + a.overall.option;
+  const observed = state.clarifications.filter(c => c.answer).length;
+  a.previous = before;
+  /* A mover is only meaningful once a human observation (or an explicit recompute) is in play;
+     the first pass replaces the archive baseline and is reported as a reading, not a change. */
+  a.changed = !!before && before !== after && (round > 1 || observed > 0);
+  a.changedNote = a.changed
+    ? (observed ? 'Recomputed from your ' + observed + ' observation' + (observed === 1 ? '' : 's') + ': ' : 'Recomputed on request: ') + 'the provisional reading moved from ' + before + ' to ' + after + '.'
+    : '';
+  state.assessment = a;
+  state.assessRound = round;
+  state.assessLog.push({ round, at: a.at, model: a.model, satisfaction: a.satisfaction.option, overall: a.overall.option, changed: a.changed });
+  if (a.translation && !state.request.translation) state.request.translation = a.translation;
+  applyAssessmentMatrix(a);
+  syncClarifications(a.uncertainties, round);
+  return a;
+}
+function canUseModel() { return !!(aiTransport || settings.apiKey); }
+
+/* Deterministic fallback so the workflow never dead-ends without a model: the requirement
+   matrix decides, and the result is labelled a baseline rather than an AI reading. */
+function localAssessment(reason) {
+  const a = matrixScore('A'), b = matrixScore('B');
+  const option = Math.abs(a - b) < 1.5 ? 'Both are good' : a > b ? 'A is better' : 'B is better';
+  const win = option === 'A is better' ? 'A' : option === 'B is better' ? 'B' : '';
+  const loser = win === 'A' ? 'B' : 'A';
+  const scored = st => st === 'met' || st === 'human confirmed' || st === 'likely met';
+  const rows = state.requirements.filter(r => (r.statusA && r.statusA !== 'unknown') || (r.statusB && r.statusB !== 'unknown'));
+  const because = rows.slice(0, 5).map(r => r.id + ': ' + String(r.text).slice(0, 120) + ' — Website A ' + (r.statusA || 'unknown') + ', Website B ' + (r.statusB || 'unknown'));
+  const mk = dim => ({
+    option, confidence: Math.abs(a - b) >= 3 ? 'medium' : 'low',
+    because: because.length ? because : ['No requirement has been assessed yet, so this baseline can only restate the request.'],
+    decidingRequirementIds: rows.slice(0, 4).map(r => r.id),
+    tradeOff: dim === 'overall' ? 'No model weighed functionality against visual quality here; the baseline follows the requirement matrix alone.' : ''
+  });
+  const open = state.verification.filter(v => v.status === 'unverified');
+  const before = state.assessment ? state.assessment.satisfaction.option + ' / ' + state.assessment.overall.option : '';
+  const assessment = {
+    satisfaction: mk('satisfaction'), overall: mk('overall'),
+    strengths: win ? rows.filter(r => scored(r['status' + win])).slice(0, 6).map(r => ({ site: win, point: String(r.text).slice(0, 200) + ' reads as ' + r['status' + win] + ' in the archive', relevance: 'explicit', requirementIds: [r.id], certainty: 'presence-only' })) : [],
+    weaknesses: win ? rows.filter(r => !scored(r['status' + loser])).slice(0, 6).map(r => ({ site: loser, point: String(r.text).slice(0, 200) + ' is missing or unproven in this candidate', relevance: 'explicit', requirementIds: [r.id], certainty: 'presence-only' })) : [],
+    talkingPoints: rows.slice(0, 8).map(r => ({ site: 'A', point: r.id + ' · Website A ' + (r.statusA || 'unknown') + ', Website B ' + (r.statusB || 'unknown') + ': ' + String(r.text).slice(0, 140), relevance: 'explicit', requirementIds: [r.id], certainty: 'presence-only' })),
+    uncertainties: [], requirementStatus: [],
+    purpose: '', translation: '', round: Math.max(1, state.assessRound), provisional: true,
+    model: '', at: new Date().toISOString(), source: reason || 'deterministic baseline (no model key)',
+    previous: before, changed: !!before && before !== option + ' / ' + option, changedNote: ''
+  };
+  if (assessment.changed) assessment.changedNote = 'Recomputed after your answers: the reading moved from ' + before + ' to ' + option + ' / ' + option + ' (deterministic baseline, no model).';
+  if (open.length) {
+    assessment.uncertainties = open.slice(0, 6).map((v, i) => ({
+      id: 'u-local-' + (i + 1), site: v.site, question: v.question, why: v.why,
+      importance: 'material', affects: 'both', ifYes: '', ifNo: '', requirementIds: [],
+      options: [
+        { label: 'It works as described', status: 'confirmed working', note: 'Recorded as observed working in the live tab.' },
+        { label: 'It is broken', status: 'broken', note: 'Recorded as broken in the live tab.' },
+        { label: 'It is not there', status: 'not present', note: 'Recorded as absent from the page.' },
+        { label: 'I could not check it', status: 'could not inspect', note: 'Left unverified.' }
+      ]
+    }));
+  }
+  state.assessment = assessment;
+  return assessment;
+}
+
+async function runAnalyze() {
   const btn = $('#analyzeBtn');
+  const reBtn = $('#reassessBtn');
   btn.disabled = true;
+  if (reBtn) reBtn.disabled = true;
   const failures = [];
   try {
-    status('#analyzeStatus', 'Pass 1 of 4 · understanding the request…', 'info');
+    if (!canUseModel()) {
+      localAssessment('deterministic baseline (no model key set)');
+      refreshFacts();
+      renderAll();
+      status('#analyzeStatus', 'No OpenRouter key is set, so this is the deterministic baseline from the requirement matrix and the Before/After diff. Add a key in History & settings for the full model assessment.', 'warn');
+      return;
+    }
+    status('#analyzeStatus', 'Pass 1 of 4 · reading the request…', 'info');
     const req = await passRequest();
     if (req && typeof req.translation === 'string' && !state.request.translation) state.request.translation = norm(req.translation).slice(0, 1500);
     if (req && Array.isArray(req.requirements) && req.requirements.length) {
@@ -2773,28 +3192,110 @@ async function runAiAnalysis() {
       try { applyFactsFromAi(letter, await passFacts(letter)); }
       catch (e) { failures.push('Website ' + letter + ' facts: ' + (e.message || e)); pushErr('ai-facts-' + letter, e.message || String(e)); }
     }
-    status('#analyzeStatus', 'Pass 4 of 4 · comparing candidates and listing live-verification questions…', 'info');
-    try { applyCompareFromAi(await passCompare()); }
-    catch (e) { failures.push('comparison: ' + (e.message || e)); pushErr('ai-compare', e.message || String(e)); }
+    status('#analyzeStatus', 'Pass 4 of 4 · weighing the candidates, deciding provisionally and ranking what is still uncertain…', 'info');
+    try { applyAssessmentFromAi(await passAssess(1), 1); }
+    catch (e) { failures.push('assessment: ' + (e.message || e)); pushErr('ai-assess', e.message || String(e)); }
+    state.ai.model = settings.model;
     state.ai.at = new Date().toISOString();
     state.ai.errors = failures;
     refreshFacts();
-    renderArchiveView();
-    renderCompare();
-    renderVerify();
-    renderDecision();
-    scheduleAutosave();
-    status('#analyzeStatus', failures.length ? 'Analysis finished with ' + failures.length + ' failed pass(es): ' + failures.join('; ') + '. The deterministic evidence below is unaffected.' : 'Analysis complete — evidence organised, nothing decided for you and no submission text generated.', failures.length ? 'warn' : 'ok');
+    renderAll();
+    switchView('archive');
+    const open = state.clarifications.filter(c => c.status === 'open');
+    status('#analyzeStatus', failures.length
+      ? 'Analysis finished with ' + failures.length + ' failed pass(es): ' + failures.join('; ') + '. The deterministic evidence is unaffected.'
+      : (state.assessment && state.assessment.satisfaction.option
+        ? 'Assessment ready · Satisfaction: ' + state.assessment.satisfaction.option + ' · Overall: ' + state.assessment.overall.option + '. ' + (open.length ? open.length + ' question(s) could still change that — see the clarifications below.' : 'No open uncertainty remains.') + ' The justifications are still yours to write.'
+        : 'Analysis finished, but no provisional selection came back.'),
+      failures.length ? 'warn' : 'ok');
   } catch (e) {
     pushErr('ai-analysis', e.message || String(e));
-    status('#analyzeStatus', 'Analysis stopped: ' + (e.message || 'unknown error') + '. The deterministic evidence below is unaffected.', 'bad');
+    status('#analyzeStatus', 'Analysis stopped: ' + redact(e.message || 'unknown error') + '. The deterministic evidence below is unaffected.', 'bad');
   } finally {
     btn.disabled = false;
+    if (reBtn) reBtn.disabled = !state.assessment;
     renderProviderChip();                                     // shows "verified" only after a real answer
     if (state.ai.verifiedAt) renderDiag();
   }
 }
+/* --------------------------- clarification loop --------------------------- */
+const IMPORTANCE_ORDER = { decisive: 0, material: 1, minor: 2 };
+function openClarifications() { return state.clarifications.filter(c => c.status === 'open'); }
+/* An answer becomes a human observation: it feeds the fact model, the matrix and the rubric. */
+function applyObservationToMatrix(c) {
+  const status = c.answer ? c.answer.status : '';
+  if (!status) return;
+  for (const id of c.requirementIds || []) {
+    const r = state.requirements.find(x => x.id === id);
+    if (!r) continue;
+    r.human = r.human || {};
+    if (status === 'confirmed working') { r['status' + c.site] = 'human confirmed'; r.human[c.site] = true; }
+    else if (status === 'broken' || status === 'not present') { r['status' + c.site] = 'missed'; r.human[c.site] = true; }
+    else { r.human[c.site] = false; }                 // could not inspect: keep the archive reading
+    r['evidence' + c.site] = ((r['evidence' + c.site] || '') + ' · operator observed: ' + status + (c.answer.note ? ' (' + c.answer.note.slice(0, 90) + ')' : '')).slice(0, 400);
+  }
+}
+function answerClarification(id, optionIndex, note) {
+  const c = state.clarifications.find(x => x.id === id);
+  if (!c) return null;
+  const opt = c.options[Number(optionIndex)];
+  if (!opt) return null;
+  const provided = norm(note || '');
+  c.status = 'answered';
+  c.answer = { status: opt.status, note: provided || opt.note || '', optionLabel: opt.label, at: new Date().toISOString() };
+  const existing = state.verification.find(v => v.clarificationId === c.id);
+  const rec = {
+    id: existing ? existing.id : 'v' + (state.verification.length + 1), site: c.site, question: c.question, why: c.why,
+    status: opt.status, note: c.answer.note, source: 'model clarification (round ' + c.round + ')',
+    clarificationId: c.id, answeredAt: c.answer.at, importance: c.importance
+  };
+  if (existing) Object.assign(existing, rec); else state.verification.push(rec);
+  applyObservationToMatrix(c);
+  refreshFacts();
+  renderAll();
+  runValidation();
+  scheduleAutosave();
+  return reassess();
+}
 /* --------------------------- archive intake flow --------------------------- */
+async function reassess() {
+  if (state.assessBusy) return;
+  state.assessBusy = true;
+  status('#clarifyStatus', 'Observation recorded · recomputing the assessment with it…', 'info');
+  try {
+    if (!canUseModel()) {
+      localAssessment('deterministic baseline (no model key set)');
+      refreshFacts(); renderAll(); runValidation();
+      status('#clarifyStatus', 'Observation recorded. The reading was recomputed deterministically because no key is set — it follows the requirement matrix only.', 'warn');
+      return;
+    }
+    const round = Math.max(1, state.assessRound || 1) + 1;
+    if (round > 4) { status('#clarifyStatus', 'Observation recorded. The round limit is reached, so the assessment was not re-run automatically — press Recompute for one more pass.', 'warn'); return; }
+    const out = await passAssess(round);
+    applyAssessmentFromAi(out, round);
+    refreshFacts(); renderAll(); runValidation(); scheduleAutosave();
+    status('#clarifyStatus', state.assessment.changed ? state.assessment.changedNote : 'Recomputed with your observation: the provisional reading is unchanged.', state.assessment.changed ? 'warn' : 'ok');
+    status('#analyzeStatus', 'Round ' + round + ' · Satisfaction: ' + state.assessment.satisfaction.option + ' · Overall: ' + state.assessment.overall.option + '.', 'ok');
+  } catch (e) {
+    pushErr('reassess', e.message || String(e));
+    status('#clarifyStatus', 'Re-assessment failed (' + redact(e.message || String(e)) + '). Your observation is recorded and the deterministic evidence is unaffected.', 'warn');
+  } finally {
+    state.assessBusy = false;
+    renderClarifications();
+  }
+}
+/* Confirming a suggestion sets the selection only; the justification stays human-authored. */
+function applySuggestion(dim) {
+  const a = state.assessment;
+  if (!a || !a[dim] || !a[dim].option) return;
+  state.decisions[dim].option = a[dim].option;
+  state.decisions[dim].suggestionUsed = a.source;
+  renderDecision();
+  renderTabs();
+  scheduleAutosave();
+  status('#copyStatus', (dim === 'satisfaction' ? 'Satisfaction' : 'Overall') + ' selection set to “' + a[dim].option + '” from the assessment. The justification is still yours to write.', 'ok');
+}
+
 async function handleFile(file) {
   if (!file) return;
   state.file = file;
@@ -2822,6 +3323,7 @@ async function handleFile(file) {
     state.verification = buildVerification();
     refreshFacts();
     state.validation = validateAll();
+    localAssessment('deterministic baseline from the archive — no model run yet');
     renderAll();
     switchView('archive');
     status('#setupStatus', 'Archive parsed: ' + result.partCount + ' MIME parts · mapping confidence ' + Math.round((result.mapping.confidence || 0) * 100) + '%.', (result.mapping.confidence || 0) >= 0.7 ? 'ok' : 'warn');
@@ -3039,7 +3541,7 @@ function renderProviderChip() {
   chipEl.className = 'help';
 }
 function renderAll() {
-  const steps = [[renderTabs, 'renderTabs'], [renderArchiveView, 'renderArchiveView'], [renderCompare, 'renderCompare'], [renderVerify, 'renderVerify'], [renderDecision, 'renderDecision'], [renderFinal, 'renderFinal']];
+  const steps = [[renderTabs, 'renderTabs'], [renderArchiveView, 'renderArchiveView'], [renderAssessment, 'renderAssessment'], [renderClarifications, 'renderClarifications'], [renderCompare, 'renderCompare'], [renderVerify, 'renderVerify'], [renderDecision, 'renderDecision'], [renderFinal, 'renderFinal']];
   for (const [fn, name] of steps) {
     try { fn(); }
     catch (e) { pushErr('render', name + ': ' + (e.message || String(e)), (e.stack || '').split('\n')[1] || ''); }
@@ -3065,7 +3567,21 @@ function bind() {
   $('#drop').addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) handleFile(f); });
   $('#demoBtn').addEventListener('click', () => loadDemo());
   $('#reparseBtn').addEventListener('click', () => { if (state.file) handleFile(state.file); });
-  $('#analyzeBtn').addEventListener('click', () => runAiAnalysis());
+  $('#analyzeBtn').addEventListener('click', () => runAnalyze());
+  $('#reassessBtn').addEventListener('click', () => reassess());
+  $('#copyAssessBtn').addEventListener('click', () => copy(assessmentText(), '#analyzeStatus'));
+  /* Confirming a suggestion or answering a clarification: both act on rendered cards, so the
+     handlers are delegated and survive every re-render. */
+  ['#assessBody', '#suggestionBody'].forEach(sel => $(sel).addEventListener('click', e => {
+    const btn = e.target.closest('[data-use]');
+    if (btn) applySuggestion(btn.dataset.use);
+  }));
+  $('#clarifyBody').addEventListener('click', e => {
+    const btn = e.target.closest('[data-cl-opt]');
+    if (!btn) return;
+    const noteEl = $('[data-cl-note="' + btn.dataset.cl + '"]');
+    answerClarification(btn.dataset.cl, Number(btn.dataset.clOpt), noteEl ? noteEl.value : '');
+  });
   $('#translateBtn').addEventListener('click', async () => {
     if (state.request.translation) { status('#translationStatus', 'A translation already exists — edit it instead.', 'warn'); return; }
     status('#translationStatus', 'Translating the captured request…', 'info');
@@ -3396,9 +3912,12 @@ if (typeof window !== 'undefined') {
     saveTask, buildRecord, applyRecord, importTask, exportTask, pruneTasks,
     idbGetAll, idbPut, idbDelete, idbClear, idbGet,
     requestPreview, evidencePayload,
-    setAiTransport: fn => { state.aiTransport = fn; },
+    setAiTransport: fn => { aiTransport = fn; },
     settings: () => settings, modelCatalog: () => modelCatalog, renderModels, renderProviderChip, errBuffer: () => errBuffer,
     checkApiKey, headerValue, openrouterHeaders, openrouter, fetchModels, keyNotice: () => keyNotice, renderDiag,
+    runAnalyze, reassess, answerClarification, applySuggestion, assessmentText, localAssessment, sanitizeAssessment,
+    applyAssessmentFromAi, syncClarifications, openClarifications, renderAssessment, renderClarifications, renderSuggestionPanel,
+    assessment: () => state.assessment, clarifications: () => state.clarifications,
     pushErr, copy, allFieldsText, fieldText
   };
 }

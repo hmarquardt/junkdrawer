@@ -214,6 +214,8 @@ test('records human overrides on the requirement matrix', async ({ page }) => {
   expect(before.hypothesis).toBe(true);
   expect(before.text.length).toBeGreaterThan(10);
   await page.evaluate(() => window.__BERRY3W_TEST__.switchView('compare'));
+  // the matrix now lives in an expandable detail section, so open it like an operator would
+  await page.evaluate(() => { const d = document.querySelector('#reqTable').closest('details'); if (d) d.open = true; });
   await page.selectOption(`select[data-req-status="${before.id}"][data-site="A"]`, 'human confirmed');
   const after = await page.evaluate(id => {
     const r = window.__BERRY3W_TEST__.state().requirements.find(x => x.id === id);
@@ -318,6 +320,7 @@ test('sanitized preview strips scripts, handlers and data URLs inside a script-b
   await open(page);
   await uploadSynthetic(page);
   await page.evaluate(() => window.__BERRY3W_TEST__.switchView('compare'));
+  await page.evaluate(() => { const d = document.querySelector('#previewBody').closest('details'); if (d) d.open = true; });
   await page.evaluate(() => window.__BERRY3W_TEST__.requestPreview('A:after'));
   await page.waitForSelector('iframe.preview', { timeout: 60000 });
   const info = await page.evaluate(async () => {
@@ -593,4 +596,219 @@ test('an imported record cannot smuggle a key back into storage', async ({ page 
   }, KEY_GOOD);
   expect(stored).not.toContain(KEY_GOOD.slice(0, 16));
   expect(stored).not.toContain('apiKey');
+});
+
+/* ---------------- AI-first assessment workflow (regression) ----------------
+   The workbench must analyse, decide provisionally and ask only what matters: the operator
+   reviews and validates, rather than reconstructing the analysis by hand. */
+const ASSESS_REQUEST = {
+  sourceLanguage: 'zh', translation: 'Next, load the existing publicly available original text yourself.', purpose: 'Load the original text.',
+  requirements: [{ id: 'r1', text: 'Load the existing publicly available original text', quoteOriginal: '\u63a5\u4e0b\u6765\u81ea\u884c\u52a0\u8f7d\u5df2\u6709\u516c\u5f00\u539f\u8457\u6587\u672c', lens: 'functionality', importance: 'core', kind: 'behavior' }]
+};
+function toAssessFacts(letter) {
+  return { website: letter, requirementStatus: [{ id: 'r2', status: 'likely met', evidence: 'loader control present in the After state' }],
+    facts: [{ claim: 'loader control present', lens: 'functionality', source: 'archive-dom', confidence: 'STRONG', behaviorRequired: true }],
+    visualObservations: [], possibleRenderingFailures: [], uncertainties: [] };
+}
+const DECIDED = {
+  satisfaction: { option: 'A is better', confidence: 'medium', because: ['r2: both expose a loader and Website A also offers a URL import'], decidingRequirementIds: ['r2'] },
+  overall: { option: 'B is better', confidence: 'low', because: ['Website B labels where the imported text came from'], tradeOff: 'Website A imports more sources, but Website B tells the reader where the text came from.', decidingRequirementIds: ['r2'] },
+  relativeStrengths: [{ site: 'A', point: 'URL import control present in the After state', relevance: 'explicit', requirementIds: ['r2'], certainty: 'behaviour-unverified' }],
+  relativeWeaknesses: [{ site: 'B', point: 'no URL import control in the After state', relevance: 'explicit', requirementIds: ['r2'], certainty: 'presence-only' }],
+  talkingPoints: [{ site: 'A', point: 'r2: Website A has a loader plus a URL import control', relevance: 'explicit', requirementIds: ['r2'], certainty: 'presence-only' }],
+  uncertainties: [
+    { site: 'A', question: 'Website A shows a text loader. When you tried loading the text, what happened?', why: 'A loader control exists in the After markup, but only a live tab proves it responds.', importance: 'decisive', affects: 'both', ifYes: 'Website A fulfils the request end to end', ifNo: 'Website A only looks complete', requirementIds: ['r2'], options: [{ label: 'It loaded text', status: 'confirmed working', note: 'text loaded' }, { label: 'It did nothing', status: 'broken', note: 'loader dead' }, { label: 'I could not check', status: 'could not inspect', note: 'unverified' }] },
+    { site: 'B', question: 'Website B may show a placeholder where Website A shows a loader. What did you see?', why: 'Only placeholder text appears in the After state.', importance: 'material', affects: 'satisfaction', ifYes: '', ifNo: '', requirementIds: ['r2'], options: [{ label: 'A real loader', status: 'confirmed working', note: 'loader present' }, { label: 'Placeholder only', status: 'not present', note: 'no loader' }] }
+  ]
+};
+const REVISED = Object.assign({}, DECIDED, {
+  satisfaction: { option: 'B is better', confidence: 'high', because: ['your observation: the Website A loader did nothing', 'Website B loaded text from a public source'], decidingRequirementIds: ['r2'] },
+  overall: { option: 'B is better', confidence: 'medium', because: ['Website B is the only candidate that loads text'], tradeOff: 'Website A looks richer, but cannot load text at all.', decidingRequirementIds: ['r2'] },
+  uncertainties: []
+});
+async function openForAnalysis(page, opts = {}) {
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  await page.route('**/api/analytics/**', r => r.fulfill({ status: 204, body: '' }));
+  await page.route('**openrouter.ai**', r => r.abort());
+  await page.goto(PAGE, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => Boolean(window.__BERRY3W_TEST__));
+  if (opts.stub !== false) {
+    await page.evaluate(canned => {
+      window.__STAGES__ = [];
+      window.__BERRY3W_TEST__.setAiTransport(async stage => {
+        window.__STAGES__.push(stage);
+        if (stage === 'request') return canned.request;
+        if (stage === 'facts-A') return canned.factsA;
+        if (stage === 'facts-B') return canned.factsB;
+        if (stage === 'assess') return canned.first;
+        if (stage === 'assess:2') return canned.second;
+        throw new Error('unexpected stage ' + stage);
+      });
+    }, { request: ASSESS_REQUEST, factsA: toAssessFacts('A'), factsB: toAssessFacts('B'), first: DECIDED, second: REVISED });
+  }
+  await uploadSynthetic(page);
+  return errors;
+}
+const analyzed = () => /model assessment/.test(window.__BERRY3W_TEST__.assessment().source);
+test('one-click Analyze returns a provisional reading of both questions and only the questions that matter', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  const beforeAnalyze = await page.evaluate(() => window.__BERRY3W_TEST__.assessment().source);
+  expect(beforeAnalyze).toMatch(/deterministic baseline/);            // archive-only until Analyze
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(analyzed, null, { timeout: 30000 });
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, a = t.assessment();
+    return {
+      stages: window.__STAGES__, sat: a.satisfaction, ovr: a.overall, changed: a.changed,
+      strengths: a.strengths.length, weaknesses: a.weaknesses.length, talking: a.talkingPoints.length,
+      clar: t.clarifications().map(c => ({ q: c.question, imp: c.importance, affects: c.affects, opts: c.options.map(o => o.label + '\u2192' + o.status), status: c.status })),
+      decisions: { sat: t.state().decisions.satisfaction, ovr: t.state().decisions.overall },
+      panel: document.querySelector('#assessBody').textContent, chip: document.querySelector('#assessChip').textContent,
+      caveat: document.querySelector('#assessCaveat').textContent,
+      matrixA: t.state().requirements.find(r => r.id === 'r2').statusA,
+      firstPanelIsAssessment: !!document.querySelector('#view-archive section.panel #assessBody'),
+      matrixFolded: !!document.querySelector('#reqTable').closest('details'),
+      translated: t.state().request.translation
+    };
+  });
+  expect(out.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess']);   // four calls, nothing extra
+  expect(out.sat.option).toBe('A is better');
+  expect(out.sat.confidence).toBe('medium');
+  expect(out.ovr.option).toBe('B is better');
+  expect(out.ovr.tradeOff).toContain('tells the reader');
+  expect(out.changed).toBe(false);                                           // first pass replaces the baseline, it is not a "change"
+  expect(out.strengths).toBeGreaterThan(0);
+  expect(out.weaknesses).toBeGreaterThan(0);
+  expect(out.talking).toBeGreaterThan(0);
+  expect(out.clar).toHaveLength(2);                                          // targeted questions, not a generic list
+  expect(out.clar[0].imp).toBe('decisive');
+  expect(out.clar[1].imp).toBe('material');
+  expect(out.clar[0].q).toContain('what happened');
+  expect(out.clar[0].opts.length).toBeGreaterThanOrEqual(3);                 // quick answers with their meaning
+  expect(out.clar[1].affects).toBe('satisfaction');
+  expect(out.decisions.sat).toEqual({ option: '', reason: '' });             // no model prose in the four fields
+  expect(out.decisions.ovr).toEqual({ option: '', reason: '' });
+  expect(out.panel).toContain('A is better');
+  expect(out.panel).toContain('trade-off');
+  expect(out.panel).toContain('Unresolved questions');
+  expect(out.chip).toContain('AI assessment');
+  expect(out.caveat).toContain('not proof of behaviour');
+  expect(out.matrixA).toBe('likely met');                                    // the model also fills the matrix
+  expect(out.firstPanelIsAssessment).toBe(true);                             // review-first layout
+  expect(out.matrixFolded).toBe(true);                                       // detail folded away
+  expect(out.translated).toContain('publicly available original text');
+  expect(errors).toEqual([]);
+});
+
+test('an answered clarification is recorded as a human observation and can change the suggested winner', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(analyzed, null, { timeout: 30000 });
+  const before = await page.evaluate(() => ({ sat: window.__BERRY3W_TEST__.assessment().satisfaction.option, ovr: window.__BERRY3W_TEST__.assessment().overall.option, open: window.__BERRY3W_TEST__.openClarifications().length }));
+  expect(before.sat).toBe('A is better');
+  expect(before.open).toBe(2);
+  await page.click('#clarifyBody [data-cl-opt="1"]');                      // "It did nothing" -> broken
+  await page.waitForFunction(() => window.__BERRY3W_TEST__.assessment().round === 2, null, { timeout: 30000 });
+  const after = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, a = t.assessment(), c = t.clarifications()[0];
+    const r = t.state().requirements.find(x => x.id === 'r2');
+    return {
+      stages: window.__STAGES__, sat: a.satisfaction.option, ovr: a.overall.option, changed: a.changed, note: a.changedNote, round: a.round,
+      open: t.openClarifications().length, status: c.status, answer: c.answer,
+      verify: t.state().verification.filter(v => v.clarificationId).map(v => ({ site: v.site, status: v.status, source: v.source })),
+      humanFacts: t.state().facts.A.filter(f => f.conf === 'HUMAN').length,
+      matrixA: r.statusA, humanA: !!(r.human && r.human.A),
+      superseded: t.clarifications().filter(c => c.status === 'superseded').length,
+      clarifyStatus: document.querySelector('#clarifyStatus').textContent,
+      panel: document.querySelector('#assessBody').textContent,
+      clarifyPanel: document.querySelector('#clarifyBody').textContent,
+      verifyPanel: document.querySelector('#verifyBody').textContent.slice(0, 80)
+    };
+  });
+  expect(after.stages).toEqual(['request', 'facts-A', 'facts-B', 'assess', 'assess:2']);
+  expect(after.sat).toBe('B is better');                                     // the suggestion moved
+  expect(after.changed).toBe(true);
+  expect(after.note).toContain('A is better');
+  expect(after.note).toContain('B is better');
+  expect(after.round).toBe(2);
+  expect(after.status).toBe('answered');
+  expect(after.answer.status).toBe('broken');
+  expect(after.open).toBe(0);                                                // round 2 asked nothing further
+  expect(after.superseded).toBe(1);                                          // the other question is kept, not lost
+  expect(after.clarifyPanel).toContain('superseded');
+  expect(after.verify).toHaveLength(1);
+  expect(after.verify[0].status).toBe('broken');
+  expect(after.verify[0].source).toContain('model clarification');
+  expect(after.humanFacts).toBeGreaterThan(0);                               // observation is now a human fact
+  expect(after.matrixA).toBe('missed');
+  expect(after.humanA).toBe(true);
+  expect(after.clarifyStatus).toContain('moved from');
+  expect(after.panel).toContain('B is better');
+  expect(after.verifyPanel).toContain('Asked by the assessment');
+  expect(errors).toEqual([]);
+});
+test('keeps the four submission fields human-authored while offering advisory suggestions', async ({ page }) => {
+  const errors = await openForAnalysis(page);
+  await page.click('#analyzeBtn');
+  await page.waitForFunction(analyzed, null, { timeout: 30000 });
+  const view = await page.evaluate(() => {
+    window.__BERRY3W_TEST__.switchView('decide');
+    return {
+      satReason: document.querySelector('#satReason').value,
+      ovrReason: document.querySelector('#ovrReason').value,
+      suggestion: document.querySelector('#suggestionBody').textContent,
+      chip: document.querySelector('#suggestChip').textContent,
+      options: document.querySelectorAll('#satOptions .opt').length,
+      draft: window.__BERRY3W_TEST__.assessmentText()
+    };
+  });
+  expect(view.satReason).toBe('');                       // never pre-filled with model prose
+  expect(view.ovrReason).toBe('');
+  expect(view.suggestion).toContain('A is better');
+  expect(view.suggestion).toContain('Use suggestion');
+  expect(view.suggestion).toContain('must be your own writing');
+  expect(view.chip).toContain('suggestion');
+  expect(view.options).toBe(4);
+  expect(view.draft).toContain('the four submission fields are written by the operator');
+  const applied = await page.evaluate(() => {
+    window.__BERRY3W_TEST__.applySuggestion('satisfaction');
+    const d = window.__BERRY3W_TEST__.state().decisions.satisfaction;
+    return { option: d.option, reason: d.reason, checked: document.querySelectorAll('#satOptions input[type=radio]:checked').length };
+  });
+  expect(applied.option).toBe('A is better');            // confirming a suggestion sets the selection ...
+  expect(applied.reason).toBe('');                       // ... and nothing else
+  expect(applied.checked).toBe(1);
+  // the rubric still governs what the operator writes
+  const rubric = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__;
+    t.state().decisions.satisfaction.reason = 'Website A is better because it works.';
+    return t.validateAll().findings.map(f => f.code);
+  });
+  expect(rubric).toContain('word-min');
+  expect(errors).toEqual([]);
+});
+
+test('without a model the workflow still returns a labelled deterministic baseline, never a blank decision', async ({ page }) => {
+  const errors = await openForAnalysis(page, { stub: false });
+  await page.click('#analyzeBtn');
+  const out = await page.evaluate(() => {
+    const t = window.__BERRY3W_TEST__, a = t.assessment();
+    return { src: a.source, sat: a.satisfaction.option, ovr: a.overall.option, conf: a.satisfaction.confidence,
+      status: document.querySelector('#analyzeStatus').textContent, chip: document.querySelector('#assessChip').textContent,
+      caveat: document.querySelector('#assessCaveat').textContent, clar: t.clarifications().length,
+      panel: document.querySelector('#assessBody').textContent };
+  });
+  expect(out.src).toMatch(/deterministic baseline/);
+  expect(out.sat).toBeTruthy();
+  expect(out.ovr).toBeTruthy();
+  expect(['low', 'medium']).toContain(out.conf);          // a baseline never claims high confidence
+  expect(out.status).toContain('No OpenRouter key is set');
+  expect(out.status).toContain('deterministic baseline');
+  expect(out.chip).toContain('baseline');
+  expect(out.caveat).toContain('no model weighed the candidates');
+  expect(out.clar).toBe(0);                              // no invented questions without a model
+  expect(out.panel).toContain(out.sat);
+  expect(errors).toEqual([]);
 });
