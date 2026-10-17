@@ -110,7 +110,8 @@ test.describe('CFLab sign-in UX', () => {
     await fillCredentials(page);
     await signInBtn(page).click();
     await expect(signInBtn(page)).toHaveText('Sign in');
-    expect(await page.evaluate(() => sessionStorage.getItem('wfr_session_v1'))).toBe(TOKEN);
+    expect(await page.evaluate(() => localStorage.getItem('wfr_session_persistent_v1'))).toBe(TOKEN);
+    expect(await page.evaluate(() => sessionStorage.getItem('wfr_session_v1'))).toBeNull();
     await expect(page.locator('#cfg-auth-signed-in')).toBeVisible();
     await expect(page.locator('#cfg-auth-signed-out')).toBeHidden();
     await expect(page.locator('#cfg-auth-user')).toHaveText(EMAIL);
@@ -316,6 +317,68 @@ test.describe('CFLab session state', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('wfr_session_v1'))).toBeNull();
     const rows = await page.evaluate(async () => (await window.__WFR_TEST__.db.observations.toArray()).map(o => o.submitStatus));
     expect(rows).toEqual(['ready', 'ready', 'ready']);
+  });
+
+  test('remembered CFLab session survives loss of tab-only storage', async ({ page }) => {
+    await openAdmin(page);
+    await mockCflab(page, (route, request) => {
+      if (request.url().endsWith('/api/auth/me')) return json(route, 200, { user: { email: EMAIL }, memberships: [] });
+      return json(route, 200, { token: TOKEN, user: { email: EMAIL }, memberships: [] });
+    });
+    await fillCredentials(page);
+    await signInBtn(page).click();
+    expect(await page.evaluate(() => localStorage.getItem('wfr_session_persistent_v1'))).toBe(TOKEN);
+    await page.evaluate(() => sessionStorage.clear());
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => !!window.__WFR_TEST__);
+    await page.click('nav#tabs button[data-tab="admin"]');
+    await expect(page.locator('#cfg-auth-signed-in')).toBeVisible();
+    await expect(statusEl(page)).toHaveText('Signed in as ' + EMAIL);
+  });
+
+  test('unchecked Remember me uses tab-only storage, and sign-out clears both stores', async ({ page }) => {
+    await openAdmin(page);
+    await mockCflab(page, (route, request) => json(route, 200, { token: TOKEN, user: { email: EMAIL }, memberships: [] }));
+    await page.locator('#cfg-auth-remember').uncheck();
+    await fillCredentials(page);
+    await signInBtn(page).click();
+    expect(await page.evaluate(() => sessionStorage.getItem('wfr_session_v1'))).toBe(TOKEN);
+    expect(await page.evaluate(() => localStorage.getItem('wfr_session_persistent_v1'))).toBeNull();
+    await page.locator('#cfg-sign-out').click();
+    expect(await page.evaluate(() => sessionStorage.getItem('wfr_session_v1'))).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem('wfr_session_persistent_v1'))).toBeNull();
+  });
+
+  test('an expired remembered token is discarded after a 401', async ({ page }) => {
+    await openAdmin(page);
+    await mockCflab(page, (route, request) => {
+      if (request.url().endsWith('/api/auth/me')) return json(route, 401, { error: { code: 'unauthorized', message: 'Invalid or expired session' } });
+      return json(route, 200, { token: TOKEN, user: { email: EMAIL }, memberships: [] });
+    });
+    await fillCredentials(page);
+    await signInBtn(page).click();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => !!window.__WFR_TEST__);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('wfr_session_persistent_v1'))).toBeNull();
+    await page.click('nav#tabs button[data-tab="admin"]');
+    await expect(page.locator('#cfg-auth-signed-out')).toBeVisible();
+  });
+
+  test('mobile nav remains clickable above simulated Leaflet panes', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => !!window.__WFR_TEST__);
+    await page.evaluate(() => {
+      const pane = document.createElement('div');
+      pane.className = 'leaflet-pane';
+      pane.style.cssText = 'position:fixed;inset:0;z-index:700;pointer-events:auto';
+      document.body.appendChild(pane);
+    });
+    await page.locator('#menu-toggle').click();
+    await expect(page.locator('nav#tabs')).toBeVisible();
+    await page.locator('nav#tabs button[data-tab="admin"]').click();
+    await expect(page.locator('#tab-admin')).toHaveClass(/active/);
+    expect(await page.evaluate(() => Number(getComputedStyle(document.querySelector('nav#tabs')).zIndex))).toBeGreaterThan(700);
   });
 
   test('records the deployed origin the suite assumes (documentation guard)', () => {
