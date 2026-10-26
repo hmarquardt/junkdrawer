@@ -1460,7 +1460,7 @@
             temperature: options.temperature ?? 0.25,
             response_format: options.json ? { type: "json_object" } : undefined
           };
-          if (options.tools) body.tools = options.tools;
+          if (options.tools) { body.tools = options.tools; delete body.response_format; }
           const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             signal: options.signal,
@@ -1477,9 +1477,15 @@
             throw new Error(`OpenRouter call failed: ${response.status} ${response.statusText} ${text.slice(0, 240)}`);
           }
           const data = await response.json();
-          const content = data.choices?.[0]?.message?.content;
-          if (!content) throw new Error("OpenRouter returned no message content.");
-          return content;
+          if (data.error) throw new Error("OpenRouter provider error: " + String(data.error.message || data.error.code || "unknown").slice(0, 200));
+          const choice = data.choices?.[0];
+          const content = choice?.message?.content;
+          const normalized = typeof content === "string" ? content : Array.isArray(content) ? content.filter(x => x.type === "text" && typeof x.text === "string").map(x => x.text).join("\n") : "";
+          if (!normalized.trim()) {
+            const diagnostic = { model: data.model || model, finish: choice?.finish_reason || "missing", toolCalls: !!choice?.message?.tool_calls?.length, outputTokens: data.usage?.completion_tokens ?? "unknown", requestId: response.headers.get("x-request-id") || data.id || "unknown" };
+            throw new Error("OpenRouter returned no message text: " + JSON.stringify(diagnostic));
+          }
+          return normalized;
         }
       };
 
@@ -2608,7 +2614,7 @@
                   <input id="maxQueriesPerSection" type="number" min="1" max="8" step="1" />
                 </label>
               </div>
-              <p class="notice">OpenRouter search uses the server tool <code>openrouter:web_search</code>. If a model rejects tool use, choose another research model or switch to Mock / Demo.</p>
+              <p class="notice">OpenRouter search uses <code>openrouter:web_search</code>.</p><button id="testResearchBtn" class="btn secondary" type="button">Test research connection (one query)</button><p id="testResearchStatus" class="notice" role="status" aria-live="polite"></p>
             </section>
 
             <section class="content-box wide" aria-labelledby="fetchHeading">
@@ -4386,6 +4392,19 @@
       }
 
       function bindEvents() {
+        document.querySelector("#testResearchBtn").addEventListener("click", async () => {
+          const button = document.querySelector("#testResearchBtn");
+          const status = document.querySelector("#testResearchStatus");
+          button.disabled = true;
+          status.textContent = "Testing one live search…";
+          try {
+            saveSettings();
+            const result = await new OpenRouterWebSearchProvider(state.settings).search("official Eventbrite event registration pricing", { idea: "Event registration software", assumptions: {}, evidenceType: "pricing" });
+            if (!result.results.some(item => /^https?:\/\//.test(item.url || ""))) throw new Error("No source URLs returned; live research not verified.");
+            status.textContent = "Connected: " + result.results.length + " sourced result(s).";
+          } catch (error) { status.textContent = "Research test failed: " + error.message; }
+          finally { button.disabled = false; }
+        });
         els.generateQuestionsBtn.addEventListener("click", generateQuestions);
         els.regenerateQuestionsBtn.addEventListener("click", generateQuestions);
         els.skipQuestionsBtn.addEventListener("click", () => {
