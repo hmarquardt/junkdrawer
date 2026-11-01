@@ -179,7 +179,15 @@ family('provenance', () => {
   // The fixture must describe the same PDF bytes the artifact cites, and the same page.
   assert.equal(headerValue('pdf_sha256'), artifact.source.sha256, 'fixture and artifact cite different PDFs');
   assert.equal(headerValue('page'), '25 (1-based page number; pypdf page index 24)');
-  assert.equal(headerValue('retrieved_url'), artifact.source.retrieved_url);
+  // The fixture pins the archived IMO PDF used to extract these rows. The same
+  // byte-identical PDF may now be fetched from IMO's canonical URL. Keep the
+  // original fixture provenance unchanged; the SHA-256 comparison above proves
+  // the PDF contents agree, and unknown retrieval origins still fail closed.
+  const fixtureRetrievedUrl = headerValue('retrieved_url');
+  assert.ok(
+    [fixtureRetrievedUrl, artifact.source.original_url].includes(artifact.source.retrieved_url),
+    'artifact PDF retrieval URL must be the pinned fixture source or the canonical IMO URL'
+  );
   return `pdf ${artifact.source.sha256.slice(0, 12)}…, ${artifact.notes.length} notes`;
 });
 
