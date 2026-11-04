@@ -63,7 +63,9 @@ console.log('artifacts: ' + validation.comets.length + ' comets, catalog ' + val
       if (days <= 400) assert(separation <= 15, comet.id + ' differs from Horizons by ' + separation.toFixed(2) + ' arcmin at ' + days.toFixed(0) + ' days (limit 15)');
       else if (days <= 800) assert(separation <= 60, comet.id + ' differs by ' + separation.toFixed(2) + ' arcmin at ' + days.toFixed(0) + ' days (limit 60)');
     }
-    const grade = C.positionFromElements(comet, now).grade;
+    // Grade at the same instant used to measure orbital age; a fixed test date
+    // can straddle the 800-day boundary as the daily ephemeris advances.
+    const grade = C.positionFromElements(comet, entry.points[0].t).grade;
     if (daysFromEpoch > 800) {
       assert.equal(grade, 'kepler-unreliable', comet.id + ' must be graded unreliable ' + daysFromEpoch.toFixed(0) + ' days from its epoch');
       unreliable.push({ id: comet.id, days: daysFromEpoch, worst: worst.arcmin });
