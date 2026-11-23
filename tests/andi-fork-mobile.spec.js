@@ -420,3 +420,29 @@ test("a left click aims the fork, then WebGL loss preserves the fight in Canvas"
   expect(await page.evaluate(() => s.fork.extended)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test("the campaign button accepts taps when the game input handlers are ready", async ({
+  page,
+}) => {
+  let unblock;
+  const pending = new Promise((resolve) => {
+    unblock = resolve;
+  });
+  await page.route("http://andi.test/**", async (route) => {
+    const asset = new URL(route.request().url()).pathname.slice(1);
+    if (asset === "andi-the-rat-slayer/game.js") await pending;
+    if (asset === "favicon.ico") return route.fulfill({ status: 204 });
+    await route.fulfill({ path: path.resolve(asset) });
+  });
+  const loaded = page.goto("http://andi.test/andi-the-rat-slayer.html");
+  try {
+    await expect(
+      page.getByRole("button", { name: /Play campaign/ }),
+    ).toBeDisabled();
+  } finally {
+    unblock();
+  }
+  await loaded;
+  await page.click("#start");
+  await expect(page.getByRole("button", { name: "BEGIN FIGHT" })).toBeVisible();
+});

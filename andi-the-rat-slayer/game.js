@@ -856,3 +856,6 @@ for (const el of [$("touchAttack"), $("view")]) {
     if (s?.fork?.source === e.pointerId) cancelFork();
   });
 }
+
+// The menu can paint before these classic scripts finish loading on a phone.
+$("start").disabled = false;
