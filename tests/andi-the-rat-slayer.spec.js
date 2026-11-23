@@ -198,6 +198,7 @@ test("all five bosses, retry and ending via keyboard gameplay", async ({
   await tick(240);
   const pad = await page.evaluate(() => s.targets[0]);
   await actAt(pad.x, pad.z);
+  await tick(105);
   await expect(page.locator("#sceneTag")).toHaveText("CAMPAIGN COMPLETE");
   await page.click("#next");
   await expect(page.locator("#start")).toBeVisible();
@@ -219,10 +220,10 @@ test("portrait touch controls and fallback drawing", async ({ browser }) => {
     };
   });
   await page.tap("#start");
-  await expect(page.locator("#missionBrief")).toContainText("Tap Act");
+  await expect(page.locator("#missionBrief")).toContainText("Tap Enter car");
   await expect(page.locator("#missionBrief")).not.toContainText("WASD");
   await page.tap("#next");
-  await expect(page.locator("#instruction")).toHaveText("Tap Act to enter");
+  await expect(page.locator("#instruction")).toHaveText("Tap Enter car");
   await page.tap("#touchAction");
   expect(await page.evaluate(() => s.driving)).toBe(true);
   const pad = page.locator("[data-key=arrowright]");
@@ -417,9 +418,7 @@ test("portrait WebGL projects the active release to the edge and uses touch labe
     s.andi.x = 4.2;
     s.andi.z = -6;
   });
-  await expect(page.locator("#instruction")).toHaveText(
-    "Tap Act to release cart",
-  );
+  await expect(page.locator("#instruction")).toHaveText("Tap Release");
   await page.tap("#touchAction");
   await page.evaluate(() => {
     s.andi.x = 7.4;

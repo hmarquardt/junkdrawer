@@ -8,10 +8,12 @@ function createAlleyView(host, quality) {
   if (!gl || !window.THREE) return createMapView(host);
   const T = THREE,
     renderer = new T.WebGLRenderer({ canvas, context: gl });
-  canvas.addEventListener("webglcontextlost", (event) => {
+  function onLost(event) {
     event.preventDefault();
+    dispose(false);
     view = createMapView(host);
-  });
+  }
+  canvas.addEventListener("webglcontextlost", onLost);
   host.replaceChildren(canvas);
   const scene = new T.Scene(),
     camera = new T.PerspectiveCamera(42, 1, 0.1, 150);
@@ -210,15 +212,82 @@ function createAlleyView(host, quality) {
     car = new T.Group();
   scene.add(andi, car);
   const oval = (g, c, x, y, z, w, h, d) => shape(g, ball, c, x, y, z, w, h, d);
-  oval(andi, "#ca6335", 0, 1.03, 0, 0.33, 0.53, 0.22);
-  oval(andi, "#b08062", 0, 1.72, 0, 0.22, 0.28, 0.21);
-  oval(andi, "#47352c", 0, 1.9, -0.04, 0.235, 0.18, 0.23);
-  const legs = [-1, 1].map((s) =>
-    shape(andi, cube, "#344353", s * 0.15, 0.37, 0, 0.21, 0.74, 0.23),
+  // A workday silhouette shared with the illustrated map figure and poster.
+  oval(andi, "#b85c39", 0, 1.03, 0, 0.255, 0.44, 0.18);
+  oval(andi, "#f5dfb8", 0, 1.24, 0.14, 0.14, 0.24, 0.06);
+  oval(andi, "#c39879", 0, 1.64, 0.02, 0.194, 0.245, 0.177);
+  const hair = new T.Group();
+  andi.add(hair);
+  hair.position.y = 1.66;
+  oval(hair, "#dba951", 0, 0.14, -0.025, 0.216, 0.167, 0.208);
+  oval(hair, "#d0a056", 0, -0.09, -0.12, 0.214, 0.27, 0.12);
+  for (const side of [-1, 1]) {
+    const lock = oval(
+      hair,
+      side < 0 ? "#f0cc81" : "#e6b85f",
+      side * 0.167,
+      -0.073,
+      0.001,
+      0.071,
+      0.255,
+      0.129,
+    );
+    lock.rotation.z = side * 0.11;
+    oval(andi, "#524137", side * 0.072, 1.68, 0.179, 0.018, 0.018, 0.012);
+    const strap = shape(
+      andi,
+      cube,
+      "#296c70",
+      side * 0.053,
+      1.27,
+      0.191,
+      0.023,
+      0.23,
+      0.014,
+    );
+    strap.rotation.z = -side * 0.33;
+  }
+  const fringe = oval(
+    hair,
+    "#efcc83",
+    -0.061,
+    0.092,
+    0.122,
+    0.154,
+    0.092,
+    0.087,
   );
-  for (const s of [-1, 1])
-    oval(andi, "#b56038", s * 0.34, 1, 0, 0.12, 0.39, 0.13);
-  shape(andi, cube, "#dfbf7c", 0.37, 0.65, 0, 0.29, 0.46, 0.36);
+  fringe.rotation.z = 0.31;
+  shape(andi, cube, "#f4ead3", 0, 1.115, 0.202, 0.105, 0.14, 0.022);
+  shape(andi, cube, "#42828a", 0, 1.147, 0.217, 0.09, 0.025, 0.008);
+  const legs = [-1, 1].map((side) => {
+    const leg = new T.Group();
+    andi.add(leg);
+    leg.position.set(side * 0.118, 0.76, 0);
+    shape(leg, cube, "#344353", 0, -0.36, 0, 0.157, 0.72, 0.183);
+    oval(leg, "#353934", 0, -0.69, 0.044, 0.104, 0.084, 0.162);
+    return leg;
+  });
+  for (const side of [-1, 1])
+    oval(andi, "#b85c39", side * 0.274, 1.06, 0, 0.094, 0.32, 0.108);
+  const tote = new T.Group();
+  andi.add(tote);
+  tote.position.set(-0.31, 0.8, 0);
+  shape(tote, cube, "#d6b67b", 0, -0.16, 0, 0.21, 0.4, 0.33);
+  shape(tote, cube, "#658a87", 0, 0.052, -0.055, 0.15, 0.093, 0.15);
+  shape(tote, cube, "#bc7950", 0, 0.058, 0.09, 0.15, 0.077, 0.1);
+  for (const z of [-0.11, 0.11])
+    shape(tote, cube, "#a98253", 0, 0.18, z, 0.035, 0.31, 0.045);
+  const keysRing = new T.Mesh(
+    new T.TorusGeometry(0.049, 0.012, 6, 12),
+    material("#c5ccd1"),
+  );
+  tote.add(keysRing);
+  keysRing.position.set(-0.116, -0.07, 0.046);
+  keysRing.rotation.y = Math.PI / 2;
+  shape(tote, cube, "#b6bfc3", -0.12, -0.147, 0.055, 0.02, 0.1, 0.022);
+  let priorHeading = 0,
+    turnSway = 0;
   shape(car, cube, "#527b87", 0, 0.58, 0, 1.55, 0.7, 3.15);
   shape(car, cube, "#334950", 0, 1.07, -0.13, 1.35, 0.48, 1.62);
   shape(car, cube, "#749397", 0, 1.35, -0.13, 1.38, 0.11, 1.6);
@@ -314,6 +383,38 @@ function createAlleyView(host, quality) {
   }
   const boss = ratModel(),
     mob = [ratModel(true), ratModel(true)];
+  const utensil = new T.Group(),
+    forkHead = new T.Group();
+  andi.add(utensil);
+  utensil.add(forkHead);
+  const steel = new T.MeshStandardMaterial({
+    color: 0xe0e7ec,
+    metalness: 0.57,
+    roughness: 0.18,
+  });
+  const band = new T.MeshStandardMaterial({
+    color: 0x8295a5,
+    metalness: 0.64,
+    roughness: 0.24,
+  });
+  function forkMesh(parent, geometry, mat) {
+    const m = new T.Mesh(geometry, mat);
+    parent.add(m);
+    return m;
+  }
+  const shafts = [0.075, 0.059, 0.046].map((r, i) => {
+    const geo = new T.CylinderGeometry(r, r, 1, 12);
+    geo.rotateX(Math.PI / 2);
+    return forkMesh(utensil, geo, i === 1 ? band : steel);
+  });
+  const palm = forkMesh(forkHead, ball, steel);
+  palm.scale.set(0.26, 0.047, 0.16);
+  for (let i = 0; i < 4; i++) {
+    const tine = forkMesh(forkHead, new T.ConeGeometry(0.048, 0.43, 8), steel);
+    tine.rotation.x = Math.PI / 2;
+    tine.position.set((i - 1.5) * 0.132, 0.018, 0.24);
+  }
+  const forearm = shape(andi, cube, "#b85c39", 0.31, 0.91, 0, 0.16, 0.17, 0.3);
   const crown = shape(boss.g, cube, "#bd994d", 0, 0.69, 0.06, 0.42, 0.18, 0.32);
   const hat = shape(boss.g, cube, "#252a29", 0, 0.76, 0.32, 0.58, 0.18, 0.48);
   const visor = shape(boss.g, cube, "#57cfc2", 0, 0.52, 0.64, 0.44, 0.1, 0.08);
@@ -388,11 +489,37 @@ function createAlleyView(host, quality) {
   );
   outline.rotation.x = -Math.PI / 2;
   scene.add(outline);
+  let slow = 0,
+    fast = 0,
+    scale = 1;
+  function performanceSample(ms) {
+    if (!touchPlay() || s?.mode !== "play" || ms <= 0 || ms > 200) return;
+    slow = ms > 29 ? slow + 1 : Math.max(0, slow - 1);
+    fast = ms < 19 ? fast + 1 : 0;
+    if (slow >= 20 && scale > 0.65) {
+      scale = Math.max(0.65, scale - 0.2);
+      slow = 0;
+      options(quality);
+    }
+    if (fast >= 240 && scale < 1) {
+      scale = Math.min(1, scale + 0.1);
+      fast = 0;
+      options(quality);
+    }
+    s.economy = scale < 0.9 || quality === "low";
+  }
   function options(q) {
     quality = q;
-    renderer.shadowMap.enabled = q === "high";
+    renderer.shadowMap.enabled =
+      q === "high" && (!touchPlay() || scale >= 0.99);
     renderer.shadowMap.type = T.PCFSoftShadowMap;
-    renderer.setPixelRatio(Math.min(devicePixelRatio, q === "high" ? 1.6 : 1));
+    renderer.setPixelRatio(
+      scale *
+        Math.min(
+          devicePixelRatio,
+          q === "high" ? (touchPlay() ? 1.25 : 1.6) : 1,
+        ),
+    );
   }
   options(quality);
   function pose(model, p, scale, t) {
@@ -428,6 +555,48 @@ function createAlleyView(host, quality) {
     andi.visible = !s.driving;
     andi.position.set(p.x, s.dash > 0 ? 0.12 : 0, p.z);
     andi.rotation.y = p.angle;
+    const turn = Math.atan2(
+      Math.sin(p.angle - priorHeading),
+      Math.cos(p.angle - priorHeading),
+    );
+    turnSway = clamp(turnSway * 0.85 + turn * 0.13, -0.21, 0.21);
+    priorHeading = p.angle;
+    const gait = p.speed > 0.1 ? Math.sin(s.time * 13) : 0;
+    hair.rotation.z = gait * 0.035 + turnSway;
+    hair.rotation.x = s.dash > 0 ? 0.16 : gait * 0.024;
+    tote.rotation.x = gait * 0.15;
+    utensil.visible = forearm.visible = !!s.fork;
+    if (s.fork) {
+      const f = s.fork,
+        ending = s.mode === "finale";
+      const push = ending
+        ? -0.25 + 1.3 * clamp((s.time - f.finaleStart - 0.16) * 6, 0, 1)
+        : forkLunge();
+      const reveal = s.mode === "intro" && s.stage === 1;
+      const length = reveal
+          ? 1.05 + 2.1 * clamp((s.intro - 1.65) / 0.42, 0, 1)
+          : forkLength(),
+        neck = length - 0.455;
+      utensil.position.set(0.31, 0.92, 0.18 + push);
+      utensil.rotation.x =
+        f.phase === "holding" ? -0.13 * Math.min(1, f.elapsed / 0.48) : 0;
+      forearm.position.z = (0.18 + push) / 2;
+      forearm.scale.z = Math.max(0.2, 0.26 + push);
+      shafts.forEach((m, i) => {
+        m.scale.z = neck / 3 + 0.015;
+        m.position.z = (neck * (i + 0.5)) / 3;
+      });
+      forkHead.position.z = neck;
+      steel.emissive.set(
+        s.stage === 3 ? 0x318cd6 : s.stage === 4 ? 0xffad38 : 0x9fb5bc,
+      );
+      steel.emissiveIntensity = f.charged ? 0.9 : s.stage >= 3 ? 0.43 : 0.1;
+      if (reveal) {
+        utensil.position.y = 0.55 + 0.4 * clamp(s.intro - 1, 0, 1);
+        utensil.rotation.x =
+          -0.4 * Math.sin(Math.min(1, s.intro / 2) * Math.PI);
+      }
+    }
     legs.forEach(
       (l, i) =>
         (l.rotation.x =
@@ -449,12 +618,26 @@ function createAlleyView(host, quality) {
     if (s.impactUntil > s.time)
       boss.g.rotation.z = Math.sin((s.impactUntil - s.time) * 25) * 0.16;
     else boss.g.rotation.z = 0;
+    if (s.stage === 4 && s.mode === "intro") {
+      boss.g.rotation.z = s.intro < 1.6 ? 0.13 * Math.sin(s.intro * 15) : 0;
+      boss.g.position.z -= clamp((s.intro - 1.7) * 2, 0, 1) * 0.85;
+    }
+    if (s.mode === "finale") {
+      const bounce = clamp((s.time - s.fork.finaleStart - 0.36) * 1.6, 0, 1);
+      boss.g.position.z += Math.cos(p.angle) * bounce * 2;
+      boss.g.position.x += Math.sin(p.angle) * bounce * 2;
+      boss.g.position.y += Math.sin(bounce * Math.PI) * 1.6;
+      boss.g.rotation.z = bounce * 0.7;
+    }
     crown.visible = s.stage === 1;
     hat.visible = s.stage === 4;
     visor.visible = s.stage === 3;
     mob.forEach((m, i) => {
       m.g.visible = !!s.mobs[i];
-      if (m.g.visible) pose(m, s.mobs[i], 0.86, s.time);
+      if (m.g.visible) {
+        pose(m, s.mobs[i], 0.86, s.time);
+        m.g.rotation.z = (s.mobs[i].tumble || 0) * 14;
+      }
     });
     pads.forEach((m, i) => {
       const a = s.targets[i];
@@ -547,6 +730,34 @@ function createAlleyView(host, quality) {
     camera.aspect = w / h;
     camera.position.set(fx, d * 1.05, fz + d * 0.72);
     camera.lookAt(fx, 0, fz - 1);
+    if (touchPlay()) {
+      const bossWeight = s.stage === 0 && !s.driving ? 0.2 : 0.42;
+      const cx = p.x * (1 - bossWeight) + r.x * bossWeight,
+        cz = p.z * (1 - bossWeight) + r.z * bossWeight;
+      const span = Math.abs(p.x - r.x) + s.scale * 0.9 + 3;
+      const dist =
+        Math.max(
+          11.8,
+          Math.abs(p.z - r.z) * 0.65 + 8,
+          span / (camera.aspect * 1.03),
+        ) * s.zoom;
+      camera.position.set(cx, dist * 1.05, cz + dist * 0.72);
+      camera.lookAt(cx, 0, cz - 0.8);
+    }
+    if (s.mode === "intro" && s.stage === 1) {
+      const a = s.intro * 0.82;
+      camera.position.set(
+        p.x + Math.sin(a) * 3.4,
+        2.7,
+        p.z + Math.cos(a) * 3.4,
+      );
+      camera.lookAt(p.x, 0.9, p.z);
+    }
+    if (s.mode === "finale") {
+      const a = Math.min(2, s.time - s.fork.finaleStart);
+      camera.position.set(p.x + Math.sin(a) * 4, 4, p.z + 5);
+      camera.lookAt((r.x + p.x) / 2, 1, (r.z + p.z) / 2);
+    }
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
   }
@@ -558,7 +769,45 @@ function createAlleyView(host, quality) {
       y: ((1 - projected.y) * projectionHeight) / 2,
     };
   }
-  return { draw, options, project };
+  const ray = new T.Raycaster(),
+    plane = new T.Plane(new T.Vector3(0, 1, 0), 0),
+    hit = new T.Vector3();
+  function aim(x, y) {
+    ray.setFromCamera(
+      { x: (2 * x) / projectionWidth - 1, y: 1 - (2 * y) / projectionHeight },
+      camera,
+    );
+    return ray.ray.intersectPlane(plane, hit);
+  }
+  function dispose(lose = true) {
+    canvas.removeEventListener("webglcontextlost", onLost);
+    const geometries = new Set(),
+      mats = new Set(),
+      textures = new Set();
+    scene.traverse((o) => {
+      if (o.geometry) geometries.add(o.geometry);
+      if (o.material) mats.add(o.material);
+      if (o.isInstancedMesh) o.dispose();
+    });
+    for (const m of mats) {
+      if (m.map) textures.add(m.map);
+      m.dispose();
+    }
+    for (const g of geometries) g.dispose();
+    for (const t of textures) t.dispose();
+    light.shadow.dispose();
+    renderer.dispose();
+    if (lose) renderer.forceContextLoss();
+    canvas.remove();
+  }
+  return {
+    draw,
+    options,
+    project,
+    aim,
+    performance: performanceSample,
+    dispose,
+  };
 }
 function createMapView(host) {
   const c = document.createElement("canvas");
@@ -642,11 +891,44 @@ function createMapView(host) {
     label(s.car.x, s.car.z, "🚙", "#fff", 2.2);
     label(s.rat.x, s.rat.z, "🐀", "#efe6de", 1.25 * s.scale);
     s.mobs.forEach((m) => label(m.x, m.z, "🐀", "#fff"));
-    if (!s.driving) label(s.andi.x, s.andi.z, "🧥", "#ff9e58", 1.4);
+    if (s.fork) {
+      const p = s.andi;
+      g.save();
+      g.translate(p.x, p.z);
+      g.rotate(Math.PI / 2 - p.angle);
+      g.translate(0.18 + forkLunge(), -0.31);
+      paintUtensil(
+        g,
+        forkLength(),
+        0.55,
+        s.stage === 3 ? "#64cfff" : s.stage === 4 ? "#ffb945" : null,
+      );
+      g.restore();
+    }
+    if (!s.driving) {
+      g.save();
+      g.translate(s.andi.x, s.andi.z);
+      const factor = Math.max(1, 15 / k);
+      g.scale(factor, factor);
+      paintAndi(g, s.andi.angle, s.time, s.andi.speed);
+      g.restore();
+    }
   }
   function project(x, z, height) {
     const m = floorTransform;
     return { x: m.a * x + m.e, y: m.d * (z - height * 0.6) + m.f };
   }
-  return { draw, project, options() {} };
+  return {
+    draw,
+    project,
+    aim: (x, y) => ({
+      x: (x - floorTransform.e) / floorTransform.a,
+      z: (y - floorTransform.f) / floorTransform.d,
+    }),
+    options() {},
+    dispose() {
+      c.remove();
+      c.width = c.height = 0;
+    },
+  };
 }

@@ -5,11 +5,11 @@ const USE_RADIUS = 2.4,
   BAIT_RADIUS = 3.5;
 const panelOrder = [1, 0, 2];
 function inputs() {
-  const touch = matchMedia("(pointer: coarse)").matches;
+  const touch = touchPlay();
   return touch
     ? {
         move: "the direction pad",
-        act: "Tap Act",
+        act: "Tap " + touchActionName(),
         dodge: "Tap Dodge",
         dodgeKey: "Dodge",
       }
@@ -22,13 +22,21 @@ function inputs() {
 }
 function briefing() {
   const { act, move, dodge, dodgeKey } = inputs();
-  const releaseSteps = [
-    "Find the two glowing cart-release controls.",
-    `Walk close to a control using ${move}.`,
-    act + " to release a rolling dumpster.",
-    "Activate both controls to defeat the Dumpster King.",
-    "Dodge his minions while moving between controls.",
-  ];
+  const releaseSteps = touchPlay()
+    ? [
+        "Find both flagged cart releases.",
+        "Slide the direction pad toward a dashed ring.",
+        "Tap Release inside the ring, or use the fork from farther back.",
+        "Send both carts into the King.",
+        "Dodge his minions between controls.",
+      ]
+    : [
+        "Find the two glowing cart-release controls.",
+        `Walk close to a control using ${move}.`,
+        act + " to release a rolling dumpster.",
+        "Activate both controls to defeat the Dumpster King.",
+        "Dodge his minions while moving between controls.",
+      ];
   const missions = [
     [
       "Intercept the rat with Andi’s car.",
@@ -88,6 +96,7 @@ function briefing() {
     ][Math.min(s.step, 2)],
   ];
   const [goal, how, watch] = missions[s.stage];
+  if (s.stage) how.push(forkTutorial().lesson);
   return (
     "<h3>YOUR MISSION</h3><dl><dt>Goal</dt><dd>" +
     goal +
@@ -174,11 +183,28 @@ function updateMission() {
   $("guideLayer").hidden = !live && s.mode !== "impact";
   document.querySelector(".brief").hidden = !live && s.mode !== "impact";
   if (!live && s.mode !== "impact") return;
+  setCopy($("forkReadout"), forkStatus());
+  const f = s.fork;
+  $("touchAttack").style.setProperty(
+    "--charge",
+    f?.phase === "holding"
+      ? Math.min(100, (100 * f.elapsed) / chargeTime) + "%"
+      : "0%",
+  );
+  $("touchAttack").classList.toggle(
+    "charged",
+    f?.phase === "holding" && f.charged,
+  );
+  $("forkToggle").setAttribute("aria-pressed", Boolean(f?.extended));
+  setCopy($("touchAction"), touchActionName());
   const objects = missionObjects(),
     next = objects
       .filter((o) => o.eligible && !o.used)
       .sort((a, b) => a.dist - b.dist)[0];
   const inside = next && next.dist < next.radius;
+  $("touchAction").hidden = !(s.stage === 0
+    ? !s.driving && inside
+    : s.targets.some((t) => !t.used && distance(t, s.andi) < USE_RADIUS));
   const count = s.targets.filter((t) => t.used).length;
   const progress = [
     s.driving ? "In the car · rat still loose" : "On foot · find the car",
@@ -231,7 +257,8 @@ function updateMission() {
       !s.attack.landed &&
       distance(s.andi, s.attack) <= s.attack.radius + 0.2;
   let instruction = "";
-  if (inside && next.verb) instruction = act + " to " + next.verb;
+  if (inside && next.verb)
+    instruction = touchPlay() ? act : act + " to " + next.verb;
   else if (urgent)
     instruction =
       s.attack.delay < 0.64
@@ -254,6 +281,15 @@ function updateMission() {
   else if (s.stage === 3) instruction = "Activate panels in order: 2 → 1 → 3";
   else if (next?.kind === "weak")
     instruction = "Get close and " + act.toLowerCase() + " to strike.";
+  if (
+    touchPlay() &&
+    f &&
+    !inside &&
+    !urgent &&
+    next?.verb &&
+    next.at === assistedTarget()
+  )
+    instruction = "Tap Attack to " + next.verb;
   if (s.mode === "impact") instruction = "";
   setCopy($("instruction"), instruction);
   $("guideLayer").classList.toggle(
@@ -268,6 +304,8 @@ function drawMissionMarkers(objects, next) {
   const w = $("view").clientWidth,
     h = $("view").clientHeight;
   const project = view.project;
+  const top = touchPlay() ? 27 : 139,
+    bottom = touchPlay() ? 22 : 150;
   for (let i = 0; i < Math.max(markerPool.length, objects.length); i++) {
     if (!markerPool[i]) {
       const pin = document.createElement("span"),
@@ -286,14 +324,15 @@ function drawMissionMarkers(objects, next) {
     }
     const active = o === next;
     const pos = project(o.at.x, o.at.z, o.kind === "weak" ? 1.4 : 1.9);
-    const edge = pos.x < 54 || pos.x > w - 54 || pos.y < 139 || pos.y > h - 150;
+    const edge =
+      pos.x < 54 || pos.x > w - 54 || pos.y < top || pos.y > h - bottom;
     pin.hidden = edge && !active && (o.kind !== "lever" || o.used);
     if (pin.hidden) {
       pin.className = "pin";
       continue;
     }
     const x = clamp(pos.x, 58, w - 58),
-      y = clamp(pos.y, 139, h - 150);
+      y = clamp(pos.y, top, h - bottom);
     pin.className =
       "pin" +
       (active ? " primaryPin" : "") +

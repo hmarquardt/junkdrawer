@@ -10,7 +10,7 @@ const cases = [
   {
     name: "The Commuter",
     type: "Car interception",
-    sub: "Same alley. Same rat. Every morning.",
+    sub: "Andi has a class to teach. The alley rat has other plans.",
     line: "I've had students with better attendance than you.",
     clue: "He drops a tiny transit pass. Someone has stamped it KING OF THE BINS.",
   },
@@ -18,7 +18,7 @@ const cases = [
     name: "The Dumpster King",
     type: "Environmental combat",
     sub: "His royal court is about to get flattened.",
-    line: "Oh, you've got to be kidding me.",
+    line: "Well, I didn't pack for this.",
     clue: "Under the royal lid, a municipal growth permit. Approved for thirty feet.",
   },
   {
@@ -117,7 +117,10 @@ function resetStage(stage) {
   const hp = levels[prefs.difficulty].health;
   s = {
     stage,
+    fork: equipFork(stage),
     mode: "intro",
+    stick: { x: 0, z: 0 },
+    economy: false,
     time: 0,
     intro: 0,
     andi: point(-2, 8),
@@ -152,7 +155,7 @@ function resetStage(stage) {
   if (stage === 0) s.rat = point(-5, 5);
   if (stage === 1 || stage === 4) {
     s.targets = [target(-4.2, 4), target(4.2, -6)];
-    s.mobs = [point(-3, -2), point(3, -3)];
+    s.mobs = [stage === 1 ? point(-4.9, 2.4) : point(-3, -2), point(3, -3)];
   }
   if (stage === 3) s.targets = [target(-4, 3), target(0, -6), target(4, 4)];
   $("bhealth").max = s.boss;
@@ -160,6 +163,8 @@ function resetStage(stage) {
   $("chapter").textContent = "ENCOUNTER 0" + (stage + 1) + " / 05";
   $("boss").textContent = cases[stage].name;
   $("quote").textContent = "";
+  $("forkButtons").hidden = !stage;
+  $("finish").hidden = true;
   showCard(
     "BOSS ENTRANCE",
     cases[stage].name,
@@ -185,6 +190,12 @@ function showCard(tag, name, sub, line, button) {
   $("sceneName").textContent = name;
   $("sceneSub").textContent = sub;
   $("sceneLine").textContent = line ? "“" + line + "”" : "";
+  $("utensilFilm").hidden = !(
+    s.fork &&
+    ((briefingCard && s.mode === "intro") ||
+      (s.mode === "won" && s.stage === 4))
+  );
+  $("award").hidden = !(s.mode === "won" && s.fork?.achievement);
   $("next").textContent = button;
   $("next").focus({ preventScroll: true });
 }
@@ -210,18 +221,26 @@ function strike() {
   tone(187, 0.23);
   tone(281, 0.28, 0.12);
   if (!s.boss) {
-    s.mode = "won";
     keys.clear();
-    const end = s.stage === 4;
-    showCard(
-      end ? "CAMPAIGN COMPLETE" : "ENCOUNTER CLEARED",
-      end ? "FIRST BELL" : cases[s.stage].name,
-      cases[s.stage].clue,
-      end ? "Somebody better cover my first period." : "",
-      end ? "Return to title" : "Next encounter →",
-    );
+    if (s.stage === 4) {
+      s.mode = "finale";
+      s.fork.finaleStart = s.time;
+      $("finish").hidden = false;
+    } else victoryCard();
   }
   syncHud();
+}
+function victoryCard() {
+  s.mode = "won";
+  $("finish").hidden = true;
+  const end = s.stage === 4;
+  showCard(
+    end ? "CAMPAIGN COMPLETE" : "ENCOUNTER CLEARED",
+    end ? "FIRST BELL" : cases[s.stage].name,
+    cases[s.stage].clue,
+    end ? "Somebody better cover my first period." : "",
+    end ? "Return to title" : "Next encounter →",
+  );
 }
 function hurt() {
   if (s.inv > 0 || s.mode !== "play") return;
@@ -250,6 +269,7 @@ function hurt() {
 }
 function dodge() {
   if (s?.mode !== "play" || s.dodgeWait > 0) return;
+  cancelFork();
   s.dash = 0.65;
   s.dodgeWait = 1.2;
   tone(248, 0.08);
@@ -276,6 +296,9 @@ function action() {
     s.locateUntil = s.time + 3;
     return;
   }
+  activateTarget(index, false);
+}
+function activateTarget(index, byFork) {
   if (s.stage === 3 && index !== panelOrder[s.step]) {
     s.step = 0;
     s.targets.forEach((t) => (t.used = false));
@@ -293,7 +316,7 @@ function action() {
   t.used = true;
   if (s.stage === 1 || (s.stage === 4 && s.step === 0)) {
     s.crushed.push(index === 0 ? 2 : 1);
-    s.roll = { from: { ...t }, to: { ...s.rat }, time: 0.65 };
+    s.roll = { byFork, from: { ...t }, to: { ...s.rat }, time: 0.65 };
     s.receipt =
       s.stage === 1
         ? "CART RELEASED — " + s.targets.filter((t) => t.used).length + " OF 2"
@@ -305,13 +328,21 @@ function action() {
     if (s.boss === 1 || s.stage === 4) s.mode = "impact";
     return;
   }
-  finishAction();
+  finishAction(byFork);
 }
-function finishAction() {
+function finishAction(byFork) {
   s.step++;
   s.stun = 0;
+  if (s.stage === 4 && s.step === 3) {
+    s.fork.extended = true;
+    s.fork.extension = 1;
+    s.andi.angle = Math.atan2(s.rat.x - s.andi.x, s.rat.z - s.andi.z);
+    s.fork.burst = null;
+    forkChime(true);
+  }
+  if (s.boss === 1 && (byFork || s.stage === 4)) s.fork.achievement = true;
   strike();
-  if (s.mode === "won") return;
+  if (s.mode === "won" || s.mode === "finale") return;
   if (s.stage === 2) {
     s.targets = [];
     s.attackTimer = 1.5;
@@ -328,7 +359,9 @@ function finishAction() {
       s.step === 1
         ? "His suit switches to backup power."
         : "He tosses his hat into the ring.",
-      s.step === 1 ? "He has a backup suit?" : "This meeting is over.",
+      s.step === 1
+        ? "He has a backup suit?"
+        : "You're about to become a four-course meal.",
       "BEGIN PHASE",
     );
     tone(124, 0.32);
@@ -351,9 +384,11 @@ function blocked(x, z) {
 function moveAndi(dt) {
   const p = s.andi,
     dx =
+      s.stick.x +
       Number(keys.has("arrowright") || keys.has("d")) -
       Number(keys.has("arrowleft") || keys.has("a")),
     dz =
+      s.stick.z +
       Number(keys.has("arrowdown") || keys.has("s")) -
       Number(keys.has("arrowup") || keys.has("w"));
   const len = Math.hypot(dx, dz);
@@ -439,6 +474,26 @@ function enemies(dt) {
     r = s.rat,
     level = levels[prefs.difficulty];
   s.mobs.forEach((m, i) => {
+    if (m.panic > 0) {
+      m.panic -= dt;
+      m.tumble = Math.max(0, (m.tumble || 0) - dt);
+      const x = m.x + Math.sin(m.flee) * dt * 6,
+        z = m.z + Math.cos(m.flee) * dt * 6;
+      if (!blocked(x, m.z)) m.x = x;
+      if (!blocked(m.x, z)) m.z = z;
+      return;
+    }
+    if (
+      s.fork.phase === "holding" &&
+      s.fork.charged &&
+      distance(m, p) < 2.7 &&
+      s.time > (m.evadeUntil || 0)
+    ) {
+      m.evadeUntil = s.time + 5;
+      m.panic = 0.22;
+      m.flee = p.angle + ((i ? 1 : -1) * Math.PI) / 2;
+      return;
+    }
     track(m, p.x + Math.sin(s.time + i) * 0.5, p.z, 1.45 * level.speed, dt);
     if (distance(m, p) < 0.64) {
       hurt();
@@ -446,6 +501,7 @@ function enemies(dt) {
       m.z = -5;
     }
   });
+  if (s.fork.stagger > 0) return;
   if (s.stun > 0) {
     s.stun -= dt;
     if (s.stun <= 0) {
@@ -506,7 +562,9 @@ function advance() {
 }
 function pause() {
   if (s?.mode === "play" || s?.mode === "impact") {
+    if (s.fork?.phase === "holding") cancelFork();
     s.resumeMode = s.mode;
+    resetStick();
     keys.clear();
     s.mode = "paused";
     showCard(
@@ -519,9 +577,10 @@ function pause() {
   } else if (s?.mode === "paused") play();
 }
 function loop(now) {
+  if (!s || !view) return;
+  view.performance?.(now - last);
   const dt = clamp((now - last) / 1000 || 0, 0, 0.05);
   last = now;
-  if (!s) return;
   if (s.mode === "intro" && !$("dialog").open) {
     s.time += dt;
     s.intro += dt;
@@ -531,10 +590,11 @@ function loop(now) {
     for (const key of ["dash", "inv", "actionWait", "dodgeWait"])
       s[key] = Math.max(0, s[key] - dt);
     moveAndi(dt);
+    updateFork(dt);
     if (s.stage === 0) {
       commuter(dt);
       if (s.mode === "play" && s.driving) looseCart(dt);
-    } else enemies(dt);
+    } else if (s.mode === "play") enemies(dt);
     if (s.lineUntil && s.time > s.lineUntil) {
       $("quote").textContent = "";
       s.lineUntil = 0;
@@ -549,21 +609,34 @@ function loop(now) {
       tone(67, 0.24, 0, "sawtooth", 0.045);
       tone(108, 0.16, 0.08);
       if (s.mode === "play") {
+        const { byFork } = s.roll;
         s.roll = null;
-        finishAction();
+        finishAction(byFork);
       }
     }
     if (s.roll?.time < -0.45) {
+      const { byFork } = s.roll;
       s.roll = null;
-      finishAction();
+      finishAction(byFork);
     }
   }
+  if (s.mode === "finale" && !$("dialog").open) {
+    s.time += dt;
+    const elapsed = s.time - s.fork.finaleStart;
+    if (elapsed >= 0.36 && !s.fork.burst)
+      forkBurst(s.rat, "FOUR-COURSE FINALE", "confetti");
+    if (elapsed >= 1.65) victoryCard();
+  }
+  if (s.mode === "won" && s.stage === 4 && !$("dialog").open) s.time += dt;
   view.draw(s);
   updateMission();
+  drawForkEffects();
   frame = requestAnimationFrame(loop);
 }
 function start() {
   unlockSound();
+  document.body.classList.add("playing");
+  document.body.classList.toggle("phone", touchPlay());
   $("menu").hidden = true;
   $("arena").hidden = false;
   $("help").hidden = false;
@@ -576,11 +649,17 @@ function start() {
 function home() {
   cancelAnimationFrame(frame);
   keys.clear();
+  resetStick();
   s = null;
+  document.body.classList.remove("playing", "phone");
   $("arena").hidden = true;
   $("help").hidden = true;
   $("menu").hidden = false;
-  audio?.suspend();
+  view?.dispose();
+  view = null;
+  audio?.close().catch(() => {});
+  audio = null;
+  ambient = null;
   $("start").focus();
 }
 function modal(title, html) {
@@ -591,7 +670,7 @@ function modal(title, html) {
   $("dialog").showModal();
 }
 const controlCopy =
-  "<p><b>Move or steer</b> with WASD or the arrow keys. On touchscreens, hold the direction pad.</p><p><b>E / Act</b> enters the car, releases bins, strikes weak points and operates panels. Drive into the first rat to intercept it.</p><p><b>Space / Dodge</b> gives Andi a moment of protection. Amber rings show where an attack will land.</p><p><b>+ / −</b> adjusts camera distance. Camera zoom is also in Settings. Use <b>P</b> to pause.</p>";
+  "<p>From the Dumpster King onward, F extends the fork. Tap J or left click to thrust. Hold for the chime and release to charge. On phones, Attack aims and extends automatically.</p><p><b>Move or steer</b> with WASD or the arrow keys. On touchscreens, hold the direction pad.</p><p><b>E / Act</b> enters the car, releases bins, strikes weak points and operates panels. Drive into the first rat to intercept it.</p><p><b>Space / Dodge</b> gives Andi a moment of protection. Amber rings show where an attack will land.</p><p><b>+ / −</b> adjusts camera distance. Camera zoom is also in Settings. Use <b>P</b> to pause.</p>";
 $("help").onclick = () => modal(cases[s.stage].name, briefing());
 $("how").onclick = () => modal("CONTROLS", controlCopy);
 $("settings").onclick = () => {
@@ -663,18 +742,68 @@ cases.forEach((c, i) => {
     );
   $("files").append(b);
 });
+$("finish").onclick = victoryCard;
 $("start").onclick = start;
 $("next").onclick = advance;
 $("pause").onclick = pause;
-$("touchAction").onclick = action;
-$("touchDodge").onclick = dodge;
-for (const b of document.querySelectorAll("[data-key]")) {
-  b.onpointerdown = (e) => {
-    b.setPointerCapture(e.pointerId);
-    keys.add(b.dataset.key);
+function thumbButton(el, fn) {
+  el.onpointerdown = (e) => {
+    if (e.button === 0) {
+      e.preventDefault();
+      fn();
+    }
   };
-  b.onlostpointercapture = () => keys.delete(b.dataset.key);
+  el.onclick = (e) => {
+    if (e.detail === 0) fn();
+  };
 }
+thumbButton($("touchAction"), action);
+thumbButton($("touchDodge"), dodge);
+const pad = document.querySelector(".pad");
+let stickPointer = null;
+function resetStick() {
+  if (s) s.stick = { x: 0, z: 0 };
+  stickPointer = null;
+  pad.removeAttribute("data-held");
+  for (const b of pad.querySelectorAll("button")) b.classList.remove("pressed");
+}
+function steerTouch(e) {
+  if (stickPointer !== e.pointerId || s?.mode !== "play") return;
+  const r = pad.getBoundingClientRect(),
+    x = (e.clientX - r.left) / r.width - 0.5,
+    z = (e.clientY - r.top) / r.height - 0.5;
+  const len = Math.hypot(x, z);
+  s.stick = len < 0.09 ? { x: 0, z: 0 } : { x: x / len, z: z / len };
+  pad.dataset.held = "true";
+  for (const b of pad.querySelectorAll("button"))
+    b.classList.toggle(
+      "pressed",
+      {
+        arrowleft: -s.stick.x,
+        arrowright: s.stick.x,
+        arrowup: -s.stick.z,
+        arrowdown: s.stick.z,
+      }[b.dataset.key] > 0.35,
+    );
+}
+pad.onpointerdown = (e) => {
+  if (s?.mode !== "play" || stickPointer !== null) return;
+  stickPointer = e.pointerId;
+  pad.setPointerCapture(e.pointerId);
+  steerTouch(e);
+};
+pad.onpointermove = steerTouch;
+pad.onlostpointercapture = (e) => {
+  if (e.pointerId === stickPointer) resetStick();
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    resetStick();
+    keys.clear();
+    if (s?.mode === "play" || s?.mode === "impact") pause();
+    audio?.suspend();
+  } else if (s && prefs.sound) audio?.resume().catch(() => {});
+});
 addEventListener("keydown", (e) => {
   if (!s || $("dialog").open) return;
   const k = e.key.toLowerCase();
@@ -687,13 +816,43 @@ addEventListener("keydown", (e) => {
   if (e.repeat) return;
   if (k === "p" || k === "escape") pause();
   if (k === "?") $("help").click();
+  if (k === "f") toggleFork();
+  if (k === "j") holdFork("key");
   if (k === "e") action();
   if (k === " ") dodge();
   if (k === "+" || k === "=") s.zoom = clamp(s.zoom - 0.1, 0.8, 1.4);
   if (k === "-") s.zoom = clamp(s.zoom + 0.1, 0.8, 1.4);
 });
-addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+addEventListener("keyup", (e) => {
+  keys.delete(e.key.toLowerCase());
+  if (e.key.toLowerCase() === "j") releaseFork("key");
+});
 addEventListener("blur", () => {
   keys.clear();
   if (s?.mode === "play" || s?.mode === "impact") pause();
 });
+
+thumbButton($("forkToggle"), toggleFork);
+for (const el of [$("touchAttack"), $("view")]) {
+  el.addEventListener("pointerdown", (e) => {
+    if (
+      e.button !== 0 ||
+      s?.mode !== "play" ||
+      !s.fork ||
+      (el === $("view") && e.pointerType !== "mouse")
+    )
+      return;
+    el.setPointerCapture(e.pointerId);
+    const rect = el.getBoundingClientRect();
+    holdFork(
+      e.pointerId,
+      el === $("view")
+        ? view.aim(e.clientX - rect.left, e.clientY - rect.top)
+        : null,
+    );
+  });
+  el.addEventListener("pointerup", (e) => releaseFork(e.pointerId));
+  el.addEventListener("lostpointercapture", (e) => {
+    if (s?.fork?.source === e.pointerId) cancelFork();
+  });
+}
