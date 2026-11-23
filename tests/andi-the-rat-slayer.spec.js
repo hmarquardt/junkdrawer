@@ -141,6 +141,9 @@ test("all five bosses, retry and ending via keyboard gameplay", async ({
   }
   async function actAt(x, z) {
     await go(x, z);
+    await expect(page.locator("#instruction")).toHaveText(
+      /^Press E to (release cart|strike|activate panel [123])$/,
+    );
     await page.keyboard.press("e");
     await tick(15);
   }
@@ -151,6 +154,7 @@ test("all five bosses, retry and ending via keyboard gameplay", async ({
   await actAt(-4.2, 4);
   await go(-4.2, 2);
   await actAt(4.2, -6);
+  await tick(70);
   await next();
   await go(-4.4, 4);
   for (let hit = 0; hit < 2; hit++) {
@@ -177,10 +181,19 @@ test("all five bosses, retry and ending via keyboard gameplay", async ({
   await actAt(4, 4);
   await next();
   await actAt(-4.2, 4);
+  await tick(70);
+  await tick(360);
   await expect(page.locator("#sceneName")).toHaveText("HOSTILE TAKEOVER");
+  await expect(page.locator("#missionBrief")).toContainText(
+    "Cut power to his suit",
+  );
   await page.click("#next");
   await go(-4.2, 2);
   await actAt(4, 3);
+  await tick(360);
+  await expect(page.locator("#missionBrief")).toContainText(
+    "Land the final strike",
+  );
   await page.click("#next");
   await tick(240);
   const pad = await page.evaluate(() => s.targets[0]);
@@ -206,7 +219,10 @@ test("portrait touch controls and fallback drawing", async ({ browser }) => {
     };
   });
   await page.tap("#start");
+  await expect(page.locator("#missionBrief")).toContainText("Tap Act");
+  await expect(page.locator("#missionBrief")).not.toContainText("WASD");
   await page.tap("#next");
+  await expect(page.locator("#instruction")).toHaveText("Tap Act to enter");
   await page.tap("#touchAction");
   expect(await page.evaluate(() => s.driving)).toBe(true);
   const pad = page.locator("[data-key=arrowright]");
@@ -228,6 +244,198 @@ test("portrait touch controls and fallback drawing", async ({ browser }) => {
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  expect(log).toEqual([]);
+  await context.close();
+});
+
+test("briefings wait for acknowledgement and help restores the exact encounter", async ({
+  page,
+}) => {
+  const log = errors(page);
+  await mapClock(page);
+  await page.goto(url);
+  await page.click("#start");
+  for (const [stage, goal] of [
+    "Intercept the rat",
+    "Defeat the Dumpster King",
+    "two exposed weak points",
+    "Override three panels",
+    "break his barricade",
+  ].entries()) {
+    await page.evaluate((i) => resetStage(i), stage);
+    await page.evaluate(() => advanceFrames(450));
+    await expect(page.locator("#missionBrief")).toContainText(goal);
+    for (const key of ["Goal", "How", "Watch out", "Controls"])
+      await expect(
+        page.locator("#missionBrief dt").getByText(key, { exact: true }),
+      ).toBeVisible();
+    if (stage === 4)
+      await expect(page.locator("#missionBrief")).not.toContainText("panel 2");
+    await page.getByRole("button", { name: "BEGIN FIGHT" }).click();
+    await page.evaluate(() => advanceFrames(8));
+    const before = await page.evaluate(() => [
+      s.time,
+      s.hp,
+      s.stage,
+      s.step,
+      s.attackTimer,
+    ]);
+    await page.click("#help");
+    await expect(page.locator("dialog")).toContainText(goal);
+    await page.evaluate(() => advanceFrames(600));
+    expect(
+      await page.evaluate(() => [s.time, s.hp, s.stage, s.step, s.attackTimer]),
+    ).toEqual(before);
+    await page.click("#close");
+    await page.click("#pause");
+    await page.evaluate(() => advanceFrames(180));
+    await expect(page.locator("#next")).toHaveText("Resume");
+    await page.click("#help");
+    await page.click("#close");
+    await expect(page.locator("#next")).toHaveText("Resume");
+    await page.click("#next");
+  }
+  expect(log).toEqual([]);
+});
+test("release controls, recovery hints, receipt and impact follow the encounter", async ({
+  page,
+}) => {
+  const log = errors(page);
+  await mapClock(page);
+  await page.goto(url);
+  await page.click("#start");
+  await page.evaluate(() => resetStage(1));
+  await page.click("#next");
+  // Keep the stationary fixture alive long enough to test both hint thresholds.
+  await page.evaluate(() => {
+    s.inv = 65;
+    advanceFrames(2);
+  });
+  await expect(page.locator("#progress")).toHaveText(
+    "Cart releases activated: 0 / 2",
+  );
+  await expect(page.locator("#pins .pin:visible")).toHaveCount(2);
+  await page.keyboard.press("e");
+  await page.evaluate(() => advanceFrames(1));
+  await expect(page.locator("#instruction")).toContainText("Follow Release 1");
+  await page.evaluate(() => advanceFrames(930));
+  await page.evaluate(() => {
+    for (let i = 0; i < 125 && s.attack; i++) advanceFrames(1);
+  });
+  await expect(page.locator("#instruction")).toContainText("glowing controls");
+  await page.evaluate(() => advanceFrames(950));
+  await expect(page.locator("#guideLayer")).toHaveClass(/beacon/);
+  expect(await page.evaluate(() => s.mode)).toBe("play");
+  await page.keyboard.down("a");
+  await page.evaluate(() => {
+    s.andi.x = -4.2;
+    s.andi.z = 4;
+    advanceFrames(1);
+  });
+  await page.keyboard.up("a");
+  await expect(page.locator("#instruction")).toHaveText(
+    "Press E to release cart",
+  );
+  await expect(page.locator("#guideLayer")).not.toHaveClass(/beacon/);
+  await page.keyboard.press("e");
+  await page.evaluate(() => advanceFrames(1));
+  await expect(page.locator("#receipt")).toHaveText("CART RELEASED — 1 OF 2");
+  await expect(page.locator("#progress")).toContainText("1 / 2");
+  await expect(page.locator(".complete")).toContainText("Release 1");
+  await expect(page.locator(".primaryPin")).toContainText("Release 2");
+  await page.evaluate(() => advanceFrames(40));
+  await expect(page.locator("#impact")).toBeVisible();
+  expect(await page.locator("#bhealth").evaluate((e) => e.value)).toBe(1);
+  await page.evaluate(() => {
+    s.andi.x = 4.2;
+    s.andi.z = -6;
+    advanceFrames(1);
+  });
+  await page.keyboard.press("e");
+  await page.evaluate(() => advanceFrames(2));
+  await expect(page.locator("#progress")).toContainText("2 / 2");
+  await expect(page.locator(".primaryPin:visible")).toHaveCount(0);
+  await page.evaluate(() => advanceFrames(68));
+  await expect(page.locator("#sceneTag")).toHaveText("ENCOUNTER CLEARED");
+  expect(log).toEqual([]);
+});
+test("guidance follows panel resets, dodge warnings and temporary weak points", async ({
+  page,
+}) => {
+  await mapClock(page);
+  await page.goto(url);
+  await page.click("#start");
+  await page.evaluate(() => resetStage(3));
+  await page.click("#next");
+  await page.evaluate(() => advanceFrames(1));
+  await expect(page.locator("#instruction")).toContainText("2 → 1 → 3");
+  async function panel(i) {
+    await page.evaluate((i) => {
+      Object.assign(s.andi, s.targets[i]);
+      advanceFrames(15);
+    }, i);
+    await page.keyboard.press("e");
+    await page.evaluate(() => advanceFrames(1));
+  }
+  await panel(1);
+  await expect(page.locator("#progress")).toContainText("1 / 3");
+  await panel(2);
+  await expect(page.locator("#progress")).toContainText("0 / 3");
+  await expect(page.locator(".primaryPin")).toContainText("Panel 2");
+  await expect(page.locator("#pins .complete")).toHaveCount(0);
+  await page.evaluate(() => resetStage(2));
+  await page.click("#next");
+  await page.evaluate(() => {
+    s.andi.x = -4.4;
+    s.andi.z = 4;
+    advanceFrames(240);
+  });
+  await expect(page.locator("#instruction")).toContainText("Press Space");
+  await page.keyboard.press("Space");
+  await page.evaluate(() => advanceFrames(40));
+  await expect(page.locator(".primaryPin")).toContainText("Weak point");
+  await expect(page.locator("#instruction")).toHaveText("Press E to strike");
+  await page.evaluate(() => advanceFrames(350));
+  await expect(page.locator(".primaryPin")).toContainText("Dumpster");
+  await expect(page.locator("#instruction")).not.toContainText("strike");
+});
+test("portrait WebGL projects the active release to the edge and uses touch labels", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 360, height: 740 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  const log = errors(page);
+  await page.goto(url);
+  await page.tap("#start");
+  await page.evaluate(() => resetStage(1));
+  await page.tap("#next");
+  await page.evaluate(() => {
+    s.andi.x = 4.2;
+    s.andi.z = -6;
+  });
+  await expect(page.locator("#instruction")).toHaveText(
+    "Tap Act to release cart",
+  );
+  await page.tap("#touchAction");
+  await page.evaluate(() => {
+    s.andi.x = 7.4;
+    s.andi.z = -11;
+    s.zoom = 0.8;
+  });
+  await expect(page.locator(".primaryPin.edge")).toContainText("Release 1");
+  await expect(page.locator(".primaryPin.edge")).toBeInViewport();
+  expect(
+    await page.evaluate(
+      () => !!document.querySelector("#view canvas").getContext("webgl2"),
+    ),
+  ).toBe(true);
+  await page.tap("#help");
+  await expect(page.locator("dialog")).toContainText("direction pad");
+  await page.tap("#close");
   expect(log).toEqual([]);
   await context.close();
 });

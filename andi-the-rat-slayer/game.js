@@ -17,7 +17,7 @@ const cases = [
   {
     name: "The Dumpster King",
     type: "Environmental combat",
-    sub: "You clipped his cousin.",
+    sub: "His royal court is about to get flattened.",
     line: "Oh, you've got to be kidding me.",
     clue: "Under the royal lid, a municipal growth permit. Approved for thirty feet.",
   },
@@ -144,6 +144,9 @@ function resetStage(stage) {
     zoom: s?.zoom || 1,
     step: 0,
     actionWait: 0,
+    locateUntil: 0,
+    receiptUntil: 0,
+    impactUntil: 0,
     lastNear: 0,
   };
   if (stage === 0) s.rat = point(-5, 5);
@@ -162,7 +165,7 @@ function resetStage(stage) {
     cases[stage].name,
     cases[stage].sub,
     cases[stage].line,
-    "Skip entrance",
+    "BEGIN FIGHT",
   );
   [0, 1, 2, 3].forEach((n) =>
     tone(
@@ -174,6 +177,9 @@ function resetStage(stage) {
   syncHud();
 }
 function showCard(tag, name, sub, line, button) {
+  const briefingCard = s.mode === "intro" || s.mode === "phase";
+  $("missionBrief").hidden = !briefingCard;
+  $("missionBrief").innerHTML = briefingCard ? briefing() : "";
   $("sceneCard").hidden = false;
   $("sceneTag").textContent = tag;
   $("sceneName").textContent = name;
@@ -183,36 +189,12 @@ function showCard(tag, name, sub, line, button) {
   $("next").focus({ preventScroll: true });
 }
 function play() {
-  s.mode = "play";
+  s.mode = s.mode === "paused" ? s.resumeMode : "play";
   $("sceneCard").hidden = true;
   keys.clear();
   syncHud();
 }
-function objective() {
-  if (s.mode === "won") return cases[s.stage].clue;
-  switch (s.stage) {
-    case 0:
-      return s.driving
-        ? "Intercept the rat. Dodge runaway carts with Space or Dodge."
-        : "Walk to the blue car. Press E or Act to get in.";
-    case 1:
-      return "Reach a numbered cart release. Press E or Act to send its bin rolling.";
-    case 2:
-      return s.stun > 0
-        ? "Ratzilla is staggered! Reach the gold weak point and press Act."
-        : "Bait a stomp beside a green bin, then dodge out of the amber ring.";
-    case 3:
-      return "Override the panels in order: 2 → 1 → 3. Press Act at each panel.";
-    case 4:
-      return [
-        "Break his barricade. Reach a numbered bin release and press Act.",
-        "Cut power to his suit. Reach panel 2 and press Act.",
-        "Dodge his lunge, then reach the gold weak point and press Act.",
-      ][s.step];
-  }
-}
 function syncHud() {
-  $("objective").textContent = objective();
   $("health").value = s.hp;
   $("bhealth").value = s.boss;
 }
@@ -278,22 +260,23 @@ function action() {
   if (s?.mode !== "play" || s.actionWait > 0) return;
   s.actionWait = 0.23;
   if (s.stage === 0) {
-    if (!s.driving && distance(s.andi, s.car) < 3) {
+    if (!s.driving && distance(s.andi, s.car) < CAR_RADIUS) {
       s.driving = true;
       Object.assign(s.andi, s.car);
       tone(93, 0.3);
       syncHud();
-    } else if (!s.driving) say(["I left the car by the green bin."]);
+    } else if (!s.driving) s.locateUntil = s.time + 3;
     return;
   }
+  if (s.roll) return;
   const index = s.targets.findIndex(
-    (t) => !t.used && distance(t, s.andi) < 2.4,
+    (t) => !t.used && distance(t, s.andi) < USE_RADIUS,
   );
   if (index < 0) {
-    say(["A little closer, Andi."]);
+    s.locateUntil = s.time + 3;
     return;
   }
-  if (s.stage === 3 && index !== [1, 0, 2][s.step]) {
+  if (s.stage === 3 && index !== panelOrder[s.step]) {
     s.step = 0;
     s.targets.forEach((t) => (t.used = false));
     tone(83, 0.2);
@@ -311,8 +294,20 @@ function action() {
   if (s.stage === 1 || (s.stage === 4 && s.step === 0)) {
     s.crushed.push(index === 0 ? 2 : 1);
     s.roll = { from: { ...t }, to: { ...s.rat }, time: 0.65 };
+    s.receipt =
+      s.stage === 1
+        ? "CART RELEASED — " + s.targets.filter((t) => t.used).length + " OF 2"
+        : "CART RELEASED";
+    s.receiptUntil = s.time + 3.5;
+    tone(360, 0.12);
+    tone(150, 0.3, 0.1, "triangle");
     s.mobs.pop();
+    if (s.boss === 1 || s.stage === 4) s.mode = "impact";
+    return;
   }
+  finishAction();
+}
+function finishAction() {
   s.step++;
   s.stun = 0;
   strike();
@@ -326,14 +321,16 @@ function action() {
     s.attackTimer = 1.7;
     s.targets = s.step === 1 ? [target(-3, -3), target(4, 3)] : [];
     s.mobs = [];
+    s.mode = "phase";
     showCard(
       "THE RATFATHER · PHASE " + (s.step + 1),
       s.step === 1 ? "HOSTILE TAKEOVER" : "LAST LUNGE",
-      objective(),
+      s.step === 1
+        ? "His suit switches to backup power."
+        : "He tosses his hat into the ring.",
       s.step === 1 ? "He has a backup suit?" : "This meeting is over.",
-      "Continue",
+      "BEGIN PHASE",
     );
-    s.mode = "phase";
     tone(124, 0.32);
   }
   syncHud();
@@ -468,7 +465,7 @@ function enemies(dt) {
         r.x = a.x;
         r.z = a.z;
         const bin = alleyBins.findIndex(
-          ([x, z]) => Math.hypot(x - a.x, z - a.z) < 3.5,
+          ([x, z]) => Math.hypot(x - a.x, z - a.z) < BAIT_RADIUS,
         );
         if (bin >= 0 || s.stage === 4) {
           if (bin >= 0 && !s.crushed.includes(bin)) s.crushed.push(bin);
@@ -508,20 +505,26 @@ function advance() {
   } else if (s.mode === "lost") resetStage(s.stage);
 }
 function pause() {
-  if (s?.mode === "play") {
+  if (s?.mode === "play" || s?.mode === "impact") {
+    s.resumeMode = s.mode;
     keys.clear();
     s.mode = "paused";
-    showCard("CAMPAIGN PAUSED", "HOLD THE BELL", objective(), "", "Resume");
+    showCard(
+      "CAMPAIGN PAUSED",
+      "HOLD THE BELL",
+      $("objective").textContent,
+      "",
+      "Resume",
+    );
   } else if (s?.mode === "paused") play();
 }
 function loop(now) {
-  const dt = Math.min((now - last) / 1000 || 0, 0.05);
+  const dt = clamp((now - last) / 1000 || 0, 0, 0.05);
   last = now;
   if (!s) return;
   if (s.mode === "intro" && !$("dialog").open) {
     s.time += dt;
     s.intro += dt;
-    if (s.intro > 3) play();
   }
   if (s.mode === "play") {
     s.time += dt;
@@ -536,18 +539,34 @@ function loop(now) {
       $("quote").textContent = "";
       s.lineUntil = 0;
     }
-    if (s.roll) {
-      s.roll.time -= dt;
-      if (s.roll.time <= 0) s.roll = null;
+  }
+  if (s.mode === "impact" && !$("dialog").open) s.time += dt;
+  if (s.roll && ["play", "impact"].includes(s.mode) && !$("dialog").open) {
+    s.roll.time -= dt;
+    if (s.roll.time <= 0 && !s.roll.hit) {
+      s.roll.hit = true;
+      s.impactUntil = s.time + 0.85;
+      tone(67, 0.24, 0, "sawtooth", 0.045);
+      tone(108, 0.16, 0.08);
+      if (s.mode === "play") {
+        s.roll = null;
+        finishAction();
+      }
+    }
+    if (s.roll?.time < -0.45) {
+      s.roll = null;
+      finishAction();
     }
   }
   view.draw(s);
+  updateMission();
   frame = requestAnimationFrame(loop);
 }
 function start() {
   unlockSound();
   $("menu").hidden = true;
   $("arena").hidden = false;
+  $("help").hidden = false;
   if (!view) view = createAlleyView($("view"), prefs.quality);
   resetStage(0);
   window.scrollTo(0, 0);
@@ -559,12 +578,13 @@ function home() {
   keys.clear();
   s = null;
   $("arena").hidden = true;
+  $("help").hidden = true;
   $("menu").hidden = false;
   audio?.suspend();
   $("start").focus();
 }
 function modal(title, html) {
-  dialogPaused = s?.mode === "play";
+  dialogPaused = s?.mode === "play" || s?.mode === "impact";
   if (dialogPaused) pause();
   $("dialogTitle").textContent = title;
   $("content").innerHTML = html;
@@ -572,6 +592,7 @@ function modal(title, html) {
 }
 const controlCopy =
   "<p><b>Move or steer</b> with WASD or the arrow keys. On touchscreens, hold the direction pad.</p><p><b>E / Act</b> enters the car, releases bins, strikes weak points and operates panels. Drive into the first rat to intercept it.</p><p><b>Space / Dodge</b> gives Andi a moment of protection. Amber rings show where an attack will land.</p><p><b>+ / −</b> adjusts camera distance. Camera zoom is also in Settings. Use <b>P</b> to pause.</p>";
+$("help").onclick = () => modal(cases[s.stage].name, briefing());
 $("how").onclick = () => modal("CONTROLS", controlCopy);
 $("settings").onclick = () => {
   modal(
@@ -657,11 +678,15 @@ for (const b of document.querySelectorAll("[data-key]")) {
 addEventListener("keydown", (e) => {
   if (!s || $("dialog").open) return;
   const k = e.key.toLowerCase();
-  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k))
+  if (
+    s.mode === "play" &&
+    ["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)
+  )
     e.preventDefault();
   keys.add(k);
   if (e.repeat) return;
   if (k === "p" || k === "escape") pause();
+  if (k === "?") $("help").click();
   if (k === "e") action();
   if (k === " ") dodge();
   if (k === "+" || k === "=") s.zoom = clamp(s.zoom - 0.1, 0.8, 1.4);
@@ -670,5 +695,5 @@ addEventListener("keydown", (e) => {
 addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 addEventListener("blur", () => {
   keys.clear();
-  if (s?.mode === "play") pause();
+  if (s?.mode === "play" || s?.mode === "impact") pause();
 });

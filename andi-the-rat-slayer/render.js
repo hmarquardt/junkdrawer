@@ -348,6 +348,16 @@ function createAlleyView(host, quality) {
     const m = shape(scene, cube, "#e99c43", 0, 0.06, 0, 1.7, 0.12, 1.7);
     return m;
   });
+  const levers = pads.map(() => {
+    const stand = new T.Group();
+    scene.add(stand);
+    shape(stand, cube, "#293b3a", 0, 0.55, 0, 0.52, 1.1, 0.49);
+    shape(stand, cube, "#ffe1a1", 0, 1.12, 0, 0.68, 0.17, 0.64);
+    const shaft = shape(stand, cube, "#423c32", 0, 1.4, 0, 0.12, 0.6, 0.12);
+    shaft.rotation.x = -0.35;
+    const grip = shape(stand, cube, "#ffa347", 0, 1.67, -0.1, 0.65, 0.19, 0.19);
+    return { stand, grip };
+  });
   const symbols = pads.map((pad, i) => {
     const c = document.createElement("canvas");
     c.width = c.height = 96;
@@ -402,9 +412,11 @@ function createAlleyView(host, quality) {
       (j, i) => (j.rotation.y = Math.sin(t * 9 - i * 0.6) * 0.23),
     );
   }
+  let projectionWidth = 0,
+    projectionHeight = 0;
   function draw(s) {
-    const w = host.clientWidth,
-      h = host.clientHeight;
+    const w = (projectionWidth = host.clientWidth),
+      h = (projectionHeight = host.clientHeight);
     if (
       canvas.clientWidth !== w ||
       canvas.width !== Math.floor(w * renderer.getPixelRatio()) ||
@@ -434,6 +446,9 @@ function createAlleyView(host, quality) {
       boss.g.position.z += (s.attack.z - r.z) * u;
       boss.g.position.y += Math.sin(u * Math.PI) * 2.8;
     }
+    if (s.impactUntil > s.time)
+      boss.g.rotation.z = Math.sin((s.impactUntil - s.time) * 25) * 0.16;
+    else boss.g.rotation.z = 0;
     crown.visible = s.stage === 1;
     hat.visible = s.stage === 4;
     visor.visible = s.stage === 3;
@@ -443,6 +458,12 @@ function createAlleyView(host, quality) {
     });
     pads.forEach((m, i) => {
       const a = s.targets[i];
+      const { stand, grip } = levers[i];
+      stand.visible = !!a && leverStage();
+      if (stand.visible) {
+        stand.position.set(a.x, 0, a.z);
+        grip.position.y = a.used ? 1.17 : 1.67;
+      }
       m.visible = symbols[i].visible = !!a && !a.used;
       if (m.visible) {
         m.position.set(a.x, 0.09, a.z);
@@ -471,7 +492,7 @@ function createAlleyView(host, quality) {
       rolling.rotation.z = 0.15 * Math.sin(u * 12);
     }
     if (s.roll) {
-      const u = 1 - s.roll.time / 0.65;
+      const u = Math.min(1, 1 - s.roll.time / 0.65);
       rolling.position.set(
         s.roll.from.x + (s.roll.to.x - s.roll.from.x) * u,
         0.8 + 0.35 * Math.sin(u * Math.PI),
@@ -529,12 +550,21 @@ function createAlleyView(host, quality) {
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
   }
-  return { draw, options };
+  const projected = new T.Vector3();
+  function project(x, z, height) {
+    projected.set(x, height, z).project(camera);
+    return {
+      x: ((projected.x + 1) * projectionWidth) / 2,
+      y: ((1 - projected.y) * projectionHeight) / 2,
+    };
+  }
+  return { draw, options, project };
 }
 function createMapView(host) {
   const c = document.createElement("canvas");
   host.replaceChildren(c);
   const g = c.getContext("2d");
+  let floorTransform;
   function draw(s) {
     const w = host.clientWidth,
       h = host.clientHeight;
@@ -555,6 +585,7 @@ function createMapView(host) {
       w / 2 - focus.x * k * 0.12,
       h / 2 - focus.z * k * 0.14,
     );
+    floorTransform = g.getTransform();
     g.fillStyle = "#68685c";
     g.fillRect(-8, -13, 16, 26);
     function label(x, z, symbol, color, size = 1) {
@@ -575,7 +606,18 @@ function createMapView(host) {
       g.stroke();
     }
     s.targets.forEach((a, i) => {
-      if (!a.used) label(a.x, a.z, String(i + 1), "#ffc978", 1.6);
+      if (leverStage()) {
+        g.fillStyle = "#263334";
+        g.fillRect(a.x - 0.42, a.z - 0.5, 0.84, 1);
+        g.strokeStyle = a.used ? "#a4a398" : "#fff2ac";
+        g.lineWidth = 0.12;
+        g.beginPath();
+        g.moveTo(a.x, a.z + 0.27);
+        g.lineTo(a.x + 0.18, a.z - 0.46);
+        g.stroke();
+        g.fillStyle = a.used ? "#8e9286" : "#ff984a";
+        g.fillRect(a.x - 0.15, a.z - 0.58, 0.73, 0.22);
+      } else if (!a.used) label(a.x, a.z, String(i + 1), "#ffc978", 1.6);
     });
     if (s.stage === 0 && s.attack) {
       const u = 1 - s.attack.delay / levels[prefs.difficulty].warning;
@@ -588,7 +630,7 @@ function createMapView(host) {
       );
     }
     if (s.roll) {
-      const u = 1 - s.roll.time / 0.65;
+      const u = Math.min(1, 1 - s.roll.time / 0.65);
       label(
         s.roll.from.x + (s.roll.to.x - s.roll.from.x) * u,
         s.roll.from.z + (s.roll.to.z - s.roll.from.z) * u,
@@ -602,5 +644,9 @@ function createMapView(host) {
     s.mobs.forEach((m) => label(m.x, m.z, "🐀", "#fff"));
     if (!s.driving) label(s.andi.x, s.andi.z, "🧥", "#ff9e58", 1.4);
   }
-  return { draw, options() {} };
+  function project(x, z, height) {
+    const m = floorTransform;
+    return { x: m.a * x + m.e, y: m.d * (z - height * 0.6) + m.f };
+  }
+  return { draw, project, options() {} };
 }
