@@ -20,6 +20,10 @@ function inputs() {
         dodgeKey: "Space",
       };
 }
+function baitLocation() {
+  const [x, z] = alleyBins[s.step === 0 ? 2 : 3];
+  return { x, z };
+}
 function briefing() {
   const { act, move, dodge, dodgeKey } = inputs();
   const releaseSteps = touchPlay()
@@ -54,13 +58,12 @@ function briefing() {
     [
       "Strike two exposed weak points.",
       [
-        "Stand beside a green dumpster to draw a stomp.",
+        "Ratzilla is too big to attack directly. Stand near the highlighted dumpster to lure his stomp.",
         dodge +
-          " as the impact ring closes. Approach the gold weak point. " +
-          act +
-          " to strike.",
+          " when the ring flashes, or step out. Approach the gold star. " +
+          (touchPlay() ? "Tap Strike." : "Press E to strike."),
       ],
-      "The stomp hits hard. Each opening lasts only a few seconds.",
+      "The stomp hits the marked ring. On Story, the gold target stays until you strike.",
     ],
     [
       "Override three panels.",
@@ -95,8 +98,15 @@ function briefing() {
       ],
     ][Math.min(s.step, 2)],
   ];
-  const [goal, how, watch] = missions[s.stage];
+  const [goal, how, watch] =
+    s.stage >= 5
+      ? [cases[s.stage].goal, [...cases[s.stage].how], cases[s.stage].threat]
+      : missions[s.stage];
   if (s.stage) how.push(forkTutorial().lesson);
+  if (s.stage === 5)
+    how.push(
+      "Optional: greet the cats for a chance at protection, patience or extra reach. A pocketed treat wins them over.",
+    );
   return (
     "<h3>YOUR MISSION</h3><dl><dt>Goal</dt><dd>" +
     goal +
@@ -143,12 +153,28 @@ function missionObjects() {
         ? mark(s.rat, "Commuter", "rat", 1.6)
         : mark(s.car, "Blue car", "car", CAR_RADIUS, "enter"),
     ];
+  if (s.stage >= 5)
+    return s.targets.map((t) =>
+      mark(
+        t,
+        t.label,
+        t.icon,
+        t.icon === "wind" ? windRadius : USE_RADIUS,
+        t.verb,
+      ),
+    );
   if (s.stun > 0 && s.targets.length)
     return [mark(s.targets[0], "Weak point", "weak", USE_RADIUS, "strike")];
+  if (s.stage === 2 && s.attack) return [];
   if (s.stage === 2)
-    return alleyBins.map(([x, z], i) =>
-      mark({ x, z }, "Dumpster " + (i + 1), "bait", BAIT_RADIUS),
-    );
+    return [
+      mark(
+        baitLocation(),
+        "Dumpster " + (s.step === 0 ? 3 : 4),
+        "bait",
+        BAIT_RADIUS,
+      ),
+    ];
   return s.targets.map((t, i) => {
     const lever = leverStage(),
       eligible = lever || i === (s.stage === 3 ? panelOrder[s.step] : 1);
@@ -205,14 +231,19 @@ function updateMission() {
   $("touchAction").hidden = !(s.stage === 0
     ? !s.driving && inside
     : s.targets.some((t) => !t.used && distance(t, s.andi) < USE_RADIUS));
+  const cat = nearbyCat();
+  if (cat >= 0 || nearbyDecoy()) $("touchAction").hidden = false;
+  $("touchAttack").disabled = !!s.stolen;
   const count = s.targets.filter((t) => t.used).length;
-  const progress = [
-    s.driving ? "In the car · rat still loose" : "On foot · find the car",
-    `Cart releases activated: ${count} / 2`,
-    `Weak points struck: ${s.step} / 2`,
-    `Panels overridden: ${s.step} / 3`,
-    `Phase ${Math.min(s.step + 1, 3)} / 3`,
-  ][s.stage];
+  const progress =
+    [
+      s.driving ? "In the car · rat still loose" : "On foot · find the car",
+      `Cart releases activated: ${count} / 2`,
+      `Weak points struck: ${s.step} / 2`,
+      `Panels overridden: ${s.step} / 3`,
+      `Phase ${Math.min(s.step + 1, 3)} / 3`,
+    ][s.stage] ??
+    "Objectives cleared: " + s.step + " / " + nightRoutes[s.stage - 5].length;
   setCopy(
     $("missionGoal"),
     s.stage === 0 ? "Intercept the Commuter" : "Defeat " + cases[s.stage].name,
@@ -229,6 +260,13 @@ function updateMission() {
   if (next?.kind === "weak") task = "Strike the exposed weak point";
   if (next?.kind === "lever")
     task = "Reach highlighted cart release " + next.label.split(" ")[1];
+  if (s.stage >= 5 && next)
+    task =
+      next.verb.charAt(0).toUpperCase() +
+      next.verb.slice(1) +
+      " · " +
+      next.label;
+  if (s.stage === 2 && s.attack) task = "HE’S ABOUT TO STOMP! DODGE!";
   if (s.mode === "impact") task = "Watch the dumpster hit";
   setCopy(
     $("objective"),
@@ -280,7 +318,9 @@ function updateMission() {
       : task + ".";
   else if (s.stage === 3) instruction = "Activate panels in order: 2 → 1 → 3";
   else if (next?.kind === "weak")
-    instruction = "Get close and " + act.toLowerCase() + " to strike.";
+    instruction = touchPlay()
+      ? "Approach the star, then tap Strike."
+      : "Get close and press E to strike.";
   if (
     touchPlay() &&
     f &&
@@ -290,6 +330,32 @@ function updateMission() {
     next.at === assistedTarget()
   )
     instruction = "Tap Attack to " + next.verb;
+  if (s.stage === 2 && s.attack)
+    instruction =
+      s.attack.delay < 0.65
+        ? dodge + " NOW or leave the ring!"
+        : "Leave the ring, or " + dodge + " when it flashes.";
+  if (s.stage === 2 && !s.attack && next?.kind === "bait" && !inside)
+    instruction = "BAIT · Stand near the highlighted dumpster.";
+  if (s.stage >= 5 && next) {
+    if (s.stolen)
+      instruction = inside
+        ? act + " to recover your fork"
+        : "Follow the stolen fork tag.";
+    if (next.kind === "wind" && next.dist < windRadius)
+      instruction =
+        "Hold " + forkTutorial().attack + " until the chime, then release.";
+    if (next.kind === "detect" && !inside)
+      instruction =
+        "Detector " +
+        (next.dist < 5 ? "HOT" : "searching") +
+        " · follow the marked prop.";
+    if (cat >= 0 && !inside && instruction === "")
+      instruction =
+        (touchPlay() ? "Tap Greet cat" : "Press E") +
+        " · " +
+        catCouncil[cat].name;
+  }
   if (s.mode === "impact") instruction = "";
   setCopy($("instruction"), instruction);
   $("guideLayer").classList.toggle(

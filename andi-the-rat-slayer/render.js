@@ -31,7 +31,8 @@ function createAlleyView(host, quality) {
   });
   light.shadow.mapSize.set(1024, 1024);
   light.shadow.bias = -0.0005;
-  scene.add(light, new T.HemisphereLight(0xe9f2fb, 0x8d7662, 2));
+  const skylight = new T.HemisphereLight(0xe9f2fb, 0x8d7662, 2);
+  scene.add(light, skylight);
   const cube = new T.BoxGeometry(1, 1, 1),
     ball = new T.SphereGeometry(1, 18, 12),
     lowBall = new T.SphereGeometry(1, 8, 6);
@@ -541,6 +542,7 @@ function createAlleyView(host, quality) {
   }
   let projectionWidth = 0,
     projectionHeight = 0;
+  const drawNight = threeNight(T, scene, shape, cube, lowBall);
   function draw(s) {
     const w = (projectionWidth = host.clientWidth),
       h = (projectionHeight = host.clientHeight);
@@ -565,7 +567,7 @@ function createAlleyView(host, quality) {
     hair.rotation.z = gait * 0.035 + turnSway;
     hair.rotation.x = s.dash > 0 ? 0.16 : gait * 0.024;
     tote.rotation.x = gait * 0.15;
-    utensil.visible = forearm.visible = !!s.fork;
+    utensil.visible = forearm.visible = !!s.fork && !s.stolen;
     if (s.fork) {
       const f = s.fork,
         ending = s.mode === "finale";
@@ -580,6 +582,8 @@ function createAlleyView(host, quality) {
       utensil.position.set(0.31, 0.92, 0.18 + push);
       utensil.rotation.x =
         f.phase === "holding" ? -0.13 * Math.min(1, f.elapsed / 0.48) : 0;
+      utensil.rotation.y =
+        s.spinUntil > s.time ? (s.spinUntil - s.time) * 22 : 0;
       forearm.position.z = (0.18 + push) / 2;
       forearm.scale.z = Math.max(0.2, 0.26 + push);
       shafts.forEach((m, i) => {
@@ -605,6 +609,13 @@ function createAlleyView(host, quality) {
     car.position.set(s.car.x, 0, s.car.z);
     car.rotation.y = s.car.angle;
     pose(boss, r, s.scale, s.time);
+    boss.g.visible = s.stage < 5;
+    scene.background.setHex(s.stage >= 5 ? 0x28344d : 0x9daaa5);
+    scene.fog.color.copy(scene.background);
+    light.color.setHex(s.stage >= 5 ? 0xb6d7ff : 0xffdda6);
+    skylight.color.setHex(s.stage >= 5 ? 0xafbcf4 : 0xe9f2fb);
+    skylight.intensity = s.stage >= 5 ? 1.15 : 2;
+    drawNight(s);
     if (s.attack && (s.stage === 2 || (s.stage === 4 && s.step === 2))) {
       const u = clamp(
         1 - s.attack.delay / levels[prefs.difficulty].warning,
@@ -629,6 +640,8 @@ function createAlleyView(host, quality) {
       boss.g.position.y += Math.sin(bounce * Math.PI) * 1.6;
       boss.g.rotation.z = bounce * 0.7;
     }
+    if (s.stage === 2 && s.stun > 0)
+      boss.g.rotation.z = -0.38 + Math.sin(s.time * 5) * 0.06;
     crown.visible = s.stage === 1;
     hat.visible = s.stage === 4;
     visor.visible = s.stage === 3;
@@ -647,7 +660,7 @@ function createAlleyView(host, quality) {
         stand.position.set(a.x, 0, a.z);
         grip.position.y = a.used ? 1.17 : 1.67;
       }
-      m.visible = symbols[i].visible = !!a && !a.used;
+      m.visible = symbols[i].visible = !!a && !a.used && s.stage < 5;
       if (m.visible) {
         m.position.set(a.x, 0.09, a.z);
         symbols[i].position.set(a.x, 0.17, a.z);
@@ -716,7 +729,13 @@ function createAlleyView(host, quality) {
     if (s.attack) {
       ring.position.set(s.attack.x, 0.2, s.attack.z);
       ring.scale.setScalar(s.attack.radius);
-      ring.material.color.set(s.attack.delay > 0 ? 0xffbd62 : 0xff4829);
+      ring.material.color.set(
+        s.attack.delay > 0.65
+          ? 0xffbd62
+          : Math.sin(s.time * 30) > 0
+            ? 0xff4829
+            : 0xfff3b0,
+      );
     }
     outline.position.set(p.x, 0.19, p.z);
     outline.scale.setScalar(s.driving ? 1.65 : 0.55);
@@ -780,6 +799,7 @@ function createAlleyView(host, quality) {
     return ray.ray.intersectPlane(plane, hit);
   }
   function dispose(lose = true) {
+    drawNight.dispose();
     canvas.removeEventListener("webglcontextlost", onLost);
     const geometries = new Set(),
       mats = new Set(),
@@ -835,7 +855,7 @@ function createMapView(host) {
       h / 2 - focus.z * k * 0.14,
     );
     floorTransform = g.getTransform();
-    g.fillStyle = "#68685c";
+    g.fillStyle = s.stage >= 5 ? "#45495b" : "#68685c";
     g.fillRect(-8, -13, 16, 26);
     function label(x, z, symbol, color, size = 1) {
       g.fillStyle = color;
@@ -848,7 +868,10 @@ function createMapView(host) {
       g.fillRect(x - 0.82, z - 1, 1.64, 2);
     });
     if (s.attack) {
-      g.strokeStyle = "#ffc466";
+      g.strokeStyle =
+        s.attack.delay < 0.65 && Math.sin(s.time * 30) > 0
+          ? "#ff5540"
+          : "#ffc466";
       g.lineWidth = 0.16;
       g.beginPath();
       g.arc(s.attack.x, s.attack.z, s.attack.radius, 0, 2 * Math.PI);
@@ -866,7 +889,8 @@ function createMapView(host) {
         g.stroke();
         g.fillStyle = a.used ? "#8e9286" : "#ff984a";
         g.fillRect(a.x - 0.15, a.z - 0.58, 0.73, 0.22);
-      } else if (!a.used) label(a.x, a.z, String(i + 1), "#ffc978", 1.6);
+      } else if (!a.used && s.stage < 5)
+        label(a.x, a.z, String(i + 1), "#ffc978", 1.6);
     });
     if (s.stage === 0 && s.attack) {
       const u = 1 - s.attack.delay / levels[prefs.difficulty].warning;
@@ -889,13 +913,20 @@ function createMapView(host) {
       );
     }
     label(s.car.x, s.car.z, "🚙", "#fff", 2.2);
-    label(s.rat.x, s.rat.z, "🐀", "#efe6de", 1.25 * s.scale);
+    if (s.stage >= 5) mapNight(g, s);
+    else label(s.rat.x, s.rat.z, "🐀", "#efe6de", 1.25 * s.scale);
+    if (s.stage === 2 && s.stun > 0)
+      label(s.rat.x, s.rat.z - 1.7, "✦  ✧  ✦", "#ffdb73", 1.5);
     s.mobs.forEach((m) => label(m.x, m.z, "🐀", "#fff"));
-    if (s.fork) {
+    if (s.fork && !s.stolen) {
       const p = s.andi;
       g.save();
       g.translate(p.x, p.z);
-      g.rotate(Math.PI / 2 - p.angle);
+      g.rotate(
+        Math.PI / 2 -
+          p.angle +
+          (s.spinUntil > s.time ? (s.spinUntil - s.time) * 22 : 0),
+      );
       g.translate(0.18 + forkLunge(), -0.31);
       paintUtensil(
         g,

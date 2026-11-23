@@ -172,7 +172,11 @@ test("all five bosses, retry and ending via keyboard gameplay", async ({
     const pad = await page.evaluate(() => s.targets[0]);
     expect(pad).toBeTruthy();
     await actAt(pad.x, pad.z);
-    if (hit === 0) await go(-4.4, 4);
+    if (hit === 0) {
+      await go(-3.9, 2); // cross in front of the parked car
+      await go(4.3, 2);
+      await go(4.3, 6);
+    }
   }
   await next();
   await go(0, 8);
@@ -199,9 +203,9 @@ test("all five bosses, retry and ending via keyboard gameplay", async ({
   const pad = await page.evaluate(() => s.targets[0]);
   await actAt(pad.x, pad.z);
   await tick(105);
-  await expect(page.locator("#sceneTag")).toHaveText("CAMPAIGN COMPLETE");
+  await expect(page.locator("#sceneTag")).toHaveText("CHAPTER 1 COMPLETE");
   await page.click("#next");
-  await expect(page.locator("#start")).toBeVisible();
+  await expect(page.locator("#sceneName")).toHaveText("CHICAGO AFTER DARK");
   expect(log).toEqual([]);
 });
 test("portrait touch controls and fallback drawing", async ({ browser }) => {
@@ -396,7 +400,10 @@ test("guidance follows panel resets, dodge warnings and temporary weak points", 
   await page.evaluate(() => advanceFrames(40));
   await expect(page.locator(".primaryPin")).toContainText("Weak point");
   await expect(page.locator("#instruction")).toHaveText("Press E to strike");
-  await page.evaluate(() => advanceFrames(350));
+  await page.evaluate(() => advanceFrames(850));
+  await expect(page.locator(".primaryPin")).toContainText("Weak point");
+  await page.keyboard.press("e");
+  await page.evaluate(() => advanceFrames(2));
   await expect(page.locator(".primaryPin")).toContainText("Dumpster");
   await expect(page.locator("#instruction")).not.toContainText("strike");
 });
@@ -437,4 +444,39 @@ test("portrait WebGL projects the active release to the edge and uses touch labe
   await page.tap("#close");
   expect(log).toEqual([]);
   await context.close();
+});
+
+test("Ratzilla waits for the marked bin and timed openings return to bait on the harder difficulties", async ({
+  page,
+}) => {
+  await mapClock(page);
+  await page.goto(url);
+  await page.click("#start");
+  for (const [difficulty, window] of [
+    ["normal", 9],
+    ["rush", 6],
+  ]) {
+    await page.evaluate((d) => {
+      prefs.difficulty = d;
+      resetStage(2);
+    }, difficulty);
+    await page.click("#next");
+    await page.evaluate(() => advanceFrames(700));
+    expect(await page.evaluate(() => s.attack)).toBeNull();
+    await page.evaluate(() => {
+      s.andi = point(-4.3, 4);
+      advanceFrames(3);
+    });
+    await expect(page.locator("#objective")).toContainText("DODGE!");
+    await expect(page.locator("#objective")).not.toContainText(" m");
+    await page.evaluate(() => {
+      s.andi = point(1, 0);
+      advanceFrames(110);
+    });
+    await expect(page.locator(".primaryPin")).toContainText("Weak point");
+    expect(await page.evaluate(() => s.stun)).toBeGreaterThan(window - 1);
+    await page.evaluate((n) => advanceFrames(60 * n + 10), window);
+    await expect(page.locator(".primaryPin")).toContainText("Dumpster");
+    await expect(page.locator("#receipt")).toContainText("recovered");
+  }
 });

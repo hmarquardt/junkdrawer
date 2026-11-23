@@ -5,8 +5,12 @@ const forkNames = [
   "The Mega Fork",
   "The Conductive Fork",
   "The Fork of Destiny",
+  "Windmill Fork",
+  "Magnetic Fork",
+  "Fork Detector",
+  "Council Edition",
 ];
-const forkLengths = [0, 3.15, 4.35, 4.35, 5.55];
+const forkLengths = [0, 3.15, 4.35, 4.35, 5.55, 5.55, 5.55, 5.55, 5.55];
 const chargeTime = 0.48;
 function equipFork(stage) {
   return stage
@@ -26,7 +30,7 @@ function equipFork(stage) {
 }
 function toggleFork() {
   const f = s?.fork;
-  if (s?.mode !== "play" || !f || f.phase !== "ready") return;
+  if (s?.mode !== "play" || !f || s.stolen || f.phase !== "ready") return;
   f.extended = !f.extended;
   forkChime(f.extended);
   if (f.extended && f.firstFlick) {
@@ -47,7 +51,8 @@ function forkChime(up) {
 }
 function holdFork(source, aim) {
   const f = s?.fork;
-  if (s?.mode !== "play" || !f || f.phase !== "ready" || s.dash > 0) return;
+  if (s?.mode !== "play" || !f || s.stolen || f.phase !== "ready" || s.dash > 0)
+    return;
   f.assist = source !== "key" && !aim;
   if (f.assist) {
     if (!f.extended) toggleFork();
@@ -80,8 +85,11 @@ function cancelFork() {
     source: null,
   });
 }
+function forkReach() {
+  return forkLengths[s.stage] + (s.time < s.reachUntil ? 2 : 0);
+}
 function forkLength() {
-  return 1.05 + (forkLengths[s.stage] - 1.05) * s.fork.extension;
+  return 1.05 + (forkReach() - 1.05) * s.fork.extension;
 }
 function forkLunge() {
   const f = s.fork,
@@ -136,6 +144,13 @@ function resolveFork() {
     p = s.andi,
     reach = forkLength() + forkLunge() + 0.18;
   const hit = (at, r) => forkContact(at, r, reach);
+  if (s.stage >= 5 && f.charged) {
+    windmill();
+    if (nightCue()?.icon === "wind" && distance(p, nightCue()) < windRadius) {
+      nightAction(true);
+      return;
+    }
+  }
   // A target uses the same lever, circuit and weak-point transaction as Act.
   const i = s.targets.findIndex((t) => !t.used && hit(t, 0.65));
   if (i >= 0 && !s.roll) {
@@ -228,12 +243,21 @@ function forkTutorial() {
         " for the chime, then release.",
       "Thrust into numbered panels in sequence, or touch an incoming robot bolt with the fork to short it out.",
       "The glowing fork has its longest reach yet. Face the marked objective and thrust.",
+      "Windmill Fork: hold " +
+        attack +
+        " until the chime and release to disperse nearby odor.",
+      "Magnetic Fork: approach the latch and activate it to draw the stolen wagon back.",
+      "Fork Detector: the stronger the signal, the closer the real prop. Follow the marker and inspect it.",
+      "All upgrades are ready. Hold " +
+        attack +
+        " for the chime, then release at the intake.",
     ][s.stage],
   };
 }
 function forkStatus() {
   const f = s.fork;
   if (!f) return "";
+  if (s.stolen) return "Fork stolen · recover it by hand";
   const { toggle, attack } = forkTutorial();
   if (f.phase === "holding")
     return f.charged ? "CHARGED · Release to thrust" : "Charging…";
@@ -241,6 +265,15 @@ function forkStatus() {
     return touchPlay()
       ? "Tap Attack · auto-aim & extend"
       : toggle + " · Extend the Fork of Fury";
+  if (s.stage >= 5) {
+    if (nightCue()?.icon === "wind")
+      return "Windmill · hold " + attack + " for the chime";
+    if (nightCue()?.icon === "detect")
+      return "Fork Detector · follow the signal";
+    if (nightCue()?.icon === "magnet")
+      return "Magnetic Fork · retrieve at range";
+    if (s.stage === 5) return "Windmill Fork · charged spin clears odor";
+  }
   if (!f.swings) return attack + " · Thrust toward a target";
   return forkNames[s.stage] + " · " + (f.extended ? "extended" : "retracted");
 }
@@ -249,6 +282,13 @@ function touchPlay() {
   return navigator.maxTouchPoints > 0 || coarsePointer.matches;
 }
 function touchActionName() {
+  if (s.stage >= 5) {
+    if (!s.targets.some((t) => distance(t, s.andi) < USE_RADIUS)) {
+      if (nearbyDecoy()) return "Check prop";
+      if (nearbyCat() >= 0) return "Greet cat";
+    }
+    return nightCue()?.button || "Act";
+  }
   if (s.stage === 0) return "Enter car";
   if (s.stage === 2 || (s.stage === 4 && s.step === 2)) return "Strike";
   return leverStage() ? "Release" : "Activate";
@@ -271,9 +311,9 @@ function assistedTarget() {
     candidates.push(boltPoint());
   candidates.push(s.rat);
   for (const obj of candidates) {
-    if (distance(p, obj) > forkLengths[s.stage] + 1.25) continue;
+    if (distance(p, obj) > forkReach() + 1.25) continue;
     const angle = Math.atan2(obj.x - p.x, obj.z - p.z);
-    if (forkContact(obj, 0.65, forkLengths[s.stage] + 0.52, angle)) return obj;
+    if (forkContact(obj, 0.65, forkReach() + 0.52, angle)) return obj;
   }
 }
 

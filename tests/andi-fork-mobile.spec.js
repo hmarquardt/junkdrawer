@@ -268,13 +268,22 @@ for (const fallback of [true, false])
       test.setTimeout(180000);
       const ctx = await browser.newContext({
         ...devices["Pixel 7"],
-        viewport: { width: 360, height: 740 },
+        viewport: fallback
+          ? { width: 390, height: 844 }
+          : { width: 360, height: 740 },
       });
       try {
         const page = await ctx.newPage(),
           errors = watch(page);
         await frameClock(page, fallback);
-        await page.goto(url);
+        if (process.env.ANDI_VERIFY_PAGES === "1") {
+          await page.goto("https://hmarquardt.github.io/junkdrawer/");
+          await page.getByRole("link", { name: /ANDI THE RAT SLAYER/ }).tap();
+          await expect(page.locator("footer")).toContainText(
+            require("../junk-drawer.json").pages["andi-the-rat-slayer.html"]
+              .version,
+          );
+        } else await page.goto(url);
         const cdp = await ctx.newCDPSession(page);
         await cdp.send("Emulation.setSafeAreaInsetsOverride", {
           insets: { top: 18, bottom: 12, left: 4, right: 4 },
@@ -295,7 +304,7 @@ for (const fallback of [true, false])
         let same = 0,
           last = "",
           completed = false;
-        for (let i = 0; i < 420; i++) {
+        for (let i = 0; i < 680; i++) {
           await tick(page, 1);
           if (await page.locator("#finish").isVisible()) {
             await tick(page, 100);
@@ -304,13 +313,36 @@ for (const fallback of [true, false])
           if (await page.locator("#sceneCard").isVisible()) {
             const name = await page.locator("#sceneName").innerText(),
               tag = await page.locator("#sceneTag").innerText();
+            if (
+              [
+                "ENCOUNTER CLEARED",
+                "CHAPTER 1 COMPLETE",
+                "CAMPAIGN COMPLETE",
+              ].includes(tag)
+            ) {
+              const level = Number(
+                (await page.locator("#chapter").innerText()).match(
+                  /ENCOUNTER (\d+)/,
+                )[1],
+              );
+              const record = await page.evaluate(() =>
+                JSON.parse(localStorage.getItem("andi.campaign")),
+              );
+              expect(record.lastCompleted).toBe(level);
+              expect(record.best[level]).toBeGreaterThan(0);
+              expect(record.unlocked).toBe(Math.min(9, level + 1));
+              if (level >= 2 && level <= 8)
+                expect(record.upgrades).toContain(level);
+            }
             if (tag === "CAMPAIGN COMPLETE") {
               completed = true;
               break;
             }
-            expect(tag, "A fresh player lost the encounter: " + name).not.toBe(
-              "CHECKPOINT",
-            );
+            expect(
+              tag,
+              "A fresh player lost the encounter: " +
+                (await page.locator("#boss").innerText()),
+            ).not.toBe("CHECKPOINT");
             if (await page.locator("#missionBrief").isVisible()) {
               lessons.add(name.toLowerCase());
               const copy = await page.locator("#missionBrief").innerText();
@@ -320,13 +352,28 @@ for (const fallback of [true, false])
             await page.tap("#next");
             continue;
           }
+          if (!(await page.locator(".brief").isVisible())) {
+            await tick(page, 15);
+            continue;
+          }
           const objective = await page.locator("#objective").innerText(),
             prompt = (
               await page.locator("#instruction").innerText()
             ).toLowerCase();
           const receipt = await page.locator("#receipt").innerText();
           if (receipt) receipts.add(receipt);
-          if (prompt === "tap enter car") {
+          if (prompt.startsWith("hold attack")) {
+            await finger(page, cdp, "touchStart", [
+              { id: 2, ...(await center(page, "#touchAttack")) },
+            ]);
+            await tick(page, 38);
+            await finger(page, cdp, "touchEnd", []);
+            await tick(page, 40);
+            continue;
+          }
+          if (
+            /^tap (enter car|recover|inspect|ventilate|magnetize)/i.test(prompt)
+          ) {
             await page.tap("#touchAction");
             continue;
           }
@@ -340,7 +387,9 @@ for (const fallback of [true, false])
           }
           if (prompt.includes("tap dodge")) await page.tap("#touchDodge");
           if (
-            /Stay beside|Bait his lunge|Watch the dumpster/i.test(objective)
+            /Stay beside|Bait his lunge|STOMP! DODGE|Watch the dumpster/i.test(
+              objective,
+            )
           ) {
             await tick(page, 9);
             continue;
@@ -368,9 +417,16 @@ for (const fallback of [true, false])
         expect(completed, await page.locator(".brief").textContent()).toBe(
           true,
         );
-        expect(lessons.size).toBe(7);
+        expect(lessons.size).toBe(11);
         expect(receipts.has("CART RELEASED — 1 OF 2")).toBe(true);
-        await expect(page.locator("#award")).toBeVisible();
+        await expect(page.locator("#sceneName")).toHaveText(
+          "THE ALLEY CAT COUNCIL",
+        );
+        await page.reload();
+        await page.tap("#continue");
+        await expect(page.locator("#sceneName")).toHaveText(
+          "The Midnight Menagerie",
+        );
         expect(errors).toEqual([]);
       } finally {
         await ctx.close();

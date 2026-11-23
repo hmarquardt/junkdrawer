@@ -43,12 +43,13 @@ const cases = [
     clue: "The last rat tips his hat, backs into the drain, and pulls the lid shut.",
   },
 ];
+cases.push(...nightCases);
 const levels = {
   story: { health: 7, speed: 0.76, warning: 1.8 },
   normal: { health: 5, speed: 1, warning: 1.45 },
   rush: { health: 4, speed: 1.2, warning: 1.15 },
 };
-const prefs = { difficulty: "story", quality: "high", sound: true };
+const prefs = { ...campaign.settings };
 const keys = new Set(),
   route = [
     [-5, 7],
@@ -123,14 +124,15 @@ function resetStage(stage) {
     economy: false,
     time: 0,
     intro: 0,
+    playSeconds: 0,
     andi: point(-2, 8),
     car: point(-2, 5.7),
     rat: point(0, -2),
-    scale: [1.15, 2.15, 4.7, 2, 3.2][stage],
+    scale: [1.15, 2.15, 4.7, 2, 3.2, 3, 2.6, 2.5, 3][stage],
     driving: false,
     hp,
     maxHp: hp,
-    boss: [1, 2, 2, 3, 3][stage],
+    boss: [1, 2, 2, 3, 3, 2, 2, 3, 3][stage],
     mobs: [],
     targets: [],
     crushed: [],
@@ -158,9 +160,11 @@ function resetStage(stage) {
     s.mobs = [stage === 1 ? point(-4.9, 2.4) : point(-3, -2), point(3, -3)];
   }
   if (stage === 3) s.targets = [target(-4, 3), target(0, -6), target(4, 4)];
+  if (stage >= 5) initNight();
+  stageCheckpoint(stage);
   $("bhealth").max = s.boss;
   $("health").max = hp;
-  $("chapter").textContent = "ENCOUNTER 0" + (stage + 1) + " / 05";
+  $("chapter").textContent = "ENCOUNTER 0" + (stage + 1) + " / 09";
   $("boss").textContent = cases[stage].name;
   $("quote").textContent = "";
   $("forkButtons").hidden = !stage;
@@ -186,15 +190,24 @@ function showCard(tag, name, sub, line, button) {
   $("missionBrief").hidden = !briefingCard;
   $("missionBrief").innerHTML = briefingCard ? briefing() : "";
   $("sceneCard").hidden = false;
+  $("sceneCard").querySelector(":scope > div").scrollTop = 0;
   $("sceneTag").textContent = tag;
   $("sceneName").textContent = name;
   $("sceneSub").textContent = sub;
   $("sceneLine").textContent = line ? "“" + line + "”" : "";
   $("utensilFilm").hidden = !(
     s.fork &&
+    s.stage <= 4 &&
     ((briefingCard && s.mode === "intro") ||
       (s.mode === "won" && s.stage === 4))
   );
+  const nightCard = s.stage >= 5 && (s.mode === "intro" || s.mode === "won");
+  $("interlude").hidden = s.mode !== "transition" && !nightCard;
+  $("interlude").setAttribute(
+    "aria-label",
+    nightCard ? name : "Andi on her couch as her phone buzzes",
+  );
+  if (nightCard) paintNightCard($("interlude"));
   $("award").hidden = !(s.mode === "won" && s.fork?.achievement);
   $("next").textContent = button;
   $("next").focus({ preventScroll: true });
@@ -221,11 +234,20 @@ function strike() {
   tone(187, 0.23);
   tone(281, 0.28, 0.12);
   if (!s.boss) {
+    completeCheckpoint();
     keys.clear();
     if (s.stage === 4) {
       s.mode = "finale";
       s.fork.finaleStart = s.time;
       $("finish").hidden = false;
+    } else if (s.stage === 5 || s.stage === 7) {
+      s.mode = "curtain";
+      s.exitAt = s.time;
+      forkBurst(
+        s.rat,
+        s.stage === 5 ? "FRESH AIR!" : "TAKE A BOW",
+        s.stage === 5 ? "spark" : "confetti",
+      );
     } else victoryCard();
   }
   syncHud();
@@ -233,13 +255,31 @@ function strike() {
 function victoryCard() {
   s.mode = "won";
   $("finish").hidden = true;
-  const end = s.stage === 4;
+  const end = s.stage === 8,
+    chapterEnd = s.stage === 4;
   showCard(
-    end ? "CAMPAIGN COMPLETE" : "ENCOUNTER CLEARED",
-    end ? "FIRST BELL" : cases[s.stage].name,
-    cases[s.stage].clue,
-    end ? "Somebody better cover my first period." : "",
-    end ? "Return to title" : "Next encounter →",
+    end
+      ? "CAMPAIGN COMPLETE"
+      : chapterEnd
+        ? "CHAPTER 1 COMPLETE"
+        : "ENCOUNTER CLEARED",
+    end
+      ? "THE ALLEY CAT COUNCIL"
+      : chapterEnd
+        ? "FIRST BELL"
+        : cases[s.stage].name,
+    (s.stage === 2 ? "RATZILLA — 2 OF 2 WEAK POINTS DESTROYED. " : "") +
+      cases[s.stage].clue,
+    end
+      ? "You could've done that an hour ago?"
+      : chapterEnd
+        ? "Somebody better cover my first period."
+        : "",
+    end
+      ? "Return to title"
+      : chapterEnd
+        ? "Chicago After Dark →"
+        : "Next encounter →",
   );
 }
 function hurt() {
@@ -293,12 +333,25 @@ function action() {
     (t) => !t.used && distance(t, s.andi) < USE_RADIUS,
   );
   if (index < 0) {
-    s.locateUntil = s.time + 3;
+    const cat = nearbyCat();
+    if (nearbyDecoy()) {
+      receipt(
+        "PAINTED CARDBOARD · Follow the detector to the real " +
+          nightCue().label.toLowerCase() +
+          ".",
+      );
+      tone(180, 0.2);
+    } else if (cat >= 0) greetCat(cat);
+    else s.locateUntil = s.time + 3;
     return;
   }
   activateTarget(index, false);
 }
 function activateTarget(index, byFork) {
+  if (s.stage >= 5) {
+    nightAction(byFork);
+    return;
+  }
   if (s.stage === 3 && index !== panelOrder[s.step]) {
     s.step = 0;
     s.targets.forEach((t) => (t.used = false));
@@ -339,6 +392,11 @@ function finishAction(byFork) {
     s.andi.angle = Math.atan2(s.rat.x - s.andi.x, s.rat.z - s.andi.z);
     s.fork.burst = null;
     forkChime(true);
+  }
+  if (s.stage === 2) {
+    receipt("RATZILLA — " + s.step + " OF 2 WEAK POINTS DESTROYED");
+    s.impactUntil = s.time + 0.85;
+    forkBurst(s.targets[0], "WEAK POINT SHATTERED");
   }
   if (s.boss === 1 && (byFork || s.stage === 4)) s.fork.achievement = true;
   strike();
@@ -506,6 +564,10 @@ function enemies(dt) {
     s.stun -= dt;
     if (s.stun <= 0) {
       s.targets = [];
+      if (s.stage === 2) {
+        receipt("He recovered. Bait another stomp at the marked dumpster.");
+        s.attackTimer = 1.5;
+      }
       syncHud();
     }
     return;
@@ -525,8 +587,20 @@ function enemies(dt) {
         );
         if (bin >= 0 || s.stage === 4) {
           if (bin >= 0 && !s.crushed.includes(bin)) s.crushed.push(bin);
-          s.stun = 5.5;
-          s.targets = [target(clamp(a.x * 0.74, -5, 5), a.z * 0.82)];
+          s.stun =
+            s.stage === 2
+              ? { story: Infinity, normal: 9, rush: 6 }[prefs.difficulty]
+              : 5.5;
+          if (s.stage === 2) {
+            receipt("HE’S STUNNED! HIT THE GOLD WEAK POINT!");
+            tone(880, 0.36, 0.12);
+          }
+          // Place Ratzilla's star on the alley side, clear of the flattened bin and parked car.
+          s.targets = [
+            s.stage === 2
+              ? target(Math.sign(alleyBins[bin][0]) * 3.9, alleyBins[bin][1])
+              : target(clamp(a.x * 0.74, -5, 5), a.z * 0.82),
+          ];
           s.attack = null;
           syncHud();
           return;
@@ -541,7 +615,10 @@ function enemies(dt) {
   }
   track(r, Math.sin(s.time * 0.5) * 2, -2 + Math.cos(s.time * 0.45), 1.3, dt);
   s.attackTimer -= dt;
-  if (s.attackTimer <= 0) {
+  if (
+    s.attackTimer <= 0 &&
+    (s.stage !== 2 || distance(p, baitLocation()) < BAIT_RADIUS)
+  ) {
     s.attack = {
       x: p.x,
       z: p.z,
@@ -556,9 +633,19 @@ function advance() {
   if (!s) return;
   if (["intro", "phase", "paused"].includes(s.mode)) play();
   else if (s.mode === "won") {
-    if (s.stage === 4) home();
-    else resetStage(s.stage + 1);
-  } else if (s.mode === "lost") resetStage(s.stage);
+    if (s.stage === 8) home();
+    else if (s.stage === 4) {
+      s.mode = "transition";
+      showCard(
+        "LATER THAT NIGHT",
+        "CHICAGO AFTER DARK",
+        "Shoes off. Bag down. Andi sinks into the couch. Her phone buzzes: WILDLIFE ACTIVITY REPORTED IN YOUR ALLEY. Outside, a trash can crashes.",
+        "Absolutely not.",
+        "Investigate the crash →",
+      );
+    } else resetStage(s.stage + 1);
+  } else if (s.mode === "transition") resetStage(5);
+  else if (s.mode === "lost") resetStage(s.stage);
 }
 function pause() {
   if (s?.mode === "play" || s?.mode === "impact") {
@@ -589,12 +676,16 @@ function loop(now) {
     s.time += dt;
     for (const key of ["dash", "inv", "actionWait", "dodgeWait"])
       s[key] = Math.max(0, s[key] - dt);
+    s.playSeconds += dt;
     moveAndi(dt);
     updateFork(dt);
     if (s.stage === 0) {
       commuter(dt);
       if (s.mode === "play" && s.driving) looseCart(dt);
-    } else if (s.mode === "play") enemies(dt);
+    } else if (s.mode === "play") {
+      if (s.stage >= 5) nightTick(dt);
+      else enemies(dt);
+    }
     if (s.lineUntil && s.time > s.lineUntil) {
       $("quote").textContent = "";
       s.lineUntil = 0;
@@ -627,13 +718,35 @@ function loop(now) {
       forkBurst(s.rat, "FOUR-COURSE FINALE", "confetti");
     if (elapsed >= 1.65) victoryCard();
   }
-  if (s.mode === "won" && s.stage === 4 && !$("dialog").open) s.time += dt;
+  if (s.mode === "curtain" && !$("dialog").open) {
+    s.time += dt;
+    if (s.time - s.exitAt > 1) victoryCard();
+  }
+  if (s.mode === "recall" && !$("dialog").open) {
+    s.time += dt;
+    if (s.time - s.recall.start > 1) strike();
+  }
+  if (s.mode === "transition" && !$("dialog").open) {
+    s.interludeTime = (s.interludeTime || 0) + dt;
+    paintInterlude();
+  }
+  if (s.mode === "council" && !$("dialog").open) {
+    s.time += dt;
+    if (s.time - s.councilStart >= 1.55 && !s.councilBurst) {
+      s.councilBurst = true;
+      forkBurst({ x: 3.4, z: 5 }, "MOTION CARRIED", "confetti");
+    }
+    if (s.time - s.councilStart >= 2.4) strike();
+  }
+  if (s.mode === "won" && (s.stage === 4 || s.stage === 8) && !$("dialog").open)
+    s.time += dt;
   view.draw(s);
   updateMission();
   drawForkEffects();
   frame = requestAnimationFrame(loop);
 }
-function start() {
+function start(stage = 0, isReplay = false) {
+  replay = isReplay;
   unlockSound();
   document.body.classList.add("playing");
   document.body.classList.toggle("phone", touchPlay());
@@ -641,7 +754,7 @@ function start() {
   $("arena").hidden = false;
   $("help").hidden = false;
   if (!view) view = createAlleyView($("view"), prefs.quality);
-  resetStage(0);
+  resetStage(stage);
   window.scrollTo(0, 0);
   last = performance.now();
   frame = requestAnimationFrame(loop);
@@ -685,6 +798,7 @@ $("settings").onclick = () => {
     $(k).value = prefs[k];
     $(k).onchange = () => {
       prefs[k] = $(k).value;
+      persistCampaign();
       if (k === "quality") view?.options(prefs.quality);
       else if (s) {
         const hp = levels[prefs.difficulty].health;
@@ -712,6 +826,7 @@ $("dialog").onclose = () => {
 };
 $("sound").onclick = () => {
   prefs.sound = !prefs.sound;
+  persistCampaign();
   if (prefs.sound) unlockSound();
   else audio?.suspend();
   $("sound").textContent = "♫　 SOUND " + (prefs.sound ? "ON" : "OFF");
@@ -743,7 +858,10 @@ cases.forEach((c, i) => {
   $("files").append(b);
 });
 $("finish").onclick = victoryCard;
-$("start").onclick = start;
+$("start").onclick = () => start(0, campaign.unlocked > 1);
+bindCampaignMenu();
+$("sound").textContent = "♫　 SOUND " + (prefs.sound ? "ON" : "OFF");
+$("sound").setAttribute("aria-pressed", prefs.sound);
 $("next").onclick = advance;
 $("pause").onclick = pause;
 function thumbButton(el, fn) {
