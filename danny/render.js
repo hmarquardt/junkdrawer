@@ -7,7 +7,8 @@ precision highp float;
 uniform sampler2D photo;
 uniform vec2 frame, drag;
 uniform vec4 sites[6], traits[6];
-uniform float zoom, caseNo;
+uniform float zoom, caseNo, photoAspect;
+uniform vec4 tissue;
 uniform vec2 center;
 varying vec2 vUv;
 void main(){
@@ -23,27 +24,43 @@ void main(){
     float p=t.x, alive=t.y, phase=t.w;
     q.x*=1.0+.13*sin(phase);
     q.y+=.09*sin(q.x*2.+phase);
-    q.x*=1.+p*.47;
+    q.x*=1.+p*.53*tissue.z;
+    q.y*=1.-p*.15;
+    q += p*vec2(.11*sin(q.y*4.+phase),.06*cos(q.x*3.));
     float a=atan(q.y,q.x), r=length(q)*(1.+.062*cos(3.*a+phase)+.04*sin(5.*a-phase));
-    float hill=exp(-r*r*1.75), halo=exp(-r*r*.52);
+    float hill=exp(-r*r*1.48), halo=exp(-r*r*.52);
+    float ridges=sin(q.y*22.+phase+sin(q.x*7.8))*.5+sin(q.x*18.-q.y*9.+phase)*.5;
+    hill*=1.+.065*ridges;
+    float mottling=.91+.09*sin(q.x*8.+sin(q.y*6.)+phase);
     float dent=exp(-pow((abs(q.x)-1.25)*1.8,2.)-q.y*q.y*1.3);
     warp+=s.z/aspect*(q*(hill*(-.20*alive)+p*halo*.4)-drag*p*halo*.42);
-    red+=halo*(.045+.21*alive)*(1.-p*.17);
-    shade+=alive*hill*(-q.x-q.y)*.86*(1.+p*.4)-p*dent*.115;
-    shine+=alive*.16*exp(-length(q+vec2(.26,.31))*5.);
-    float core=exp(-r*r*(s.w<.5?11.:26.));
+    red+=halo*mottling*(.04+.165*alive)*(1.-p*.17);
+    shade+=alive*hill*(-q.x-q.y)*.64*(1.+p*.4)-p*dent*.115;
+    float rim=exp(-pow((r-.68)*4.0,2.));
+    shine+=alive*tissue.y*(.16*exp(-length(q+vec2(.26,.31))*5.)+p*rim*.065);
+    shade-=p*dent*.12;
+    if(t.z>.5){
+      float lobe=exp(-dot(q-vec2(.42,.15),q-vec2(.42,.15))*4.);
+      shade+=alive*lobe*(-q.x-q.y+.59)*.35;
+      tip+=alive*lobe*.10;
+    }
+    vec2 opening=q+vec2(.09,.12);
+    float capRadius=length(opening*vec2(.93,1.12))*(1.+.12*sin(a*3.+phase));
+    float core=exp(-pow(capRadius,2.4)*(s.w<.5?18.:33.));
+    shade+=alive*exp(-pow((capRadius-.30)*7.,2.))*.035*ridges;
     tip+=s.w<.5?core*alive*(.86+.09*p):0.;
     dark+=s.w>.5?core*alive*(s.w<1.5?.8:.52):0.;
     dark+=(1.-alive)*exp(-r*r*42.)*.32;
   }
-  vec2 cover=vec2(min(1.,frame.x/frame.y/1.5), min(1.,1.5*frame.y/frame.x));
+  vec2 cover=vec2(min(1.,frame.x/frame.y/photoAspect), min(1.,photoAspect*frame.y/frame.x));
   vec2 sampleUv=(uv+warp-.5)*cover*.89+.5+vec2(sin(caseNo*4.1),cos(caseNo*2.4))*.045;
   if(mod(caseNo,2.)>.5)sampleUv.x=1.-sampleUv.x;
   vec3 skin=texture2D(photo,vec2(sampleUv.x,1.-sampleUv.y)).rgb;
-  skin*=vec3(.98,.87,.89)*(1.-.035*mod(caseNo,4.));
+  skin*=vec3(.98,.91,.93)*tissue.x;
   skin+=red*vec3(.27,-.34,-.28)+shade*vec3(.65,.53,.48)+shine;
-  skin=mix(skin,skin*.47+vec3(.52,.43,.32),min(tip,1.));
+  skin=mix(skin,skin*.32+vec3(.65,.58,.44),min(tip,1.));
   skin*=1.-dark;
+  skin+=.025*tissue.y*smoothstep(.62,.89,skin.r);
   skin*=1.-.19*dot(screen-.5,screen-.5);
   gl_FragColor=vec4(skin,1.);
 }
@@ -59,32 +76,35 @@ function gpuRenderer(canvas, image) {
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   const vectors = () => Array.from({length:6},()=>new T.Vector4());
-  const u = Object.fromEntries(Object.entries({photo:texture,frame:new T.Vector2(),drag:new T.Vector2(),
+  const u = Object.fromEntries(Object.entries({photo:texture,frame:new T.Vector2(),photoAspect:1,tissue:new T.Vector4(),drag:new T.Vector2(),
     sites:vectors(),traits:vectors(),zoom:1,caseNo:0,center:new T.Vector2()}).map(([key,value])=>[key,{value}]));
   const scene = new T.Scene(), camera = new T.Camera();
   scene.add(new T.Mesh(new T.PlaneGeometry(2,2),new T.ShaderMaterial({uniforms:u,vertexShader,fragmentShader,depthTest:false})));
-  return (s,w,h) => {
+  return (s,w,h,image) => {
     if(canvas.width!==w || canvas.height!==h) renderer.setSize(w,h,false);
+    if(texture.image!==image){texture.image=image;texture.needsUpdate=true;}
+    u.photoAspect.value=image.naturalWidth/image.naturalHeight;
+    u.tissue.value.set(s.patient.tone,s.region.oil*s.patient.oil,s.region.elasticity,0);
     u.frame.value.set(w,h); u.zoom.value=s.zoom; u.center.value.set(s.cx,s.cy);
     u.caseNo.value=s.index; u.drag.value.set(s.dx,s.dy);
     for(let i=0;i<6;i++) {
       const l=s.field[i];
       if(!l) {u.sites.value[i].z=0;continue;}
       u.sites.value[i].set(l.x,l.y,l.size,l.type);
-      u.traits.value[i].set(s.active===i?s.force:0, fullness(s,i),0,l.phase);
+      u.traits.value[i].set(s.active===i?s.force:0, fullness(s,i),l.boss?1:0,l.phase);
     }
     renderer.render(scene,camera);
   };
 }
 function fullness(s,i) {
-  if(!s.cleared.includes(i)) return 1;
+  if(!s.cleared.includes(i)) return 1-.54*(s.layers[i]||0)/s.field[i].layers;
   if(s.burst?.id === i) return Math.pow(Math.max(0,1-s.burst.t*3),2);
   return 0;
 }
 export function position(s,l) { return {x:(l.x-s.cx)*s.zoom+.5,y:(l.y-s.cy)*s.zoom+.5}; }
 function canvasRenderer(canvas,image) {
   const c=canvas.getContext('2d',{alpha:false});
-  return (s,w,h) => {
+  return (s,w,h,image) => {
     if(canvas.width!==w || canvas.height!==h) {canvas.width=w;canvas.height=h;}
     const cover=Math.max(w/image.width,h/image.height)*s.zoom*1.12;
     const iw=image.width*cover, ih=image.height*cover;
@@ -139,36 +159,33 @@ function drawBurst(c,s,w,h) {
   c.clearRect(0,0,w,h);
   contactTool(c,s,w,h);
   if(!s.burst)return;
-  const {id,t}=s.burst, l=s.field[id], pos=position(s,l);
-  const r=l.size*Math.min(w,h)*s.zoom;
-  const rise=Math.sin(Math.min(1,t*2.8)*Math.PI/2), fade=Math.min(1,(1-t)*3.7);
-  c.save(); c.translate(pos.x*w,pos.y*h);
-  c.rotate(.3*Math.sin(l.phase)); c.globalAlpha=Math.max(0,fade);
-  c.scale(r,r); c.lineCap='round'; c.lineJoin='round';
-  const length=[1.65,.70,1.10][l.type];
-  const endX=Math.sin(l.phase)*rise*.94, endY=-rise*(length+.32*Math.cos(l.phase)) + Math.max(0,t-.35)*.95;
-  const stroke=(color,width,offset)=>{
-    c.beginPath();c.moveTo(0,0);c.bezierCurveTo(-.22*rise,-.8*rise,endX+.48*rise,endY-.28*rise,endX+offset,endY);
-    c.strokeStyle=color;c.lineWidth=width;c.stroke();
-  };
-  stroke('rgba(83,51,34,.48)',.26,0);
-  stroke(l.type===1?'#c8ad80':'#e5cfa4',.19,-.025);
-  stroke('rgba(255,240,201,.77)',.055,-.045);
-  if(l.type===1) {
-    c.beginPath();c.ellipse(endX,endY,.13,.17,-.4,0,Math.PI*2);c.fillStyle='#74563c';c.fill();
-  } else {
-    const count=l.type===0?3:2;
-    for(let i=0;i<count;i++){
-      const phase=l.phase+i*1.7, speed=.8+.3*i;
-      const x=endX+Math.cos(phase)*t*speed, y=endY-t*(1.55+.2*i)+t*t*2.2;
-      c.beginPath();c.ellipse(x,y,.085+.025*i,.065+.04*i,phase,0,Math.PI*2);
-      c.fillStyle=i===0?'#ebd6b0':'#dfc39d';c.fill();
+  const b=s.burst, l=s.field[b.id], pos=position(s,l);
+  const r=l.size*Math.min(w,h)*s.zoom, points=b.particles;
+  c.save();c.translate(pos.x*w,pos.y*h);c.scale(r,r);
+  c.globalAlpha=Math.max(0,Math.min(1,(1-b.t)*4));
+  c.lineCap='round';c.lineJoin='round';
+  function strand(color,width,offset){
+    c.strokeStyle=color;
+    for(let i=1;i<points.length;i++){
+      const p=points[i-1],q=points[i];
+      c.lineWidth=q.r*width;c.beginPath();c.moveTo(p.x+offset,p.y+offset);
+      c.lineTo(q.x+offset,q.y+offset);c.stroke();
     }
+  }
+  strand('rgba(74,46,33,.48)',2.15,.065);
+  strand(b.mat.color,2,0);strand(b.mat.highlight,.61,-.032);
+  if(l.type===1){
+    const tip=points.at(-1);
+    c.fillStyle='#745941';c.beginPath();c.ellipse(tip.x,tip.y,tip.r,tip.r*.82,.4,0,Math.PI*2);c.fill();
+  }
+  for(const p of b.droplets){
+    c.fillStyle=b.mat.color;c.beginPath();c.ellipse(p.x,p.y,p.r,p.r*.8,0,0,Math.PI*2);c.fill();
+    c.fillStyle=b.mat.highlight;c.beginPath();c.arc(p.x-.02,p.y-.02,p.r*.37,0,Math.PI*2);c.fill();
   }
   c.restore();
 }
-export async function createRenderer(stage, canvas, overlay) {
-  const image=new Image(); image.src=new URL('skin.jpg',import.meta.url);
+export async function createRenderer(stage, canvas, overlay, initialUrl) {
+  let image=new Image(); image.src=initialUrl;
   await image.decode();
   let draw;
   try {draw=gpuRenderer(canvas,image);} catch {}
@@ -184,10 +201,22 @@ export async function createRenderer(stage, canvas, overlay) {
     canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fallback();stage.dispatchEvent(new Event('redraw'));},{once:true});
   }
   const effects=overlay.getContext('2d');
-  return s => {
-    const dpr=Math.min(window.devicePixelRatio||1,1.6);
+  let desired=image.src,quality=1.5,slow=0;
+  const paint=s=>{
+    // Lower the backing-buffer cost only after repeated slow interactive frames.
+    if(s.contact && s.frameMs>34 && s.frameMs<200)slow++;else slow=Math.max(0,slow-1);
+    if(slow>=6){quality=Math.max(.7,quality-.2);slow=0;}
+    const dpr=Math.min(window.devicePixelRatio||1,quality);
     const w=Math.max(1,Math.round(stage.clientWidth*dpr)),h=Math.max(1,Math.round(stage.clientHeight*dpr));
     if(overlay.width!==w || overlay.height!==h) {overlay.width=w;overlay.height=h;}
-    draw(s,w,h); drawBurst(effects,s,w,h);
+    draw(s,w,h,image); drawBurst(effects,s,w,h);
   };
+  paint.region=async url=>{
+    desired=url;
+    if(image.src===url)return;
+    const next=new Image();next.src=url;
+    await next.decode();
+    if(desired===url){image=next;stage.dispatchEvent(new Event('redraw'));}
+  };
+  return paint;
 }
