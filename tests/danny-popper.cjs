@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
 const root = path.resolve(__dirname,'..');
 const server = http.createServer(async (req,res) => {
   const file = new URL(req.url,'http://localhost').pathname.replace(/^\/junkdrawer\//,'');
-  if(!/^(danny\/[\w.-]+|andi-the-rat-slayer\/three.min.js|danny-sw.js|danny-the-pimple-popper.html|analytics-lite.js)$/.test(file)) {
+  if(!/^(danny\/[\w.-]+|andi-the-rat-slayer\/three.min.js|danny-sw.js|dani-the-pimple-popper.html|danny-the-pimple-popper.html|analytics-lite.js)$/.test(file)) {
     res.writeHead(404).end(); return;
   }
   try {
@@ -18,7 +18,7 @@ const server = http.createServer(async (req,res) => {
 });
 async function run() {
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
-  const url='http://127.0.0.1:'+server.address().port+'/junkdrawer/danny-the-pimple-popper.html';
+  const url='http://127.0.0.1:'+server.address().port+'/junkdrawer/dani-the-pimple-popper.html';
   const browser=await chromium.launch({channel:'chrome',args:['--enable-unsafe-swiftshader']});
   try {
     const errors=[];
@@ -113,6 +113,7 @@ async function run() {
     }
     assert.equal(bosses,4);assert.equal(passes,42);
     assert.equal(await p.locator('#dialogTitle').textContent(),'Campaign complete');
+    assert.match(await p.locator('#dialogBody').textContent(),/Dani is officially off the clock/);
     await p.locator('#dismiss').click();
     const finished=await snapshot(p);
     assert.equal(finished.stats.chapters,4);assert.equal(finished.stats.bosses,4);

@@ -1,6 +1,8 @@
-# Danny the Pimple Popper 1.0
+# Dani the Pimple Popper 1.0.1
 
-The root HTML page is the game entry point. Serve the repository over HTTP on localhost or HTTPS. The first online visit installs the base game for offline play. The service worker controls the game URL and caches its explicitly listed assets.
+The public entry point is [dani-the-pimple-popper.html](../dani-the-pimple-popper.html). Serve the repository over HTTP on localhost or HTTPS. The first online visit installs the base game for offline play. The game registers its worker for the canonical and legacy game filenames. Both use the same bounded asset cache.
+
+Existing installations keep their manifest ID, `danny-popper` database and both campaign checkpoints. The old bookmark works offline with its installed release. After reconnecting, open it to receive the updated worker, then reopen the game. The legacy worker can run the corrected shell at the old address until the canonical scope is ready for offline launches. A device that has never received the update needs a connection before it can first open the new URL.
 
 ## Game systems
 
@@ -50,9 +52,9 @@ One IndexedDB object store holds `current` and `previous`. Every write compares 
 
 ## Verification and expansion gate
 
-Run `node tests/danny-popper.cjs` from the repository root with Chrome and Playwright installed. It serves a GitHub Pages-style subpath and exercises the game through browser input. The static shell includes its licensed fonts, Three.js and all base region textures.
+Run `node tests/danny-popper.cjs` from the repository root with Chrome and Playwright installed. It serves a GitHub Pages-style subpath and exercises the game through browser input. Run `node tests/dani-release.cjs` to test the installed 1.0 worker upgrading on the same origin, both launch URLs, and checkpoint preservation. The compatibility test reads the original release from Git history. The static shell includes its licensed fonts, Three.js and all base region textures.
 
-The Pore Explorer, Dani's Disgusting Day Spa, The Guinness Book of Pores, and The Midnight Clinic are reserved concepts. Expansion implementation starts only after the base release is live, its encounters and save recovery pass, mobile performance is acceptable, and actual players have evaluated the feel and visual quality of extraction. Record real device, input method, observed response, and player comments when that playtest takes place.
+The Pore Explorer, Dani's Disgusting Day Spa, The Guinness Book of Pores, and The Midnight Clinic are reserved concepts. Expansion implementation starts only after the base release is live, its encounters and save recovery pass, physical-device testing confirms acceptable mobile performance, and actual players have evaluated the feel and visual quality of extraction. Record real device, input method, observed response, and player comments when that playtest takes place.
 
 ### Art sources
 

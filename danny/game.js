@@ -267,11 +267,32 @@ function report(){
   const title=last?'Campaign complete':visit.boss?'Boss shift cleared':visit.zen?'Patient complete':'Case cleared';
   modal(title,'<p>'+escape(visit.patient.name)+' · '+field.length+' targets cleared.</p><h3>'+
     (visit.zen?'A quiet moment.':run().points+' points · '+profile.xp+' career XP')+'</h3><p>'+
-    (last?'Four chapters down. Danny is officially off the clock.':visit.zen?'Take another shift whenever you feel like it.':'Your next patient is ready for inspection.')+'</p>',
+    (last?'Four chapters down. Dani is officially off the clock.':visit.zen?'Take another shift whenever you feel like it.':'Your next patient is ready for inspection.')+'</p>',
     last?[['View campaign',files],['Choose another mode',modes,true]]:[[next,()=>{if(advance(visit)){save();loadField();}close();}]],'EXTRACTION REPORT');
 }
 new ResizeObserver(schedule).observe($('stage'));
 $('stage').addEventListener('redraw',schedule);
+// Keep both registrations file-scoped on the shared Junkdrawer origin.
+async function installOffline(){
+  const canonical=new URL('./dani-the-pimple-popper.html',location.href);
+  const legacy=new URL('./danny-the-pimple-popper.html',location.href);
+  const workers=navigator.serviceWorker;
+  const viaLegacy=location.pathname===legacy.pathname;
+  const adoptCanonical=()=>history.replaceState(history.state,'',canonical.pathname+location.search+location.hash);
+  const registration=await workers.register('./danny-sw.js',{scope:canonical.pathname});
+  if(viaLegacy){
+    // Wait for the canonical offline shell before changing an installed player's address.
+    const worker=registration.active||registration.installing||registration.waiting;
+    if(worker){
+      const adoptWhenReady=()=>{
+        if(worker.state==='activated'){worker.removeEventListener('statechange',adoptWhenReady);adoptCanonical();}
+        if(worker.state==='redundant')worker.removeEventListener('statechange',adoptWhenReady);
+      };
+      worker.addEventListener('statechange',adoptWhenReady);adoptWhenReady();
+    }
+  }
+  await workers.register('./danny-sw.js',{scope:legacy.pathname});
+}
 async function init(){
   document.querySelector('main').inert=true;document.querySelector('header').inert=true;
   try{
@@ -293,8 +314,12 @@ async function init(){
     document.querySelector('main').inert=false;document.querySelector('header').inert=false;$('feedStatus').textContent='Optics online';
   }catch(e){$('feedStatus').textContent='Optics unavailable';cue('Could not load game assets. Reload to retry.');console.error(e);}
   if('serviceWorker' in navigator){
-    try{await navigator.serviceWorker.register('./danny-sw.js',{scope:'./danny-the-pimple-popper.html'});}
-    catch{say($('saveStatus').textContent+' Offline installation is unavailable in this browser.');}
+    try{await installOffline();}
+    catch{
+      const legacyLaunch=location.pathname.endsWith('/danny-the-pimple-popper.html') && navigator.serviceWorker.controller;
+      const notice=legacyLaunch?'Reopen online to finish updating the offline launch address.':'Offline installation could not finish.';
+      say([$('saveStatus').textContent,notice].filter(Boolean).join(' '));
+    }
   }
 }
 init();
