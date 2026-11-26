@@ -168,8 +168,10 @@ and imaging available. The legacy launch URL continues to resolve to the canonic
 ## Deployment
 
 - Production host: GitHub Pages, canonical URL unchanged.
-- Release commit: `bfde2ce9b7d25d66dafcbac06c8fed080c3d5eb7` ("Release Dani 1.1 with The Pore Explorer expansion")
-- Push verification: `origin/main` contains the release commit (`git-sync.sh verify` reported the remote has this commit).
+- Release commit: `bfde2ce9b7d25d66dafcbac06c8fed080c3d5eb7` ("Release Dani 1.1 with The Pore Explorer expansion").
+- Follow-up commit: `a4f40be` ("Prime the Pore Explorer offline cache on a first visit") adds `primeOffline()` and bumps the shell and expansion caches to 2026.11.25.5.
+- Push verification: `origin/main` contains both commits (`git-sync.sh verify` reported the remote has this history).
+- Production smoke test on the live origin with a fresh browser profile: page reports `FICTIONAL SIMULATION · v1.1`, WebGL2 renderer, the expansion loads only after it is opened, the authored seed 51031 is used, a scan reached 3/3 chambers at full depth gain, one release advanced the reservoir with two material streams and awarded "The Truth Is Down There", and the worker finished with `junkdrawer-danny-shell-2026.11.25.5` plus `junkdrawer-danny-expansion-2026.11.25.5` (9 files, 6 plates). No console or page errors.
 
 ## Remaining physical-device validation
 
