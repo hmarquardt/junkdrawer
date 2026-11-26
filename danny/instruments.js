@@ -37,6 +37,32 @@ export function illustrate(canvas,id) {
     for(const dir of [1,-1]){c.beginPath();c.moveTo(0,-3.4*dir);c.bezierCurveTo(10,-10*dir,14,3*dir,4,3.4*dir);c.stroke();}
     c.restore();
     c.strokeStyle='#2c3733';c.lineWidth=1;c.beginPath();c.arc(-30,0,10,0,Math.PI*2);c.stroke();
+  } else if(id===6) {
+    // The Silver Loop: a polished ring on a slim mirror-steel shaft.
+    rod(-58,-4,72,8);rod(8,-3,20,6,'#7d8783');
+    c.shadowBlur=0;c.shadowOffsetY=0;c.strokeStyle='#eef4f2';c.lineWidth=3.2;
+    c.beginPath();c.ellipse(40,0,9,13,0,0,Math.PI*2);c.stroke();
+    c.strokeStyle='#9fe6df';c.lineWidth=1;c.beginPath();c.ellipse(40,0,5,8,0,0,Math.PI*2);c.stroke();
+  } else if(id===7) {
+    // Spectral Extractor: prism head with three phase vanes.
+    rod(-58,-7,64,14);rod(-40,-9,24,18,'#5b6a78');
+    c.fillStyle=metal(-8,16);c.beginPath();c.moveTo(26,-7);c.lineTo(46,-13);c.lineTo(46,13);c.lineTo(26,7);c.closePath();c.fill();
+    c.shadowBlur=0;c.shadowOffsetY=0;
+    for(const [i,alpha] of [[0,.9],[1,.55],[2,.3]]){c.strokeStyle='rgba(170,235,255,'+alpha+')';c.lineWidth=1.6;
+      c.beginPath();c.moveTo(30+i*5,-10+i*2);c.lineTo(30+i*5,10-i*2);c.stroke();}
+  } else if(id===8) {
+    // Cryo Wand: canister, frost collar and a cold tip.
+    rod(-58,-10,58,20,'#6d7d86');rod(-46,-12,28,24,'#9fb4bd');rod(0,-5,24,10);
+    c.fillStyle=metal(-6,12);c.beginPath();c.moveTo(24,-6);c.lineTo(42,-9);c.lineTo(42,9);c.lineTo(24,6);c.closePath();c.fill();
+    c.shadowBlur=0;c.shadowOffsetY=0;c.strokeStyle='#c9f6ff';c.lineWidth=1.4;
+    for(let i=0;i<3;i++){c.beginPath();c.arc(44,0,4+i*2.4,0,Math.PI*2);c.stroke();}
+  } else if(id===9) {
+    // Arcane Resonator: brass rings around a suspended crystal.
+    rod(-58,-5,62,10,'#6b5a3e');rod(-42,-7,22,14,'#8c7448');
+    for(const r of [12,17,22]){c.strokeStyle='rgba(214,184,110,.85)';c.lineWidth=1.6;
+      c.beginPath();c.arc(36,0,r,0,Math.PI*2);c.stroke();}
+    c.shadowBlur=0;c.shadowOffsetY=0;c.fillStyle='#b9f6de';
+    c.beginPath();c.moveTo(36,-9);c.lineTo(44,0);c.lineTo(36,9);c.lineTo(28,0);c.closePath();c.fill();
   } else {
     // Resonance Wand: tapered shaft, tuning-fork head, stepped rings.
     rod(-57,-4,66,8);rod(9,-3,22,6,'#6f7f78');

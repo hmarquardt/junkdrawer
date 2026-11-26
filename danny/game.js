@@ -11,7 +11,7 @@ const icon=id=>'<svg aria-hidden="true"><use href="#'+id+'"/></svg>';
 const audio=soundEngine(),dialog=$('dialog');
 let profile,visit,field,tool,active=0,zoom=1,draw,ready=false;
 // The Pore Explorer is fetched only when a player opens it or resumes its checkpoint.
-let expansion=null,expansionLoading=null;
+let expansion=null,expansionLoading=null,clinic=null,clinicLoading=null;
 let database,writesPending=0,saveBroken=false,markerListeners;
 let started=null,source=null,force=0,velocity=0,dx=0,dy=0,burst=null,lastStamp=0,frameMs=0,pending=0,inside=false;
 const current=()=>field[active], run=()=>visit.run, complete=()=>run().cleared.length===field.length;
@@ -136,18 +136,21 @@ function renderUI(){
   $('rankName').textContent=rank(profile.xp);
   $('soundBtn').innerHTML=icon(profile.settings.sound?'sound':'mute')+'<span>Sound '+(profile.settings.sound?'on':'off')+'</span>';
   $('soundBtn').setAttribute('aria-pressed',profile.settings.sound);
-  const equipment=content.list('equipment').filter(item=>!item.scope||item.scope===visit.mode.id.split(':')[0]);
+  const family=visit.mode.id.split(':')[0];
+  const inScope=item=>!item.scope||(Array.isArray(item.scope)?item.scope.includes(family):item.scope===family);
+  const equipment=content.list('equipment').filter(inScope);
   $('kitCount').textContent=pad(equipment.filter(t=>visit.zen||profile.xp>=t.xp).length)+' / '+pad(equipment.length)+' AVAILABLE';
   $('tools').replaceChildren();
   for(const item of equipment){
+    const restricted=!!clinic?.toolLocked?.(item.id);
     const b=document.createElement('button'),owned=visit.zen||profile.xp>=item.xp,eq=item.id===tool.id;
-    b.className='tool'+(eq?' equipped':'');b.disabled=!owned;b.setAttribute('aria-pressed',eq);
+    b.className='tool'+(eq?' equipped':'');b.disabled=!owned||restricted;b.setAttribute('aria-pressed',eq);
     b.innerHTML='<span class="tool-art"><canvas aria-hidden="true"></canvas></span><span><span class="tool-name"></span><span class="tool-detail"></span></span><span class="tool-status">'+icon(eq?'check':owned?'kit':'lock')+'<span class="sr">'+(eq?'Equipped':owned?'Available':'Locked')+'</span></span>';
-    b.querySelector('.tool-name').textContent=item.name;b.querySelector('.tool-detail').textContent=owned?item.type:'Unlock at '+item.xp+' XP';
+    b.querySelector('.tool-name').textContent=item.name;b.querySelector('.tool-detail').textContent=restricted?'Restricted this shift':owned?item.type:'Unlock at '+item.xp+' XP';
     $('tools').append(b);illustrate(b.querySelector('canvas'),item.art);
     b.onclick=()=>{cancel();profile.tool=item.id;save();renderUI();cue(item.name+' equipped. '+rest());expansion?.toolEquipped(item.id);};
   }
-  syncControls();refreshMarkers();expansion?.sync();schedule();
+  syncControls();refreshMarkers();expansion?.sync();clinic?.sync();schedule();
 }
 function loadField(){
   cancel();visit=visitFor(profile);field=makeField(visit);
@@ -257,14 +260,14 @@ function files(){
   const achievements=content.list('achievements').map(a=>'<p class="'+(profile.achievements.includes(a.id)?'achievement':'')+'">'+(profile.achievements.includes(a.id)?'✓ ':'○ ')+escape(a.name)+' · '+Math.min(profile.stats[a.stat]||0,a.threshold)+'/'+a.threshold+'</p>').join('');
   const upgrades=content.list('upgrades').map(u=>'<p>'+escape(u.name)+' · '+(profile.xp>=u.xp?'Fitted':u.xp+' XP')+'</p>').join('');
   modal('Case files','<p>'+rank(profile.xp)+' · '+profile.xp+' XP · '+profile.score+' points · '+profile.stats.total+' scored extractions</p>'+rows+
-    '<details><summary>Achievements · '+profile.achievements.length+'</summary><div class="record-grid">'+achievements+'</div></details><details><summary>Equipment upgrades</summary>'+upgrades+'</details>',
+    '<details><summary>Achievements · '+profile.achievements.length+'</summary><div class="record-grid">'+achievements+'</div></details><details><summary>Equipment upgrades</summary>'+upgrades+'</details>'+(clinic?.recordsForFiles?.()||''),
     [['Return to shift',close],['Reset game',resetPrompt,true]],'CAMPAIGN RECORD');
 }
 $('filesBtn').onclick=files;
 function resetPrompt(){
   modal('Reset all shifts?','<p>This clears the three saved fields, previous checkpoint, achievements, XP, and equipment unlocks on this device.</p>',[['Keep progress',files],['Reset all shifts',()=>{
     const {revision,settings,checkpointId}=profile;
-    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();expansion?.reset();close();
+    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();expansion?.reset();clinic?.reset();close();
   },true]]);
 }
 function settings(){
@@ -272,9 +275,10 @@ function settings(){
   const checks=[['sound','Sound effects and timing cue'],['haptics','Vibration on supported devices'],['assist','Slower pressure and wider release band'],
     ['toggle','Press twice instead of holding'],['contrast','High-contrast controls'],['reducedMotion','Reduced extraction motion']];
   modal('Operator settings','<div class="prefs"><label>Volume <input id="volume" type="range" min="0" max="100" step="5" value="'+Math.round(prefs.volume*100)+'"><output id="volLabel">'+Math.round(prefs.volume*100)+'%</output></label>'+
-    checks.map(([k,label])=>'<label>'+label+'<input type="checkbox" data-pref="'+k+'" '+(prefs[k]?'checked':'')+'></label>').join('')+'</div>',
+    checks.map(([k,label])=>'<label>'+label+'<input type="checkbox" data-pref="'+k+'" '+(prefs[k]?'checked':'')+'></label>').join('')+'</div>'+(clinic?.settingsHTML?.()||''),
     [['Done',()=>{close();cue(rest());}]],'AUDIO & ACCESSIBILITY');
   $('volume').oninput=e=>{prefs.volume=e.target.value/100;audio.volume(prefs.volume);$('volLabel').textContent=e.target.value+'%';};
+  clinic?.bindSettings?.();
   $('volume').onchange=()=>{save();if(prefs.sound){audio.wake();play('zone');}};
   for(const input of $('dialogBody').querySelectorAll('[data-pref]'))input.onchange=()=>{
     prefs[input.dataset.pref]=input.checked;save();renderUI();if(prefs.sound){audio.wake();play('touch');}
@@ -314,17 +318,20 @@ async function installOffline(){
   }
   await workers.register('./danny-sw.js',{scope:legacy.pathname});
 }
+// Shared API handed to every first-party expansion. The engine reads the active mode itself, so the
+// same deep game serves the Pore Explorer and the Midnight Clinic.
+function expansionApi(){
+  return {profile:()=>profile, visit:()=>visit, run:()=>run(), field:()=>field, active:()=>active, tool:()=>tool,
+    getPaint:()=>draw, paint:()=>{if(ready)draw(view());}, cue, play, save, modal, close,
+    selectMode, replayEncounter, audio, packs:['pore-explorer','midnight-clinic']};
+}
 // Selectable campaign entry. The pack, module and plates download here, not at startup.
 async function ensureExpansion(){
-  if(expansion)return expansion;
+  if(expansion && content.versions()['pore-explorer'])return expansion;
   expansionLoading??=(async()=>{
     await content.load('./pore-explorer/pack.json');
     const mod=await import('./pore-explorer/expansion.js');
-    mod.attach({
-      profile:()=>profile, visit:()=>visit, run:()=>run(), field:()=>field, active:()=>active, tool:()=>tool,
-      getPaint:()=>draw, paint:()=>{if(ready)draw(view());}, cue, play, save, modal, close,
-      selectMode, replayEncounter
-    });
+    mod.attach(expansionApi());
     expansion=mod;mod.mount();
     // Fill the expansion runtime cache once a worker controls this page. On a first visit the
     // assets were fetched before activation, so this is the moment they can be stored.
@@ -347,6 +354,34 @@ function replayEncounter(modeId,encounterId,seed){
   Object.assign(slot,{encounter:encounterId,seed,cleared:[],layers:{},deep:{},streak:0,points:0});
   save();loadField();
 }
+async function ensureClinic(){
+  if(clinic && content.versions()['midnight-clinic'])return clinic;
+  clinicLoading??=(async()=>{
+    // The clinic shares the deep engine and the PoreScope, so both first-party packs load here.
+    await content.load('./pore-explorer/pack.json');
+    await content.load('./midnight-clinic/pack.json');
+    const mod=await import('./midnight-clinic/expansion.js');
+    mod.attach(expansionApi());
+    // The clinic imports the shared engine, which attaches on import; keep one reference for game calls.
+    expansion??=await import('./pore-explorer/expansion.js');
+    expansion.mount();mod.mount();
+    clinic=mod;
+    if('serviceWorker' in navigator){
+      const prime=()=>clinic?.primeOffline?.();
+      if(navigator.serviceWorker.controller)prime();
+      else navigator.serviceWorker.addEventListener('controllerchange',prime,{once:true});
+    }
+    return mod;
+  })();
+  try{return await clinicLoading;}catch(e){clinicLoading=null;throw e;}
+}
+$('clinicBtn').onclick=async()=>{
+  try{await ensureClinic();clinic.openPanel();}
+  catch(e){
+    say(e.message||'The clinic could not be opened.');
+    modal('The Midnight Clinic is dark','<p>The first-party expansion could not be downloaded on this visit. Nothing in the base campaign or The Pore Explorer has changed. Reconnect, then open it again.</p>',[['Return to shift',close]],'EXPANSION 3');
+  }
+};
 $('poreBtn').onclick=async()=>{
   try{await ensureExpansion();expansion.openPanel();}
   catch(e){
@@ -366,6 +401,7 @@ async function init(){
       profile=migrate(state);visit=visitFor(profile);content.get('equipment',profile.tool);
       // A checkpoint inside the expansion needs its module before the first field is built.
       if(String(profile.mode).startsWith('pore-explorer:'))await ensureExpansion();
+      if(String(profile.mode).startsWith('midnight-clinic:'))await ensureClinic();
       recovery=recovered||!!state&&!state.schema;
       if(recovered)say('Recovered your previous checkpoint.');
     }catch(e){
@@ -373,7 +409,7 @@ async function init(){
     }
     visit=visitFor(profile);
     draw=await createRenderer($('stage'),$('skin'),$('effects'),content.get('assets',visit.region.image).url);
-    expansion?.mount();
+    expansion?.mount();clinic?.mount();
     ready=true;loadField();if(recovery)save();
     // Read-only inspection surface for the automated suites and production smoke checks.
     // It exposes snapshots only: no writes, no content control, no network access.
@@ -388,7 +424,9 @@ async function init(){
       scope:()=>{const s=expansion?.overlayContext?.();return s?{mode:s.mode,shown:s.shown,found:s.state.found,remaining:s.state.remaining,
         pattern:s.graph.pattern,edges:s.graph.edges.length,hidden:s.graph.hidden,
         nodes:s.graph.nodes.map(n=>{const live=s.state.nodes.find(item=>item.key===n.key);return {key:n.key,x:n.x,y:n.y,depth:n.depth,
-          volume:n.volume,remaining:live.remaining,hidden:n.hidden,revealed:live.revealed,exposed:live.exposed};}),
+          volume:n.volume,remaining:live.remaining,hidden:n.hidden,revealed:live.revealed,exposed:live.exposed,
+          phased:!!n.phased,phaseOffset:n.phaseOffset,dormant:!!n.dormant,active:live.active};}),
+        tick:s.state.tick,phaseClosed:s.state.phaseClosed,dormant:s.state.dormant,pending:s.state.pending,
         scan:{c:s.scan.c,d:s.scan.d},gates:s.state.gates.map(g=>({type:g.type,broken:g.broken})),held:s.state.held}:null;},
       bursts:()=>burst?(burst.streams||[burst]).map(stream=>({color:stream.mat.color,particles:stream.particles.length})):[],
       totals:()=>({xp:profile.xp,stats:structuredClone(profile.stats),achievements:[...profile.achievements]})

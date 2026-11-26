@@ -2,6 +2,8 @@
 // equipment record may supply an optional audio asset, decoded only on first use.
 export function soundEngine(){
   let ctx,master,contact,level=.65,sampleKey='',sample;
+  // Midnight Clinic ambience: an independent bus so atmosphere never competes with extraction audio.
+  let room=null,roomGain=null,ambienceLevel=.35,musicNodes=null,ambienceTimers=[];
   const wake=()=>{
     try{
       if(!ctx){ctx=new AudioContext();master=ctx.createGain();master.gain.value=level*.7;master.connect(ctx.destination);}
@@ -9,6 +11,36 @@ export function soundEngine(){
     }catch{}
   };
   function volume(value){level=value;if(master)master.gain.setTargetAtTime(value*.7,ctx.currentTime,.025);}
+  // Two seconds of brown noise is enough for rain, thunder and creaks; nothing is downloaded.
+  function noiseBuffer(){const buffer=ctx.createBuffer(1,Math.round(ctx.sampleRate*2),ctx.sampleRate),data=buffer.getChannelData(0);let last=0;
+    for(let i=0;i<data.length;i++){const white=Math.random()*2-1;last=(last+.02*white)/1.02;data[i]=last*3.2;}return buffer;}
+  function ensureRoom(){
+    if(!ctx)return null;
+    if(!room){const source=ctx.createBufferSource(),filter=ctx.createBiquadFilter();
+      source.buffer=noiseBuffer();source.loop=true;filter.type='lowpass';filter.frequency.value=520;
+      roomGain=ctx.createGain();roomGain.gain.value=ambienceLevel*.1;source.connect(filter).connect(roomGain).connect(ctx.destination);source.start();room=source;}
+    roomGain.gain.setTargetAtTime(ambienceLevel*.1,ctx.currentTime,.5);return roomGain;
+  }
+  function ambienceTone(from,to,duration,gain,type,delay=0){if(!ctx||ctx.state!=='running'||!roomGain)return;
+    const osc=ctx.createOscillator(),amp=ctx.createGain(),t=ctx.currentTime+delay;osc.type=type;
+    osc.frequency.setValueAtTime(from,t);osc.frequency.exponentialRampToValueAtTime(Math.max(20,to),t+duration);
+    amp.gain.setValueAtTime(.0001,t);amp.gain.exponentialRampToValueAtTime(gain,t+.02);amp.gain.exponentialRampToValueAtTime(.0001,t+duration);
+    osc.connect(amp).connect(roomGain);osc.start(t);osc.stop(t+duration+.05);}
+  function thunder(){if(!ctx||!roomGain)return;const source=ctx.createBufferSource(),filter=ctx.createBiquadFilter(),amp=ctx.createGain(),t=ctx.currentTime;
+    source.buffer=noiseBuffer();filter.type='bandpass';filter.frequency.value=170+Math.random()*90;filter.Q.value=.7;
+    amp.gain.setValueAtTime(.0001,t);amp.gain.exponentialRampToValueAtTime(.16,t+.12);amp.gain.exponentialRampToValueAtTime(.0001,t+2.4);
+    source.connect(filter).connect(amp).connect(roomGain);source.start(t);source.stop(t+2.5);}
+  function scheduleAmbience(){
+    if(ambienceTimers.length||!ctx)return;
+    const later=(fn,delay)=>ambienceTimers.push(setTimeout(()=>{if(ctx&&roomGain){fn();ambienceTimers=[];scheduleAmbience();}},delay));
+    later(()=>{thunder();ambienceTone(70,48,.5,.03,'sawtooth',.4);},26000+Math.random()*24000);
+    later(()=>{[520,660,780].forEach((n,i)=>ambienceTone(n,n*.99,1.2,.02,'sine',i*.18));},70000+Math.random()*50000);
+  }
+  function stopMusic(){if(!musicNodes)return;for(const node of musicNodes){try{node.stop?.(ctx.currentTime+.2);node.disconnect?.();}catch{}}musicNodes=null;}
+  function startMusic(){if(!ctx||musicNodes)return;const amp=ctx.createGain(),filter=ctx.createBiquadFilter();
+    amp.gain.value=.018;filter.type='lowpass';filter.frequency.value=260;
+    musicNodes=[55,82.5].map(frequency=>{const osc=ctx.createOscillator();osc.type='sine';osc.frequency.value=frequency;osc.connect(filter);osc.start();return osc;});
+    filter.connect(amp).connect(ctx.destination);musicNodes.push(filter,amp);}
   function tone(from,to,duration,gain,type,delay=0,pan=0){
     if(!ctx || ctx.state!=='running')return;
     const osc=ctx.createOscillator(),amp=ctx.createGain(),t=ctx.currentTime+delay;
@@ -27,6 +59,10 @@ export function soundEngine(){
     contact.amp.gain.setTargetAtTime(.0001,ctx.currentTime,.012);contact.osc.stop(ctx.currentTime+.08);contact=null;
   }
   return {wake,volume,stop,
+    startAmbience(value){try{wake();if(!ctx)return;ambienceLevel=Math.max(0,Math.min(1,value??ambienceLevel));ensureRoom();scheduleAmbience();}catch{}},
+    stopAmbience(){for(const timer of ambienceTimers)clearTimeout(timer);ambienceTimers=[];
+      if(room){try{room.stop();room.disconnect();}catch{}room=null;roomGain=null;}stopMusic();},
+    setMusic(on){try{wake();if(!ctx)return;if(on)startMusic();else stopMusic();}catch{}},
     start(tech){
       wake();stop();if(!ctx)return;
       const osc=ctx.createOscillator(),amp=ctx.createGain();osc.type=tech==='suction'?'sawtooth':'sine';

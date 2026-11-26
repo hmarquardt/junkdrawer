@@ -4,35 +4,52 @@
 const links = {
   regions:{image:'assets'}, archetypes:{material:'materials',reservoir:'reservoirs'},
   bosses:{behavior:'behaviors',archetype:'archetypes',reservoir:'reservoirs'},
-  encounters:{region:'regions',boss:'bosses',archetypes:'archetypes',behaviors:'behaviors',reservoir:'reservoirs'},
+  encounters:{region:'regions',boss:'bosses',archetypes:'archetypes',behaviors:'behaviors',reservoir:'reservoirs',patient:'patients',condition:'conditions'},
   chapters:{encounters:'encounters'}, modes:{scoring:'scoring',chapters:'chapters'},
   materials:{}, equipment:{audio:'assets'}, behaviors:{reservoir:'reservoirs'},
   achievements:{}, scoring:{}, assets:{}, upgrades:{}, reservoirs:{}, commentary:{},
-  tutorials:{equipment:'equipment'}
+  tutorials:{equipment:'equipment'}, patients:{region:'regions',reservoir:'reservoirs',condition:'conditions',materials:'materials'},
+  conditions:{}, intake:{}, records:{}
 };
 const requiredLinks={
   regions:['image'],archetypes:['material'],bosses:['behavior','archetype'],encounters:['region','archetypes'],
   chapters:['encounters'],modes:['chapters','scoring']
 };
-const TECHNIQUES=['roll','pulse','suction','probe','vortex','resonance'];
+const TECHNIQUES=['roll','pulse','suction','probe','vortex','resonance','silver','spectral','cryo','arcane'];
 const PATTERNS=['layers','drift','breakaway','alternating','stutter','surge'];
 const RESERVOIR_PATTERNS=['fork','ribbon','strata','chain','braid','migrate'];
-const OBSTRUCTIONS=['none','plug','valve','septum','migrate'];
+const OBSTRUCTIONS=['none','plug','valve','septum','migrate','core'];
+const CLASSES=['vampire','werewolf','zombie','swamp','reptilian','alien','troll','ghost','fungoid','lovecraftian','hybrid','crossover'];
+const RECORD_KINDS=['max','count','score'];
+const INTENSITIES=['spooky','midnight','eldritch'];
 function validateRecord(kind,v){
   const inRange=(n,min,max)=>Number.isFinite(n)&&n>=min&&n<=max;
   for(const key of requiredLinks[kind]||[]){
     if(!v[key]||Array.isArray(v[key])&&!v[key].length)throw Error('Missing '+key+' on '+v.id);
   }
   if(kind==='materials' && ['viscosity','cohesion','adhesion'].some(k=>!inRange(v[k],0,1)))throw Error('Invalid material properties');
-  if(kind==='equipment' && (!inRange(v.speed,.01,8)||!inRange(v.window,.01,.45)||!Number.isInteger(v.art)||v.art<0||v.art>5))throw Error('Invalid instrument');
-  if(kind==='equipment' && v.scope!==undefined && !/^[a-z][a-z0-9-]*$/.test(v.scope))throw Error('Invalid instrument scope');
+  if(kind==='equipment' && (!inRange(v.speed,.01,8)||!inRange(v.window,.01,.45)||!Number.isInteger(v.art)||v.art<0||v.art>9))throw Error('Invalid instrument');
+  if(kind==='equipment' && v.scope!==undefined){
+    const scopes=[].concat(v.scope);
+    if(!scopes.length||scopes.some(scope=>typeof scope!=='string'||!/^[a-z][a-z0-9-]*$/.test(scope)))throw Error('Invalid instrument scope');
+  }
   if(kind==='behaviors' && (!Number.isInteger(v.layers)||v.layers<1||v.layers>8||!inRange(v.pace,.1,8)||!inRange(v.window,.1,2)))throw Error('Invalid release behavior');
   if(kind==='chapters' && !inRange(v.difficulty,.1,8))throw Error('Invalid difficulty');
   if(kind==='reservoirs'){
     const rooms=Array.isArray(v.chambers)&&v.chambers.length===2&&v.chambers.every(n=>Number.isInteger(n)&&n>=1&&n<=14)&&v.chambers[0]<=v.chambers[1];
     if(!rooms || !inRange(v.scale,.1,4) || !Array.isArray(v.materials) || !v.materials.length)throw Error('Invalid reservoir template');
     if(!Number.isInteger(v.hidden)||v.hidden<0||v.hidden>14)throw Error('Invalid concealed count');
+    for(const key of ['phase','dormant','rewire','mutates','outlets']){
+      if(v[key]!==undefined && (!Number.isInteger(v[key])||v[key]<0||v[key]>8))throw Error('Invalid reservoir '+key);
+    }
+    if(v.mutation!==undefined && (!Number.isInteger(v.mutation)||v.mutation<1||v.mutation>16))throw Error('Invalid mutation milestone');
   }
+  if(kind==='patients'){
+    if(!CLASSES.includes(v.klass))throw Error('Unknown patient class');
+    if(!Array.isArray(v.materials)||!v.materials.length)throw Error('Patient needs materials');
+  }
+  if(kind==='records' && (!RECORD_KINDS.includes(v.kind)||typeof v.stat!=='string'))throw Error('Invalid record definition');
+  if(kind==='conditions' && Object.values(v).some(value => typeof value==='number' && !Number.isFinite(value)))throw Error('Invalid condition');
   if(kind==='tutorials' && (!Array.isArray(v.steps)||!v.steps.length||v.steps.some(s=>typeof s!=='string'||!s.trim())))throw Error('Invalid tutorial');
 }
 export function createRegistry() {
@@ -70,6 +87,9 @@ export function createRegistry() {
             if(kind==='modes' && !['campaign','endless','zen'].includes(value.strategy))throw Error('Unknown mode strategy');
             if(kind==='equipment' && !TECHNIQUES.includes(value.technique))throw Error('Unknown technique');
             if(kind==='reservoirs' && (!RESERVOIR_PATTERNS.includes(value.pattern)||!OBSTRUCTIONS.includes(value.obstruction||'none')))throw Error('Unknown reservoir family');
+            if(kind==='modes' && value.intensity!==undefined && !INTENSITIES.includes(value.intensity))throw Error('Unknown visual intensity');
+            if(kind==='patients' && value.intake!==undefined && typeof value.intake!=='string')throw Error('Invalid intake note');
+            if(kind==='encounters' && value.patient!==undefined && !String(value.patient).includes(':'))throw Error('Invalid encounter patient');
             additions.set(value.id,{kind,value});
           }
         }
@@ -98,7 +118,7 @@ export const baseReady=content.load('./base.json');
 // Future approved packages get a source here when released. Reading inactive pack slots must never
 // download their media or prevent the base campaign from resuming. Registering a source is only a
 // string; the manifest, module and plates download when that content is actually required.
-const optionalSources=new Map([['pore-explorer','./pore-explorer/pack.json']]);
+const optionalSources=new Map([['pore-explorer','./pore-explorer/pack.json'],['midnight-clinic','./midnight-clinic/pack.json']]);
 export async function restoreContent(state){
   if(state?.schema!==2)return;
   const active=state.slots?.[state.mode];

@@ -28,7 +28,9 @@ export function makeField(visit) {
     const behavior=leader?content.get('behaviors',leader.behavior)
       :(encounter.behaviors?.length?content.get('behaviors',encounter.behaviors[(id+index)%encounter.behaviors.length]):null);
     // Reservoir networks are authored templates; the expansion turns each into a seeded graph.
-    const reservoir=leader?.reservoir||encounter.reservoir||archetype.reservoir||null;
+    // A patient record can supply the class reservoir, so supernatural encounters stay data-driven.
+    const patient=encounter.patient?content.get('patients',encounter.patient):null;
+    const reservoir=leader?.reservoir||encounter.reservoir||patient?.reservoir||archetype.reservoir||null;
     return {id,x:x+(rng()-.5)*.09,y:y+(rng()-.5)*.09,size:(.044+rng()*.014)*(leader?1.45:1),
       phase:rng()*Math.PI*2,goal:.49+rng()*.25,resistance:(.86+rng()*.28)/Math.sqrt(difficulty)*(1+.22*hair),
       type:archetype.shape,name:leader?.name||archetype.name,material:content.get('materials',archetype.material),
@@ -49,6 +51,12 @@ export function pressure(seconds,target,tool,layer=0){
   if(tool.technique==='vortex')return .5+.5*Math.sin(cycle*Math.PI*2);
   if(tool.technique==='resonance')return .5+.5*Math.sin(cycle*Math.PI*2+.55);
   if(tool.technique==='probe')return linear*.55;
+  // Midnight Clinic instruments: a stable silver ramp, a phase-stepped spectral sweep, a cooling
+  // cryo curve that loses authority as it warms, and an arcane double peak.
+  if(tool.technique==='silver')return linear<.62?linear:.62+(linear-.62)*.5;
+  if(tool.technique==='spectral')return Math.min(.92,Math.round(linear*4)/4);
+  if(tool.technique==='cryo')return linear<.7?linear*.88:.616+(linear-.7)*.4;
+  if(tool.technique==='arcane')return Math.abs(Math.sin(cycle*Math.PI*1.5))*.92;
   return linear;
 }
 export function band(seconds,target,tool,layer=0){
@@ -56,6 +64,12 @@ export function band(seconds,target,tool,layer=0){
   // deliberately open: any release is a valid pulse on any target.
   if(tool.technique==='probe')return {center:.3,width:.62};
   const b=target.behavior;
+  // Specialized instruments hold their own alignment: silver is steady, spectral steps with the
+  // phase, cryo sits low, arcane rides the second peak.
+  if(tool.technique==='silver')return {center:.5,width:tool.window*.82};
+  if(tool.technique==='spectral')return {center:.24+.52*((layer%3)/2),width:tool.window*.9};
+  if(tool.technique==='cryo')return {center:.34,width:tool.window};
+  if(tool.technique==='arcane')return {center:.56,width:tool.window*.92};
   let center=target.goal;
   if(b?.pattern==='drift')center+=Math.sin(seconds*2.4+target.phase)*b.shift;
   if(b?.pattern==='layers'||b?.pattern==='breakaway')center-=layer*b.shift;

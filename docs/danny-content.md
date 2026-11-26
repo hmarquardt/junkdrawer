@@ -194,3 +194,42 @@ the base game.
 ![A forked reservoir releasing two material streams](img/pore-explorer-extraction.png)
 
 ![Expansion campaign panel](img/pore-explorer-campaign.png)
+
+## Expansion 3: The Midnight Clinic
+
+`danny/midnight-clinic/` is a second reservoir pack layered on the same first-party engine. It adds
+no new game loop; it extends the graph primitive and reuses the shared imaging, release and checkpoint
+code in `pore-explorer/expansion.js` and `reservoir.js`.
+
+### Engine 1.3 primitives (all optional, all derived)
+
+| Field | Meaning |
+| --- | --- |
+| `phase`, `phaseNodes` | Marks the deepest chambers as phase-locked. A chamber's phase is a function of its own fill; closed phases throttle flow to 30% and never block, so completion is always finite. |
+| `dormant` | Marks leaf chambers as dormant. A dormant chamber wakes, once, when a chamber empties or a pass drains nothing. The list bounds total regeneration. |
+| `rewire` | Adds extra passages that open at fixed milestones. Openings can only add routes, so no node becomes unreachable. |
+| `echo` | After a chamber empties, the still-filled chamber behind it releases again one pass later. |
+| `mutation`, `mutates` | At a defined milestone, marked chambers change their material. Derived from the pass count, not stored. |
+| `core` obstruction | A crystalline gate that only the cryo wand or arcane resonator can break. |
+| `conditions` family | Authored environmental records (`moon`, `temp`, `spectral`, `bioluminescence`, `ignorePhase`) referenced by encounters. Effects are pure functions of the pass index. |
+| `patients` family | `klass`, `region`, `reservoir`, `condition`, `materials`, `intake`. `makeField` uses the patient reservoir when the encounter does not name one. |
+| `records` family | `{name, stat, kind}`. Display only; values are ordinary integer profile stats. |
+| Techniques | `silver`, `spectral`, `cryo`, `arcane`, each with its own curve, alignment band and breakable gate types. |
+| Equipment `scope` array | An instrument can be listed for several packs (the PoreScope is shared). |
+| Settings | Optional `intensity` (spooky/midnight/eldritch), `ambience`, `music`, `quietHud`; validated only when present, so 1.0 saves load unchanged. |
+
+Each attempt increments a small persisted attempt clock (`deep[target].k`); it is currently reserved
+for phase timing experiments and does not affect reservoir state.
+
+### Version 1.2
+
+The World Book of Pores is not implemented in this repository. 1.3 resolves that dependency with a
+bounded supernatural record book (eight classifications, integer stats, separate from base records)
+and documents the outstanding unified record/challenge service rather than pretending to integrate it.
+
+### Verification
+
+`node tests/dani-midnight-clinic.cjs` covers the pack contract, ten classes, eight materials, four
+instruments, all sixteen appointments, four bosses, the supernatural primitives, achievements, records,
+the hidden referral, endless variants, Zen, checkpoints, save compatibility, offline caching and both
+renderers. The base, Pore Explorer, release-upgrade and Andi suites remain green.

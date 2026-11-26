@@ -169,10 +169,48 @@ export function build(template, seed) {
       if (pick) { pick.gate = template.obstruction; gates.push(pick); }
     }
   }
+  // Supernatural primitives. Every one is derived from the seed or the pass index at replay time, so
+  // a checkpoint needs no extra state. Templates without these fields produce exactly the 1.1 graph.
+  const dormantKeys = [];
+  const dormantCount = Math.max(0, Math.min(4, template.dormant || 0));
+  if (dormantCount) {
+    const leaves = shape.nodes.filter(node => node.i > 0 && !shape.edges.some(edge => edge.a === node.key))
+      .sort((a, b) => b.depth - a.depth || a.i - b.i);
+    for (let i = 0; i < dormantCount && i < leaves.length; i++) {
+      leaves[i].dormant = true;
+      dormantKeys.push(leaves[i].key);
+    }
+  }
+  const phaseNodes = Math.max(0, Math.min(6, template.phaseNodes || 0));
+  if (template.phase) {
+    const list = shape.nodes.filter(node => node.i > 0).sort((a, b) => b.depth - a.depth || a.i - b.i);
+    for (let i = 0; i < phaseNodes && i < list.length; i++) { list[i].phased = true; list[i].phaseOffset = i; }
+  }
+  const mutates = Math.max(0, Math.min(6, template.mutates || 0));
+  if (template.mutation) {
+    const list = shape.nodes.filter(node => node.i > 0).sort((a, b) => b.depth - a.depth || a.i - b.i);
+    for (let i = 0; i < mutates && i < list.length; i++) {
+      list[i].mutates = true;
+      list[i].mutationMaterial = materials[(materials.indexOf(list[i].material) + 1 + i) % materials.length];
+    }
+  }
+  // The Living Labyrinth opens extra passages at fixed milestones. Opening a passage can only add
+  // routes, so a node can never become unreachable.
+  let wired = 0;
+  const rewire = Math.max(0, Math.min(4, template.rewire || 0));
+  for (let i = 0; i < rewire; i++) {
+    const a = shape.nodes[(i * 3 + 1) % shape.nodes.length], b = shape.nodes[(i * 5 + 4) % shape.nodes.length];
+    if (!a || !b || a.key === b.key || a.key === 'n0' || b.key === 'n0') continue;
+    if (shape.edges.some(edge => edge.a === a.key && edge.b === b.key || edge.a === b.key && edge.b === a.key)) continue;
+    shape.edges.push({a: a.key, b: b.key, resistance: .92, opensAt: 2 * (i + 1)});
+    wired++;
+  }
   for (const edge of shape.edges) edge.resistance = Math.round(Math.min(1, edge.resistance) * 100) / 100;
   return {
     id: template.id, pattern: shape.pattern, nodes: shape.nodes, edges: shape.edges, gates,
     migrating: shape.migrating || null, hidden, scale, seed, materials,
+    phase: template.phase || 0, phaseNodes, dormantKeys, dormantCount, rewired: wired,
+    echo: !!template.echo, mutation: template.mutation || 0, mutates, outlets: template.outlets || 1,
     totalVolume: Math.round(shape.nodes.reduce((sum, node) => sum + node.volume, 0) * 100) / 100
   };
 }
@@ -181,6 +219,17 @@ export function build(template, seed) {
 // revealed compartments are inputs, so the same committed progress always replays identically.
 // A migrating plug sits on a different edge for every draw; a resonance pass records that draw
 // index as a negative "broken" entry, so the checkpoint stays a small integer list.
+// A phase-locked chamber is only reachable inside its fictional window. The window is derived from
+// the pass index, so a checkpoint never stores a phase.
+// A phase is a property of the chamber's own fill, not of a wall clock: it is fully replayable from
+// the checkpoint and can never be unreachable. Closed phases throttle flow (30%) instead of blocking
+// it, so no seed or instrument combination can soft-lock a case.
+function phaseOpen(node) {
+  if (!node.phased) return true;
+  const fill = node.remaining / Math.max(0.01, node.volume);
+  return fill > 0.62 || fill < 0.34;
+}
+
 function blockedEdge(graph, edge, broken, pass, openAll) {
   if (openAll) return false;
   if (edge.gate && !broken.has(graph.gates.indexOf(edge))) return true;
@@ -188,15 +237,14 @@ function blockedEdge(graph, edge, broken, pass, openAll) {
     const host = graph.migrating[((pass % graph.migrating.length) + graph.migrating.length) % graph.migrating.length];
     if (edge.b === host && !broken.has(-1 - pass)) return true;
   }
+  if (Number.isInteger(edge.opensAt) && pass < edge.opensAt) return true;
   return false;
 }
 
-function frontier(graph, map, broken, pass, openAll) {
+function frontier(graph, map, broken, pass, openAll, env, tick) {
   const distance = new Map([['n0', 0]]), queue = ['n0'], order = [];
   const outlet = map.get('n0');
   if (outlet && !outlet.empty) order.push({key: 'n0', distance: 0});
-  // A migrating plug occupies one chamber for the current draw. Everything beyond it is
-  // unreachable until a resonance pass breaks that pass's obstruction.
   const host = graph.migrating && !openAll
     ? graph.migrating[((pass % graph.migrating.length) + graph.migrating.length) % graph.migrating.length]
     : null;
@@ -211,7 +259,9 @@ function frontier(graph, map, broken, pass, openAll) {
       distance.set(edge.b, distance.get(key) + 1);
       if (held && edge.b === host) continue;
       queue.push(edge.b);
-      if (!target.empty) order.push({key: edge.b, distance: distance.get(edge.b), edge});
+      if (target.empty) continue;
+      if (!openAll && !target.active) continue;
+      order.push({key: edge.b, distance: distance.get(edge.b), edge});
     }
   }
   order.sort((a, b) => a.distance - b.distance || a.key.localeCompare(b.key));
@@ -219,48 +269,79 @@ function frontier(graph, map, broken, pass, openAll) {
 }
 
 export function replay(graph, progress = {}, options = {}) {
-  const revealed = new Set(progress.found || []);
+  const scanned = new Set(progress.found || []);
   const broken = new Set(progress.g || []);
   const openAll = !!options.openAll;
+  const env = options.env || null;
+  const units = Number.isFinite(options.units) ? Math.max(0.4, Math.min(3, options.units)) : DRAW;
+  // The phase clock advances on every release attempt, blocked ones included, so a phase window can
+  // never be unreachable. It is one small integer in the checkpoint.
+  const tick = Number.isFinite(progress.k) ? Math.max(0, Math.min(999999, Math.round(progress.k))) : 0;
   const nodes = graph.nodes.map(node => ({
-    ...node, remaining: node.volume, empty: false,
-    revealed: openAll || !node.hidden || revealed.has(node.key), exposed: false
+    ...node, remaining: node.volume, empty: false, active: !node.dormant,
+    revealed: openAll || !node.hidden || scanned.has(node.key), exposed: false,
+    materialNow: node.material, phasedNow: false
   }));
   const map = new Map(nodes.map(node => [node.key, node]));
   const events = [];
-  // Draining a chamber exposes the concealed compartment behind it, even without a scan. This is
-  // the conditional release that lets a "finished" lesion open a second storey.
-  const expose = () => {
+  let dormantActivated = 0;
+  const dormantKeys = graph.dormantKeys || [];
+  // Visibility is derived every pass: scanned probes, drainage exposure, a spectral window, and the
+  // bioluminescent reveal that follows an emptied chamber.
+  const reveal = pass => {
+    const spectral = !openAll && env && env.spectral && pass % 2 === 1;
     let changed = true;
     while (changed) {
       changed = false;
       for (const node of nodes) {
-        if (node.i === 0 || !node.hidden || node.revealed) continue;
+        if (openAll || scanned.has(node.key) || spectral) node.revealed = node.revealed || node.hidden || !node.hidden;
+        if (!node.hidden || node.revealed) { node.phasedNow = node.phased ? !phaseOpen(node) : false; continue; }
         const parents = graph.edges.filter(edge => edge.b === node.key).map(edge => map.get(edge.a));
         if (parents.length && parents.every(parent => parent && parent.empty)) {
           node.revealed = true; node.exposed = true; changed = true;
         }
+        node.phasedNow = node.phased ? !phaseOpen(node) : false;
       }
     }
   };
-  expose();
+  const materialOf = (node, pass) => {
+    if (graph.mutation && node.mutates && pass >= graph.mutation) return node.mutationMaterial || node.material;
+    return node.material;
+  };
+  reveal(0);
   const visits = Math.max(0, Math.min(64, progress.p || 0));
+  let echo = [];
   for (let pass = 0; pass < visits; pass++) {
-    expose();
-    const reachable = frontier(graph, map, broken, pass, openAll);
+    reveal(pass);
+    const reachable = frontier(graph, map, broken, pass, openAll, env, tick);
+    const base = units * (env && env.moon && pass % 4 === 3 ? 1.5 : 1) * (env && env.temp && pass % 3 === 2 ? 0.6 : 1);
     const drained = [];
-    let budget = DRAW;
+    let budget = base;
     for (const item of reachable) {
       if (budget <= EPSILON) break;
       const node = map.get(item.key);
-      const amount = Math.min(node.remaining, budget);
+      // Closed phases throttle, they never wall off.
+      const factor = !openAll && node.phased && !phaseOpen(node) && !(env && env.ignorePhase) ? 0.3 : 1;
+      const amount = Math.min(node.remaining, budget * factor);
       node.remaining = Math.round((node.remaining - amount) * 100) / 100;
-      budget -= amount;
-      drained.push({key: node.key, amount, material: node.material, depth: node.depth});
+      budget -= amount / Math.max(0.3, factor);
+      drained.push({key: node.key, amount, material: materialOf(node, pass), depth: node.depth});
       if (node.remaining <= EPSILON) { node.remaining = 0; node.empty = true; }
     }
+    // Spectral echo: the previous pass's emptied chamber releases again one pass later.
+    const echoed = [];
+    if (graph.echo) {
+      for (const key of echo) {
+        const node = map.get(key);
+        if (!node || node.empty || !node.revealed) continue;
+        const amount = Math.min(node.remaining, base * 0.35);
+        node.remaining = Math.round((node.remaining - amount) * 100) / 100;
+        if (node.remaining <= EPSILON) { node.remaining = 0; node.empty = true; }
+        echoed.push({key: node.key, amount, material: materialOf(node, pass), depth: node.depth, echo: true});
+      }
+    }
     const secondary = [];
-    for (const item of drained) {
+    for (const item of [...drained, ...echoed]) {
       const node = map.get(item.key);
       if (!node.empty || !node.hub) continue;
       for (const edge of graph.edges) {
@@ -270,16 +351,55 @@ export function replay(graph, progress = {}, options = {}) {
         const amount = Math.min(child.remaining, DRAW * 0.55);
         child.remaining = Math.round((child.remaining - amount) * 100) / 100;
         if (child.remaining <= EPSILON) { child.remaining = 0; child.empty = true; }
-        secondary.push({key: child.key, amount, material: child.material, depth: child.depth, chain: true});
+        secondary.push({key: child.key, amount, material: materialOf(child, pass), depth: child.depth, chain: true});
       }
     }
-    events.push({pass, drained, secondary, blocked: drained.length === 0});
+    // The Regenerator: a dormant chamber wakes once, and only while the field is still active. The
+    // count is bounded by the authored dormant list, so completion is always finite.
+    const activated = [];
+    const anyEmpty = drained.some(item => map.get(item.key).empty) || echoed.some(item => map.get(item.key).empty);
+    if (dormantActivated < dormantKeys.length && (anyEmpty || drained.length === 0)) {
+      const node = map.get(dormantKeys[dormantActivated++]);
+      if (node) { node.active = true; activated.push(node.key); }
+    }
+    // Bioluminescence: an emptied chamber lights its neighbours into the record.
+    const lit = [];
+    if (env && env.bioluminescence) {
+      for (const item of [...drained, ...echoed]) {
+        const node = map.get(item.key);
+        if (!node.empty) continue;
+        for (const edge of graph.edges) {
+          if (edge.a !== node.key) continue;
+          const child = map.get(edge.b);
+          if (child && !child.revealed) { child.revealed = true; lit.push(child.key); }
+        }
+      }
+    }
+    const rewired = graph.edges.map((edge, index) => ({edge, index}))
+      .filter(item => Number.isInteger(item.edge.opensAt) && item.edge.opensAt === pass)
+      .map(item => item.index);
+    const mutated = graph.mutation === pass ? nodes.filter(node => node.mutates).map(node => node.key) : [];
+    events.push({pass, drained, secondary, echoed, activated, lit, rewired, mutated,
+      blocked: drained.length === 0 && echoed.length === 0});
+    // The echo targets are the still-filled chambers behind a chamber that emptied this pass: a
+    // completed release produces a delayed secondary release rather than replaying an empty one.
+    if (graph.echo) {
+      const next = [];
+      for (const item of [...drained, ...echoed]) {
+        if (!map.get(item.key).empty) continue;
+        for (const edge of graph.edges) {
+          if (edge.a !== item.key) continue;
+          const child = map.get(edge.b);
+          if (child && !child.empty && child.revealed) next.push(child.key);
+        }
+      }
+      echo = [...new Set(next)];
+    } else echo = [];
   }
-  expose();
+  reveal(visits);
   const remaining = Math.round(nodes.reduce((sum, node) => sum + node.remaining, 0) * 100) / 100;
   const unrevealed = nodes.filter(node => !node.revealed);
   const gates = graph.gates.map((edge, index) => ({index, a: edge.a, b: edge.b, type: edge.gate, broken: broken.has(index)}));
-  // The plug that will block the *next* draw, and whether a resonance pass has already pinned it.
   const migrating = graph.migrating ? graph.migrating[visits % graph.migrating.length] : null;
   const held = migrating && !broken.has(-1 - visits) ? migrating : null;
   return {
@@ -287,7 +407,10 @@ export function replay(graph, progress = {}, options = {}) {
     drawn: Math.round((graph.totalVolume - remaining) * 100) / 100,
     complete: remaining <= EPSILON && unrevealed.length === 0,
     found: nodes.filter(node => node.revealed).length,
-    gates, migrating, held,
+    gates, migrating, held, env, units, tick,
+    dormant: dormantKeys.filter((key, index) => index < dormantActivated),
+    pending: dormantKeys.slice(dormantActivated),
+    phaseClosed: nodes.filter(node => node.phased && !phaseOpen(node)).map(node => node.key),
     outlet: 'n0', pass: visits
   };
 }
@@ -304,10 +427,12 @@ export function remainingDraws(graph, progress = {}) {
 }
 
 // What a specific release would do, without committing it.
-export function preview(graph, progress, tool) {
-  const before = replay(graph, progress);
+export function preview(graph, progress, tool, options = {}) {
+  const env = options.env || null;
+  const units = Number.isFinite(options.units) ? options.units : 1;
+  const before = replay(graph, progress, {env, units});
   const steps = tool && tool.technique === 'vortex' ? 2 : 1;
-  const state = replay(graph, {...progress, p: (progress.p || 0) + steps});
+  const state = replay(graph, {...progress, p: (progress.p || 0) + steps}, {env, units});
   const events = state.events.slice(before.pass);
   const drained = events.flatMap(event => [...event.drained, ...event.secondary]);
   const blocked = events.length === 0 || events.every(event => event.blocked);

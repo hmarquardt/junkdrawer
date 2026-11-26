@@ -7,10 +7,10 @@ import {eject} from '../simulation.js';
 import {earnAchievements} from '../progression.js';
 import * as scope from './porescope.js';
 
-const NS = 'pore-explorer';
-const CAMPAIGN = 'pore-explorer:campaign';
-const ENDLESS = 'pore-explorer:endless';
-const ZEN = 'pore-explorer:zen';
+// This module is the shared deep-extraction engine for every first-party reservoir pack. The active
+// namespace comes from the visit, so the Pore Explorer and the Midnight Clinic use one simulation.
+const DEFAULT_NS = 'pore-explorer';
+const PACKS = new Set(['pore-explorer', 'midnight-clinic']);
 let api = null, built = false, graphs = new Map(), animateRaf = 0, scanRaf = 0, scanStamp = 0;
 let lastScanSave = 0, panel = null, scanFound = 0;
 // Frame-time gain is fractional; keep the remainder in memory so an integer save field still grows.
@@ -19,12 +19,22 @@ const view = {mode: 'surface', shown: 0, focus: null, scanning: false, beam: {x:
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const hash = text => { let h = 2166136261; for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619); return h >>> 0; };
 
-export const namespace = NS;
-export const campaignMode = CAMPAIGN;
-export const expansionModes = [CAMPAIGN, ENDLESS, ZEN];
-export function attach(context) { api = context; }
-export function active() { return !!api && String(api.visit()?.mode?.id || '').startsWith(NS + ':'); }
-export function recordMode(modeId) { return String(modeId || '').startsWith(NS + ':'); }
+export const namespace = DEFAULT_NS;
+const modeNamespace = () => String(api?.visit()?.mode?.id || '').split(':')[0];
+export function attach(context) {
+  api = context;
+  PACKS.add(DEFAULT_NS);
+  for (const pack of context.packs || []) PACKS.add(pack);
+}
+export function active() { return !!api && PACKS.has(modeNamespace()); }
+export function recordMode(modeId) { return PACKS.has(String(modeId || '').split(':')[0]); }
+export function packCampaign(pack = DEFAULT_NS) {
+  const mode = content.list('modes').find(item => item.id.startsWith(pack + ':') && item.strategy === 'campaign');
+  return mode ? mode.id : null;
+}
+export function campaignMode() { return packCampaign(modeNamespace()); }
+export function expansionModes() { return content.list('modes').filter(mode => modeNamespace() && mode.id.startsWith(modeNamespace() + ':')); }
+export function packNamespace() { return modeNamespace(); }
 
 // ---------------------------------------------------------------------------------------------
 // Deterministic reservoir state. The graph is a pure function of the template, the encounter seed
@@ -34,7 +44,7 @@ function deepFor(run, id) {
   const existing = run.deep[id];
   if (existing && typeof existing.c === 'string' && existing.c.length === 72 && Array.isArray(existing.g)) return existing;
   // One small record per target: coverage mask, depth gain and broken gate indices.
-  return (run.deep[id] = {...scope.emptyScan(), g: []});
+  return (run.deep[id] = {...scope.emptyScan(), g: [], k: 0});
 }
 function graphFor(target, visit) {
   const key = target.deep.template.id + ':' + target.deep.seed;
@@ -48,9 +58,9 @@ function graphFor(target, visit) {
 }
 export function progressOf(run, target) {
   const deep = deepFor(run, target.id), committed = run.layers[target.id] || 0;
-  const base = replay(target.deep.graph, {p: committed, g: deep.g});
+  const base = replay(target.deep.graph, {p: committed, g: deep.g}, {env: envFor(api.visit())});
   const found = scope.discoveries(target.deep.graph, deep, base);
-  return {p: committed, g: deep.g, found};
+  return {p: committed, g: deep.g, found, k: deep.k || 0};
 }
 // The field generator attaches the authored reservoir template; this decorates each target with its
 // generated graph and the number of passes the current state still needs.
@@ -61,14 +71,14 @@ export function decorate(field, visit) {
     target.deep = {template: target.reservoir, seed};
     target.deep.graph = graphFor(target, visit);
     const progress = progressOf(api.run(), target);
-    const state = replay(target.deep.graph, progress);
+    const state = replay(target.deep.graph, progress, {env: envFor(visit)});
     target.deep.state = state;
     target.layers = Math.max(1, progress.p + remainingDraws(target.deep.graph, progress));
   }
 }
 export function accounting(target, run) {
   if (!target?.deep) return null;
-  const state = replay(target.deep.graph, progressOf(run, target));
+  const state = replay(target.deep.graph, progressOf(run, target), {env: envFor(api.visit())});
   return {initial: target.deep.graph.totalVolume, remaining: state.remaining, drawn: state.drawn,
     negative: state.nodes.some(node => node.remaining < 0)};
 }
@@ -77,23 +87,27 @@ export function graphOf(target) { return target?.deep?.graph || null; }
 // ---------------------------------------------------------------------------------------------
 // Commentary: authored lines from the pack, chosen deterministically so a case replays the same way.
 function pick(event, salt) {
-  const lines = content.list('commentary').filter(line => line.event === event);
+  const pack = modeNamespace();
+  const lines = content.list('commentary').filter(line => line.event === event && String(line.id).startsWith(pack + ':'));
   return lines.length ? lines[hash(event + ':' + salt) % lines.length].text : '';
 }
 function say(event, salt, fallback = '') { return pick(event, salt) || fallback; }
 
 // ---------------------------------------------------------------------------------------------
 // Release behaviour. Returns null for targets the base engine owns, so base calls stay untouched.
-function pendingGate(graph, state) {
-  const unbroken = state.gates.find(gate => !gate.broken);
+function pendingGate(graph, state, breaks = []) {
+  const unbroken = state.gates.find(gate => !gate.broken && (breaks.length === 0 || breaks.includes(gate.type)));
   if (unbroken) return unbroken.index;
-  if (graph.migrating) return -1 - state.pass;
+  if (graph.migrating && (breaks.length === 0 || breaks.includes('migrate'))) return -1 - state.pass;
   return null;
 }
-function blockedHint(graph, state) {
-  if (state.held) return 'The migrating plug is sitting on the next chamber. Resonate it, then pull.';
+function blockedHint(graph, state, breaks = []) {
+  if (state.held) return breaks.includes('migrate')
+    ? 'The migrating plug is sitting on the next chamber. Resonate it, then pull.'
+    : 'A moving plug blocks the path. The resonance wand or the arcane resonator can pin it.';
   const unbroken = state.gates.find(gate => !gate.broken);
-  if (unbroken) return 'A ' + unbroken.type + ' blocks the path. The resonance wand can break it.';
+  if (unbroken) return breaks.includes(unbroken.type) ? gateHint(unbroken.type) : gateHint(unbroken.type);
+  if (state.phaseClosed && state.phaseClosed.length) return 'A chamber is out of phase: flow is throttled. The spectral extractor draws through the window faster.';
   if (state.unrevealed.length) return 'The outlet is open but the field is not empty. Scan deeper: something is still sealed.';
   return 'Nothing is moving. Check the imaging and choose another route.';
 }
@@ -105,7 +119,10 @@ function burstFor({target, graph, tool, drained, secondary, value, dx, dy, layer
     group.amount += item.amount;
     groups.set(id, group);
   }
-  const entries = [...groups.values()].filter(entry => entry.amount > 0.0001).slice(0, 3);
+  // Visual intensity changes presentation only: stream count and chain length, never scoring.
+  const intensity = api?.profile?.()?.settings?.intensity || 'midnight';
+  const cap = intensity === 'spooky' ? 2 : intensity === 'eldritch' ? 4 : 3;
+  const entries = [...groups.values()].filter(entry => entry.amount > 0.0001).slice(0, cap);
   if (!entries.length) entries.push({id: target.material?.id || 'base:cream', amount: 1});
   const long = graph.pattern === 'ribbon' ? 2.6 : graph.pattern === 'fork' ? 1.15 : 1;
   const streams = entries.map((entry, index) => {
@@ -118,16 +135,95 @@ function burstFor({target, graph, tool, drained, secondary, value, dx, dy, layer
   return {id: target.id, mat: streams[0].mat, streams, t: 0};
 }
 function awardBoss(profile, visit) {
-  const id = visit.boss?.id;
-  if (id === 'pore-explorer:iceberg') profile.stats.icebergs = (profile.stats.icebergs || 0) + 1;
-  if (id === 'pore-explorer:krakenzit') profile.stats.krakenzits = (profile.stats.krakenzits || 0) + 1;
-  if (id === 'pore-explorer:hydra') profile.stats.hydras = (profile.stats.hydras || 0) + 1;
+  // Boss records are content metadata, so a pack can add bosses without engine changes.
+  const stat = visit.boss?.stat;
+  if (stat) profile.stats[stat] = (profile.stats[stat] || 0) + 1;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Environmental conditions and instrument rules. A condition is a small authored record; every
+// effect is a pure function of the pass index, so the same seed always produces the same weather.
+const BREAKS = {
+  // The Silver Loop can lever out a simple plug; valves, septa and cores need their specialists.
+  roll: [], pulse: [], suction: [], probe: [], vortex: [], silver: ['plug'],
+  spectral: [], cryo: ['core'], resonance: ['valve', 'septum', 'migrate', 'plug'],
+  arcane: ['core', 'septum', 'migrate', 'plug', 'valve']
+};
+function conditionFor(visit) {
+  const patient = visit.encounter.patient ? content.get('patients', visit.encounter.patient) : null;
+  const id = visit.encounter.condition || patient?.condition;
+  if (!id) return null;
+  try { return content.get('conditions', id); } catch { return null; }
+}
+function envFor(visit) {
+  const condition = conditionFor(visit);
+  if (!condition) return null;
+  return {
+    moon: !!condition.moon, temp: !!condition.temp, spectral: !!condition.spectral,
+    bioluminescence: !!condition.bioluminescence, name: condition.name,
+    // Zen explicitly removes phase restrictions without touching material behaviour.
+    ignorePhase: !!visit.zen
+  };
+}
+function gateHint(type) {
+  if (type === 'core') return 'A crystalline core blocks the path. The cryo wand or the arcane resonator can crack it.';
+  if (type === 'septum') return 'A spectral septum blocks the path. Resonance or arcane energy can part it.';
+  if (type === 'valve') return 'A valve blocks the path. The resonance wand can break it.';
+  return 'A moving plug blocks the path. Resonance or arcane energy can pin it.';
+}
+function recordStats(profile, visit, graph, drained, after) {
+  const stats = profile.stats;
+  const patient = visit.encounter.patient ? content.get('patients', visit.encounter.patient) : null;
+  if (patient?.klass === 'alien') {
+    const pulled = Math.round(drained.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+    // Record stats are integers so the save validator stays strict; centi-units keep precision.
+    stats.alienBest = Math.max(stats.alienBest || 0, Math.round(pulled * 100));
+  }
+  const materials = new Set(drained.map(item => item.material));
+  const run = visit.run;
+  run.mats = [...new Set([...(run.mats || []), ...materials])].slice(0, 12);
+  stats.materialsInCase = Math.max(stats.materialsInCase || 0, run.mats.length);
+  if (materials.size > 1) stats.multiStream = Math.max(stats.multiStream || 0, materials.size);
+  const phased = drained.filter(item => graph.nodes.find(node => node.key === item.key)?.phased).length;
+  if (phased) stats.phaseReleases = (stats.phaseReleases || 0) + phased;
+  const activated = after.events.slice(Math.max(0, after.pass - 1)).reduce((sum, event) => sum + event.activated.length, 0);
+  if (activated) {
+    run.regen = (run.regen || 0) + activated;
+    stats.regenBest = Math.max(stats.regenBest || 0, run.regen);
+  }
+  if (graph.pattern === 'ribbon') stats.ribbons = (stats.ribbons || 0) + 1;
+  if (recordStats.pending) { /* reserved for future telemetry adapters */ }
+}
+// One case closed. Class counters and the discovery book are content-driven, so a future pack can add
+// classes without touching this engine.
+const CLASS_COUNTERS = {vampire: 'vampires', werewolf: 'werewolves', zombie: 'zombies', swamp: 'swamps',
+  reptilian: 'reptilians', alien: 'aliens', troll: 'trolls', ghost: 'ghosts', fungoid: 'fungoids',
+  lovecraftian: 'lovecraftians', crossover: 'crossovers'};
+function finishCase(profile, visit, graph, drained) {
+  const stats = profile.stats, run = visit.run;
+  const className = visit.encounter.patient ? content.get('patients', visit.encounter.patient).klass : null;
+  if (className) {
+    profile.discovered = [...new Set([...(profile.discovered || []), className])].slice(0, 16);
+    stats.classCases = (stats.classCases || 0) + 1;
+    const counter = CLASS_COUNTERS[className];
+    if (counter) stats[counter] = (stats[counter] || 0) + 1;
+    if (className === 'crossover') { stats.ratfathers = (stats.ratfathers || 0) + 1; profile.observer = true; }
+  }
+  stats.classesSeen = Math.max(stats.classesSeen || 0, (profile.discovered || []).length);
+  stats.witchingHour = Math.max(stats.witchingHour || 0, run.turn || 1);
+  const env = envFor(visit);
+  if (env?.moon) stats.moonBest = Math.max(stats.moonBest || 0, run.points || 0);
+  if (new Set(drained.map(item => item.material)).size > 1) stats.unholyExtrusion = Math.max(stats.unholyExtrusion || 0, run.points || 0);
 }
 export function flow({profile, visit, run, target, tool, value, perfect, dx, dy}) {
   if (!target?.deep) return null;
   const graph = target.deep.graph, deep = deepFor(run, target.id);
+  const env = envFor(visit);
+  // Every attempt advances the fictional phase clock, including refused or blocked ones. That keeps
+  // phase windows reachable and deterministic while committed passes stay the scoring unit.
+  deep.k = (deep.k || 0) + 1;
   const progress = progressOf(run, target);
-  const state = replay(graph, progress);
+  const state = replay(graph, progress, {env});
   // A reservoir can be empty while a concealed compartment was only just exposed. Sealing it is a
   // normal release: the field is done even though no new volume moves. This also prevents a
   // soft-lock if a player scans after draining the last chamber.
@@ -138,13 +234,16 @@ export function flow({profile, visit, run, target, tool, value, perfect, dx, dy}
     return {steps: 1, burst, done: true, pan: 0, cue: 'deep', earned: earnAchievements(profile), secondary: 0,
       message: say('complete', visit.encounter.id, 'Reservoir cleared.')};
   }
+  // Diagnostic and arcane instruments improve the imaging as part of their release.
+  if (tool.technique === 'probe' || tool.technique === 'arcane') {
+    scope.scanGain(deep, tool.technique === 'probe' ? 7 + Math.round(value * 7) : 4 + Math.round(value * 4));
+    scope.addScan(deep, scope.beamCell(target, view.beam), tool.technique === 'probe' ? 90 : 55);
+  }
   // The PoreScope never grips material: a release sends a diagnostic pulse instead.
   if (tool.technique === 'probe') {
-    scope.scanGain(deep, 7 + Math.round(value * 7));
-    scope.addScan(deep, scope.beamCell(target, view.beam), 90);
-    const after = progressOf(run, target);
-    const found = registerDiscovery(profile, graph, progress, after);
-    target.deep.state = replay(graph, after);
+    const afterProbe = progressOf(run, target);
+    const found = registerDiscovery(profile, graph, progress, afterProbe);
+    target.deep.state = replay(graph, afterProbe, {env});
     refresh(target, run);
     const message = found
       ? found + ' concealed chamber' + (found === 1 ? '' : 's') + ' resolved. ' + say('scan', target.phase)
@@ -152,23 +251,41 @@ export function flow({profile, visit, run, target, tool, value, perfect, dx, dy}
     return {diagnostic: true, message, pan: 0, cue: 'scope', earned: []};
   }
   let gates = progress.g;
-  if (tool.technique === 'resonance') {
-    const pending = pendingGate(graph, state);
-    if (pending === null)
+  const breaks = BREAKS[tool.technique] || [];
+  if (breaks.length) {
+    const pending = pendingGate(graph, state, breaks);
+    if (pending !== null) gates = [...gates, pending];
+    else if (tool.technique === 'resonance')
       return {refused: true, cue: 'miss', message: 'The wand finds nothing to resonate. It cannot grip ordinary material.'};
-    gates = [...gates, pending];
   }
-  const attempt = preview(graph, {p: progress.p, g: gates, found: progress.found}, tool);
-  if (attempt.blocked) return {blocked: true, cue: 'miss', message: blockedHint(graph, state)};
+  const units = tool.technique === 'silver' ? (perfect ? 1.5 : 1) : tool.technique === 'cryo' ? .9
+    : tool.technique === 'arcane' ? .8 : tool.technique === 'spectral' ? 1.3 : 1;
+  // The phase clock must travel with the preview, or a phase-locked chamber is always judged at tick 0.
+  const attempt = preview(graph, {p: progress.p, g: gates, found: progress.found, k: progress.k}, tool, {units, env});
+  if (attempt.blocked) return {blocked: true, cue: 'miss', message: blockedHint(graph, state, breaks)};
   const drained = attempt.drained.filter(item => item.amount > 0.0001);
-  if (!drained.length) return {blocked: true, cue: 'miss', message: blockedHint(graph, state)};
+  if (!drained.length) return {blocked: true, cue: 'miss', message: blockedHint(graph, state, breaks)};
   deep.g = gates;
-  const after = replay(graph, {p: attempt.passes, g: gates, found: progress.found});
-  const secondary = after.events.slice(state.pass).flatMap(event => event.secondary);
+  // Crystalline obstructions are recorded separately: a broken core is a class of its own.
+  if (gates.length > progress.g.length) {
+    const gate = state.gates.find(item => item.index === gates.at(-1));
+    if (gate && gate.type === 'core') {
+      profile.stats.crystals = (profile.stats.crystals || 0) + 1;
+      const node = graph.nodes.find(item => item.key === gate.b);
+      profile.stats.crystalBest = Math.max(profile.stats.crystalBest || 0, node ? Math.round(node.volume * 100) : 0);
+    }
+  }
+  const after = attempt.state;
+  const window = after.events.slice(state.pass);
+  const secondary = window.flatMap(event => event.secondary);
+  const echoed = window.flatMap(event => event.echoed);
+  const activated = window.reduce((sum, event) => sum + event.activated.length, 0);
+  const rewired = window.some(event => event.rewired.length);
+  const mutated = window.some(event => event.mutated.length);
   if (secondary.length) profile.stats.secondarySwarm = Math.max(profile.stats.secondarySwarm || 0, secondary.length);
+  recordStats(profile, visit, graph, [...drained, ...echoed], after);
   const done = after.complete;
   if (done) {
-    if (graph.pattern === 'ribbon') profile.stats.ribbons = (profile.stats.ribbons || 0) + 1;
     const mapped = scope.mappedByImaging(graph, deep);
     if (graph.hidden > 0 && mapped.length === graph.hidden) profile.stats.networks = (profile.stats.networks || 0) + 1;
     if (target.boss) awardBoss(profile, visit);
@@ -176,26 +293,32 @@ export function flow({profile, visit, run, target, tool, value, perfect, dx, dy}
     if (visit.encounter.mystery && graph.hidden > 0 && mapped.length < graph.hidden)
       profile.stats.mysterySolves = (profile.stats.mysterySolves || 0) + 1;
     if (target.boss) { view.flourish = {t: 0}; }
+    if (run.cleared.length + 1 >= visit.encounter.count) finishCase(profile, visit, graph, [...drained, ...echoed]);
   }
   const remaining = done ? 0 : Math.max(1, remainingDraws(graph, {p: attempt.passes, g: gates, found: progress.found}));
   // teaching the completion threshold to reward(): passes completed plus passes still owed
   target.layers = Math.max(1, attempt.passes + remaining);
   target.deep.state = after;
   const earned = earnAchievements(profile);
-  const burst = burstFor({target, graph, tool, drained, secondary, value, dx, dy, layer: progress.p});
+  const burst = burstFor({target, graph, tool, drained: [...drained, ...echoed], secondary, value, dx, dy, layer: progress.p});
   const pan = entriesPan(drained);
   const materialChanged = new Set(drained.map(item => item.material)).size > 1;
   let message;
   if (done) message = say('complete', visit.encounter.id, 'Reservoir cleared.');
+  else if (echoed.length) message = say('echo', target.phase, 'A spectral echo releases a moment later.');
+  else if (activated) message = say('regen', target.phase, 'A dormant chamber just woke up. There is another storey.');
+  else if (mutated) message = say('mutate', target.phase, 'The material mutated mid-case.');
+  else if (rewired) message = say('rewire', target.phase, 'A new passage just opened in the reservoir.');
   else if (secondary.length) message = say('chain', target.phase, 'A chamber finished and woke its neighbours.');
   else if (state.held || after.held) message = say('plug', target.phase, 'The plug has moved to another chamber.');
   else if (materialChanged) message = say('mixed', target.phase, 'The material changed mid-case.');
   else if (graph.pattern === 'ribbon') message = say('ribbon', target.phase, 'Still coming. That is a lot of ribbon.');
+  else if (after.phaseClosed.length) message = 'A chamber slipped out of phase. Time the next release.';
   else if (graph.pattern === 'braid') message = say('braid', target.phase, 'Branch by branch.');
   else message = 'Chamber drained. ' + (after.remaining > 0 ? 'There is more below.' : 'The field reads empty.');
   refresh(target, run);
   return {steps: attempt.steps, burst, done, message, pan, earned,
-    cue: secondary.length ? 'secondary' : done ? 'deep' : 'release', secondary: secondary.length};
+    cue: echoed.length || secondary.length ? 'secondary' : done ? 'deep' : 'release', secondary: secondary.length + echoed.length};
 }
 function entriesPan(drained) {
   const node = drained[0];
@@ -217,12 +340,12 @@ const readDeep = () => {
   const visit = api.visit(), run = api.run(), target = api.field()[api.active()];
   if (!target?.deep) return null;
   const progress = progressOf(run, target);
-  const state = replay(target.deep.graph, progress);
+  const state = replay(target.deep.graph, progress, {env: envFor(visit)});
   return {visit, run, target, progress, state, deep: deepFor(run, target.id), graph: target.deep.graph};
 };
 function refresh(target, run) {
   if (!target?.deep) return;
-  target.deep.state = replay(target.deep.graph, progressOf(run, target));
+  target.deep.state = replay(target.deep.graph, progressOf(run, target), {env: envFor(api.visit())});
   hud();
 }
 function foundCount(state, graph) {
@@ -231,7 +354,7 @@ function foundCount(state, graph) {
 export function sync() {
   if (!panel) return;
   // Keep every inspector snapshot current, including targets finished by the previous release.
-  if (active()) for (const target of api.field()) if (target.deep) target.deep.state = replay(target.deep.graph, progressOf(api.run(), target));
+  if (active()) for (const target of api.field()) if (target.deep) target.deep.state = replay(target.deep.graph, progressOf(api.run(), target), {env: envFor(api.visit())});
   const live = readDeep();
   panel.hidden = !live;
   const stage = document.getElementById('stage');
@@ -344,7 +467,7 @@ function scanTick(stamp) {
   if (whole > 0) scope.scanGain(deep, whole);
   const after = progressOf(run, target);
   const found = registerDiscovery(api.profile(), graph, progress, after);
-  target.deep.state = replay(graph, after);
+  target.deep.state = replay(graph, after, {env: envFor(visit)});
   if (found) {
     scanFound += found;
     api.play('deep', 0, clamp(target.x * 2 - 1, -0.8, 0.8));
@@ -485,66 +608,90 @@ function showTutorial(id, after) {
   markSeen(id);
   api.save();
   api.modal(record.title,
-    '<p class="tiny">THE PORE EXPLORER · TUTORIAL</p>' + record.steps.map(step => '<p>' + esc(step) + '</p>').join(''),
+    '<p class="tiny">' + esc(modeNamespace().toUpperCase()) + ' · TUTORIAL</p>' + record.steps.map(step => '<p>' + esc(step) + '</p>').join(''),
     [['Got it', () => { api.close(); after?.(); }]], 'FICTIONAL DIAGNOSTIC INSTRUMENT');
 }
 export function toolEquipped(id) {
-  if (!String(id).startsWith(NS + ':')) return;
+  if (!PACKS.has(String(id).split(':')[0])) return;
   const tutorial = content.list('tutorials').find(item => item.equipment === id);
   if (tutorial && !seen(tutorial.id) && !document.getElementById('dialog')?.open)
     showTutorial(tutorial.id);
 }
-export function intro() { if (!seen('pore-explorer:enter')) showTutorial('pore-explorer:enter'); }
-export function enter(mode = CAMPAIGN) {
+export function intro() {
+  const pack = modeNamespace() || DEFAULT_NS;
+  const first = content.list('tutorials').find(item => String(item.id).startsWith(pack + ':') && !item.equipment);
+  if (first && !seen(first.id)) showTutorial(first.id);
+}
+export function enterMode(mode) {
   api.selectMode(mode);
   api.close();
   intro();
-  api.cue('PoreScope online. PoreScope panel below the pressure control.');
+  api.cue('Reservoir imaging online. PoreScope panel below the pressure control.');
 }
+export function enter(mode) { enterMode(mode || campaignMode() || DEFAULT_NS + ':campaign'); }
 export function replayEncounter(mode, encounter, seed) { api.replayEncounter(mode, encounter, seed); api.close(); }
-export function openPanel() {
-  const profile = api.profile();
-  const campaign = content.get('modes', CAMPAIGN);
-  const slots = profile.slots || {};
-  const current = slots[CAMPAIGN];
-  const route = campaign.chapters.flatMap(id => content.get('chapters', id).encounters.map(encounterId => content.get('encounters', encounterId)));
-  const reached = current ? route.findIndex(item => item.id === current.encounter) : -1;
-  const cleared = index => index < reached || (index === reached && slots[CAMPAIGN].cleared.length === route[index].count);
-  const rows = route.map((encounter, index) => {
+export function campaignRoute(modeId) {
+  const mode = content.get('modes', modeId);
+  return mode.chapters.flatMap(id => content.get('chapters', id).encounters.map(encounterId => content.get('encounters', encounterId)));
+}
+export function campaignRowsHTML(modeId, profile = api.profile()) {
+  const route = campaignRoute(modeId), slot = profile.slots?.[modeId];
+  const reached = slot ? route.findIndex(item => item.id === slot.encounter) : -1;
+  return route.map((encounter, index) => {
     const boss = encounter.boss ? content.get('bosses', encounter.boss) : null;
-    const status = cleared(index) ? 'CLEARED' : index === reached ? 'IN PROGRESS' : 'LOCKED';
+    const done = index < reached || (index === reached && slot.cleared.length === route[index].count);
+    const status = done ? 'CLEARED' : index === reached ? 'IN PROGRESS' : 'LOCKED';
     const replayable = index <= reached && index >= 0;
     return '<div class="file-row ' + (index === reached ? 'current' : '') + '"><span>' + String(index + 1).padStart(2, '0') + '</span><strong>' +
       esc(boss ? boss.name : encounter.name) + '</strong><small>' + status + '</small>' +
-      (replayable ? '<button class="secondary deep-replay" data-encounter="' + esc(encounter.id) + '" data-seed="' + encounter.seed + '">Replay</button>' : '') + '</div>';
+      (replayable ? '<button class="secondary deep-replay" data-encounter="' + esc(encounter.id) + '" data-seed="' + encounter.seed + '" data-mode="' + esc(modeId) + '">Replay</button>' : '') + '</div>';
   }).join('');
-  const earned = content.list('achievements').filter(item => item.id.startsWith(NS + ':'));
-  const achievements = earned.map(item => '<p class="' + (profile.achievements.includes(item.id) ? 'achievement' : '') + '">' +
-    (profile.achievements.includes(item.id) ? '✓ ' : '○ ') + esc(item.name) + ' · ' +
-    Math.min(profile.stats[item.stat] || 0, item.threshold) + '/' + item.threshold + '</p>').join('');
-  const start = current ? 'Resume the dive' : 'Start the dive';
-  api.modal('The Pore Explorer',
-    '<p class="tiny">EXPANSION 1 · THE SURFACE IS ONLY THE BEGINNING</p>' +
-    '<p>Three chapters, twelve encounters and three buried bosses. Image the reservoir, find what is concealed, then extract it with instruments that each solve a different problem.</p>' +
-    '<p class="deep-quote">' + esc(say('scan', 'panel', 'That one has a basement.')) + ' — Dani</p>' +
-    rows +
-    '<details><summary>Expansion achievements · ' + earned.filter(item => profile.achievements.includes(item.id)).length + '/' + earned.length + '</summary><div class="record-grid">' + achievements + '</div></details>' +
-    '<p class="tiny">SEPARATE CHECKPOINTS · BASE CAMPAIGN UNTOUCHED · WORKS OFFLINE AFTER FIRST VISIT</p>',
-    [[start, () => enter(CAMPAIGN)],
-      ['Endless core sample', () => enter(ENDLESS), true],
-      ['Zen imaging', () => enter(ZEN), true],
-      ['Tutorials', () => { api.close(); showTutorial('pore-explorer:enter', openPanel); }, true],
-      ['Stay on shift', api.close, true]], 'EXPANSION CAMPAIGN');
-  for (const button of document.querySelectorAll('.deep-replay'))
-    button.onclick = () => replayEncounter(CAMPAIGN, button.dataset.encounter, Number(button.dataset.seed));
 }
+export function achievementRowsHTML(pack = modeNamespace()) {
+  const profile = api.profile();
+  const list = content.list('achievements').filter(item => String(item.id).startsWith(pack + ':'));
+  const rows = list.map(item => '<p class="' + (profile.achievements.includes(item.id) ? 'achievement' : '') + '">' +
+    (profile.achievements.includes(item.id) ? '✓ ' : '○ ') + esc(item.name) + (item.hidden ? '' : ' · ' +
+    Math.min(profile.stats[item.stat] || 0, item.threshold) + '/' + item.threshold) + '</p>').join('');
+  return {rows, earned: list.filter(item => profile.achievements.includes(item.id)).length, total: list.length};
+}
+// A pack describes its own campaign panel through optional mode metadata, so the shared engine can
+// present any expansion without hard-coded copy.
+export function openCampaignPanel(modeId = campaignMode()) {
+  if (!modeId) return;
+  const profile = api.profile();
+  const mode = content.get('modes', modeId), pack = modeId.split(':')[0];
+  const slot = profile.slots?.[modeId];
+  const modesHere = content.list('modes').filter(item => item.id.startsWith(pack + ':'));
+  const endless = modesHere.find(item => item.strategy === 'endless');
+  const zen = modesHere.find(item => item.strategy === 'zen');
+  const achievements = achievementRowsHTML(pack);
+  const start = slot ? (mode.resumeLabel || 'Resume') : (mode.startLabel || 'Start');
+  const actions = [[start, () => enter(modeId)]];
+  if (endless) actions.push([endless.name, () => enter(endless.id), true]);
+  if (zen) actions.push([zen.name, () => enter(zen.id), true]);
+  actions.push(['Tutorials', () => { api.close(); intro(); }, true]);
+  actions.push(['Stay on shift', api.close, true]);
+  api.modal(mode.panelTitle || mode.name,
+    '<p class="tiny">' + esc(mode.panelLabel || 'EXPANSION CAMPAIGN') + '</p>' +
+    '<p>' + esc(mode.blurb || mode.description) + '</p>' +
+    (mode.tagline ? '<p class="deep-quote">' + esc(mode.tagline) + '</p>' : '') +
+    campaignRowsHTML(modeId, profile) +
+    '<details><summary>Achievements · ' + achievements.earned + '/' + achievements.total + '</summary><div class="record-grid">' + achievements.rows + '</div></details>' +
+    '<p class="tiny">SEPARATE CHECKPOINTS · BASE CAMPAIGN UNTOUCHED · WORKS OFFLINE AFTER FIRST VISIT</p>',
+    actions, mode.panelLabel || 'EXPANSION CAMPAIGN');
+  for (const button of document.querySelectorAll('.deep-replay'))
+    button.onclick = () => replayEncounter(button.dataset.mode || modeId, button.dataset.encounter, Number(button.dataset.seed));
+}
+export function openPanel() { openCampaignPanel(packCampaign(DEFAULT_NS)); }
 export function report(visit) {
   if (!recordMode(visit?.mode?.id)) return null;
-  const last = visit.mode.strategy === 'campaign' && visit.index === visit.route.length - 1;
-  if (last) return {title: 'The underground is clear', flavor:
-    'Three chapters beneath the surface. ' + say('complete', visit.encounter.id, 'Andi, I think yours are easier to deal with.') +
-    ' Dani is officially off the deep clock.'};
-  if (visit.boss) return {title: 'Boss reservoir cleared', flavor: say('boss', visit.encounter.id, 'The little ones never warn you about the basement.')};
+  const mode = visit.mode;
+  const last = mode.strategy === 'campaign' && visit.index === visit.route.length - 1;
+  if (last) return {title: mode.completeTitle || 'Campaign complete',
+    flavor: mode.completeText || say('complete', visit.encounter.id, 'That is the whole campaign.')};
+  if (visit.boss) return {title: mode.bossTitle || 'Boss reservoir cleared',
+    flavor: say('boss', visit.encounter.id, 'The little ones never warn you about the basement.')};
   return {title: null, flavor: say('finish', visit.encounter.id, 'Every time I think we are finished, it opens another franchise.')};
 }
 export function summary(run, visit) {
@@ -562,7 +709,7 @@ export async function primeOffline() {
   // Resolve against this module, not the document: the pack lives beside this file.
   const urls = new Set(['./pack.json', './expansion.js', './porescope.js'].map(path => new URL(path, import.meta.url).href));
   for (const asset of content.list('assets'))
-    if (String(asset.id).startsWith(NS + ':') && asset.url) urls.add(asset.url);
+    if (PACKS.has(String(asset.id).split(':')[0]) && asset.url) urls.add(asset.url);
   await Promise.allSettled([...urls].map(url => fetch(url, {cache: 'reload'})));
 }
 export function reset() { view.mode = 'surface'; view.shown = 0; view.focus = null; view.scanning = false; view.flourish = null; graphs.clear(); sync(); }

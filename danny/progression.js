@@ -23,7 +23,8 @@ function slot(modeId){
 export function fresh(){
   return {schema:2,revision:0,packs:content.versions(),mode:baseMode,slots:{[baseMode]:slot(baseMode)},tool:'base:loop',
     xp:0,score:0,stats:{total:0,perfects:0,bestStreak:0,bosses:0,chapters:0,endlessFields:0,zenFields:0,...deepStats},
-    achievements:[],tutorials:[],settings:{sound:true,volume:.65,haptics:false,assist:false,toggle:false,contrast:false,
+    achievements:[],tutorials:[],discovered:[],settings:{sound:true,volume:.65,haptics:false,assist:false,toggle:false,contrast:false,
+      intensity:'midnight',ambience:.35,music:false,quietHud:false,
       reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches}};
 }
 const count=n=>Number.isSafeInteger(n)&&n>=0;
@@ -41,7 +42,8 @@ function validDeep(deep){
     const id=Number(key);
     return targetId(id)&&value&&typeof value==='object'&&/^[0-9a-f]{72}$/.test(String(value.c))
       && Number.isInteger(value.d)&&value.d>=0&&value.d<=48
-      && Array.isArray(value.g)&&value.g.length<=24&&value.g.every(n=>Number.isInteger(n)&&n>=-65&&n<=24);
+      && Array.isArray(value.g)&&value.g.length<=24&&value.g.every(n=>Number.isInteger(n)&&n>=-65&&n<=24)
+      && (value.k===undefined||(Number.isInteger(value.k)&&value.k>=0&&value.k<=999999));
   });
 }
 function validSlot(v){
@@ -62,6 +64,12 @@ export function validSave(s){
     && Number.isFinite(s.settings.volume)&&s.settings.volume>=0&&s.settings.volume<=1
     && Object.entries(s.stats).every(([key,value])=>stats.includes(key)||count(value))
     && (s.tutorials===undefined||Array.isArray(s.tutorials)&&s.tutorials.length<=32&&s.tutorials.every(qualified))
+    && (s.discovered===undefined||Array.isArray(s.discovered)&&s.discovered.length<=16&&s.discovered.every(item=>typeof item==='string'&&/^[a-z][a-z-]*$/.test(item)))
+    && (s.observer===undefined||typeof s.observer==='boolean')
+    && (s.settings.intensity===undefined||['spooky','midnight','eldritch'].includes(s.settings.intensity))
+    && (s.settings.ambience===undefined||(Number.isFinite(s.settings.ambience)&&s.settings.ambience>=0&&s.settings.ambience<=1))
+    && (s.settings.music===undefined||typeof s.settings.music==='boolean')
+    && (s.settings.quietHud===undefined||typeof s.settings.quietHud==='boolean')
     && Array.isArray(s.achievements)&&s.achievements.every(qualified)
     && !!s.slots?.[s.mode] && !!s.slots[baseMode] && Object.values(s.slots).every(validSlot);
 }
@@ -72,6 +80,11 @@ export function migrate(old){
     // Additive normalization: fill expansion counters that a 1.0 save never wrote.
     for(const [key,value] of Object.entries(deepStats))if(!count(old.stats[key]))old.stats[key]=value;
     if(!Array.isArray(old.tutorials))old.tutorials=[];
+    if(!Array.isArray(old.discovered))old.discovered=[];
+    if(!['spooky','midnight','eldritch'].includes(old.settings.intensity))old.settings.intensity='midnight';
+    if(!Number.isFinite(old.settings.ambience))old.settings.ambience=.35;
+    if(typeof old.settings.music!=='boolean')old.settings.music=false;
+    if(typeof old.settings.quietHud!=='boolean')old.settings.quietHud=false;
     return old;
   }
   const p=fresh(),dest=p.slots[baseMode],route=itinerary(content.get('modes',baseMode)),c=route[old.caseIndex].encounter;
@@ -124,7 +137,7 @@ export function reward(p,v,l,perfect){
   if(closed){
     // Base chapters keep the published counter. Expansion chapters track their own, so completing
     // three underground chapters never masquerades as finishing the four base chapters.
-    const stat=native?'chapters':'deepChapters';
+    const stat=native?'chapters':v.mode.id.startsWith('pore-explorer:')?'deepChapters':'midnightChapters';
     if(v.mode.strategy==='campaign' && v.chapter.encounters.at(-1)===v.encounter.id)
       p.stats[stat]=Math.max(p.stats[stat]||0,v.chapterIndex+1);
     if(native&&v.zen)p.stats.zenFields++;
