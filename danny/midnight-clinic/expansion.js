@@ -71,9 +71,14 @@ export function patientSummary() {
 export function recordsHTML() {
   if (!api) return '';
   const profile = api.profile();
+  // Values come from the unified record service when 1.4 has migrated them; the 1.3 stat stays as a
+  // read-only fallback for saves that have never opened the World Book. Legacy metadata is labelled.
+  const unified = profile.world && profile.world.best ? profile.world.best : {};
   const rows = content.list('records').filter(record => String(record.id).startsWith(NS + ':')).map(record => {
-    const value = profile.stats[record.stat] || 0;
-    return '<p class="' + (value > 0 ? 'achievement' : '') + '">' + esc(record.name) + ' · ' + value + '</p>';
+    const migrated = record.metric && unified[record.metric] !== undefined ? unified[record.metric] : null;
+    const value = migrated !== null ? migrated : (profile.stats[record.stat] || 0);
+    const legacy = migrated !== null && profile.world?.meta?.[record.metric]?.legacy;
+    return '<p class="' + (value > 0 ? 'achievement' : '') + '">' + esc(record.name) + ' · ' + value + (legacy ? ' <span class="tiny">legacy</span>' : '') + '</p>';
   }).join('');
   return '<div class="record-grid">' + rows + '</div>';
 }
@@ -143,7 +148,7 @@ export function openPanel() {
     rows +
     '<details><summary>Intake paperwork</summary>' + intakeHTML(api.visit()) + '</details>' +
     '<details><summary>Class book · ' + (profile.discovered || []).length + '/' + CLASSES.length + '</summary><div class="record-grid">' + classBookHTML() + '</div></details>' +
-    '<details><summary>Supernatural records</summary>' + recordsHTML() + '<p class="tiny">Supernatural classifications are separate from base records. A future World Book of Pores can adopt them without touching this pack.</p></details>' +
+    '<details><summary>Supernatural records</summary>' + recordsHTML() + '<p class="tiny">Supernatural classifications are compared separately. When the World Book of Pores is installed, these values are served by the unified record service and 1.3 values are labelled legacy.</p></details>' +
     '<details><summary>Achievements · ' + achievements.earned + '/' + achievements.total + '</summary><div class="record-grid">' + achievements.rows + '</div></details>' +
     (profile.observer ? '<p class="tiny">AN ALLEY CAT COUNCIL OBSERVER IS PRESENT. IT IS JUDGING.</p>' : '') +
     '<p class="tiny">SEPARATE CHECKPOINTS · BASE CAMPAIGN UNTOUCHED · WORKS OFFLINE AFTER FIRST VISIT</p>',

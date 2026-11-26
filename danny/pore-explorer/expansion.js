@@ -272,7 +272,9 @@ export function flow({profile, visit, run, target, tool, value, perfect, dx, dy}
     if (gate && gate.type === 'core') {
       profile.stats.crystals = (profile.stats.crystals || 0) + 1;
       const node = graph.nodes.find(item => item.key === gate.b);
-      profile.stats.crystalBest = Math.max(profile.stats.crystalBest || 0, node ? Math.round(node.volume * 100) : 0);
+      const size = node ? Math.round(node.volume * 100) : 0;
+      profile.stats.crystalBest = Math.max(profile.stats.crystalBest || 0, size);
+      api.observe?.({type: 'gate-cleared', kind: gate.type, core: size});
     }
   }
   const after = attempt.state;
@@ -304,6 +306,20 @@ export function flow({profile, visit, run, target, tool, value, perfect, dx, dy}
   target.deep.state = after;
   const earned = earnAchievements(profile);
   const burst = burstFor({target, graph, tool, drained: [...drained, ...echoed], secondary, value, dx, dy, layer: progress.p});
+  // Telemetry observes only finished measurements. It cannot mutate simulation state.
+  const released = [...drained, ...echoed];
+  const perMaterial = new Map();
+  for (const item of released) perMaterial.set(item.material, (perMaterial.get(item.material) || 0) + item.amount);
+  api.observe?.({
+    type: 'release', namespace: modeNamespace(), encounter: visit.encounter.id, seed: visit.seed,
+    target: target.id, volume: released.reduce((sum, item) => sum + item.amount, 0),
+    streams: burst.streams.length, outlets: new Set(released.map(item => item.key)).size,
+    materials: [...perMaterial.keys()].slice(0, 8), cohesive: Math.max(0, ...perMaterial.values()),
+    secondary: secondary.length, echo: echoed.length, regenerated: activated, mutated: mutated ? 1 : 0,
+    phased: released.filter(item => graph.nodes.find(node => node.key === item.key)?.phased).length,
+    discovered: after.found, chambers: graph.nodes.length, perfect: perfect ? 1 : 0,
+    equipment: tool.id, extrusion: burst.streams[0]?.particles.length ? burst.streams[0].particles.length / 100 : 0
+  });
   const pan = entriesPan(drained);
   const materialChanged = new Set(drained.map(item => item.material)).size > 1;
   let message;
@@ -471,6 +487,8 @@ function scanTick(stamp) {
   const after = progressOf(run, target);
   const found = registerDiscovery(api.profile(), graph, progress, after);
   target.deep.state = replay(graph, after, {env: envFor(visit)});
+  if (found) api.observe?.({type: 'discovery', encounter: visit.encounter.id, seed: visit.seed,
+    found: target.deep.state.found, chambers: graph.nodes.length});
   if (found) {
     scanFound += found;
     api.play('deep', 0, clamp(target.x * 2 - 1, -0.8, 0.8));

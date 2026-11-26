@@ -1,14 +1,14 @@
 // The file-scoped registration controls only the game document on the shared Pages origin.
-const cacheName = 'junkdrawer-danny-shell-2026.11.25.7';
+const cacheName = 'junkdrawer-danny-shell-2026.11.25.8';
 // Expansion media and modules are cached on first use, so the base install stays small and the
 // expansion remains playable offline after one online visit.
-const expansionCache = 'junkdrawer-danny-expansion-2026.11.25.7';
+const expansionCache = 'junkdrawer-danny-expansion-2026.11.25.8';
 const page = './dani-the-pimple-popper.html';
 const legacy = new URL('./danny-the-pimple-popper.html',self.location.href).href;
-const expansionPrefixes = ['./danny/pore-explorer/','./danny/midnight-clinic/'].map(path => new URL(path,self.location.href).href);
+const expansionPrefixes = ['./danny/pore-explorer/','./danny/midnight-clinic/','./danny/world-book/'].map(path => new URL(path,self.location.href).href);
 const files = [page, './analytics-lite.js', './andi-the-rat-slayer/three.min.js',
   ...['style.css','game.js','render.js','input.js','simulation.js','instruments.js','audio.js',
-    'storage.js','content.js','progression.js','reservoir.js','base.json','forehead.jpg','jaw.jpg','temple.jpg','nose.jpg','skin.jpg','BarlowCondensed-Bold.ttf','Barlow-Medium.ttf','icon-192.png',
+    'storage.js','content.js','progression.js','reservoir.js','records.js','telemetry.js','base.json','forehead.jpg','jaw.jpg','temple.jpg','nose.jpg','skin.jpg','BarlowCondensed-Bold.ttf','Barlow-Medium.ttf','icon-192.png',
     'icon-512.png','manifest.webmanifest'].map(name => './danny/' + name)];
 const urls = new Set(files.map(path => new URL(path,self.location.href).href));
 self.addEventListener('install', e => {

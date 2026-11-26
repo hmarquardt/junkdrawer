@@ -9,7 +9,7 @@ const links = {
   materials:{}, equipment:{audio:'assets'}, behaviors:{reservoir:'reservoirs'},
   achievements:{}, scoring:{}, assets:{}, upgrades:{}, reservoirs:{}, commentary:{},
   tutorials:{equipment:'equipment'}, patients:{region:'regions',reservoir:'reservoirs',condition:'conditions',materials:'materials'},
-  conditions:{}, intake:{}, records:{}
+  conditions:{}, intake:{}, records:{}, trophies:{achievement:'achievements'}, challenges:{encounter:'encounters'}
 };
 const requiredLinks={
   regions:['image'],archetypes:['material'],bosses:['behavior','archetype'],encounters:['region','archetypes'],
@@ -48,7 +48,12 @@ function validateRecord(kind,v){
     if(!CLASSES.includes(v.klass))throw Error('Unknown patient class');
     if(!Array.isArray(v.materials)||!v.materials.length)throw Error('Patient needs materials');
   }
-  if(kind==='records' && (!RECORD_KINDS.includes(v.kind)||typeof v.stat!=='string'))throw Error('Invalid record definition');
+  if(kind==='records'){
+    const legacy=RECORD_KINDS.includes(v.kind)&&typeof v.stat==='string';
+    const unified=typeof v.metric==='string'&&v.tiers&&typeof v.tiers==='object';
+    if(!legacy&&!unified)throw Error('Invalid record definition');
+  }
+  if(kind==='challenges' && (typeof v.category!=='string'||typeof v.metric!=='string'||(v.modifier!==undefined&&typeof v.modifier!=='object')))throw Error('Invalid challenge definition');
   if(kind==='conditions' && Object.values(v).some(value => typeof value==='number' && !Number.isFinite(value)))throw Error('Invalid condition');
   if(kind==='tutorials' && (!Array.isArray(v.steps)||!v.steps.length||v.steps.some(s=>typeof s!=='string'||!s.trim())))throw Error('Invalid tutorial');
 }
@@ -118,7 +123,13 @@ export const baseReady=content.load('./base.json');
 // Future approved packages get a source here when released. Reading inactive pack slots must never
 // download their media or prevent the base campaign from resuming. Registering a source is only a
 // string; the manifest, module and plates download when that content is actually required.
-const optionalSources=new Map([['pore-explorer','./pore-explorer/pack.json'],['midnight-clinic','./midnight-clinic/pack.json']]);
+const optionalSources=new Map([
+  ['pore-explorer','./pore-explorer/pack.json'],
+  ['midnight-clinic','./midnight-clinic/pack.json'],
+  // The World Book composes legendary content from both installed packs, so its source chain
+  // registers those manifests first. Nothing downloads until this namespace is actually required.
+  ['world-book-of-pores',['./pore-explorer/pack.json','./midnight-clinic/pack.json','./world-book/pack.json']]
+]);
 export async function restoreContent(state){
   if(state?.schema!==2)return;
   const active=state.slots?.[state.mode];
@@ -128,7 +139,8 @@ export async function restoreContent(state){
     if(!installed){
       const source=optionalSources.get(ns);
       if(!source)throw Error('This shift needs the '+ns+' content pack.');
-      await content.load(source);installed=content.versions()[ns];
+      for(const path of [].concat(source))await content.load(path);
+      installed=content.versions()[ns];
     }
     if(!installed || state.packs?.[ns] && state.packs[ns].split('.')[0]!==installed.split('.')[0])
       throw Error('Saved content needs a compatible '+ns+' version.');

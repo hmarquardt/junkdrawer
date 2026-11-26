@@ -1,4 +1,5 @@
 import {content} from './content.js';
+import {defaultWorld} from './records.js';
 import {patient,random} from './simulation.js';
 const baseMode='base:campaign';
 // Expansion counters live beside the base statistics. Every new key is additive: a 1.0 save loads
@@ -23,7 +24,7 @@ function slot(modeId){
 export function fresh(){
   return {schema:2,revision:0,packs:content.versions(),mode:baseMode,slots:{[baseMode]:slot(baseMode)},tool:'base:loop',
     xp:0,score:0,stats:{total:0,perfects:0,bestStreak:0,bosses:0,chapters:0,endlessFields:0,zenFields:0,...deepStats},
-    achievements:[],tutorials:[],discovered:[],settings:{sound:true,volume:.65,haptics:false,assist:false,toggle:false,contrast:false,
+    achievements:[],tutorials:[],discovered:[],world:defaultWorld(),settings:{sound:true,volume:.65,haptics:false,assist:false,toggle:false,contrast:false,
       intensity:'midnight',ambience:.35,music:false,quietHud:false,
       reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches}};
 }
@@ -46,6 +47,27 @@ function validDeep(deep){
       && (value.k===undefined||(Number.isInteger(value.k)&&value.k>=0&&value.k<=999999));
   });
 }
+// The World Book state is optional for 1.0–1.3 saves and bounded when present. Every value is an
+// integer, every list has a hard cap, and no certificate or telemetry stream is stored here.
+function countOrZero(value){return value===undefined||count(value);}
+function validWorld(world){
+  if(world===undefined)return true;
+  if(!world||typeof world!=='object'||Array.isArray(world))return false;
+  const ints=object=>Object.entries(object||{}).every(([key,value])=>typeof key==='string'&&count(value));
+  const bounded=(object,limit)=>object===undefined||(object&&typeof object==='object'&&!Array.isArray(object)&&Object.keys(object).length<=limit);
+  return countOrZero(world.v)&&countOrZero(world.migrated)&&countOrZero(world.session)&&countOrZero(world.views)
+    && ints(world.best)&&ints(world.prev)&&Object.keys(world.best||{}).length<=40&&Object.keys(world.prev||{}).length<=40
+    && (world.meta===undefined||(world.meta&&typeof world.meta==='object'))
+    && (world.history===undefined||Array.isArray(world.history)&&world.history.length<=24
+      &&world.history.every(entry=>entry&&typeof entry.m==='string'&&count(entry.v)&&count(entry.at)))
+    && (world.trophies===undefined||Array.isArray(world.trophies)&&world.trophies.length<=96&&world.trophies.every(id=>typeof id==='string'))
+    && bounded(world.daily,16)&&bounded(world.weekly,10)&&bounded(world.gauntlet,10)
+    && (world.imported===undefined||Array.isArray(world.imported)&&world.imported.length<=5)
+    && (world.legendary===undefined||Array.isArray(world.legendary)&&world.legendary.length<=16)
+    && (world.flags===undefined||(world.flags&&typeof world.flags==='object'))
+    && (world.highlight===undefined||world.highlight===null||(typeof world.highlight==='object'))
+    && (world.pending===undefined||world.pending===null||(typeof world.pending==='object'));
+}
 function validSlot(v){
   return v && qualified(v.encounter)&&count(v.seed)&&count(v.turn)&&v.turn>=1&&count(v.streak)&&count(v.points)
     &&validTargets(v.cleared)&&v.layers&&typeof v.layers==='object'
@@ -66,6 +88,7 @@ export function validSave(s){
     && (s.tutorials===undefined||Array.isArray(s.tutorials)&&s.tutorials.length<=32&&s.tutorials.every(qualified))
     && (s.discovered===undefined||Array.isArray(s.discovered)&&s.discovered.length<=16&&s.discovered.every(item=>typeof item==='string'&&/^[a-z][a-z-]*$/.test(item)))
     && (s.observer===undefined||typeof s.observer==='boolean')
+    && validWorld(s.world)
     && (s.settings.intensity===undefined||['spooky','midnight','eldritch'].includes(s.settings.intensity))
     && (s.settings.ambience===undefined||(Number.isFinite(s.settings.ambience)&&s.settings.ambience>=0&&s.settings.ambience<=1))
     && (s.settings.music===undefined||typeof s.settings.music==='boolean')
@@ -81,6 +104,7 @@ export function migrate(old){
     for(const [key,value] of Object.entries(deepStats))if(!count(old.stats[key]))old.stats[key]=value;
     if(!Array.isArray(old.tutorials))old.tutorials=[];
     if(!Array.isArray(old.discovered))old.discovered=[];
+    if(!old.world||typeof old.world!=='object')old.world=defaultWorld();
     if(!['spooky','midnight','eldritch'].includes(old.settings.intensity))old.settings.intensity='midnight';
     if(!Number.isFinite(old.settings.ambience))old.settings.ambience=.35;
     if(typeof old.settings.music!=='boolean')old.settings.music=false;

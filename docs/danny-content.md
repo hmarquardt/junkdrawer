@@ -233,3 +233,11 @@ and documents the outstanding unified record/challenge service rather than prete
 instruments, all sixteen appointments, four bosses, the supernatural primitives, achievements, records,
 the hidden referral, endless variants, Zen, checkpoints, save compatibility, offline caching and both
 renderers. The base, Pore Explorer, release-upgrade and Andi suites remain green.
+
+## Version 1.4 — The World Book of Pores
+
+The unified telemetry and record architecture lives in `danny/telemetry.js` and `danny/records.js`;
+the expansion module and content are under `danny/world-book/`. Full release notes, metric
+definitions, migration strategy and the Version 2.0 encounter-result contract are in
+`docs/dani-world-book-1.4.md`. The base, Pore Explorer and Midnight Clinic packs keep their own
+namespaces and checkpoints and report measurements through the same event contract.

@@ -11,7 +11,7 @@ const icon=id=>'<svg aria-hidden="true"><use href="#'+id+'"/></svg>';
 const audio=soundEngine(),dialog=$('dialog');
 let profile,visit,field,tool,active=0,zoom=1,draw,ready=false;
 // The Pore Explorer is fetched only when a player opens it or resumes its checkpoint.
-let expansion=null,expansionLoading=null,clinic=null,clinicLoading=null;
+let expansion=null,expansionLoading=null,clinic=null,clinicLoading=null,world=null,worldLoading=null;
 let database,writesPending=0,saveBroken=false,markerListeners;
 let started=null,source=null,force=0,velocity=0,dx=0,dy=0,burst=null,lastStamp=0,frameMs=0,pending=0,inside=false;
 const current=()=>field[active], run=()=>visit.run, complete=()=>run().cleared.length===field.length;
@@ -139,25 +139,32 @@ function renderUI(){
   const family=visit.mode.id.split(':')[0];
   const inScope=item=>!item.scope||(Array.isArray(item.scope)?item.scope.includes(family):item.scope===family);
   const equipment=content.list('equipment').filter(inScope);
-  $('kitCount').textContent=pad(equipment.filter(t=>visit.zen||profile.xp>=t.xp).length)+' / '+pad(equipment.length)+' AVAILABLE';
+  const archiveKit=visit.mode.id.startsWith('world-book-of-pores:');
+  $('kitCount').textContent=pad(equipment.filter(t=>visit.zen||archiveKit||profile.xp>=t.xp).length)+' / '+pad(equipment.length)+' AVAILABLE';
   $('tools').replaceChildren();
   for(const item of equipment){
-    const restricted=!!clinic?.toolLocked?.(item.id);
-    const b=document.createElement('button'),owned=visit.zen||profile.xp>=item.xp,eq=item.id===tool.id;
+    const restricted=!!(clinic?.toolLocked?.(item.id)||world?.toolLocked?.(item.id));
+    const archive=visit.mode.id.startsWith('world-book-of-pores:');
+    const b=document.createElement('button'),owned=visit.zen||archive||profile.xp>=item.xp,eq=item.id===tool.id;
     b.className='tool'+(eq?' equipped':'');b.disabled=!owned||restricted;b.setAttribute('aria-pressed',eq);
     b.innerHTML='<span class="tool-art"><canvas aria-hidden="true"></canvas></span><span><span class="tool-name"></span><span class="tool-detail"></span></span><span class="tool-status">'+icon(eq?'check':owned?'kit':'lock')+'<span class="sr">'+(eq?'Equipped':owned?'Available':'Locked')+'</span></span>';
     b.querySelector('.tool-name').textContent=item.name;b.querySelector('.tool-detail').textContent=restricted?'Restricted this shift':owned?item.type:'Unlock at '+item.xp+' XP';
     $('tools').append(b);illustrate(b.querySelector('canvas'),item.art);
     b.onclick=()=>{cancel();profile.tool=item.id;save();renderUI();cue(item.name+' equipped. '+rest());expansion?.toolEquipped(item.id);};
   }
-  syncControls();refreshMarkers();expansion?.sync();clinic?.sync();schedule();
+  syncControls();refreshMarkers();expansion?.sync();clinic?.sync();world?.sync();schedule();
 }
 function loadField(){
   cancel();visit=visitFor(profile);field=makeField(visit);
   const equipped=content.get('equipment',profile.tool),family=visit.mode.id.split(':')[0];
-  // Expansion instruments stay inside expansion modes; the base kit is always available.
-  if((equipped.scope&&equipped.scope!==family) || (!visit.zen && equipped.xp>profile.xp))profile.tool='base:loop';
+  // The World Book archives the whole kit; other modes keep their own scope and XP unlocks.
+  const archive=visit.mode.id.startsWith('world-book-of-pores:');
+  const equippedScope=[].concat(equipped.scope||[]);
+  if((equippedScope.length&&!equippedScope.includes(family)) || (!visit.zen&&!archive&&equipped.xp>profile.xp))profile.tool='base:loop';
   expansion?.decorate(field,visit);
+  const patient=visit.encounter.patient?content.get('patients',visit.encounter.patient):null;
+  world?.startSession({namespace:visit.mode.id.split(':')[0],encounter:visit.encounter.id,seed:visit.seed,
+    klass:patient?.klass||null,region:visit.region.id,mode:visit.mode.id,turn:run().turn});
   active=field.find(l=>!run().cleared.includes(l.id))?.id??0;
   started=source=burst=null;zoom=1;force=velocity=dx=dy=0;
   draw.region(content.get('assets',visit.region.image).url).catch(()=>say('Region photo unavailable. Using the last loaded skin field.'));
@@ -204,7 +211,7 @@ function release(){
   const line=deep?.message||(prize.partial?'Seal released. '+visit.boss.hint:visit.zen?'Clean release.':(result.perfect?'Perfect release':'Clean extraction')+' · +'+prize.points+' points · +'+prize.xp+' XP.');
   const upgrades=availableUpgrades(profile),earned=[...(deep?.earned||[]),...prize.earned];
   cue((complete()?'Field cleared! ':'')+line+(upgrades.length>before?' '+upgrades.at(-1).name+' fitted.':'')+(earned.length?' Achievement: '+earned[0].name+'.':''));
-  if(complete())play('win');
+  if(complete()){play('win');world?.completeEncounter({points:run().points,perfect:result.perfect});}
 }
 bindAction($('extract'),()=>{});
 window.addEventListener('blur',cancel);
@@ -260,14 +267,14 @@ function files(){
   const achievements=content.list('achievements').map(a=>'<p class="'+(profile.achievements.includes(a.id)?'achievement':'')+'">'+(profile.achievements.includes(a.id)?'✓ ':'○ ')+escape(a.name)+' · '+Math.min(profile.stats[a.stat]||0,a.threshold)+'/'+a.threshold+'</p>').join('');
   const upgrades=content.list('upgrades').map(u=>'<p>'+escape(u.name)+' · '+(profile.xp>=u.xp?'Fitted':u.xp+' XP')+'</p>').join('');
   modal('Case files','<p>'+rank(profile.xp)+' · '+profile.xp+' XP · '+profile.score+' points · '+profile.stats.total+' scored extractions</p>'+rows+
-    '<details><summary>Achievements · '+profile.achievements.length+'</summary><div class="record-grid">'+achievements+'</div></details><details><summary>Equipment upgrades</summary>'+upgrades+'</details>'+(clinic?.recordsForFiles?.()||''),
+    '<details><summary>Achievements · '+profile.achievements.length+'</summary><div class="record-grid">'+achievements+'</div></details><details><summary>Equipment upgrades</summary>'+upgrades+'</details>'+(world?.recordsForFiles?.()||'')+(clinic?.recordsForFiles?.()||''),
     [['Return to shift',close],['Reset game',resetPrompt,true]],'CAMPAIGN RECORD');
 }
 $('filesBtn').onclick=files;
 function resetPrompt(){
   modal('Reset all shifts?','<p>This clears the three saved fields, previous checkpoint, achievements, XP, and equipment unlocks on this device.</p>',[['Keep progress',files],['Reset all shifts',()=>{
     const {revision,settings,checkpointId}=profile;
-    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();expansion?.reset();clinic?.reset();close();
+    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();expansion?.reset();clinic?.reset();world?.reset();close();
   },true]]);
 }
 function settings(){
@@ -275,10 +282,10 @@ function settings(){
   const checks=[['sound','Sound effects and timing cue'],['haptics','Vibration on supported devices'],['assist','Slower pressure and wider release band'],
     ['toggle','Press twice instead of holding'],['contrast','High-contrast controls'],['reducedMotion','Reduced extraction motion']];
   modal('Operator settings','<div class="prefs"><label>Volume <input id="volume" type="range" min="0" max="100" step="5" value="'+Math.round(prefs.volume*100)+'"><output id="volLabel">'+Math.round(prefs.volume*100)+'%</output></label>'+
-    checks.map(([k,label])=>'<label>'+label+'<input type="checkbox" data-pref="'+k+'" '+(prefs[k]?'checked':'')+'></label>').join('')+'</div>'+(clinic?.settingsHTML?.()||''),
+    checks.map(([k,label])=>'<label>'+label+'<input type="checkbox" data-pref="'+k+'" '+(prefs[k]?'checked':'')+'></label>').join('')+'</div>'+(world?.settingsHTML?.()||'')+(clinic?.settingsHTML?.()||''),
     [['Done',()=>{close();cue(rest());}]],'AUDIO & ACCESSIBILITY');
   $('volume').oninput=e=>{prefs.volume=e.target.value/100;audio.volume(prefs.volume);$('volLabel').textContent=e.target.value+'%';};
-  clinic?.bindSettings?.();
+  world?.bindSettings?.();clinic?.bindSettings?.();
   $('volume').onchange=()=>{save();if(prefs.sound){audio.wake();play('zone');}};
   for(const input of $('dialogBody').querySelectorAll('[data-pref]'))input.onchange=()=>{
     prefs[input.dataset.pref]=input.checked;save();renderUI();if(prefs.sound){audio.wake();play('touch');}
@@ -354,6 +361,34 @@ function replayEncounter(modeId,encounterId,seed){
   Object.assign(slot,{encounter:encounterId,seed,cleared:[],layers:{},deep:{},streak:0,points:0});
   save();loadField();
 }
+async function ensureWorld(){
+  if(world && content.versions()['world-book-of-pores'])return world;
+  worldLoading??=(async()=>{
+    // Legendary content references every installed campaign, so register those packs first.
+    await content.load('./pore-explorer/pack.json');
+    await content.load('./midnight-clinic/pack.json');
+    await content.load('./world-book/pack.json');
+    const mod=await import('./world-book/expansion.js');
+    mod.attach(expansionApi());
+    expansion??=await import('./pore-explorer/expansion.js');
+    expansion.mount();mod.mount();
+    world=mod;
+    if('serviceWorker' in navigator){
+      const prime=()=>world?.primeOffline?.();
+      if(navigator.serviceWorker.controller)prime();
+      else navigator.serviceWorker.addEventListener('controllerchange',prime,{once:true});
+    }
+    return mod;
+  })();
+  try{return await worldLoading;}catch(e){worldLoading=null;throw e;}
+}
+$('bookBtn').onclick=async()=>{
+  try{await ensureWorld();world.open();}
+  catch(e){
+    say(e.message||'The World Book could not be opened.');
+    modal('The World Book is unavailable','<p>The first-party expansion could not be downloaded on this visit. Existing campaigns and records are unaffected. Reconnect, then open it again.</p>',[['Return to shift',close]],'EXPANSION 4');
+  }
+};
 async function ensureClinic(){
   if(clinic && content.versions()['midnight-clinic'])return clinic;
   clinicLoading??=(async()=>{
@@ -402,6 +437,7 @@ async function init(){
       // A checkpoint inside the expansion needs its module before the first field is built.
       if(String(profile.mode).startsWith('pore-explorer:'))await ensureExpansion();
       if(String(profile.mode).startsWith('midnight-clinic:'))await ensureClinic();
+      if(String(profile.mode).startsWith('world-book-of-pores:'))await ensureWorld();
       recovery=recovered||!!state&&!state.schema;
       if(recovered)say('Recovered your previous checkpoint.');
     }catch(e){
@@ -409,7 +445,7 @@ async function init(){
     }
     visit=visitFor(profile);
     draw=await createRenderer($('stage'),$('skin'),$('effects'),content.get('assets',visit.region.image).url);
-    expansion?.mount();clinic?.mount();
+    expansion?.mount();clinic?.mount();world?.mount();
     ready=true;loadField();if(recovery)save();
     // Read-only inspection surface for the automated suites and production smoke checks.
     // It exposes snapshots only: no writes, no content control, no network access.
@@ -429,7 +465,8 @@ async function init(){
         tick:s.state.tick,phaseClosed:s.state.phaseClosed,dormant:s.state.dormant,pending:s.state.pending,
         scan:{c:s.scan.c,d:s.scan.d},gates:s.state.gates.map(g=>({type:g.type,broken:g.broken})),held:s.state.held}:null;},
       bursts:()=>burst?(burst.streams||[burst]).map(stream=>({color:stream.mat.color,particles:stream.particles.length})):[],
-      totals:()=>({xp:profile.xp,stats:structuredClone(profile.stats),achievements:[...profile.achievements]})
+      totals:()=>({xp:profile.xp,stats:structuredClone(profile.stats),achievements:[...profile.achievements]}),
+      world:()=>world?.snapshotForTests?.()||null
     });
     document.querySelector('main').inert=false;document.querySelector('header').inert=false;$('feedStatus').textContent='Optics online';
   }catch(e){$('feedStatus').textContent='Optics unavailable';cue('Could not load game assets. Reload to retry.');console.error(e);}
