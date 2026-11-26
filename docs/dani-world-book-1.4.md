@@ -3,6 +3,7 @@
 **Release date:** 2026-11-25
 **Canonical URL:** https://hmarquardt.github.io/junkdrawer/dani-the-pimple-popper.html
 **Baseline:** 1.3.0 (The Midnight Clinic), commit `2cbbc14`
+**Release commit:** `1855365` (pushed to `origin/main`, verified)
 **Namespace:** `world-book-of-pores` · **Content version:** 1.0.0 · **Metric rules:** v1
 
 > Some people make history. Dani extracts it.
@@ -42,6 +43,13 @@ simulation (reservoir.js / pore-explorer/expansion.js)
 The base campaign, Pore Explorer and Midnight Clinic keep their own namespaces, XP, achievements and
 campaign checkpoints. Only *measurement* is shared. The World Book module is loaded on demand; base
 startup downloads none of it.
+
+Two integration decisions worth recording: the World Book register is *not* a fifth campaign that
+reuses other modes' tools implicitly — its modes grant the archive kit (every installed instrument,
+regardless of XP) because legendary reservoirs combine septa, cores and supernatural phases; and the
+optional-source loader treats the World Book manifest as a dependency chain (Pore Explorer → Midnight
+Clinic → World Book) so a reload straight into a book mode resolves cross-pack references. Both are
+covered by `tests/dani-world-book.cjs`.
 
 ## 3. Telemetry event contract (schema 1)
 
@@ -136,9 +144,14 @@ figures on a desktop; no physical-device measurement was performed.
   legendary completion, certificate rendering, daily checkpoint resume, gauntlet restriction and
   staging, save corruption recovery, 1.0 save migration, offline hub, 360×640 layout, WebGL2 and
   Canvas.
-- Existing suites re-run green: `tests/danny-popper.cjs`, `tests/dani-pore-explorer.cjs`,
-  `tests/dani-midnight-clinic.cjs`, `tests/dani-release.cjs` (see the release commit message for the
-  exact run).
+- Existing suites re-run green after the release changes: `tests/danny-popper.cjs`,
+  `tests/dani-pore-explorer.cjs`, `tests/dani-midnight-clinic.cjs`, `tests/dani-release.cjs`,
+  `tests/andi-the-rat-slayer.spec.js` (8/8) and `tests/audit-storage-heuristics.sh` (9/9).
+- Live production check: the page serves `FICTIONAL SIMULATION · v1.4` and
+  `data-deploy-version="2026.11.25.8"`; the hub opens with 8 tabs, 20 classifications, 16 trophy
+  positions and a date-derived daily challenge; zero page or console errors. After one controlled
+  reload the worker cache `junkdrawer-danny-expansion-2026.11.25.8` contains `world-book/pack.json`
+  and `world-book/expansion.js`, and an offline reload still opens the hub.
 
 ## 11. Known limitations
 
