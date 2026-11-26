@@ -191,7 +191,7 @@ function recordStats(profile, visit, graph, drained, after) {
     run.regen = (run.regen || 0) + activated;
     stats.regenBest = Math.max(stats.regenBest || 0, run.regen);
   }
-  if (graph.pattern === 'ribbon') stats.ribbons = (stats.ribbons || 0) + 1;
+  if (graph.pattern === 'ribbon' && modeNamespace() === 'pore-explorer') stats.ribbons = (stats.ribbons || 0) + 1;
   if (recordStats.pending) { /* reserved for future telemetry adapters */ }
 }
 // One case closed. Class counters and the discovery book are content-driven, so a future pack can add
@@ -282,15 +282,18 @@ export function flow({profile, visit, run, target, tool, value, perfect, dx, dy}
   const activated = window.reduce((sum, event) => sum + event.activated.length, 0);
   const rewired = window.some(event => event.rewired.length);
   const mutated = window.some(event => event.mutated.length);
-  if (secondary.length) profile.stats.secondarySwarm = Math.max(profile.stats.secondarySwarm || 0, secondary.length);
+  // Pore Explorer achievements count pore play only; clinic cascades use their own records.
+  if (secondary.length && modeNamespace() === 'pore-explorer')
+    profile.stats.secondarySwarm = Math.max(profile.stats.secondarySwarm || 0, secondary.length);
   recordStats(profile, visit, graph, [...drained, ...echoed], after);
   const done = after.complete;
   if (done) {
     const mapped = scope.mappedByImaging(graph, deep);
-    if (graph.hidden > 0 && mapped.length === graph.hidden) profile.stats.networks = (profile.stats.networks || 0) + 1;
+    if (modeNamespace() === 'pore-explorer' && graph.hidden > 0 && mapped.length === graph.hidden)
+      profile.stats.networks = (profile.stats.networks || 0) + 1;
     if (target.boss) awardBoss(profile, visit);
     // A mystery case solved without imaging every concealed compartment is the harder version.
-    if (visit.encounter.mystery && graph.hidden > 0 && mapped.length < graph.hidden)
+    if (modeNamespace() === 'pore-explorer' && visit.encounter.mystery && graph.hidden > 0 && mapped.length < graph.hidden)
       profile.stats.mysterySolves = (profile.stats.mysterySolves || 0) + 1;
     if (target.boss) { view.flourish = {t: 0}; }
     if (run.cleared.length + 1 >= visit.encounter.count) finishCase(profile, visit, graph, [...drained, ...echoed]);
@@ -328,7 +331,7 @@ function registerDiscovery(profile, graph, before, after) {
   const added = after.found.filter(key => !before.found.includes(key));
   if (!added.length) return 0;
   const concealed = added.filter(key => graph.nodes.find(node => node.key === key)?.hidden).length;
-  if (concealed) profile.stats.concealed = (profile.stats.concealed || 0) + concealed;
+  if (concealed && modeNamespace() === 'pore-explorer') profile.stats.concealed = (profile.stats.concealed || 0) + concealed;
   return concealed;
 }
 
