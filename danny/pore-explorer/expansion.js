@@ -553,4 +553,16 @@ export function summary(run, visit) {
   const state = replay(target.deep.graph, progressOf(run, target));
   return state.found + '/' + target.deep.graph.nodes.length + ' chambers mapped · ' + target.deep.graph.pattern;
 }
+// After the service worker takes control, re-fetch this pack so the runtime offline cache fills even
+// when the player opened the expansion during their very first visit. Bounded to one pass and to
+// first-party URLs already in the catalog.
+export async function primeOffline() {
+  if (primeOffline.done || !navigator.onLine) return;
+  primeOffline.done = true;
+  // Resolve against this module, not the document: the pack lives beside this file.
+  const urls = new Set(['./pack.json', './expansion.js', './porescope.js'].map(path => new URL(path, import.meta.url).href));
+  for (const asset of content.list('assets'))
+    if (String(asset.id).startsWith(NS + ':') && asset.url) urls.add(asset.url);
+  await Promise.allSettled([...urls].map(url => fetch(url, {cache: 'reload'})));
+}
 export function reset() { view.mode = 'surface'; view.shown = 0; view.focus = null; view.scanning = false; view.flourish = null; graphs.clear(); sync(); }

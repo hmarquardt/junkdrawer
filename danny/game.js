@@ -326,6 +326,13 @@ async function ensureExpansion(){
       selectMode, replayEncounter
     });
     expansion=mod;mod.mount();
+    // Fill the expansion runtime cache once a worker controls this page. On a first visit the
+    // assets were fetched before activation, so this is the moment they can be stored.
+    if('serviceWorker' in navigator){
+      const prime=()=>expansion?.primeOffline?.();
+      if(navigator.serviceWorker.controller)prime();
+      else navigator.serviceWorker.addEventListener('controllerchange',prime,{once:true});
+    }
     return mod;
   })();
   try{return await expansionLoading;}catch(e){expansionLoading=null;throw e;}

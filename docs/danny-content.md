@@ -91,7 +91,7 @@ is not loaded.
 | Startup | Only `danny/base.json` is fetched. `reservoir.js` ships in the base offline shell but nothing imports it until the expansion module loads. |
 | Entry | `#poreBtn`, the mode chooser, or a saved expansion checkpoint. `ensureExpansion()` loads `danny/pore-explorer/pack.json` through the same staged registry, then imports `pore-explorer/expansion.js` with a dynamic import. |
 | Resume | `restoreContent()` already resolves the namespaces named by the saved mode, tool and encounter. `optionalSources` now maps `pore-explorer` to its pack, so a checkpoint inside the expansion downloads only what it needs. |
-| Offline | The base worker precaches the shell. A second runtime cache (`junkdrawer-danny-expansion-*`) fills on first use from same-origin `/danny/pore-explorer/` requests and is deleted on the next release. |
+| Offline | The base worker precaches the shell. A second runtime cache (`junkdrawer-danny-expansion-*`) fills from same-origin `/danny/pore-explorer/` requests. When the expansion was opened before a first-visit worker took control, `primeOffline()` re-fetches the pack, modules and plates once on `controllerchange`, so the cache is complete without a reload. The cache is deleted on the next release. |
 | Failure | A pack or module that cannot load leaves the base campaign and every checkpoint untouched; the game reports the failure and continues in a temporary session. |
 
 Repeated requests share one promise, packs register atomically, and a pack may reference records

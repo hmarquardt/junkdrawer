@@ -288,6 +288,23 @@ async function run() {
     assert.equal((await session()).mode, 'pore-explorer:campaign');
     assert.ok(packRequests.some(request => request.includes('pack.json')), 'the pack must load on demand');
     assert.ok(packRequests.some(request => request.includes('expansion.js')), 'the module must load on demand');
+    // First-visit offline priming: once the worker claims this page, the pack re-fetches so the
+    // runtime cache fills even though the expansion was opened before activation.
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, {timeout: 20000}).catch(() => {});
+    await page.waitForFunction(async () => {
+      const names = await caches.keys();
+      const cache = names.find(name => name.startsWith('junkdrawer-danny-expansion-'));
+      if (!cache) return false;
+      return (await (await caches.open(cache)).keys()).some(request => /back\.jpg$/.test(request.url));
+    }, null, {timeout: 20000}).catch(() => {});
+    const earlyCache = await page.evaluate(async () => {
+      const names = await caches.keys();
+      const cache = names.find(name => name.startsWith('junkdrawer-danny-expansion-'));
+      if (!cache) return {files: 0, plates: 0};
+      const files = (await (await caches.open(cache)).keys()).map(request => new URL(request.url).pathname);
+      return {files: files.length, plates: files.filter(path => /\.jpg$/.test(path)).length};
+    });
+    assert.ok(earlyCache.plates >= 6, 'the first visit primes the expansion media cache (' + earlyCache.files + ' files)');
     // Re-opening the expansion panel must not repeat the tutorial.
     await openExpansion();
     await page.getByRole('button', {name: 'Stay on shift'}).click();

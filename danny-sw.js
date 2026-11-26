@@ -1,8 +1,8 @@
 // The file-scoped registration controls only the game document on the shared Pages origin.
-const cacheName = 'junkdrawer-danny-shell-2026.11.25.4';
+const cacheName = 'junkdrawer-danny-shell-2026.11.25.5';
 // Expansion media and modules are cached on first use, so the base install stays small and the
 // expansion remains playable offline after one online visit.
-const expansionCache = 'junkdrawer-danny-expansion-2026.11.25.4';
+const expansionCache = 'junkdrawer-danny-expansion-2026.11.25.5';
 const page = './dani-the-pimple-popper.html';
 const legacy = new URL('./danny-the-pimple-popper.html',self.location.href).href;
 const expansionPrefix = new URL('./danny/pore-explorer/',self.location.href).href;
@@ -19,7 +19,7 @@ self.addEventListener('activate', e => {
     // A player can visit the new URL while the original offline worker is still active.
     // Retire the two pre-rename caches only after replacing that worker on its own scope.
     if (self.registration.scope === legacy) {
-      await Promise.all(['2026.11.25.1','2026.11.25.2'].map(version =>
+      await Promise.all(['2026.11.25.1','2026.11.25.2','2026.11.25.3','2026.11.25.4'].map(version =>
         caches.delete('junkdrawer-danny-shell-' + version)));
     }
     // Drop superseded shells and expansion caches from earlier releases; never touch other apps.
