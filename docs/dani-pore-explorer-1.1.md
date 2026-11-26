@@ -168,8 +168,8 @@ and imaging available. The legacy launch URL continues to resolve to the canonic
 ## Deployment
 
 - Production host: GitHub Pages, canonical URL unchanged.
-- Release commit: PENDING_SHA
-- Push verification: PENDING_PUSH
+- Release commit: `bfde2ce9b7d25d66dafcbac06c8fed080c3d5eb7` ("Release Dani 1.1 with The Pore Explorer expansion")
+- Push verification: `origin/main` contains the release commit (`git-sync.sh verify` reported the remote has this commit).
 
 ## Remaining physical-device validation
 
