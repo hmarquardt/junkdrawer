@@ -17,9 +17,35 @@ export function illustrate(canvas,id) {
     c.beginPath();c.moveTo(31,0);c.bezierCurveTo(40,-8,55,-9,56,-2);c.bezierCurveTo(57,6,41,8,31,0);c.stroke();
   } else if(id===1) {
     rod(-58,-4.5,74,9);c.fillStyle=metal(-4,8);c.beginPath();c.moveTo(13,-4);c.lineTo(45,-1.5);c.lineTo(58,-5);c.lineTo(46,1);c.lineTo(13,4);c.fill();
-  } else {
+  } else if(id===2) {
     rod(-53,-9,74,18);rod(-41,-10,40,20,'#66776e');rod(19,-5,21,10);
     c.fillStyle=metal(-8,16);c.beginPath();c.moveTo(36,-4);c.lineTo(53,-9);c.lineTo(53,9);c.lineTo(36,4);c.fill();rod(50,-9,6,18);
+  } else if(id===3) {
+    // PoreScope: slim imaging barrel with an illuminated lens ring.
+    rod(-60,-7,66,14);rod(-46,-9,26,18,'#5d6f74');rod(6,-5,24,10);
+    c.fillStyle=metal(-9,18);c.beginPath();c.moveTo(30,-8);c.lineTo(50,-11);c.lineTo(50,11);c.lineTo(30,8);c.fill();
+    c.shadowBlur=0;c.shadowOffsetY=0;c.strokeStyle='#bff6ff';c.lineWidth=2.4;
+    c.beginPath();c.ellipse(51,0,4.6,10.5,0,0,Math.PI*2);c.stroke();
+    c.strokeStyle='#7fdfef';c.lineWidth=1;c.beginPath();c.ellipse(51,0,2.2,5.4,0,0,Math.PI*2);c.stroke();
+    c.fillStyle='#cefa80';c.beginPath();c.arc(0,-11,2.1,0,Math.PI*2);c.fill();
+  } else if(id===4) {
+    // Vortex Extractor: rotor housing with twin spiral blades.
+    rod(-58,-12,60,24,'#4d5a56');rod(-46,-14,30,28,'#6d7d75');rod(4,-6,26,12);
+    c.fillStyle=metal(-6,14);c.beginPath();c.moveTo(30,-6);c.lineTo(47,-13);c.lineTo(47,13);c.lineTo(30,6);c.fill();
+    c.save();c.translate(-30,0);c.rotate(.5);
+    c.strokeStyle='#d9e6dc';c.lineWidth=2.2;
+    for(const dir of [1,-1]){c.beginPath();c.moveTo(0,-3.4*dir);c.bezierCurveTo(10,-10*dir,14,3*dir,4,3.4*dir);c.stroke();}
+    c.restore();
+    c.strokeStyle='#2c3733';c.lineWidth=1;c.beginPath();c.arc(-30,0,10,0,Math.PI*2);c.stroke();
+  } else {
+    // Resonance Wand: tapered shaft, tuning-fork head, stepped rings.
+    rod(-57,-4,66,8);rod(9,-3,22,6,'#6f7f78');
+    c.strokeStyle=metal(-9,18);c.lineWidth=3.2;
+    c.beginPath();c.moveTo(31,0);c.lineTo(39,0);c.moveTo(39,-7);c.lineTo(39,7);c.moveTo(39,-7);c.lineTo(50,-6.4);c.moveTo(39,7);c.lineTo(50,6.4);c.stroke();
+    c.shadowBlur=0;c.shadowOffsetY=0;c.fillStyle='#cefa80';
+    c.beginPath();c.arc(50,-6.4,1.8,0,Math.PI*2);c.fill();c.beginPath();c.arc(50,6.4,1.8,0,Math.PI*2);c.fill();
+    c.strokeStyle='#9ff3c8';c.lineWidth=1;
+    for(const x of [6,10,14]){c.beginPath();c.arc(x,0,4.2,0,Math.PI*2);c.stroke();}
   }
   c.strokeStyle='rgba(47,57,51,.65)';c.lineWidth=1;
   for(let x=-42;x<5;x+=3){c.beginPath();c.moveTo(x,-3.7);c.lineTo(x-2,3.7);c.stroke();}

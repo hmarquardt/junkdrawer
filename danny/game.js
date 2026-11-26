@@ -10,6 +10,8 @@ const $=id=>document.getElementById(id), pad=n=>String(n).padStart(2,'0');
 const icon=id=>'<svg aria-hidden="true"><use href="#'+id+'"/></svg>';
 const audio=soundEngine(),dialog=$('dialog');
 let profile,visit,field,tool,active=0,zoom=1,draw,ready=false;
+// The Pore Explorer is fetched only when a player opens it or resumes its checkpoint.
+let expansion=null,expansionLoading=null;
 let database,writesPending=0,saveBroken=false,markerListeners;
 let started=null,source=null,force=0,velocity=0,dx=0,dy=0,burst=null,lastStamp=0,frameMs=0,pending=0,inside=false;
 const current=()=>field[active], run=()=>visit.run, complete=()=>run().cleared.length===field.length;
@@ -18,7 +20,7 @@ const layer=()=>run().layers[active]||0;
 const cue=text=>{$('cue').textContent=text;};
 const say=text=>{$('saveStatus').textContent=text;};
 const rest=()=>visit.zen?'Use any pressure. Release whenever it feels right.':profile.settings.toggle?'Press once to build pressure. Press again in the green zone.':'Hold to build pressure. Release in the green zone.';
-function play(cue){if(profile.settings.sound)audio.play(cue,current()?.phase||0);}
+function play(cue,phase=current()?.phase||0,pan=0){if(profile.settings.sound)audio.play(cue,phase,pan);}
 function buzz(ms){if(profile.settings.haptics)navigator.vibrate?.(ms);}
 function save(eraseHistory=false){
   if(!database || saveBroken)return;
@@ -75,7 +77,7 @@ function markerStyle(b,l){
   b.className='marker'+(selected?' current':'')+(pos.x>.67?' flip':'')+(l.boss?' boss':'');
   b.style.left=pos.x*100+'%';b.style.top=pos.y*100+'%';
   b.disabled=locked(l);
-  b.lastElementChild.textContent=b.disabled?'BOSS':pad(l.id+1)+(selected?' / '+(l.boss?'BOSS':l.name.toUpperCase()):'');
+  b.lastElementChild.textContent=b.disabled?'BOSS':pad(l.id+1)+(selected?' / '+(l.boss?'BOSS':l.name.toUpperCase()):'')+(l.deep?(l.deep.state?.found?' ◈':' ◇'):'');
   b.setAttribute('aria-label',(l.boss?'Boss ':'Target ')+(l.id+1)+', '+l.name+(b.disabled?', clear other targets first.':'.'));
 }
 function bindAction(b,choose,signal){
@@ -129,11 +131,12 @@ function renderUI(){
   $('caseCode').textContent=visit.zen?'FREE PLAY':'SCORE / '+run().points;
   $('difficulty').textContent=visit.boss?'BOSS SHIFT':visit.zen?'UNTIMED':'STANDARD';
   $('modeBtn').textContent=mode.name.toUpperCase()+' MODE ▾';
-  $('introText').textContent=mode.strategy==='campaign'?'Chapter '+(chapterIndex+1)+' of '+mode.chapters.length+' · '+chapter.name:mode.description;
+  const expanded=String(mode.id).startsWith('pore-explorer:');
+  $('introText').textContent=expanded?(mode.strategy==='campaign'?'Beneath the surface · chapter '+(chapterIndex+1)+' of '+mode.chapters.length+' · '+chapter.name:mode.description):mode.strategy==='campaign'?'Chapter '+(chapterIndex+1)+' of '+mode.chapters.length+' · '+chapter.name:mode.description;
   $('rankName').textContent=rank(profile.xp);
   $('soundBtn').innerHTML=icon(profile.settings.sound?'sound':'mute')+'<span>Sound '+(profile.settings.sound?'on':'off')+'</span>';
   $('soundBtn').setAttribute('aria-pressed',profile.settings.sound);
-  const equipment=content.list('equipment');
+  const equipment=content.list('equipment').filter(item=>!item.scope||item.scope===visit.mode.id.split(':')[0]);
   $('kitCount').textContent=pad(equipment.filter(t=>visit.zen||profile.xp>=t.xp).length)+' / '+pad(equipment.length)+' AVAILABLE';
   $('tools').replaceChildren();
   for(const item of equipment){
@@ -142,13 +145,16 @@ function renderUI(){
     b.innerHTML='<span class="tool-art"><canvas aria-hidden="true"></canvas></span><span><span class="tool-name"></span><span class="tool-detail"></span></span><span class="tool-status">'+icon(eq?'check':owned?'kit':'lock')+'<span class="sr">'+(eq?'Equipped':owned?'Available':'Locked')+'</span></span>';
     b.querySelector('.tool-name').textContent=item.name;b.querySelector('.tool-detail').textContent=owned?item.type:'Unlock at '+item.xp+' XP';
     $('tools').append(b);illustrate(b.querySelector('canvas'),item.art);
-    b.onclick=()=>{cancel();profile.tool=item.id;save();renderUI();cue(item.name+' equipped. '+rest());};
+    b.onclick=()=>{cancel();profile.tool=item.id;save();renderUI();cue(item.name+' equipped. '+rest());expansion?.toolEquipped(item.id);};
   }
-  syncControls();refreshMarkers();schedule();
+  syncControls();refreshMarkers();expansion?.sync();schedule();
 }
 function loadField(){
   cancel();visit=visitFor(profile);field=makeField(visit);
-  if(!visit.zen && content.get('equipment',profile.tool).xp>profile.xp)profile.tool='base:loop';
+  const equipped=content.get('equipment',profile.tool),family=visit.mode.id.split(':')[0];
+  // Expansion instruments stay inside expansion modes; the base kit is always available.
+  if((equipped.scope&&equipped.scope!==family) || (!visit.zen && equipped.xp>profile.xp))profile.tool='base:loop';
+  expansion?.decorate(field,visit);
   active=field.find(l=>!run().cleared.includes(l.id))?.id??0;
   started=source=burst=null;zoom=1;force=velocity=dx=dy=0;
   draw.region(content.get('assets',visit.region.image).url).catch(()=>say('Region photo unavailable. Using the last loaded skin field.'));
@@ -177,18 +183,24 @@ function release(){
     if(run().streak){run().streak=0;save();}
     cue(value<zone.center?'A little early. Release when the band lights up.':'Too much pressure. Try the next pass through green.');play('miss');schedule();return;
   }
-  play('release');buzz(l.boss?38:20);
+  // A reservoir target hands its release to the expansion; base targets are unchanged.
+  const deep=expansion?.active()?expansion.flow({profile,visit,run:run(),target:l,tool,value,perfect:result.perfect,dx,dy}):null;
+  if(deep?.refused || deep?.blocked){cue(deep.message);play(deep.cue||'miss');schedule();return;}
+  play(deep?.cue||'release',l.phase,deep?.pan||0);buzz(l.boss?38:20);
   if(tool.audio && profile.settings.sound)audio.asset(content.get('assets',tool.audio).url);
-  burst=eject(l,value,dx,dy,pass,tool);
+  if(deep?.diagnostic){save();renderUI();cue(deep.message);schedule();return;}
+  // The vortex can advance two flow units in one release; reward() still commits one layer.
+  if(deep?.steps)run().layers[l.id]=(run().layers[l.id]||0)+deep.steps-1;
+  burst=deep?.burst||eject(l,value,dx,dy,pass,tool);
   if(profile.settings.reducedMotion){stepMaterial(burst,.08);burst.life=.22;}
   lastStamp=now;
   const before=availableUpgrades(profile).length,prize=reward(profile,visit,l,result.perfect);
   if(!prize.partial){active=field.find(x=>!run().cleared.includes(x.id))?.id??active;force=velocity=0;zoom=1;}
   save();renderUI();
   if(focusMarker)(complete()?$('review'):$('markers').querySelector('.current'))?.focus({preventScroll:true});
-  const line=prize.partial?'Seal released. '+visit.boss.hint:visit.zen?'Clean release.':(result.perfect?'Perfect release':'Clean extraction')+' · +'+prize.points+' points · +'+prize.xp+' XP.';
-  const upgrades=availableUpgrades(profile);
-  cue((complete()?'Field cleared! ':'')+line+(upgrades.length>before?' '+upgrades.at(-1).name+' fitted.':'')+(prize.earned.length?' Achievement: '+prize.earned[0].name+'.':''));
+  const line=deep?.message||(prize.partial?'Seal released. '+visit.boss.hint:visit.zen?'Clean release.':(result.perfect?'Perfect release':'Clean extraction')+' · +'+prize.points+' points · +'+prize.xp+' XP.');
+  const upgrades=availableUpgrades(profile),earned=[...(deep?.earned||[]),...prize.earned];
+  cue((complete()?'Field cleared! ':'')+line+(upgrades.length>before?' '+upgrades.at(-1).name+' fitted.':'')+(earned.length?' Achievement: '+earned[0].name+'.':''));
   if(complete())play('win');
 }
 bindAction($('extract'),()=>{});
@@ -219,10 +231,18 @@ $('pauseBtn').onclick=()=>modal('Shift paused','<p>Your field is waiting exactly
 $('manualBtn').onclick=()=>modal('Field manual','<h3>Choose a target</h3><p>Hold a numbered marker or the extraction button. Space and Enter work too. Drag during contact to lean the instrument and steer the release.</p><h3>Catch the signal</h3><p>Release inside the striped band. The center earns a precision bonus. The loop rolls steadily, the tip builds in pulses, and the vacuum accelerates. Audio settings include an audible in-band cue, slower timing, and two-press control.</p><h3>Work the shift</h3><p>Clear the smaller targets to expose the boss. Watch its case brief for the special release pattern. Clean streaks build score. XP unlocks instruments and automatically fits grip and servo upgrades.</p><p>Fictional arcade mechanics. Never attempt on real skin.</p>',[['Back to work',close]],'OPERATOR REFERENCE');
 function modes(){
   modal('Choose a shift','<p>Each mode keeps its own field. You can switch back at any time.</p>',[],'GAMEPLAY MODES');
-  for(const m of content.list('modes')){
+  const list=content.list('modes');
+  for(const m of list){
     const b=document.createElement('button');b.className='mode-option';b.setAttribute('aria-pressed',profile.mode===m.id);
     b.innerHTML='<strong>'+escape(m.name)+'</strong><span>'+escape(m.description)+'</span>';
     b.onclick=()=>{switchMode(profile,m.id);loadField();save();close();};
+    $('dialogBody').append(b);
+  }
+  // The expansion is offered here even before it has been loaded; the base modes stay first.
+  if(!list.some(m=>m.id.startsWith('pore-explorer:'))){
+    const b=document.createElement('button');b.className='mode-option deep-option';
+    b.innerHTML='<strong>The Pore Explorer</strong><span>Expansion 1 · subsurface imaging, reservoir networks and three buried bosses. Download on demand.</span>';
+    b.onclick=async()=>{try{await ensureExpansion();expansion.openPanel();}catch(e){say(e.message||'Expansion unavailable.');}};
     $('dialogBody').append(b);
   }
 }
@@ -244,7 +264,7 @@ $('filesBtn').onclick=files;
 function resetPrompt(){
   modal('Reset all shifts?','<p>This clears the three saved fields, previous checkpoint, achievements, XP, and equipment unlocks on this device.</p>',[['Keep progress',files],['Reset all shifts',()=>{
     const {revision,settings,checkpointId}=profile;
-    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();close();
+    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();expansion?.reset();close();
   },true]]);
 }
 function settings(){
@@ -264,10 +284,11 @@ $('settingsBtn').onclick=settings;
 function report(){
   const last=visit.mode.strategy==='campaign' && visit.index===visit.route.length-1;
   const next=visit.mode.strategy==='campaign'?'Begin next case':'Next patient';
-  const title=last?'Campaign complete':visit.boss?'Boss shift cleared':visit.zen?'Patient complete':'Case cleared';
+  const expanded=expansion?.report(visit)||null;
+  const title=expanded?.title||(last?'Campaign complete':visit.boss?'Boss shift cleared':visit.zen?'Patient complete':'Case cleared');
   modal(title,'<p>'+escape(visit.patient.name)+' · '+field.length+' targets cleared.</p><h3>'+
     (visit.zen?'A quiet moment.':run().points+' points · '+profile.xp+' career XP')+'</h3><p>'+
-    (last?'Four chapters down. Dani is officially off the clock.':visit.zen?'Take another shift whenever you feel like it.':'Your next patient is ready for inspection.')+'</p>',
+    (expanded?.flavor||(last?'Four chapters down. Dani is officially off the clock.':visit.zen?'Take another shift whenever you feel like it.':'Your next patient is ready for inspection.'))+'</p>',
     last?[['View campaign',files],['Choose another mode',modes,true]]:[[next,()=>{if(advance(visit)){save();loadField();}close();}]],'EXTRACTION REPORT');
 }
 new ResizeObserver(schedule).observe($('stage'));
@@ -293,6 +314,39 @@ async function installOffline(){
   }
   await workers.register('./danny-sw.js',{scope:legacy.pathname});
 }
+// Selectable campaign entry. The pack, module and plates download here, not at startup.
+async function ensureExpansion(){
+  if(expansion)return expansion;
+  expansionLoading??=(async()=>{
+    await content.load('./pore-explorer/pack.json');
+    const mod=await import('./pore-explorer/expansion.js');
+    mod.attach({
+      profile:()=>profile, visit:()=>visit, run:()=>run(), field:()=>field, active:()=>active, tool:()=>tool,
+      getPaint:()=>draw, paint:()=>{if(ready)draw(view());}, cue, play, save, modal, close,
+      selectMode, replayEncounter
+    });
+    expansion=mod;mod.mount();
+    return mod;
+  })();
+  try{return await expansionLoading;}catch(e){expansionLoading=null;throw e;}
+}
+function selectMode(id){
+  switchMode(profile,id);loadField();save();
+}
+// Replaying an encountered case resets only that case, never the campaign checkpoint.
+function replayEncounter(modeId,encounterId,seed){
+  switchMode(profile,modeId);
+  const slot=profile.slots[modeId];
+  Object.assign(slot,{encounter:encounterId,seed,cleared:[],layers:{},deep:{},streak:0,points:0});
+  save();loadField();
+}
+$('poreBtn').onclick=async()=>{
+  try{await ensureExpansion();expansion.openPanel();}
+  catch(e){
+    say(e.message||'The expansion could not be loaded.');
+    modal('The Pore Explorer is unavailable','<p>The first-party expansion could not be downloaded on this visit. The base campaign and its checkpoints are unaffected. Reconnect, then open it again.</p>',[['Return to shift',close]],'EXPANSION');
+  }
+};
 async function init(){
   document.querySelector('main').inert=true;document.querySelector('header').inert=true;
   try{
@@ -303,6 +357,8 @@ async function init(){
       const {state,recovered}=await database.read();
       await restoreContent(state);
       profile=migrate(state);visit=visitFor(profile);content.get('equipment',profile.tool);
+      // A checkpoint inside the expansion needs its module before the first field is built.
+      if(String(profile.mode).startsWith('pore-explorer:'))await ensureExpansion();
       recovery=recovered||!!state&&!state.schema;
       if(recovered)say('Recovered your previous checkpoint.');
     }catch(e){
@@ -310,7 +366,26 @@ async function init(){
     }
     visit=visitFor(profile);
     draw=await createRenderer($('stage'),$('skin'),$('effects'),content.get('assets',visit.region.image).url);
+    expansion?.mount();
     ready=true;loadField();if(recovery)save();
+    // Read-only inspection surface for the automated suites and production smoke checks.
+    // It exposes snapshots only: no writes, no content control, no network access.
+    window.daniInspect=Object.freeze({
+      profile:()=>structuredClone(profile),
+      session:()=>({mode:visit.mode.id,encounter:visit.encounter.id,index:visit.index,seed:visit.seed}),
+      run:()=>structuredClone(run()),
+      field:()=>field.map(l=>({id:l.id,name:l.name,boss:l.boss,layers:l.layers,passes:run().layers[l.id]||0,
+        cleared:run().cleared.includes(l.id),
+        pattern:l.deep?.graph?.pattern||null,nodes:l.deep?.graph?.nodes.length||0,
+        remaining:l.deep?.state?.remaining??null,found:l.deep?.state?.found??null,complete:l.deep?.state?.complete??null})),
+      scope:()=>{const s=expansion?.overlayContext?.();return s?{mode:s.mode,shown:s.shown,found:s.state.found,remaining:s.state.remaining,
+        pattern:s.graph.pattern,edges:s.graph.edges.length,hidden:s.graph.hidden,
+        nodes:s.graph.nodes.map(n=>{const live=s.state.nodes.find(item=>item.key===n.key);return {key:n.key,x:n.x,y:n.y,depth:n.depth,
+          volume:n.volume,remaining:live.remaining,hidden:n.hidden,revealed:live.revealed,exposed:live.exposed};}),
+        scan:{c:s.scan.c,d:s.scan.d},gates:s.state.gates.map(g=>({type:g.type,broken:g.broken})),held:s.state.held}:null;},
+      bursts:()=>burst?(burst.streams||[burst]).map(stream=>({color:stream.mat.color,particles:stream.particles.length})):[],
+      totals:()=>({xp:profile.xp,stats:structuredClone(profile.stats),achievements:[...profile.achievements]})
+    });
     document.querySelector('main').inert=false;document.querySelector('header').inert=false;$('feedStatus').textContent='Optics online';
   }catch(e){$('feedStatus').textContent='Optics unavailable';cue('Could not load game assets. Reload to retry.');console.error(e);}
   if('serviceWorker' in navigator){

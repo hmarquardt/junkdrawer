@@ -20,17 +20,25 @@ export function makeField(visit) {
   if(visit.procedural){
     for(let j=5;j>0;j--){const k=Math.floor(rng()*(j+1));[sites[k],sites[j]]=[sites[j],sites[k]];}
   }
+  // Region hair adds instrument drag and later reduces scan clarity; base regions carry no hair.
+  const hair=visit.region.hair||0;
   return sites.slice(0,encounter.count).map(([x,y],id)=>{
     const leader=boss && id===encounter.count-1?boss:null;
     const archetype=content.get('archetypes',leader?.archetype||encounter.archetypes[(id+index)%encounter.archetypes.length]);
-    const behavior=leader?content.get('behaviors',leader.behavior):null;
+    const behavior=leader?content.get('behaviors',leader.behavior)
+      :(encounter.behaviors?.length?content.get('behaviors',encounter.behaviors[(id+index)%encounter.behaviors.length]):null);
+    // Reservoir networks are authored templates; the expansion turns each into a seeded graph.
+    const reservoir=leader?.reservoir||encounter.reservoir||archetype.reservoir||null;
     return {id,x:x+(rng()-.5)*.09,y:y+(rng()-.5)*.09,size:(.044+rng()*.014)*(leader?1.45:1),
-      phase:rng()*Math.PI*2,goal:.49+rng()*.25,resistance:(.86+rng()*.28)/Math.sqrt(difficulty),
+      phase:rng()*Math.PI*2,goal:.49+rng()*.25,resistance:(.86+rng()*.28)/Math.sqrt(difficulty)*(1+.22*hair),
       type:archetype.shape,name:leader?.name||archetype.name,material:content.get('materials',archetype.material),
-      behavior,layers:behavior?.layers||1,boss:!!leader};
+      behavior,layers:behavior?.layers||1,boss:!!leader,
+      reservoir:reservoir?content.get('reservoirs',reservoir):null};
   });
 }
 // The pulse tip moves in soft steps. Suction ramps nonlinearly. The loop is proportional.
+// Engine 1.1 adds the expansion instruments: the vortex sweeps a smooth spiral, the resonance wand
+// holds a stepped tone, and the PoreScope's diagnostic pulse never grips material.
 export function pressure(seconds,target,tool,layer=0){
   const behavior=target.behavior;
   const pace=behavior?.pattern==='breakaway'?(layer?1.7:.58):(behavior?.pace||1);
@@ -38,14 +46,22 @@ export function pressure(seconds,target,tool,layer=0){
   const linear=1-Math.abs(1-cycle%2);
   if(tool.technique==='suction')return linear**1.42;
   if(tool.technique==='pulse')return linear-.025*Math.sin(linear*8*Math.PI);
+  if(tool.technique==='vortex')return .5+.5*Math.sin(cycle*Math.PI*2);
+  if(tool.technique==='resonance')return .5+.5*Math.sin(cycle*Math.PI*2+.55);
+  if(tool.technique==='probe')return linear*.55;
   return linear;
 }
 export function band(seconds,target,tool,layer=0){
+  // The PoreScope emits a diagnostic pulse, not a pressure-controlled extraction, so its band is
+  // deliberately open: any release is a valid pulse on any target.
+  if(tool.technique==='probe')return {center:.3,width:.62};
   const b=target.behavior;
   let center=target.goal;
   if(b?.pattern==='drift')center+=Math.sin(seconds*2.4+target.phase)*b.shift;
   if(b?.pattern==='layers'||b?.pattern==='breakaway')center-=layer*b.shift;
   if(b?.pattern==='alternating')center=layer%2?.75:.75-b.shift;
+  if(b?.pattern==='stutter')center+=Math.sin(seconds*3.7+target.phase)>0?b.shift:-b.shift;
+  if(b?.pattern==='surge')center-=layer*b.shift*.5+Math.sin(seconds*1.6+target.phase)*b.shift*.25;
   const width=tool.window*(b?.window||1);
   return {center:Math.min(1-width,Math.max(width,center)),width};
 }
@@ -55,21 +71,27 @@ export function assess(value,zone){
 }
 // Short position-based chain with an anchored outlet, finite emission impulse, viscosity,
 // gravity and contact friction. The simulation is independent of viewport units and frame rate.
-export function eject(target,value,dx,dy,layer,tool) {
-  const mat=target.material,r=random(Math.round(target.phase*1e6)+layer*431+Math.round(value*70));
-  const count=Math.round(5+mat.cohesion*6), thickness=.10+.09*mat.viscosity;
-  const vx=(r()-.5)*3+dx*1.65+(tool.technique==='roll'?.9:0);
-  const vy=-3-value*2.6-Math.abs(dy)*.6;
+// Engine 1.1 options: `length` multiplies the extrudate chain for long cohesive releases,
+// `scale` thins or thickens it, and `angle`/`offset` let several streams leave the same outlet.
+export function eject(target,value,dx,dy,layer,tool,options={}) {
+  const mat=target.material,r=random(Math.round(target.phase*1e6)+layer*431+Math.round(value*70)+Math.round((options.angle||0)*97));
+  const stretch=Math.min(3,Math.max(1,options.length||1));
+  const count=Math.round((5+mat.cohesion*6)*stretch), thickness=(.10+.09*mat.viscosity)*Math.min(1.4,options.scale||1);
+  const angle=options.angle||0;
+  const vx=(r()-.5)*3+dx*1.65+(tool.technique==='roll'?.9:0)+Math.sin(angle)*2.4;
+  const vy=-3-value*2.6-Math.abs(dy)*.6+Math.cos(angle)*.8;
   const particles=Array.from({length:count},(_,i)=>({
-    x:0,y:-.023*i,vx:vx+(r()-.5)*1.8,vy:vy*(.75+.45*i/count),r:thickness*(.66+.32*Math.sin(Math.PI*i/count))
+    x:Math.sin(angle)*.032*i,y:-.023*i,vx:vx+(r()-.5)*1.8,vy:vy*(.75+.45*i/count),r:thickness*(.66+.32*Math.sin(Math.PI*i/count))
   }));
   const droplets=Array.from({length:Math.round((1-mat.cohesion)*9)},()=>({
     x:0,y:0,vx:vx+(r()-.5)*6,vy:vy*(.56+r()*.68),r:.045+r()*.075
   }));
-  return {id:target.id,mat,particles,droplets,t:0,age:0,carry:0,life:1.22+mat.viscosity*.35,
+  return {id:target.id,mat,particles,droplets,t:0,age:0,carry:0,life:1.22+mat.viscosity*.35+stretch*.26,
     impulseX:vx,impulseY:vy,rest:.15+(1-mat.viscosity)*.15,seed:target.phase};
 }
 export function stepMaterial(b,delta){
+  // A reservoir can feed several outlets at once; each stream steps with the same fixed timestep.
+  if(b.streams){let t=0;for(const stream of b.streams){stepMaterial(stream,delta);t=Math.max(t,stream.t);}b.t=t;return;}
   const dt=1/90;
   b.carry+=Math.min(.10,delta);
   while(b.carry>=dt){

@@ -71,10 +71,17 @@ function gpuRenderer(canvas, image) {
   const gl = canvas.getContext('webgl2',{alpha:false,antialias:false});
   if(!gl) return null;
   const renderer = new T.WebGLRenderer({canvas,context:gl,antialias:false});
-  const texture = new T.Texture(image);
-  texture.minFilter = T.LinearFilter;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
+  // Each region plate gets its own GPU texture. Mutating one texture's image in place leaves a
+  // partially stale upload on some drivers (visible as a quadrant seam), so the old texture is
+  // disposed and replaced, which also keeps GPU memory bounded across region changes.
+  let texture = new T.Texture(image);
+  const dress = value => {
+    value.minFilter = T.LinearFilter;
+    value.generateMipmaps = false;
+    value.needsUpdate = true;
+    return value;
+  };
+  dress(texture);
   const vectors = () => Array.from({length:6},()=>new T.Vector4());
   const u = Object.fromEntries(Object.entries({photo:texture,frame:new T.Vector2(),photoAspect:1,tissue:new T.Vector4(),drag:new T.Vector2(),
     sites:vectors(),traits:vectors(),zoom:1,caseNo:0,center:new T.Vector2()}).map(([key,value])=>[key,{value}]));
@@ -82,7 +89,11 @@ function gpuRenderer(canvas, image) {
   scene.add(new T.Mesh(new T.PlaneGeometry(2,2),new T.ShaderMaterial({uniforms:u,vertexShader,fragmentShader,depthTest:false})));
   return (s,w,h,image) => {
     if(canvas.width!==w || canvas.height!==h) renderer.setSize(w,h,false);
-    if(texture.image!==image){texture.image=image;texture.needsUpdate=true;}
+    if(texture.image!==image){
+      texture.dispose();
+      texture=dress(new T.Texture(image));
+      u.photo.value=texture;
+    }
     u.photoAspect.value=image.naturalWidth/image.naturalHeight;
     u.tissue.value.set(s.patient.tone,s.region.oil*s.patient.oil,s.region.elasticity,0);
     u.frame.value.set(w,h); u.zoom.value=s.zoom; u.center.value.set(s.cx,s.cy);
@@ -149,21 +160,33 @@ function contactTool(c,s,w,h) {
     c.bezierCurveTo(.45,.74,.85,.11,1.7,0);c.lineWidth=.105;c.stroke();
   } else if(s.toolId===1){
     c.moveTo(1.75,-.11);c.lineTo(.49,-.045);c.lineTo(.04,-.21);c.lineTo(.45,.065);c.lineTo(1.75,.11);c.fill();
-  } else {
+  } else if(s.toolId===2) {
     c.moveTo(1.8,-.14);c.lineTo(.35,-.49);c.quadraticCurveTo(-.25,0,.35,.49);c.lineTo(1.8,.14);c.closePath();c.fill();
     c.beginPath();c.ellipse(.27,0,.20,.47,0,0,Math.PI*2);c.fillStyle='rgba(76,72,59,.48)';c.fill();
+  } else if(s.toolId===3) {
+    // PoreScope barrel with an illuminated imaging ring.
+    c.moveTo(1.8,-.10);c.lineTo(.62,-.13);c.lineTo(.62,.13);c.lineTo(1.8,.10);c.closePath();c.fill();
+    c.beginPath();c.ellipse(.5,0,.17,.17,0,0,Math.PI*2);c.lineWidth=.09;c.strokeStyle='#bff6ff';c.stroke();
+    c.beginPath();c.ellipse(.5,0,.07,.07,0,0,Math.PI*2);c.strokeStyle='rgba(190,250,255,.7)';c.stroke();
+  } else if(s.toolId===4) {
+    // Vortex cone with two spiral vanes.
+    c.moveTo(1.8,-.15);c.lineTo(.46,-.45);c.quadraticCurveTo(-.2,0,.46,.45);c.lineTo(1.8,.15);c.closePath();c.fill();
+    c.beginPath();c.ellipse(.34,0,.19,.42,0,0,Math.PI*2);c.fillStyle='rgba(70,84,76,.55)';c.fill();
+    c.strokeStyle='rgba(222,240,226,.85)';c.lineWidth=.055;
+    for(const dir of [1,-1]){c.beginPath();c.moveTo(.28,-.3*dir);c.bezierCurveTo(.62,-.5*dir,.62,.34*dir,.3,.26*dir);c.stroke();}
+  } else {
+    // Resonance Wand: needle shaft and stepped fork tips.
+    c.moveTo(1.8,-.06);c.lineTo(.32,-.045);c.lineTo(.32,.045);c.lineTo(1.8,.06);c.closePath();c.fill();
+    c.strokeStyle='#9ff3c8';c.lineWidth=.07;
+    c.beginPath();c.moveTo(.3,-.12);c.lineTo(.3,.12);c.moveTo(.3,-.12);c.lineTo(-.08,-.16);c.moveTo(.3,.12);c.lineTo(-.08,.16);c.stroke();
+    c.fillStyle='#cefa80';c.beginPath();c.arc(-.1,-.17,.055,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(-.1,.17,.055,0,Math.PI*2);c.fill();
   }
   c.restore();
 }
-function drawBurst(c,s,w,h) {
-  c.clearRect(0,0,w,h);
-  contactTool(c,s,w,h);
-  if(!s.burst)return;
-  const b=s.burst, l=s.field[b.id], pos=position(s,l);
-  const r=l.size*Math.min(w,h)*s.zoom, points=b.particles;
-  c.save();c.translate(pos.x*w,pos.y*h);c.scale(r,r);
-  c.globalAlpha=Math.max(0,Math.min(1,(1-b.t)*4));
-  c.lineCap='round';c.lineJoin='round';
+function drawStream(c,stream,pos,r,l){
+  const points=stream.particles;
+  c.save();c.translate(pos.x*1,pos.y*1);
   function strand(color,width,offset){
     c.strokeStyle=color;
     for(let i=1;i<points.length;i++){
@@ -173,16 +196,31 @@ function drawBurst(c,s,w,h) {
     }
   }
   strand('rgba(74,46,33,.48)',2.15,.065);
-  strand(b.mat.color,2,0);strand(b.mat.highlight,.61,-.032);
+  strand(stream.mat.color,2,0);strand(stream.mat.highlight,.61,-.032);
   if(l.type===1){
     const tip=points.at(-1);
     c.fillStyle='#745941';c.beginPath();c.ellipse(tip.x,tip.y,tip.r,tip.r*.82,.4,0,Math.PI*2);c.fill();
   }
-  for(const p of b.droplets){
-    c.fillStyle=b.mat.color;c.beginPath();c.ellipse(p.x,p.y,p.r,p.r*.8,0,0,Math.PI*2);c.fill();
-    c.fillStyle=b.mat.highlight;c.beginPath();c.arc(p.x-.02,p.y-.02,p.r*.37,0,Math.PI*2);c.fill();
+  for(const p of stream.droplets){
+    c.fillStyle=stream.mat.color;c.beginPath();c.ellipse(p.x,p.y,p.r,p.r*.8,0,0,Math.PI*2);c.fill();
+    c.fillStyle=stream.mat.highlight;c.beginPath();c.arc(p.x-.02,p.y-.02,p.r*.37,0,Math.PI*2);c.fill();
   }
   c.restore();
+}
+function drawBurst(c,s,w,h) {
+  contactTool(c,s,w,h);
+  if(!s.burst)return;
+  const b=s.burst, l=s.field[b.id], pos=position(s,l);
+  const r=l.size*Math.min(w,h)*s.zoom;
+  // A reservoir can open several outlets in one release. Each stream keeps its own material.
+  const streams=b.streams||[b];
+  for(const stream of streams){
+    c.save();c.translate(pos.x*w,pos.y*h);c.scale(r,r);
+    c.globalAlpha=Math.max(0,Math.min(1,(1-b.t)*4));
+    c.lineCap='round';c.lineJoin='round';
+    drawStream(c,stream,{x:0,y:0},r,l);
+    c.restore();
+  }
 }
 export async function createRenderer(stage, canvas, overlay, initialUrl) {
   let image=new Image(); image.src=initialUrl;
@@ -209,7 +247,12 @@ export async function createRenderer(stage, canvas, overlay, initialUrl) {
     const dpr=Math.min(window.devicePixelRatio||1,quality);
     const w=Math.max(1,Math.round(stage.clientWidth*dpr)),h=Math.max(1,Math.round(stage.clientHeight*dpr));
     if(overlay.width!==w || overlay.height!==h) {overlay.width=w;overlay.height=h;}
-    draw(s,w,h,image); drawBurst(effects,s,w,h);
+    draw(s,w,h,image);
+    effects.clearRect(0,0,w,h);
+    // Expansion imaging (PoreScope) paints on the same 2D overlay, so WebGL2 and Canvas share it.
+    // It sits under the expelled material and the instrument so an extraction stays readable.
+    if(paint.overlay)paint.overlay(effects,s,w,h);
+    drawBurst(effects,s,w,h);
   };
   paint.region=async url=>{
     desired=url;

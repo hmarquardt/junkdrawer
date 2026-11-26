@@ -1,23 +1,39 @@
 // Engine 1 accepts only authored data. Every reference resolves before a pack becomes visible.
+// Engine 1.1 adds optional first-party families (reservoir graphs, commentary, tutorials) and new
+// instrument techniques. A 1.0 pack remains valid because every addition is optional metadata.
 const links = {
-  regions:{image:'assets'}, archetypes:{material:'materials'}, bosses:{behavior:'behaviors',archetype:'archetypes'},
-  encounters:{region:'regions',boss:'bosses',archetypes:'archetypes'}, chapters:{encounters:'encounters'},
-  modes:{scoring:'scoring',chapters:'chapters'}, materials:{}, equipment:{audio:'assets'}, behaviors:{},
-  achievements:{},scoring:{},assets:{},upgrades:{}
+  regions:{image:'assets'}, archetypes:{material:'materials',reservoir:'reservoirs'},
+  bosses:{behavior:'behaviors',archetype:'archetypes',reservoir:'reservoirs'},
+  encounters:{region:'regions',boss:'bosses',archetypes:'archetypes',behaviors:'behaviors',reservoir:'reservoirs'},
+  chapters:{encounters:'encounters'}, modes:{scoring:'scoring',chapters:'chapters'},
+  materials:{}, equipment:{audio:'assets'}, behaviors:{reservoir:'reservoirs'},
+  achievements:{}, scoring:{}, assets:{}, upgrades:{}, reservoirs:{}, commentary:{},
+  tutorials:{equipment:'equipment'}
 };
 const requiredLinks={
   regions:['image'],archetypes:['material'],bosses:['behavior','archetype'],encounters:['region','archetypes'],
   chapters:['encounters'],modes:['chapters','scoring']
 };
+const TECHNIQUES=['roll','pulse','suction','probe','vortex','resonance'];
+const PATTERNS=['layers','drift','breakaway','alternating','stutter','surge'];
+const RESERVOIR_PATTERNS=['fork','ribbon','strata','chain','braid','migrate'];
+const OBSTRUCTIONS=['none','plug','valve','septum','migrate'];
 function validateRecord(kind,v){
   const inRange=(n,min,max)=>Number.isFinite(n)&&n>=min&&n<=max;
   for(const key of requiredLinks[kind]||[]){
     if(!v[key]||Array.isArray(v[key])&&!v[key].length)throw Error('Missing '+key+' on '+v.id);
   }
   if(kind==='materials' && ['viscosity','cohesion','adhesion'].some(k=>!inRange(v[k],0,1)))throw Error('Invalid material properties');
-  if(kind==='equipment' && (!inRange(v.speed,.01,8)||!inRange(v.window,.01,.45)||!Number.isInteger(v.art)||v.art<0||v.art>2))throw Error('Invalid instrument');
+  if(kind==='equipment' && (!inRange(v.speed,.01,8)||!inRange(v.window,.01,.45)||!Number.isInteger(v.art)||v.art<0||v.art>5))throw Error('Invalid instrument');
+  if(kind==='equipment' && v.scope!==undefined && !/^[a-z][a-z0-9-]*$/.test(v.scope))throw Error('Invalid instrument scope');
   if(kind==='behaviors' && (!Number.isInteger(v.layers)||v.layers<1||v.layers>8||!inRange(v.pace,.1,8)||!inRange(v.window,.1,2)))throw Error('Invalid release behavior');
   if(kind==='chapters' && !inRange(v.difficulty,.1,8))throw Error('Invalid difficulty');
+  if(kind==='reservoirs'){
+    const rooms=Array.isArray(v.chambers)&&v.chambers.length===2&&v.chambers.every(n=>Number.isInteger(n)&&n>=1&&n<=14)&&v.chambers[0]<=v.chambers[1];
+    if(!rooms || !inRange(v.scale,.1,4) || !Array.isArray(v.materials) || !v.materials.length)throw Error('Invalid reservoir template');
+    if(!Number.isInteger(v.hidden)||v.hidden<0||v.hidden>14)throw Error('Invalid concealed count');
+  }
+  if(kind==='tutorials' && (!Array.isArray(v.steps)||!v.steps.length||v.steps.some(s=>typeof s!=='string'||!s.trim())))throw Error('Invalid tutorial');
 }
 export function createRegistry() {
   const catalog=new Map(), packages=new Map(), pending=new Map();
@@ -50,9 +66,10 @@ export function createRegistry() {
               value.url=asset.href;
             }
             if(kind==='encounters' && (!Number.isInteger(value.count)||value.count<1||value.count>6||!value.archetypes?.length))throw Error('Invalid field');
-            if(kind==='behaviors' && !['layers','drift','breakaway','alternating'].includes(value.pattern))throw Error('Unknown simulation behavior');
+            if(kind==='behaviors' && !PATTERNS.includes(value.pattern))throw Error('Unknown simulation behavior');
             if(kind==='modes' && !['campaign','endless','zen'].includes(value.strategy))throw Error('Unknown mode strategy');
-            if(kind==='equipment' && !['roll','pulse','suction'].includes(value.technique))throw Error('Unknown technique');
+            if(kind==='equipment' && !TECHNIQUES.includes(value.technique))throw Error('Unknown technique');
+            if(kind==='reservoirs' && (!RESERVOIR_PATTERNS.includes(value.pattern)||!OBSTRUCTIONS.includes(value.obstruction||'none')))throw Error('Unknown reservoir family');
             additions.set(value.id,{kind,value});
           }
         }
@@ -78,9 +95,10 @@ export function createRegistry() {
 export const content=createRegistry();
 export const baseReady=content.load('./base.json');
 
-// Future approved packages get a source here when released. Reading inactive pack slots
-// must never download their media or prevent the base campaign from resuming.
-const optionalSources=new Map();
+// Future approved packages get a source here when released. Reading inactive pack slots must never
+// download their media or prevent the base campaign from resuming. Registering a source is only a
+// string; the manifest, module and plates download when that content is actually required.
+const optionalSources=new Map([['pore-explorer','./pore-explorer/pack.json']]);
 export async function restoreContent(state){
   if(state?.schema!==2)return;
   const active=state.slots?.[state.mode];
