@@ -93,5 +93,5 @@ The suite asserts the base campaign slot is unchanged after full clinic play, th
 ## Deployment
 
 - Production host: GitHub Pages, canonical URL unchanged.
-- Release commit: PENDING_SHA
-- Push verification: PENDING_PUSH
+- Release commit: `0177568e4618f7368267cacceec6d5da1a9b4e4d` ("Release Dani 1.3 with The Midnight Clinic expansion")
+- Push verification: `origin/main` contains the release commit (`git-sync.sh verify`).
