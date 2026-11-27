@@ -63,7 +63,10 @@ export function summarize(rows) {
     reverseOrderConsistencyAll: fraction(reverse, (r) => r.consistent === true),
     reverseOrderConsistencyStrict: fraction(reverse, (r) => r.consistent === true && r.decision !== 'REVIEW'),
     abstentions: rows.filter((r) => r.decision === 'REVIEW').length,
-    evidenceFactuality: fraction(valid, (r) => r.evidenceGrounded === true),
+    evidenceFactuality: fraction(
+      valid.filter((r) => r.decision !== 'REVIEW'),
+      (r) => r.evidenceGrounded === true,
+    ),
     structuralValidity: fraction(rows, (r) => r.valid),
     taxonomy: taxonomies,
     latencyMs: {

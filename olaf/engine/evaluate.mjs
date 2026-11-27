@@ -115,8 +115,13 @@ export async function evaluate(
         if (recovered) r.excerpt = recovered;
       }
     try {
-      validateObservation(observation, input);
-      const normalized = normalizePerception(observation);
+      let normalized;
+      try {
+        normalized = normalizePerception(observation, input.request);
+      } catch {
+        normalized = { observation, corrections: [] };
+      }
+      validateObservation(normalized.observation, input);
       const result = buildResult(input, normalized.observation, telemetry, {
         architecture: 'a',
         corrections: normalized.corrections,

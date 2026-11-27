@@ -2,6 +2,8 @@
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { summarize } from './summary.mjs';
+import { cases } from './dataset.mjs';
+import { classify, evidenceAudit } from './taxonomy.mjs';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -17,6 +19,14 @@ for (const file of positionals) {
   }
 }
 const selected = rows.filter((r) => values.split === 'all' || r.split === values.split);
+// Re-score evidence and taxonomy from the stored observation with the current deterministic rules.
+const caseById = new Map(cases.map((c) => [c.id, c]));
+for (const row of selected) {
+  const c = caseById.get(row.case);
+  if (!c) continue;
+  if (row.why) row.evidenceGrounded = evidenceAudit(c, row.why).grounded;
+  if (row.result) row.taxonomy = classify(c, row.result);
+}
 const groups = new Map();
 for (const row of selected) {
   const key = [row.model, row.architecture, row.split].join('|');

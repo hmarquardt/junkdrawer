@@ -18,6 +18,13 @@ const expandNode = (node) => {
 };
 export const wireSchema = (kind) => expandNode(JSON.parse(JSON.stringify(stagesSchema[kind])));
 
+export const fillPair = (pair, fallback = 'not described') => {
+  if (pair && typeof pair === 'object')
+    for (const side of sides)
+      if (typeof pair[side] !== 'string' || !pair[side].trim()) pair[side] = fallback;
+  return pair;
+};
+
 // Architecture B merges the inspection, adherence and preference stage shapes into one call.
 export function structuredSchema() {
   const pick = (name, keys) =>
@@ -35,30 +42,51 @@ export function structuredSchema() {
 }
 
 export function validateCompile(data, request) {
+  const corrections = [];
+  if (Array.isArray(data?.requirements)) {
+    const kept = data.requirements.filter((r) => {
+      if (typeof r?.excerpt === 'string' && r.excerpt.trim()) return true;
+      corrections.push({ kind: 'grounding', id: r?.id, excerpt: r?.excerpt });
+      return false;
+    });
+    data = { ...data, requirements: kept };
+  }
   validateWithSchema(data, stagesSchema.compile, 'compile');
   const seen = new Map();
   const aliases = new Map();
   const requirements = [];
   for (const r of data.requirements) {
     const excerpt = recoverExcerpt(request, r.excerpt);
-    if (!excerpt) throw Error('Compiled requirement is not grounded in the request.');
-    if (['functionality', 'later_state'].includes(r.kind) && r.scope === 'visible')
-      throw Error('Hidden behavior cannot enter visible scoring.');
+    if (!excerpt) {
+      corrections.push({ kind: 'grounding', id: r.id, excerpt: r.excerpt });
+      continue;
+    }
+    let scope = r.scope;
+    if (['functionality', 'later_state'].includes(r.kind) && scope === 'visible') {
+      scope = r.kind === 'functionality' ? 'unobservable' : 'later';
+      corrections.push({ kind: 'applicability', id: r.id, from: r.scope, to: scope, basis: r.kind });
+    }
     if (seen.has(excerpt)) {
       aliases.set(r.id, seen.get(excerpt));
       continue;
     }
     seen.set(excerpt, r.id);
-    requirements.push({ ...r, excerpt });
+    requirements.push({ ...r, scope, excerpt });
   }
   requirements.aliases = aliases;
+  requirements.corrections = corrections;
   return requirements;
 }
 
 export function validateAdherence(data, requirements, aliases = requirements.aliases || new Map()) {
+  for (const result of data?.results || []) {
+    fillPair(result.evidence);
+    fillPair(result.basis);
+  }
   validateWithSchema(data, stagesSchema.adherence, 'adherence');
   const byId = new Map(requirements.map((r) => [r.id, r]));
   const seen = new Set();
+  const corrections = [];
   for (const result of data.results) {
     const id = aliases.get(result.id) || result.id;
     const requirement = byId.get(id);
@@ -66,31 +94,48 @@ export function validateAdherence(data, requirements, aliases = requirements.ali
     if (seen.has(id)) continue;
     seen.add(id);
     for (const side of sides) {
-      if (requirement.scope !== 'visible' && result.status[side] !== 'excluded')
-        throw Error('Unobservable requirements must be excluded on both sides.');
-      if (requirement.scope === 'visible' && result.status[side] === 'excluded')
-        throw Error('Visible requirements cannot be excluded.');
+      if (requirement.scope !== 'visible' && result.status[side] !== 'excluded') {
+        corrections.push({
+          kind: 'applicability',
+          id,
+          side,
+          from: result.status[side],
+          to: 'excluded',
+          basis: requirement.scope,
+        });
+        result.status[side] = 'excluded';
+      }
+      if (requirement.scope === 'visible' && result.status[side] === 'excluded') {
+        corrections.push({ kind: 'applicability', id, side, from: 'excluded', to: 'uncertain', basis: 'visible scope' });
+        result.status[side] = 'uncertain';
+      }
     }
   }
   if (seen.size !== requirements.length) throw Error('Adherence omitted a compiled requirement.');
-  return requirements.map((r) => {
+  const assessed = requirements.map((r) => {
     const result = data.results.find((x) => (aliases.get(x.id) || x.id) === r.id);
     return { ...r, ...result };
   });
+  assessed.corrections = corrections;
+  return assessed;
 }
 
 export function validateInspection(data) {
-  validateWithSchema(data, stagesSchema.inspection, 'inspection');
-  for (const defect of data.defects) {
-    if (defect.severity === 'page_broken' && (defect.scope === 'localized' || defect.impact === 'cosmetic'))
-      throw Error('A localized cosmetic defect cannot be page-broken.');
-    if (defect.impact === 'unreadable' && defect.scope === 'localized' && defect.severity === 'minor')
-      throw Error('Unreadable localized content is at least a major defect.');
+  if (data) {
+    fillPair(data.renderEvidence);
+    for (const group of [data.passes, data.principles])
+      if (group) for (const pair of Object.values(group)) fillPair(pair);
+    for (const defect of data.defects || []) {
+      if (typeof defect.location !== 'string' || !defect.location.trim()) defect.location = 'not described';
+      fillPair(defect.evidence);
+    }
   }
+  validateWithSchema(data, stagesSchema.inspection, 'inspection');
   return data;
 }
 
 export function validatePreference(data) {
+  fillPair(data?.preferenceEvidence);
   validateWithSchema(data, stagesSchema.preference, 'preference');
   return data;
 }

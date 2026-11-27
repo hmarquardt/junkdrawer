@@ -115,11 +115,12 @@ async function runStaged(task, provider, options, architecture) {
   const runner = stageRunner(task, provider, options);
   const compiled = await runner.call('compile');
   const requirements = validateCompile(compiled.data, task.request);
-  const diagnostics = { architecture, compiled, corrections: [], verification: null };
+  const diagnostics = { architecture, compiled, corrections: [...(requirements.corrections || [])], verification: null };
   let assessment;
   if (architecture === 'b') {
     const structured = await runner.call('structured', { requirements });
     const merged = mergeStructured(structured.data, requirements);
+    diagnostics.corrections.push(...(merged.requirements.corrections || []));
     assessment = {
       ...merged.inspection,
       ...merged.preference,
@@ -131,6 +132,7 @@ async function runStaged(task, provider, options, architecture) {
       runner.call('inspection'),
     ]);
     const results = validateAdherence(adherence.data, requirements);
+    diagnostics.corrections.push(...(results.corrections || []));
     const inspected = validateInspection(inspection.data);
     let preference = placeholderPreference(inspected);
     const preview = assembleObservation({ ...inspected, ...preference, requirements: results });
@@ -147,7 +149,7 @@ async function runStaged(task, provider, options, architecture) {
     assessment = { ...inspected, ...preference, requirements: results };
   }
   const normalized = normalizeAssessment(assessment);
-  diagnostics.corrections = normalized.corrections;
+  diagnostics.corrections.push(...normalized.corrections);
   diagnostics.requirements = normalized.assessment.requirements;
   const observation = assembleObservation(normalized.assessment);
   validateObservation(observation, task);
@@ -177,7 +179,7 @@ async function runVerification(task, provider, options) {
   };
   runner.stages.push(telemetry);
   let observation = recoverRequirements(structuredClone(observed.observation), task.request);
-  const guard = normalizePerception(observation);
+  const guard = normalizePerception(observation, task.request);
   observation = guard.observation;
   validateObservation(observation, task);
   const claims = claimsFor(observation).slice(0, 8);

@@ -6,28 +6,64 @@ const negativeEvidence = (text, alternative) =>
     text || '',
   ) ||
   (alternative && /\b(?:enabled|active|ordinary|default state)\b/i.test(text || ''));
-const failureEvidence = /\b(?:fail|error|blank|empty white|cannot load|did not render|does not render|not render|unavailable|404|500|no content)\b/i;
+const failureEvidence = /\b(?:failed to load|did not load|does not render|did not render|cannot load|error page|404|500|no content at all|completely blank)\b/i;
 const unreadableEvidence = /\b(?:unreadable|washed|faint|low contrast|blends? into|fades? into|disappears?|cannot read|illegible)\b/i;
 const widespreadEvidence = /\b(?:whole|entire|all|every|throughout|page[- ]wide|widespread|main text)\b/i;
 
 // Guards for the single-pass observation: grounded evidence outranks an optimistic status or rendering label.
-export function normalizePerception(o) {
+export function normalizePerception(o, request) {
   const observation = structuredClone(o);
   const corrections = [];
-  for (const [i, r] of observation.requirements.entries())
-    for (const side of sides) {
-      const status = r.status[side],
-        text = r.evidence[side];
-      if (['met', 'alternative'].includes(status) && negativeEvidence(text, status === 'alternative')) {
-        corrections.push({
-          kind: 'status',
-          requirement: i + 1,
-          side,
-          from: status,
-          to: 'missing',
-          basis: text,
-        });
-        r.status[side] = 'missing';
+  if (Array.isArray(observation.requirements)) {
+    const seen = new Set();
+    observation.requirements = observation.requirements.filter((r) => {
+      if (request && (typeof r?.excerpt !== 'string' || !request.includes(r.excerpt))) {
+        corrections.push({ kind: 'grounding', excerpt: r?.excerpt });
+        return false;
+      }
+      if (r?.excerpt && seen.has(r.excerpt)) {
+        corrections.push({ kind: 'dedupe', excerpt: r.excerpt });
+        return false;
+      }
+      if (r?.excerpt) seen.add(r.excerpt);
+      return true;
+    });
+  }
+  if (Array.isArray(observation.requirements))
+    for (const [i, r] of observation.requirements.entries()) {
+      // Hidden behavior and later screens can never decide visible adherence.
+      if (['functionality', 'later_state'].includes(r.kind) && r.scope === 'visible') {
+        const scope = r.kind === 'functionality' ? 'unobservable' : 'later';
+        corrections.push({ kind: 'applicability', requirement: i + 1, from: r.scope, to: scope, basis: r.kind });
+        r.scope = scope;
+      }
+      if (['unobservable', 'later'].includes(r.scope))
+        for (const side of sides)
+          if (r.status[side] !== 'excluded') {
+            corrections.push({
+              kind: 'applicability',
+              requirement: i + 1,
+              side,
+              from: r.status[side],
+              to: 'excluded',
+              basis: r.scope,
+            });
+            r.status[side] = 'excluded';
+          }
+      for (const side of sides) {
+        const status = r.status[side],
+          text = r.evidence?.[side];
+        if (['met', 'alternative'].includes(status) && negativeEvidence(text, status === 'alternative')) {
+          corrections.push({
+            kind: 'status',
+            requirement: i + 1,
+            side,
+            from: status,
+            to: 'missing',
+            basis: text,
+          });
+          r.status[side] = 'missing';
+        }
       }
     }
   for (const side of sides) {
@@ -35,6 +71,20 @@ export function normalizePerception(o) {
     if (observation.rendering[side] === 'failed' && !failureEvidence.test(text) && unreadableEvidence.test(text)) {
       corrections.push({ kind: 'rendering', side, from: 'failed', to: 'rendered', basis: text });
       observation.rendering[side] = 'rendered';
+    }
+    // A page whose own text is reported unreadable is a page-broken contrast defect, not a load failure.
+    if (
+      unreadableEvidence.test(text) &&
+      !observation.defects.some((d) => d.side === side && d.type === 'contrast' && d.severity === 'page_broken')
+    ) {
+      observation.defects.push({
+        side,
+        type: 'contrast',
+        severity: 'page_broken',
+        location: 'page text',
+        evidence: { ...observation.renderEvidence },
+      });
+      corrections.push({ kind: 'defect', side, type: 'contrast', severity: 'page_broken', basis: text });
     }
   }
   for (const [i, d] of observation.defects.entries())
@@ -94,7 +144,34 @@ export function normalizeAssessment(assessment) {
     }
     return { ...r, status };
   });
-  const defects = assessment.defects.map((d, i) => {
+  const rendering = { ...assessment.rendering };
+  for (const side of sides) {
+    const text = assessment.renderEvidence?.[side] || '';
+    if (rendering[side] === 'failed' && !failureEvidence.test(text) && unreadableEvidence.test(text)) {
+      corrections.push({ kind: 'rendering', side, from: 'failed', to: 'rendered', basis: text });
+      rendering[side] = 'rendered';
+    }
+  }
+  const derived = [];
+  for (const side of sides) {
+    const text = assessment.renderEvidence?.[side] || '';
+    if (
+      unreadableEvidence.test(text) &&
+      !assessment.defects.some((d) => d.side === side && d.type === 'contrast' && d.severity === 'page_broken')
+    ) {
+      derived.push({
+        side,
+        type: 'contrast',
+        severity: 'page_broken',
+        location: 'page text',
+        scope: 'page',
+        impact: 'unreadable',
+        evidence: { ...assessment.renderEvidence },
+      });
+      corrections.push({ kind: 'defect', side, type: 'contrast', severity: 'page_broken', basis: text });
+    }
+  }
+  const defects = [...assessment.defects, ...derived].map((d, i) => {
     let severity = d.severity;
     if (d.impact === 'unreadable' && ['widespread', 'page'].includes(d.scope) && severity !== 'page_broken') {
       corrections.push({ kind: 'severity', defect: i + 1, from: severity, to: 'page_broken', basis: 'unreadable ' + d.scope });
@@ -102,13 +179,16 @@ export function normalizeAssessment(assessment) {
     } else if (d.impact === 'obstructive' && severity === 'minor') {
       corrections.push({ kind: 'severity', defect: i + 1, from: severity, to: 'major', basis: 'obstructive content' });
       severity = 'major';
+    } else if (d.impact === 'unreadable' && severity === 'minor') {
+      corrections.push({ kind: 'severity', defect: i + 1, from: severity, to: 'major', basis: 'unreadable content' });
+      severity = 'major';
     } else if (severity === 'page_broken' && (d.scope === 'localized' || d.impact === 'cosmetic')) {
       corrections.push({ kind: 'severity', defect: i + 1, from: severity, to: 'major', basis: 'localized cosmetic defect' });
       severity = 'major';
     }
     return { ...d, severity };
   });
-  return { assessment: { ...assessment, requirements, defects }, corrections };
+  return { assessment: { ...assessment, rendering, requirements, defects }, corrections };
 }
 
 const pick = (source, keys) => Object.fromEntries(keys.map((k) => [k, source[k]]));

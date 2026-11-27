@@ -1,4 +1,5 @@
 import { sides, stagesSchema, validateWithSchema } from './contracts.mjs';
+import { fillPair } from './stages.mjs';
 
 export const claimsFor = (observation) => {
   const claims = [];
@@ -33,6 +34,7 @@ const suggestedValues = {
 };
 
 export function validateVerify(data, claims) {
+  for (const check of data?.checks || []) fillPair(check.evidence, 'not reported');
   validateWithSchema(data, stagesSchema.verify, 'verify');
   const byTarget = new Map(claims.map((c) => [c.target, c]));
   const seen = new Set();
@@ -54,6 +56,7 @@ export function applyVerification(observation, verification, claims) {
   const o = structuredClone(observation);
   const byTarget = new Map(claims.map((c) => [c.target, c]));
   const corrections = [];
+  const removals = new Set();
   for (const check of verification.checks) {
     const claim = byTarget.get(check.target);
     if (check.verdict !== 'refuted') {
@@ -78,7 +81,7 @@ export function applyVerification(observation, verification, claims) {
       const index = Number(claim.target.slice(1)) - 1;
       if (check.suggested === 'remove') {
         corrections.push({ ...claim, verdict: check.verdict, applied: true, to: 'remove', note: check.note });
-        o.defects.splice(index, 1);
+        removals.add(index);
       } else if (o.defects[index] && o.defects[index].severity !== check.suggested) {
         corrections.push({
           ...claim,
@@ -118,5 +121,6 @@ export function applyVerification(observation, verification, claims) {
         }
     }
   }
+  if (removals.size) o.defects = o.defects.filter((_, index) => !removals.has(index));
   return { observation: o, corrections };
 }

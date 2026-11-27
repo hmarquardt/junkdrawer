@@ -113,16 +113,16 @@ test('stage contracts reject ungrounded, missing and applicable-requirement viol
   );
   assert.equal(duplicated.length, 1);
   assert.equal(duplicated.aliases.get('R2'), 'R1');
-  assert.throws(() =>
-    validateCompile(
-      {
-        requirements: [
-          { id: 'R1', excerpt: 'not in the request', kind: 'style', scope: 'visible', check: 'x', confidence: 'high' },
-        ],
-      },
-      request,
-    ),
+  const ungrounded = validateCompile(
+    {
+      requirements: [
+        { id: 'R1', excerpt: 'not in the request', kind: 'style', scope: 'visible', check: 'x', confidence: 'high' },
+      ],
+    },
+    request,
   );
+  assert.equal(ungrounded.length, 0);
+  assert.equal(ungrounded.corrections[0].kind, 'grounding');
   const compiled = validateCompile(
     {
       requirements: [
@@ -148,17 +148,17 @@ test('stage contracts reject ungrounded, missing and applicable-requirement viol
     confidence: { Left: 'high', Right: 'high' },
   });
   assert.throws(() => validateAdherence({ results: [result('R1', { Left: 'met', Right: 'met' })] }, compiled));
-  assert.throws(() =>
-    validateAdherence(
-      {
-        results: [
-          result('R1', { Left: 'met', Right: 'met' }),
-          result('R2', { Left: 'met', Right: 'met' }),
-        ],
-      },
-      compiled,
-    ),
+  const coerced = validateAdherence(
+    {
+      results: [
+        result('R1', { Left: 'met', Right: 'met' }),
+        result('R2', { Left: 'met', Right: 'met' }),
+      ],
+    },
+    compiled,
   );
+  assert.deepEqual(coerced[1].status, { Left: 'excluded', Right: 'excluded' });
+  assert.equal(coerced.corrections.length, 2);
   const ok = validateAdherence(
     {
       results: [
@@ -366,7 +366,41 @@ test('single-pass guards convert contradicted statuses and distinguish unreadabl
   assert.equal(out.rendering.Left, 'rendered');
   assert.equal(out.requirements[0].status.Left, 'missing');
   assert.equal(out.defects[0].severity, 'page_broken');
-  assert.equal(corrections.length, 3);
+  assert.equal(corrections.length, 4);
   assert.equal(adjudicate(out).decision, 'Right');
+  const blankish = referenceObservation(cases.find((c) => c.id === 'page-washed'));
+  blankish.rendering.Left = 'failed';
+  blankish.renderEvidence.Left = 'mostly blank page with very faint text remnants';
+  const guarded = normalizePerception(blankish);
+  assert.equal(guarded.observation.rendering.Left, 'rendered');
+  assert.ok(guarded.observation.defects.some((d) => d.side === 'Left' && d.type === 'contrast' && d.severity === 'page_broken'));
+});
+
+
+test('hidden behavior and later screens are coerced out of visible scoring, not rejected', () => {
+  const observation = referenceObservation(cases.find((c) => c.id === 'later-state'));
+  observation.requirements[1].scope = 'visible';
+  observation.requirements[1].status = { Left: 'met', Right: 'met' };
+  const { observation: out, corrections } = normalizePerception(observation);
+  assert.equal(out.requirements[1].scope, 'later');
+  assert.deepEqual(out.requirements[1].status, { Left: 'excluded', Right: 'excluded' });
+  assert.ok(corrections.some((c) => c.kind === 'applicability'));
+  assert.equal(adjudicate(out).decision, 'Left');
+});
+
+
+test('ungrounded excerpts are dropped instead of invalidating the result', () => {
+  const c = cases.find((x) => x.id === 'clip-severe');
+  const observation = referenceObservation(c);
+  observation.requirements.push({
+    excerpt: 'an invented requirement',
+    kind: 'style',
+    scope: 'visible',
+    status: { Left: 'met', Right: 'missing' },
+    evidence: { Left: 'a purple border', Right: 'no border' },
+  });
+  const { observation: out, corrections } = normalizePerception(observation, c.request);
+  assert.equal(out.requirements.length, observation.requirements.length - 1);
+  assert.ok(corrections.some((x) => x.kind === 'grounding'));
 });
 

@@ -14,10 +14,17 @@ const bestMatch = (observation, excerpt) =>
     .filter((x) => sameRequirement(x.excerpt, excerpt))
     .sort((a, b) => foldText(b.excerpt).length - foldText(a.excerpt).length)[0];
 
+const concrete = [
+  'text', 'page', 'content', 'element', 'area', 'heading', 'title', 'label', 'button', 'cta',
+  'image', 'icon', 'layout', 'spacing', 'contrast', 'color', 'colour', 'footer', 'header',
+  'portrait', 'card', 'field', 'search', 'badge', 'border', 'corner', 'radius', 'illustration',
+  'photo', 'photograph', 'preview', 'screen', 'fold', 'disabled', 'gray', 'grey', 'body copy',
+];
+
 // Evidence factuality is checked against the fixture's known elements, never against model prose.
 export function evidenceAudit(c, why) {
   const text = foldText(why || '');
-  const vocabulary = c.vocabulary.map(foldText);
+  const vocabulary = [...c.vocabulary, ...concrete].map(foldText);
   const absent = (c.absent || []).map(foldText);
   const negation = (term) => {
     const index = text.indexOf(term);

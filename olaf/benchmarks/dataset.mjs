@@ -114,12 +114,12 @@ export const newCases = [
       vocabulary: ['button', 'disabled', 'faint'],
     }),
   make('rounded-equivalent', 'dev', 'equivalence', 'Use rounded corners on the button.',
-    'roundsmall', 'round', { decision: null, stage: 'preference_or_tie' }, {
+    'roundsmall', 'round', { decision: 'Tie', stage: 'tie' }, {
       requirements: [req('rounded corners on the button', 'style', met('met', 'met'))],
       vocabulary: ['button', 'corner', 'radius'],
     }),
   make('color-family', 'dev', 'equivalence', 'Use a purple button.',
-    'violet', 'plum', { decision: null, stage: 'preference_or_tie' }, {
+    'violet', 'plum', { decision: 'Tie', stage: 'tie' }, {
       requirements: [req('purple button', 'style', met('met', 'met'))],
       vocabulary: ['button', 'purple', 'violet', 'plum'],
     }),
@@ -221,7 +221,7 @@ export const newCases = [
       vocabulary: ['paragraph', 'text', 'contrast'],
     }),
   make('holdout-overlap-vs-clip', 'holdout', 'defect', E, 'overlap', 'clip',
-    { decision: 'Right', stage: 'disqualifiers', lessAffected: 'Right' }, {
+    { decision: 'Right', stage: 'disqualifiers', lessAffected: 'Right', certainty: 'provisional' }, {
       requirements: [content],
       defects: [bug('Left', 'overlap', 'major'), bug('Right', 'clipping', 'major')],
       vocabulary: ['heading', 'paragraph', 'text'],
@@ -262,7 +262,7 @@ export const newCases = [
       vocabulary: ['button', 'purple', 'red'],
     }),
   make('holdout-color-family', 'holdout', 'equivalence', 'Use a purple button.',
-    'standard', 'violet', { decision: null, stage: 'preference_or_tie' }, {
+    'standard', 'violet', { decision: 'Tie', stage: 'tie' }, {
       requirements: [req('purple button', 'style', met('met', 'met'))],
       vocabulary: ['button', 'purple', 'violet'],
     }),
@@ -287,7 +287,7 @@ export const newCases = [
       vocabulary: ['heading', 'spacing', 'title'],
     }),
   make('holdout-position-rounded', 'holdout', 'position', 'Use rounded corners on the button.',
-    'round', 'roundsmall', { decision: null, stage: 'preference_or_tie' }, {
+    'round', 'roundsmall', { decision: 'Tie', stage: 'tie' }, {
       requirements: [req('rounded corners on the button', 'style', met('met', 'met'))],
       vocabulary: ['button', 'corner', 'radius'],
     }),
