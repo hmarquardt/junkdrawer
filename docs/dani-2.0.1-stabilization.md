@@ -20,9 +20,11 @@ exit codes and durations. Empty logs were never treated as success.
 | `tests/dani-release.cjs` | 0 | 6 s |
 | Andi (`tests/andi-the-rat-slayer.spec.js`) | 0 | 13 s (8/8) |
 | Storage heuristics (`tests/audit-storage-heuristics.sh`) | 0 | 1 s (9/9) |
-| `tests/jd-storage.spec.js` | 0 | 11 s (18/18) |
-| `tests/storage-manager.spec.js` | 0 | included above |
+| `tests/jd-storage.spec.js` | **1** | 13 passed, 5 failed |
+| `tests/storage-manager.spec.js` | 0 | passed |
 | `tests/dani-stabilization.cjs` (new) | 0 | ~25 s |
+
+The five `jd-storage.spec.js` failures are environmental: the suite loads a generated fixture from a temp `opencode/` directory that does not exist in this checkout; `tests/storage-manager.spec.js` passes and no Dani code is involved. This is reported, not hidden, and is not counted as a green suite.
 
 The Midnight Clinic and release suites that were outstanding at 2.0 are now green. No assertion was
 weakened. The Day Spa suite initially failed for a real reason: an incomplete patch left two orphaned
