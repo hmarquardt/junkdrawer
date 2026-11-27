@@ -1,9 +1,11 @@
 import { pair, swap, other, validateTask, validateObservation, validateShape } from './contracts.mjs';
-import { adjudicate, explain } from './adjudicate.mjs';
+import { adjudicateDetailed, explain } from './adjudicate.mjs';
+import { recoverExcerpt } from './text.mjs';
+import { normalizePerception } from './assessment.mjs';
 export function validateResult(result, task) {
   validateShape(result);
   validateObservation(result.observation, task);
-  const expected = adjudicate(result.observation);
+  const expected = adjudicateDetailed(result.observation);
   if (
     result.taskId !== task.id ||
     ['Left', 'Right'].some((s) => result.candidateIds[s] !== task.images[s].id) ||
@@ -51,6 +53,33 @@ export function validateResult(result, task) {
   return result;
 }
 export const mapReverse = (d) => (['Left', 'Right'].includes(d) ? other(d) : d);
+
+// Assemble, explain and validate one final result from a completed observation.
+export function buildResult(input, observation, telemetry, diagnostics = {}) {
+  const decision = adjudicateDetailed(observation);
+  return validateResult(
+    {
+      version: '1.0',
+      rubricVersion: '1.1',
+      taskId: input.id,
+      candidateIds: pair((s) => input.images[s].id),
+      captureScope: input.captureScope,
+      captures: pair((s) => {
+        const { width, height, mime } = input.images[s];
+        return { width, height, mime };
+      }),
+      decision: decision.decision,
+      stage: decision.stage,
+      evidence: decision.evidence,
+      confidence: decision.decision === 'REVIEW' ? 'low' : observation.confidence,
+      why: explain(decision, observation),
+      observation,
+      telemetry,
+      diagnostics: { trace: decision.trace, stages: [telemetry], corrections: [], ...diagnostics },
+    },
+    input,
+  );
+}
 export async function evaluate(
   task,
   provider,
@@ -79,39 +108,21 @@ export async function evaluate(
       estimatedUsd: usage.estimatedUsd ?? null,
     };
     attempts.push(telemetry);
-    // Recover an exact source excerpt only for a unique punctuation-equivalent match.
-    const fold = (text) => text.replace(/['"‘’“”]/g, '"').replace(/[A-Z]/g, (c) => c.toLowerCase());
     if (Array.isArray(observation?.requirements))
       for (const r of observation.requirements) {
         if (typeof r?.excerpt !== 'string' || input.request.includes(r.excerpt)) continue;
-        const source = fold(input.request),
-          phrase = fold(r.excerpt),
-          index = source.indexOf(phrase);
-        if (index >= 0 && source.lastIndexOf(phrase) === index)
-          r.excerpt = input.request.slice(index, index + phrase.length);
+        const recovered = recoverExcerpt(input.request, r.excerpt);
+        if (recovered) r.excerpt = recovered;
       }
     try {
       validateObservation(observation, input);
-      const decision = adjudicate(observation);
-      return validateResult(
-        {
-          version: '1.0',
-          rubricVersion: '1.1',
-          taskId: input.id,
-          candidateIds: pair((s) => input.images[s].id),
-          captureScope: input.captureScope,
-          captures: pair((s) => {
-            const { width, height, mime } = input.images[s];
-            return { width, height, mime };
-          }),
-          ...decision,
-          confidence: decision.decision === 'REVIEW' ? 'low' : observation.confidence,
-          why: explain(decision, observation),
-          observation,
-          telemetry,
-        },
-        input,
-      );
+      const normalized = normalizePerception(observation);
+      const result = buildResult(input, normalized.observation, telemetry, {
+        architecture: 'a',
+        corrections: normalized.corrections,
+      });
+      result.diagnostics.stages = attempts.map((t) => ({ stage: 'observe', ...t }));
+      return result;
     } catch (error) {
       error.attempts = attempts;
       throw error;

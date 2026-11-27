@@ -13,6 +13,12 @@ const files = new Set([
     'engine/contracts.mjs',
     'engine/adjudicate.mjs',
     'engine/evaluate.mjs',
+    'engine/pipeline.mjs',
+    'engine/stages.mjs',
+    'engine/assessment.mjs',
+    'engine/text.mjs',
+    'engine/verify.mjs',
+    'schemas/stages.v1.json',
     'ingestion/mime.mjs',
     'ingestion/archive.mjs',
     'ingestion/images.mjs',
@@ -34,6 +40,7 @@ const mime = {
   png: 'image/png',
   ico: 'image/x-icon',
 };
+const stages = ['compile', 'adherence', 'inspection', 'preference', 'structured', 'verify'];
 export async function startServer(port = 4173, env = process.env) {
   let active = false;
   const server = http.createServer(async (req, res) => {
@@ -45,7 +52,7 @@ export async function startServer(port = 4173, env = process.env) {
     if (req.headers.host !== host) return reply(403, { error: 'Unknown host.' });
     const path = req.url.split('?')[0].slice(1);
     if (req.method === 'GET' && path === 'olaf/config') return reply(200, { models: configuredModels(env) });
-    if (req.method === 'POST' && path === 'olaf/observe') {
+    if (req.method === 'POST' && ['olaf/observe', 'olaf/stage'].includes(path)) {
       if (req.headers.origin !== 'http://' + host || req.headers['content-type'] !== 'application/json')
         return reply(403, { error: 'Same-origin JSON required.' });
       if (active) return reply(429, { error: 'Another observation is running.' });
@@ -67,21 +74,51 @@ export async function startServer(port = 4173, env = process.env) {
         } catch {
           return reply(400, { error: 'Invalid JSON.' });
         }
+        const isStage = path === 'olaf/stage';
         if (
           !body ||
           typeof body.request !== 'string' ||
           !body.request.trim() ||
           body.request.length > 64000 ||
           !['unknown', 'full_page', 'viewport', 'specific_screen'].includes(body.captureScope) ||
-          !configuredModels(env).includes(body.model)
+          !configuredModels(env).includes(body.model) ||
+          (isStage && !stages.includes(body.stage))
         )
-          return reply(400, { error: 'Invalid request, scope or model.' });
+          return reply(400, { error: 'Invalid request, scope, model or stage.' });
+        if (
+          (isStage && body.stage !== 'compile') ||
+          !isStage
+        ) {
+          if (
+            !body.images ||
+            typeof body.images.Left !== 'string' ||
+            typeof body.images.Right !== 'string' ||
+            body.images.Left.length + body.images.Right.length > 64 * 1024 * 1024
+          )
+            return reply(400, { error: 'Invalid request, scope, model or stage.' });
+        }
+        if (
+          (Array.isArray(body.requirements) && body.requirements.length > 50) ||
+          (Array.isArray(body.claims) && body.claims.length > 20) ||
+          (Array.isArray(body.crops) && body.crops.length > 8)
+        )
+          return reply(400, { error: 'Stage payload exceeds its limit.' });
         const provider = openAIProvider(() => body.images, { env });
-        const out = await provider.observe(body, {
-          model: body.model,
-          signal: controller.signal,
-          diagnostic: body.diagnostic === true,
-        });
+        const out = isStage
+          ? await provider.stage(body.stage, {
+              task: body,
+              model: body.model,
+              signal: controller.signal,
+              diagnostic: body.diagnostic === true,
+              requirements: body.requirements,
+              claims: body.claims,
+              crops: body.crops,
+            })
+          : await provider.observe(body, {
+              model: body.model,
+              signal: controller.signal,
+              diagnostic: body.diagnostic === true,
+            });
         return reply(200, out);
       } catch (e) {
         // Only fixed descriptions and numeric HTTP status can reach the browser.

@@ -83,5 +83,82 @@ export function mockProvider(hashOf) {
         },
       };
     },
+    async stage(kind, { task, signal, requirements = [], claims = [] }) {
+      const { observation } = await this.observe(task, { signal });
+      const known = observation.rendering.Left === 'rendered';
+      const nullEvidence = pair(() => 'no visual inspection is available for this image');
+      const inspection = {
+        rendering: observation.rendering,
+        renderEvidence: observation.renderEvidence,
+        passes: observation.passes,
+        principles: observation.principles,
+        defects: observation.defects,
+        lessAffected: observation.lessAffected,
+        impactEvidence: observation.impactEvidence,
+        confidence: observation.confidence,
+        limitations: observation.limitations,
+        inferences: observation.inferences,
+      };
+      const preference = {
+        preference: observation.preference,
+        preferenceEvidence: observation.preferenceEvidence,
+        tieQuality: observation.tieQuality,
+        confidence: observation.confidence,
+        limitations: observation.limitations,
+      };
+      const results = requirements.map((r) => {
+        const source = observation.requirements.find((o) => o.excerpt === r.excerpt) || {
+          status: pair(() => (known ? 'met' : 'excluded')),
+          evidence: nullEvidence,
+        };
+        return {
+          id: r.id,
+          status: r.scope === 'visible' ? source.status : pair(() => 'excluded'),
+          evidence: source.evidence,
+          basis: pair(() => 'the visible button matches the stated request'),
+          alternative: pair(() => false),
+          confidence: pair(() => 'high'),
+        };
+      });
+      const data =
+        kind === 'compile'
+          ? {
+              requirements: observation.requirements.map((r, i) => ({
+                id: 'R' + (i + 1),
+                excerpt: r.excerpt,
+                kind: r.kind,
+                scope: r.scope,
+                check: 'the requested button is visibly present and colored',
+                confidence: 'high',
+              })),
+            }
+          : kind === 'adherence'
+            ? { results }
+            : kind === 'inspection'
+              ? inspection
+              : kind === 'preference'
+                ? preference
+                : kind === 'structured'
+                  ? {
+                      ...inspection,
+                      results,
+                      preference: observation.preference,
+                      preferenceEvidence: observation.preferenceEvidence,
+                      tieQuality: observation.tieQuality,
+                    }
+                  : kind === 'verify'
+                    ? {
+                        checks: claims.map((c) => ({
+                          target: c.target,
+                          verdict: 'confirmed',
+                          suggested: '',
+                          evidence: observation.renderEvidence,
+                          note: 'Scripted fixture verification.',
+                        })),
+                      }
+                    : null;
+      if (!data) throw Error('Unknown observation stage.');
+      return { data, model: 'fixture-v1', usage: { estimatedUsd: 0 }, crops: [] };
+    },
   };
 }

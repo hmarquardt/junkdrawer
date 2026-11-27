@@ -1,8 +1,9 @@
 import taskSchema from '../schemas/task.v1.json' with { type: 'json' };
 import perceptionSchema from '../schemas/perception.v1.json' with { type: 'json' };
 import resultSchema from '../schemas/result.v1.json' with { type: 'json' };
+import stagesSchema from '../schemas/stages.v1.json' with { type: 'json' };
 
-export { perceptionSchema };
+export { perceptionSchema, stagesSchema };
 export const sides = ['Left', 'Right'];
 export const other = (side) => (side === 'Left' ? 'Right' : 'Left');
 export const pair = (fn) => Object.fromEntries(sides.map((side) => [side, fn(side)]));
@@ -29,11 +30,16 @@ export function assign(task, side, image) {
 export const swap = (task) => ({ ...task, images: pair((side) => task.images[other(side)]) });
 
 // Implements exactly the JSON Schema keywords used in the versioned contracts.
+export function validateWithSchema(value, schema, path) {
+  return check(value, schema, path);
+}
 function check(value, schema, path) {
   const fail = () => {
     throw Error('Invalid ' + path);
   };
   if (schema.$ref === 'perception.v1.json') return check(value, perceptionSchema, path);
+  if (typeof schema.$ref === 'string' && schema.$ref.startsWith('#/$defs/'))
+    return check(value, stagesSchema.$defs[schema.$ref.slice(8)], path);
   if ('const' in schema && value !== schema.const) fail();
   if (schema.enum && !schema.enum.includes(value)) fail();
   const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;

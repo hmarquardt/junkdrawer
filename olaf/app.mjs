@@ -1,5 +1,5 @@
 import { createTask, assign, swap, sides, validateTask } from './engine/contracts.mjs';
-import { evaluate } from './engine/evaluate.mjs';
+import { evaluateArchitecture, architectures, architectureNames } from './engine/pipeline.mjs';
 import { extractArchive } from './ingestion/archive.mjs';
 import { normalizeImage, cropImage, imageType, dataURL } from './ingestion/images.mjs';
 import { demoRequest, mockProvider } from './providers/mock.mjs';
@@ -378,12 +378,18 @@ function setModels() {
     ? 'Runs locally. Load the sample for a scripted comparison.'
     : 'Evaluation sends the confirmed request and both images to OpenAI through your local server.';
 }
+function setArchitectures() {
+  $('architecture').replaceChildren(
+    ...architectures.map((a) => new Option(architectureNames[a], a)),
+  );
+  $('architecture').value = 'a';
+}
 $('provider').onchange = () => {
   setModels();
   invalidate();
   updatePreview();
 };
-for (const id of ['model', 'diagnostic', 'reverse'])
+for (const id of ['model', 'architecture', 'diagnostic', 'reverse'])
   $(id).onchange = () => {
     invalidate();
     updatePreview();
@@ -426,6 +432,33 @@ function provider() {
       }
       return res.json();
     },
+    async stage(kind, { task, model, signal, requirements, claims, crops }) {
+      const images = {};
+      if (kind !== 'compile')
+        for (const side of sides) images[side] = await dataURL(assets.get(task.images[side].id).blob);
+      const res = await fetch(new URL('stage', import.meta.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          request: task.request,
+          captureScope: task.captureScope,
+          images: kind === 'compile' ? undefined : images,
+          model,
+          stage: kind,
+          diagnostic: $('diagnostic').checked,
+          requirements,
+          claims,
+          crops,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw Error(error.error || 'Local vision service failed.');
+      }
+      const out = await res.json();
+      return { data: out.data, model: out.model, usage: out.usage, crops: out.crops };
+    },
   };
 }
 $('evaluate').onclick = async () => {
@@ -435,7 +468,8 @@ $('evaluate').onclick = async () => {
   $('results').hidden = true;
   result = null;
   try {
-    result = await evaluate(task, provider(), {
+    result = await evaluateArchitecture(task, provider(), {
+      architecture: $('architecture').value,
       model: $('model').value,
       signal: controller.signal,
       reverse: $('reverse').checked,
@@ -482,6 +516,12 @@ function renderResult() {
   if (o.limitations.length) line(summary, 'Limitations', o.limitations.join(' '));
   line(
     summary,
+    'Architecture',
+    (architectureNames[result.diagnostics?.architecture] || 'Single pass') +
+      (result.diagnostics?.stages?.length ? ' · ' + result.diagnostics.stages.length + ' calls' : ''),
+  );
+  line(
+    summary,
     'Run',
     [
       t.provider,
@@ -515,7 +555,32 @@ function renderResult() {
   for (const d of o.defects)
     line(breakdown, d.side + ' ' + d.type, d.severity + ' · ' + d.location + ' · ' + d.evidence[d.side]);
   $('diag').textContent = JSON.stringify(
-    { passes: o.passes, principles: o.principles, inferences: o.inferences, verification: result.verification },
+    {
+      passes: o.passes,
+      principles: o.principles,
+      inferences: o.inferences,
+      verification: result.verification,
+      order: result.diagnostics?.order,
+    },
+    null,
+    2,
+  );
+  $('trace').textContent = JSON.stringify(
+    {
+      decisionTrace: result.diagnostics?.trace,
+      corrections: result.diagnostics?.corrections,
+      verification: result.diagnostics?.verification,
+    },
+    null,
+    2,
+  );
+  $('stages').textContent = JSON.stringify(
+    {
+      architecture: result.diagnostics?.architecture,
+      compiledRequirements: result.diagnostics?.compiled?.data?.requirements,
+      requirements: result.diagnostics?.requirements,
+      calls: result.diagnostics?.stages,
+    },
     null,
     2,
   );
@@ -672,4 +737,5 @@ if (
   document.head.append(script);
 }
 setModels();
+setArchitectures();
 render();

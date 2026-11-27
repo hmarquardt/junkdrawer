@@ -1,8 +1,8 @@
 import { chromium } from 'playwright';
 import { writeFile, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { cases } from '../benchmarks/cases.mjs';
-const names = new Set(cases.flatMap((c) => [c.left, c.right]));
+import { imageNames } from '../benchmarks/dataset.mjs';
+const names = new Set(imageNames);
 const browser = await chromium.launch({ channel: 'chrome' });
 try {
   const page = await browser.newPage({ viewport: { width: 700, height: 390 }, deviceScaleFactor: 1 });

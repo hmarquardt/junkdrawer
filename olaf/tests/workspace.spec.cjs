@@ -197,6 +197,22 @@ test('local provider cancellation, safe failure feedback and retry', async ({ pa
   await expect(page.locator('#status')).toContainText('Missing observation');
   await expect(page.locator('#evaluate')).toBeEnabled();
 });
+test('architecture selection exercises structured, staged and verification paths with mock observations', async ({
+  page,
+}) => {
+  await load(page);
+  await expect(page.locator('#architecture')).toHaveValue('a');
+  await expect(page.locator('#architecture option')).toHaveCount(4);
+  for (const architecture of ['b', 'c', 'd']) {
+    await page.locator('#architecture').selectOption(architecture);
+    await page.locator('#confirm').check();
+    await page.locator('#evaluate').click();
+    await expect(page.locator('#decision')).toHaveText('Left is better');
+    await expect(page.locator('#summary')).toContainText('Architecture');
+    await expect(page.locator('#stages')).toContainText(architecture === 'b' ? 'structured' : architecture === 'c' ? 'inspection' : 'observe');
+    await page.locator('#architecture').selectOption('a');
+  }
+});
 test('narrow and desktop layouts fit and the confirmation gate is keyboard accessible', async ({ page }) => {
   await load(page);
   for (const width of [360, 768, 1440]) {
