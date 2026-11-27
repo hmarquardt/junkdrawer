@@ -89,7 +89,7 @@ Phase 2 adds a 64-case suite (16 legacy plus 48 constructed cases, including a 1
 
 ```sh
 node olaf/benchmarks/run.mjs --suite phase2 --split dev --architecture a --model gpt-4.1-mini --reverse --details --out /tmp/olaf-dev.jsonl
-node olaf/benchmarks/run.mjs --suite phase2 --split holdout --architecture c --model gpt-6.2-sol --reverse --budget-usd 2 --out /tmp/olaf-holdout.jsonl
+node olaf/benchmarks/run.mjs --suite phase2 --split holdout --architecture a --model gpt-6.2-sol --reverse --budget-usd 2 --out /tmp/olaf-holdout.jsonl
 node olaf/benchmarks/compare.mjs /tmp/olaf-dev.jsonl /tmp/olaf-holdout.jsonl
 ```
 
