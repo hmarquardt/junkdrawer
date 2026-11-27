@@ -28,7 +28,11 @@ export function defaultSpa(seed = 0) {
     inventory: {pads: 20, cartridges: 6, gel: 4, cleaning: 10, maintenance: 2, spectral: 0, environment: 0},
     staff: [], appointments: [], completed: [], transactions: [], reviews: [], marketing: [],
     events: [], pendingEvent: null, session: null, history: [], recovery: 0, andi: 0,
-    ledgerSeq: 0, closedDay: 0, eventDay: 0, assistDay: 0, stats: {days: 0, profitDays: 0, appointments: 0, delegated: 0, revenue: 0, expenses: 0,
+    ledgerSeq: 0, closedDay: 0, eventDay: 0, assistDay: 0,
+    // Cumulative accounting survives ledger pruning: opening + inflow - outflow must always equal
+    // cash. Deferred amounts are tracked separately and are never counted as paid expenses.
+    accounting: {opening: 2500, inflow: 0, outflow: 0, grants: 0, deferred: 0},
+    settled: [], stats: {days: 0, profitDays: 0, appointments: 0, delegated: 0, revenue: 0, expenses: 0,
       profitTotal: 0, reviews5: 0, returning: 0, referrals: 0, bulkBuys: 0, hires: 0, expansions: 0,
       midnightOpen: 0, vampireProfit: 0, viral: 0, recordRevenue: 0, equipmentVariety: 2, international: 0}
   };
@@ -63,6 +67,14 @@ export function normalizeSpa(spa) {
   out.events = Array.isArray(out.events) ? out.events.slice(0, 6) : [];
   out.history = Array.isArray(out.history) ? out.history.slice(-HISTORY_LIMIT) : [];
   out.ledgerSeq = int(out.ledgerSeq);
+  const retained = Array.isArray(spa.transactions) ? spa.transactions : [];
+  const inflow = retained.reduce((total, entry) => total + (entry.amount > 0 ? entry.amount : 0), 0);
+  const outflow = retained.reduce((total, entry) => total + (entry.amount < 0 ? -entry.amount : 0), 0);
+  const prior = spa.accounting && typeof spa.accounting === 'object' ? spa.accounting : null;
+  out.accounting = prior ? {opening: int(prior.opening), inflow: int(prior.inflow), outflow: int(prior.outflow),
+    grants: int(prior.grants), deferred: int(prior.deferred)}
+    : {opening: Math.max(0, out.cash - inflow + outflow), inflow, outflow, grants: 0, deferred: 0};
+  out.settled = Array.isArray(spa.settled) ? spa.settled.filter(id => typeof id === 'string').slice(-80) : [];
   out.closedDay = int(out.closedDay); out.eventDay = int(out.eventDay); out.assistDay = int(out.assistDay);
   out.stats = {...base.stats, ...(out.stats && typeof out.stats === 'object' ? out.stats : {})};
   for (const key of Object.keys(base.stats)) out.stats[key] = clamp(int(out.stats[key]), 0, 999999999);
@@ -89,6 +101,8 @@ export function post(spa, id, kind, amount, note = '') {
   spa.transactions.push({id, day: spa.day, kind, amount: value, note});
   spa.transactions = spa.transactions.slice(-LEDGER_LIMIT);
   spa.cash = money(spa.cash + value);
+  if (value > 0) spa.accounting.inflow += value; else spa.accounting.outflow += -value;
+  if (kind === 'business-assistance') spa.accounting.grants += value;
   return value;
 }
 export function payOut(spa, id, kind, amount, note = '') {
@@ -98,11 +112,20 @@ export function payOut(spa, id, kind, amount, note = '') {
   if (paid > 0) post(spa, id, kind, -paid, note);
   if (paid < wanted) {
     post(spa, id + ':deferral', 'deferral', 0, 'Deferred ' + (wanted - paid) + ' PB');
+    spa.accounting.deferred += (wanted - paid);
     spa.recovery = Math.max(1, spa.recovery);
   }
   return paid;
 }
 export function ledgerBalance(spa) { return sum(spa.transactions, entry => entry.amount); }
+// The accountant's invariant. It uses cumulative totals, not the bounded ledger, so it stays true
+// after old entries are pruned.
+export function reconcile(spa) {
+  const accounting = spa.accounting || {opening: 0, inflow: 0, outflow: 0, grants: 0, deferred: 0};
+  const expected = accounting.opening + accounting.inflow - accounting.outflow;
+  return {...accounting, expected, cash: spa.cash, balanced: expected === spa.cash,
+    retained: ledgerBalance(spa), variance: spa.cash - expected};
+}
 
 // --- catalog, prices and costs ---------------------------------------------------------------
 export function unitCost(pack, use) {
@@ -273,6 +296,10 @@ export function reputationDelta(score, records = 0) {
 // receipt and moves no money, which is what makes interrupted appointments and replays safe.
 function settle(spa, ctx, appointment, outcome, options = {}) {
   const pack = ctx.pack, receiptId = options.receiptId || ('d' + spa.day + ':' + appointment.id);
+  if ((spa.settled || []).includes(receiptId)) {
+    return {receipt: spa.completed.find(item => item.id === receiptId) || {id: receiptId}, duplicate: true,
+      review: spa.reviews.find(item => item.appointmentId === appointment.id) || null};
+  }
   const existing = spa.completed.find(item => item.id === receiptId);
   if (existing) return {receipt: existing, duplicate: true, review: spa.reviews.find(item => item.appointmentId === appointment.id) || null};
   const quality = QUALITY[outcome.quality] ? outcome.quality : 'clean';
@@ -304,6 +331,7 @@ function settle(spa, ctx, appointment, outcome, options = {}) {
     price: appointment.price, paid, tip, costs: spent, satisfaction: satisfaction.score,
     factors: satisfaction.factors, reputation, at: int(options.at)}
   spa.completed.unshift(receipt); spa.completed = spa.completed.slice(0, COMPLETED_LIMIT);
+  spa.settled = [...(spa.settled || []), receiptId].slice(-80);
   const review = reviewFor(spa, pack, receipt, satisfaction);
   spa.reviews.unshift(review); spa.reviews = spa.reviews.slice(0, REVIEW_LIMIT);
   appointment.status = 'complete';

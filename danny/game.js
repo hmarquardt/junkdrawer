@@ -267,6 +267,13 @@ function files(){
   const achievements=content.list('achievements').map(a=>'<p class="'+(profile.achievements.includes(a.id)?'achievement':'')+'">'+(profile.achievements.includes(a.id)?'✓ ':'○ ')+escape(a.name)+' · '+Math.min(profile.stats[a.stat]||0,a.threshold)+'/'+a.threshold+'</p>').join('');
   const upgrades=content.list('upgrades').map(u=>'<p>'+escape(u.name)+' · '+(profile.xp>=u.xp?'Fitted':u.xp+' XP')+'</p>').join('');
   modal('Case files','<p>'+rank(profile.xp)+' · '+profile.xp+' XP · '+profile.score+' points · '+profile.stats.total+' scored extractions</p>'+rows+
+    '<details open><summary>The five experiences</summary><div class="franchise-list">'+
+      '<p><strong>Original clinic</strong> · the four-chapter campaign, Endless Clinic and Zen. Start here for ordinary extractions; Zen has no pressure or fail state.</p>'+
+      '<p><strong>The Pore Explorer</strong> · subsurface imaging, hidden chambers and larger reservoirs. Scan first, then clear gates with the right instrument.</p>'+
+      '<p><strong>The Midnight Clinic</strong> · ten supernatural patient classes, phase-locked chambers and environmental conditions.</p>'+
+      '<p><strong>The World Book of Pores</strong> · unified records, trophies, daily disasters, weekly championships, legendary encounters, gauntlets and shareable challenges.</p>'+
+      '<p><strong>Dani’s Disgusting Day Spa</strong> · the management game. Schedule appointments, perform or delegate them, pay the bills and expand through seven facility tiers.</p>'+
+      '<p class="tiny">Recommended: play one ordinary appointment, try a PoreScope scan, then open the mode that interests you. Every expansion can be left and resumed without losing progress.</p></div></details>'+
     '<details><summary>Achievements · '+profile.achievements.length+'</summary><div class="record-grid">'+achievements+'</div></details><details><summary>Equipment upgrades</summary>'+upgrades+'</details>'+(world?.recordsForFiles?.()||'')+(clinic?.recordsForFiles?.()||'')+(spa?.recordsForFiles?.()||''),
     [['Return to shift',close],['Reset game',resetPrompt,true]],'CAMPAIGN RECORD');
 }
@@ -404,6 +411,7 @@ async function ensureSpa(){
 $('spaBtn').onclick=async()=>{
   try{await ensureSpa();spa.open();}
   catch(e){
+    console.error('Day Spa failed to open',e);window.__spaError=e.stack||String(e);
     say(e.message||'The Day Spa could not be opened.');
     modal('The Day Spa is unavailable','<p>The management module could not be downloaded on this visit. Existing campaigns, records and business state are unaffected. Reconnect, then open it again.</p>',[['Return to shift',close]],'EXPANSION 5');
   }

@@ -171,7 +171,7 @@ export function snapshotForTests() {
   const profile = api.profile(), spa = state(profile), pack = context().pack;
   return {spa: structuredClone(spa), summary: business.summary(spa, pack), pool: context().pool.length,
     legends: context().legends.length, achievements: business.achievementsFor(spa, pack).map(item => item.id),
-    revenueByClass: business.revenueBy(spa, 'class'), ledger: business.ledgerBalance(spa),
+    revenueByClass: business.revenueBy(spa, 'class'), ledger: business.ledgerBalance(spa), reconcile: business.reconcile(spa),
     reviewTrend: business.reviewTrend(spa), facility: pack.facilities.map(item => ({tier: item.tier, name: item.name, price: item.price, reputation: item.reputation}))};
 }
 export {business, world as book};
@@ -279,7 +279,7 @@ function growthSection(profile, spa, pack) {
     '<h3>Business achievements</h3><div class="record-grid">' + achievements + '</div>';
 }
 function booksSection(spa, pack) {
-  const series = business.chartSeries(spa);
+  const series = business.chartSeries(spa), reconcile = business.reconcile(spa);
   const byClass = Object.entries(business.revenueBy(spa, 'class')).sort((a, b) => b[1] - a[1]);
   const reviews = spa.reviews.slice(0, 8).map(review => '<div class="spa-review"><strong>' + '\u2605'.repeat(review.stars) + '\u2606'.repeat(5 - review.stars) + '</strong><p>' + esc(review.text) + '</p><small>Day ' + review.day + ' · satisfaction ' + review.satisfaction + '/100' + (review.delegated ? ' · delegated' : '') + '</small></div>').join('') || '<p class="tiny">No reviews yet.</p>';
   const ledger = spa.transactions.slice(-12).reverse().map(entry => '<div class="spa-ledger-row"><span>Day ' + entry.day + ' · ' + esc(entry.kind) + '</span><b class="' + (entry.amount >= 0 ? 'up' : 'down') + '">' + (entry.amount >= 0 ? '+' : '') + pb(entry.amount) + '</b><small>' + esc(entry.note || '') + '</small></div>').join('') || '<p class="tiny">No transactions yet.</p>';
@@ -288,7 +288,7 @@ function booksSection(spa, pack) {
     '<h3>Daily revenue</h3>' + bars(series, 'revenue') + '<h3>Daily profit</h3>' + bars(series, 'profit', 'brass') +
     '<h3>Revenue by patient class</h3>' + (byClass.length ? byClass.map(([name, value]) => '<div class="spa-shop-row"><span>' + esc(name) + '</span><b>' + pb(value) + '</b></div>').join('') : '<p class="tiny">No settled appointments yet.</p>') +
     '<h3>Reviews</h3>' + reviews + '<h3>Ledger (last 12)</h3>' + ledger +
-    '<p class="tiny">Every entry has a stable id. Cash reconciles to the retained ledger: ' + pb(business.ledgerBalance(spa)) + ' of movements.</p>';
+    '<p class="tiny">Accounting check: opening ' + pb(reconcile.opening) + ' + recognised ' + pb(reconcile.inflow) + ' − paid ' + pb(reconcile.outflow) + ' = ' + pb(reconcile.expected) + '; cash ' + pb(reconcile.cash) + ' · ' + (reconcile.balanced ? 'reconciled' : 'MISMATCH') + '. Deferred ' + pb(reconcile.deferred) + ', grants ' + pb(reconcile.grants) + '.</p>';
 }
 function recordsSection(profile) {
   const records = content.list('records').filter(record => record.metric).map(record => ({name: record.name, value: profile.world?.best?.[record.metric] || 0, tier: profile.world?.meta?.[record.metric]?.tier || null}))
@@ -314,7 +314,14 @@ function render() {
     [['Close', api.close]], 'OUR BUSINESS IS BOOMING');
   bind(profile, spa, pack);
 }
+let busy = false;
 function run(action) {
+  // A rapid double-click must not buy twice: ignore re-entrant actions while one is settling.
+  if (busy) return {error: 'Please wait for the previous action.'};
+  busy = true;
+  try { return runOnce(action); } finally { busy = false; }
+}
+function runOnce(action) {
   const profile = api.profile(), spa = state(profile);
   const result = action(spa, profile) || null;
   const fresh = syncAchievements(profile);
