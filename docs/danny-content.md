@@ -241,3 +241,9 @@ the expansion module and content are under `danny/world-book/`. Full release not
 definitions, migration strategy and the Version 2.0 encounter-result contract are in
 `docs/dani-world-book-1.4.md`. The base, Pore Explorer and Midnight Clinic packs keep their own
 namespaces and checkpoints and report measurements through the same event contract.
+
+## Version 2.0 — Dani's Disgusting Day Spa
+
+`danny/day-spa/` holds the headless business engine (`business.js`), the management UI and the
+appointment-session bridge (`expansion.js`), and the content manifest. Appointments use the existing
+encounters and telemetry; receipts are immutable and idempotent. See `docs/dani-day-spa-2.0.md`.

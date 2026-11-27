@@ -11,7 +11,7 @@ const icon=id=>'<svg aria-hidden="true"><use href="#'+id+'"/></svg>';
 const audio=soundEngine(),dialog=$('dialog');
 let profile,visit,field,tool,active=0,zoom=1,draw,ready=false;
 // The Pore Explorer is fetched only when a player opens it or resumes its checkpoint.
-let expansion=null,expansionLoading=null,clinic=null,clinicLoading=null,world=null,worldLoading=null;
+let expansion=null,expansionLoading=null,clinic=null,clinicLoading=null,world=null,worldLoading=null,spa=null,spaLoading=null;
 let database,writesPending=0,saveBroken=false,markerListeners;
 let started=null,source=null,force=0,velocity=0,dx=0,dy=0,burst=null,lastStamp=0,frameMs=0,pending=0,inside=false;
 const current=()=>field[active], run=()=>visit.run, complete=()=>run().cleared.length===field.length;
@@ -139,12 +139,12 @@ function renderUI(){
   const family=visit.mode.id.split(':')[0];
   const inScope=item=>!item.scope||(Array.isArray(item.scope)?item.scope.includes(family):item.scope===family);
   const equipment=content.list('equipment').filter(inScope);
-  const archiveKit=visit.mode.id.startsWith('world-book-of-pores:');
+  const archiveKit=visit.mode.id.startsWith('world-book-of-pores:')||visit.mode.id.startsWith('disgusting-day-spa:');
   $('kitCount').textContent=pad(equipment.filter(t=>visit.zen||archiveKit||profile.xp>=t.xp).length)+' / '+pad(equipment.length)+' AVAILABLE';
   $('tools').replaceChildren();
   for(const item of equipment){
     const restricted=!!(clinic?.toolLocked?.(item.id)||world?.toolLocked?.(item.id));
-    const archive=visit.mode.id.startsWith('world-book-of-pores:');
+    const archive=visit.mode.id.startsWith('world-book-of-pores:')||visit.mode.id.startsWith('disgusting-day-spa:');
     const b=document.createElement('button'),owned=visit.zen||archive||profile.xp>=item.xp,eq=item.id===tool.id;
     b.className='tool'+(eq?' equipped':'');b.disabled=!owned||restricted;b.setAttribute('aria-pressed',eq);
     b.innerHTML='<span class="tool-art"><canvas aria-hidden="true"></canvas></span><span><span class="tool-name"></span><span class="tool-detail"></span></span><span class="tool-status">'+icon(eq?'check':owned?'kit':'lock')+'<span class="sr">'+(eq?'Equipped':owned?'Available':'Locked')+'</span></span>';
@@ -152,13 +152,13 @@ function renderUI(){
     $('tools').append(b);illustrate(b.querySelector('canvas'),item.art);
     b.onclick=()=>{cancel();profile.tool=item.id;save();renderUI();cue(item.name+' equipped. '+rest());expansion?.toolEquipped(item.id);};
   }
-  syncControls();refreshMarkers();expansion?.sync();clinic?.sync();world?.sync();schedule();
+  syncControls();refreshMarkers();expansion?.sync();clinic?.sync();world?.sync();spa?.sync();schedule();
 }
 function loadField(){
   cancel();visit=visitFor(profile);field=makeField(visit);
   const equipped=content.get('equipment',profile.tool),family=visit.mode.id.split(':')[0];
   // The World Book archives the whole kit; other modes keep their own scope and XP unlocks.
-  const archive=visit.mode.id.startsWith('world-book-of-pores:');
+  const archive=visit.mode.id.startsWith('world-book-of-pores:')||visit.mode.id.startsWith('disgusting-day-spa:');
   const equippedScope=[].concat(equipped.scope||[]);
   if((equippedScope.length&&!equippedScope.includes(family)) || (!visit.zen&&!archive&&equipped.xp>profile.xp))profile.tool='base:loop';
   expansion?.decorate(field,visit);
@@ -211,7 +211,7 @@ function release(){
   const line=deep?.message||(prize.partial?'Seal released. '+visit.boss.hint:visit.zen?'Clean release.':(result.perfect?'Perfect release':'Clean extraction')+' · +'+prize.points+' points · +'+prize.xp+' XP.');
   const upgrades=availableUpgrades(profile),earned=[...(deep?.earned||[]),...prize.earned];
   cue((complete()?'Field cleared! ':'')+line+(upgrades.length>before?' '+upgrades.at(-1).name+' fitted.':'')+(earned.length?' Achievement: '+earned[0].name+'.':''));
-  if(complete()){play('win');world?.completeEncounter({points:run().points,perfect:result.perfect});}
+  if(complete()){play('win');world?.completeEncounter({points:run().points,perfect:result.perfect});spa?.completeAppointment?.();}
 }
 bindAction($('extract'),()=>{});
 window.addEventListener('blur',cancel);
@@ -267,14 +267,14 @@ function files(){
   const achievements=content.list('achievements').map(a=>'<p class="'+(profile.achievements.includes(a.id)?'achievement':'')+'">'+(profile.achievements.includes(a.id)?'✓ ':'○ ')+escape(a.name)+' · '+Math.min(profile.stats[a.stat]||0,a.threshold)+'/'+a.threshold+'</p>').join('');
   const upgrades=content.list('upgrades').map(u=>'<p>'+escape(u.name)+' · '+(profile.xp>=u.xp?'Fitted':u.xp+' XP')+'</p>').join('');
   modal('Case files','<p>'+rank(profile.xp)+' · '+profile.xp+' XP · '+profile.score+' points · '+profile.stats.total+' scored extractions</p>'+rows+
-    '<details><summary>Achievements · '+profile.achievements.length+'</summary><div class="record-grid">'+achievements+'</div></details><details><summary>Equipment upgrades</summary>'+upgrades+'</details>'+(world?.recordsForFiles?.()||'')+(clinic?.recordsForFiles?.()||''),
+    '<details><summary>Achievements · '+profile.achievements.length+'</summary><div class="record-grid">'+achievements+'</div></details><details><summary>Equipment upgrades</summary>'+upgrades+'</details>'+(world?.recordsForFiles?.()||'')+(clinic?.recordsForFiles?.()||'')+(spa?.recordsForFiles?.()||''),
     [['Return to shift',close],['Reset game',resetPrompt,true]],'CAMPAIGN RECORD');
 }
 $('filesBtn').onclick=files;
 function resetPrompt(){
   modal('Reset all shifts?','<p>This clears the three saved fields, previous checkpoint, achievements, XP, and equipment unlocks on this device.</p>',[['Keep progress',files],['Reset all shifts',()=>{
     const {revision,settings,checkpointId}=profile;
-    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();expansion?.reset();clinic?.reset();world?.reset();close();
+    profile={...fresh(),revision,settings,checkpointId};save(true);loadField();expansion?.reset();clinic?.reset();world?.reset();spa?.reset();close();
   },true]]);
 }
 function settings(){
@@ -282,10 +282,10 @@ function settings(){
   const checks=[['sound','Sound effects and timing cue'],['haptics','Vibration on supported devices'],['assist','Slower pressure and wider release band'],
     ['toggle','Press twice instead of holding'],['contrast','High-contrast controls'],['reducedMotion','Reduced extraction motion']];
   modal('Operator settings','<div class="prefs"><label>Volume <input id="volume" type="range" min="0" max="100" step="5" value="'+Math.round(prefs.volume*100)+'"><output id="volLabel">'+Math.round(prefs.volume*100)+'%</output></label>'+
-    checks.map(([k,label])=>'<label>'+label+'<input type="checkbox" data-pref="'+k+'" '+(prefs[k]?'checked':'')+'></label>').join('')+'</div>'+(world?.settingsHTML?.()||'')+(clinic?.settingsHTML?.()||''),
+    checks.map(([k,label])=>'<label>'+label+'<input type="checkbox" data-pref="'+k+'" '+(prefs[k]?'checked':'')+'></label>').join('')+'</div>'+(world?.settingsHTML?.()||'')+(clinic?.settingsHTML?.()||'')+(spa?.settingsHTML?.()||''),
     [['Done',()=>{close();cue(rest());}]],'AUDIO & ACCESSIBILITY');
   $('volume').oninput=e=>{prefs.volume=e.target.value/100;audio.volume(prefs.volume);$('volLabel').textContent=e.target.value+'%';};
-  world?.bindSettings?.();clinic?.bindSettings?.();
+  world?.bindSettings?.();clinic?.bindSettings?.();spa?.bindSettings?.();
   $('volume').onchange=()=>{save();if(prefs.sound){audio.wake();play('zone');}};
   for(const input of $('dialogBody').querySelectorAll('[data-pref]'))input.onchange=()=>{
     prefs[input.dataset.pref]=input.checked;save();renderUI();if(prefs.sound){audio.wake();play('touch');}
@@ -382,6 +382,32 @@ async function ensureWorld(){
   })();
   try{return await worldLoading;}catch(e){worldLoading=null;throw e;}
 }
+async function ensureSpa(){
+  if(spa && content.versions()['disgusting-day-spa'])return spa;
+  spaLoading??=(async()=>{
+    await ensureWorld();
+    await content.load('./day-spa/pack.json');
+    const mod=await import('./day-spa/expansion.js');
+    mod.attach(expansionApi());
+    expansion??=await import('./pore-explorer/expansion.js');
+    expansion.mount();mod.mount();
+    spa=mod;
+    if('serviceWorker' in navigator){
+      const prime=()=>spa?.primeOffline?.();
+      if(navigator.serviceWorker.controller)prime();
+      else navigator.serviceWorker.addEventListener('controllerchange',prime,{once:true});
+    }
+    return mod;
+  })();
+  try{return await spaLoading;}catch(e){spaLoading=null;throw e;}
+}
+$('spaBtn').onclick=async()=>{
+  try{await ensureSpa();spa.open();}
+  catch(e){
+    say(e.message||'The Day Spa could not be opened.');
+    modal('The Day Spa is unavailable','<p>The management module could not be downloaded on this visit. Existing campaigns, records and business state are unaffected. Reconnect, then open it again.</p>',[['Return to shift',close]],'EXPANSION 5');
+  }
+};
 $('bookBtn').onclick=async()=>{
   try{await ensureWorld();world.open();}
   catch(e){
@@ -438,6 +464,7 @@ async function init(){
       if(String(profile.mode).startsWith('pore-explorer:'))await ensureExpansion();
       if(String(profile.mode).startsWith('midnight-clinic:'))await ensureClinic();
       if(String(profile.mode).startsWith('world-book-of-pores:'))await ensureWorld();
+      if(String(profile.mode).startsWith('disgusting-day-spa:'))await ensureSpa();
       recovery=recovered||!!state&&!state.schema;
       if(recovered)say('Recovered your previous checkpoint.');
     }catch(e){
@@ -445,7 +472,7 @@ async function init(){
     }
     visit=visitFor(profile);
     draw=await createRenderer($('stage'),$('skin'),$('effects'),content.get('assets',visit.region.image).url);
-    expansion?.mount();clinic?.mount();world?.mount();
+    expansion?.mount();clinic?.mount();world?.mount();spa?.mount();
     ready=true;loadField();if(recovery)save();
     // Read-only inspection surface for the automated suites and production smoke checks.
     // It exposes snapshots only: no writes, no content control, no network access.
@@ -466,7 +493,8 @@ async function init(){
         scan:{c:s.scan.c,d:s.scan.d},gates:s.state.gates.map(g=>({type:g.type,broken:g.broken})),held:s.state.held}:null;},
       bursts:()=>burst?(burst.streams||[burst]).map(stream=>({color:stream.mat.color,particles:stream.particles.length})):[],
       totals:()=>({xp:profile.xp,stats:structuredClone(profile.stats),achievements:[...profile.achievements]}),
-      world:()=>world?.snapshotForTests?.()||null
+      world:()=>world?.snapshotForTests?.()||null,
+      spa:()=>spa?.snapshotForTests?.()||null
     });
     document.querySelector('main').inert=false;document.querySelector('header').inert=false;$('feedStatus').textContent='Optics online';
   }catch(e){$('feedStatus').textContent='Optics unavailable';cue('Could not load game assets. Reload to retry.');console.error(e);}

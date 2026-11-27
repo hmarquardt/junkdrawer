@@ -169,6 +169,7 @@ export function completeEncounter(extra = {}) {
   const freshTrophies = evaluateTrophies(profile, w);
   recordHighlight(snapshot, meta, fresh);
   api.save();
+  lastSnapshot = snapshot; lastFresh = fresh;
   lastResult = {encounter: meta.encounter, patientClass: klasse, complexity: visit.difficulty || 1,
     status: 'complete', quality: extra.perfect ? 'perfect' : 'clean',
     extraction: {releases: snapshot.releases, volume: snapshot.values.encounterTotal},
@@ -377,7 +378,7 @@ function campaignOf(meta) {
 }
 const CAMPAIGN_LABEL = {base: 'Base campaign', pore: 'Pore Explorer', midnight: 'Midnight Clinic', book: 'World Book', legacy: 'Legacy record'};
 let filter = {campaign: 'all', classification: 'all', tier: 'all'};
-let lastResult = null;
+let lastResult = null, lastSnapshot = null, lastFresh = [];
 
 export function openHub(section = 'records') {
   const profile = api.profile(), w = world(profile);
@@ -577,7 +578,8 @@ export function primeOffline() {
   const urls = ['./pack.json', './expansion.js'].map(path => new URL(path, import.meta.url).href);
   return Promise.allSettled(urls.map(url => fetch(url, {cache: 'reload'})));
 }
-export function reset() { lastResult = null; updatePanel(); }
+export function reset() { lastResult = null; lastSnapshot = null; lastFresh = []; updatePanel(); }
+export function lastEncounter() { return lastSnapshot ? {snapshot: lastSnapshot, result: lastResult, records: [...lastFresh]} : null; }
 export function open() { openHub('records'); }
 // The Version 2.0 contract. Business systems are not implemented; this is the read-only shape a
 // future Day Spa can consume.

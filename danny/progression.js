@@ -68,6 +68,28 @@ function validWorld(world){
     && (world.highlight===undefined||world.highlight===null||(typeof world.highlight==='object'))
     && (world.pending===undefined||world.pending===null||(typeof world.pending==='object'));
 }
+// The Day Spa is optional for every earlier save and bounded when present. Cash is an integer; the
+// ledger, appointment queue, receipts and histories all have hard caps.
+function validSpa(spa){
+  if(spa===undefined)return true;
+  if(!spa||typeof spa!=='object'||Array.isArray(spa))return false;
+  const money=value=>Number.isSafeInteger(value)&&value>=0&&value<=999999999;
+  const bounded=(list,limit,check)=>list===undefined||(Array.isArray(list)&&list.length<=limit&&list.every(check));
+  return money(spa.v??0)&&money(spa.rules??0)&&money(spa.cash)&&money(spa.day??0)&&money(spa.tier??0)
+    && money(spa.reputation??0)&&money(spa.rooms??0)
+    && (spa.inventory===undefined||(spa.inventory&&typeof spa.inventory==='object'&&Object.values(spa.inventory).every(money)))
+    && bounded(spa.equipment,24,id=>typeof id==='string')
+    && bounded(spa.staff,12,member=>member&&typeof member==='object'&&typeof member.id==='string')
+    && bounded(spa.appointments,12,item=>item&&typeof item==='object'&&typeof item.id==='string')
+    && bounded(spa.completed,40,item=>item&&typeof item==='object'&&typeof item.id==='string')
+    && bounded(spa.transactions,200,item=>item&&typeof item==='object'&&typeof item.id==='string'&&Number.isSafeInteger(item.amount))
+    && bounded(spa.reviews,30,item=>item&&typeof item==='object')
+    && bounded(spa.marketing,8,item=>item&&typeof item==='object')
+    && bounded(spa.history,30,item=>item&&typeof item==='object')
+    && (spa.session===undefined||spa.session===null||typeof spa.session==='object')
+    && (spa.pendingEvent===undefined||spa.pendingEvent===null||typeof spa.pendingEvent==='object')
+    && (spa.stats===undefined||(spa.stats&&typeof spa.stats==='object'));
+}
 function validSlot(v){
   return v && qualified(v.encounter)&&count(v.seed)&&count(v.turn)&&v.turn>=1&&count(v.streak)&&count(v.points)
     &&validTargets(v.cleared)&&v.layers&&typeof v.layers==='object'
@@ -89,6 +111,7 @@ export function validSave(s){
     && (s.discovered===undefined||Array.isArray(s.discovered)&&s.discovered.length<=16&&s.discovered.every(item=>typeof item==='string'&&/^[a-z][a-z-]*$/.test(item)))
     && (s.observer===undefined||typeof s.observer==='boolean')
     && validWorld(s.world)
+    && validSpa(s.spa)
     && (s.settings.intensity===undefined||['spooky','midnight','eldritch'].includes(s.settings.intensity))
     && (s.settings.ambience===undefined||(Number.isFinite(s.settings.ambience)&&s.settings.ambience>=0&&s.settings.ambience<=1))
     && (s.settings.music===undefined||typeof s.settings.music==='boolean')

@@ -9,7 +9,8 @@ const links = {
   materials:{}, equipment:{audio:'assets'}, behaviors:{reservoir:'reservoirs'},
   achievements:{}, scoring:{}, assets:{}, upgrades:{}, reservoirs:{}, commentary:{},
   tutorials:{equipment:'equipment'}, patients:{region:'regions',reservoir:'reservoirs',condition:'conditions',materials:'materials'},
-  conditions:{}, intake:{}, records:{}, trophies:{achievement:'achievements'}, challenges:{encounter:'encounters'}
+  conditions:{}, intake:{}, records:{}, trophies:{achievement:'achievements'}, challenges:{encounter:'encounters'},
+  facilities:{}, spaEquipment:{}, supplies:{}, staffRoles:{}, personalities:{}, marketing:{}, businessEvents:{}, spaAppointments:{encounter:'encounters'}, reviewLines:{}, difficulty:{}, spaAchievements:{}, staffNames:{}, commentary:{}
 };
 const requiredLinks={
   regions:['image'],archetypes:['material'],bosses:['behavior','archetype'],encounters:['region','archetypes'],
@@ -128,7 +129,9 @@ const optionalSources=new Map([
   ['midnight-clinic','./midnight-clinic/pack.json'],
   // The World Book composes legendary content from both installed packs, so its source chain
   // registers those manifests first. Nothing downloads until this namespace is actually required.
-  ['world-book-of-pores',['./pore-explorer/pack.json','./midnight-clinic/pack.json','./world-book/pack.json']]
+  ['world-book-of-pores',['./pore-explorer/pack.json','./midnight-clinic/pack.json','./world-book/pack.json']],
+  // The spa schedules appointments from every installed campaign and records through the book.
+  ['disgusting-day-spa',['./pore-explorer/pack.json','./midnight-clinic/pack.json','./world-book/pack.json','./day-spa/pack.json']]
 ]);
 export async function restoreContent(state){
   if(state?.schema!==2)return;
