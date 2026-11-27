@@ -262,11 +262,16 @@ test('loopback configuration and static responses exclude credentials and privat
       '/olaf/engine/pipeline.mjs',
       '/olaf/engine/stages.mjs',
       '/olaf/schemas/stages.v1.json',
+      '/olaf-review.html',
+      '/olaf/review.mjs',
+      '/olaf/presets.mjs',
+      '/olaf/history.mjs',
+      '/olaf/ingestion/diagnose.mjs',
+      '/olaf/fixtures/images/clip40.png',
       '/.env',
       '/OLAF_RUBRIC.md',
       '/olaf/providers/openai.mjs',
       '/olaf/tests/phase2.test.mjs',
-      '/olaf/fixtures/images/clip40.png',
     ]) {
       const r = await fetch(url + path);
       assert.equal(
@@ -278,6 +283,12 @@ test('loopback configuration and static responses exclude credentials and privat
           '/olaf/engine/pipeline.mjs',
           '/olaf/engine/stages.mjs',
           '/olaf/schemas/stages.v1.json',
+          '/olaf-review.html',
+          '/olaf/review.mjs',
+          '/olaf/presets.mjs',
+          '/olaf/history.mjs',
+          '/olaf/ingestion/diagnose.mjs',
+          '/olaf/fixtures/images/clip40.png',
         ].includes(path)
           ? 200
           : 404,

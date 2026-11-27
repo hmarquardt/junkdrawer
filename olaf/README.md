@@ -19,6 +19,38 @@ Open **http://127.0.0.1:4173/olaf.html**. Pass a different port as the first arg
 5. Review the request, thumbnails and assignment summary. Check the confirmation box and choose **Evaluate pair**. Changes invalidate confirmation. **Cancel evaluation** stops waiting and aborts the local transport. **Retry evaluation** starts a fresh run after an error. A provider can still charge for work already started.
 6. Read the explanation, decisive evidence, requirements, defects and limitations. Use **Copy Why**, **Copy JSON** or **Export evaluation** to keep a result. An export contains observations and may quote the request. Keep private exports outside the repository.
 
+### Presets and result retention
+
+The Evaluation panel offers four named presets. Only configured model identifiers are selectable; an
+unavailable preset is disabled with the required identifier in its label.
+
+| Preset | Configuration |
+| --- | --- |
+| Accuracy | `gpt-6.2-sol`, Architecture A, reverse verification |
+| Economy | `gpt-4.1-mini`, Architecture D, no reverse pass |
+| Diagnostic | Current model, Architecture D, detailed evidence, reverse verification |
+| Custom | Manual provider, model and architecture selection |
+
+The active configuration is shown above the provider controls and repeated in the result summary.
+Changing a model, architecture or verification option switches the preset to Custom. `Ctrl/Cmd+Enter`
+evaluates after the confirmation box is checked; `Escape` cancels a running evaluation. A completed
+result and its exports remain visible when the request or candidate order changes. Only **Clear task**
+or starting another evaluation removes it.
+
+The archive intake report appears after an MHTML import and lists archive size, MIME and HTML part
+counts, image resources with dimensions, Content-ID and Content-Location associations, recovered
+request text, candidate assignments, ambiguities and parser warnings. Manual assignment stays available
+from the image pool whenever automatic extraction is incomplete.
+
+### Local evaluation history
+
+The optional history is local-only and off by default. **Save current evaluation** stores a summary
+record in IndexedDB; **Save each completed evaluation automatically** opts in to automatic saving. A
+record contains the evaluation id, timestamp, request and image hashes, rubric version, provider, model,
+architecture, preset, winner, decision stage, confidence, evidence, uncertainty, latency, estimated
+cost and reverse-order consistency. It never stores screenshots, archives, tokens or API keys. History
+is capped at 200 records and pruned after 180 days, and offers JSON export and explicit clear.
+
 ### Providers and credentials
 
 **Mock** runs entirely in the browser. It recognizes the built-in exhibit pair by original SHA-256 and request text, handles swaps, and returns REVIEW for unknown input. It exercises the real adjudicator with scripted observations.
@@ -45,6 +77,9 @@ node olaf/cli.mjs --reverse olaf/fixtures/task.json \
 | `ingestion/mime.mjs` | Byte-preserving recursive MIME parsing, folded headers, nested boundaries, declared charsets, quoted-printable, Base64 and binary parts. Records partial recovery and resolves CID and location references locally. |
 | `ingestion/archive.mjs` | The browser adapter reads text and raster references from inert template content in a detached document. It recognizes generic request headings, textareas and explicit image labels. Ambiguity leaves assignments available for correction. |
 | `ingestion/images.mjs` | Sniffs and decodes original raster bytes, records dimensions and a digest, and produces optional lossless pixel crops with parent ID and coordinates. |
+| `ingestion/diagnose.mjs` | Pure archive intake report: sizes, part and document counts, image dimensions, CID/location associations, assignments, recovered request and ambiguities. |
+| `presets.mjs`, `history.mjs` | Named configurations resolved only against configured model identifiers; optional IndexedDB evaluation history with hashes, telemetry, evidence, export, clear, a 200-record cap and 180-day pruning. |
+| `review.html`, `review.mjs` | Local disputed-case review workspace. Imports a benchmark JSONL, shows frozen references and model observations, and records independent adjudication separately in IndexedDB. |
 | `schemas/` and `engine/contracts.mjs` | Versioned task, paired perception, stage and result JSON Schemas. Runtime checks also enforce identity, request grounding and requirement applicability. Both sides can contain identical pixels with independent assignment IDs. |
 | `prompts/` and `providers/` | Architecture A uses one paired multimodal call. Phase 2 stages compile, adherence, inspection, preference and verification prompts live in `prompts/stages.mjs`; the OpenAI adapter returns structured data, model, usage and per-call cost. Adapters receive the canonical task, model, diagnostic option, crop regions and abort signal. Only the adapter resolves image IDs to bytes. |
 | `engine/adjudicate.mjs` | Checks rendering, explicit visible adherence, severity and comparative defect impact, then preference and genuine ties. Accepted alternatives count as met. Unknown evidence can force REVIEW. Both page-broken sides abstain. Deterministic explanation generation uses the decisive evidence pair and emits a decision trace. |
@@ -55,7 +90,7 @@ node olaf/cli.mjs --reverse olaf/fixtures/task.json \
 | `ingestion/png.mjs` | Dependency-free PNG decode, crop and encode for Node-only native-resolution verification regions. Sources are never modified. |
 | `app.mjs`, `style.css`, `../olaf.html` | Input, inspection, confirmation, architecture selection and presentation. Collapsible decision trace, compiled requirements and stage telemetry. User and model strings go into text nodes. Task content and image object URLs live only in memory. |
 | `server.mjs` | Loopback-only static allowlist and authenticated upstream transport for `observe` and `stage`. Validates Host, request Origin, JSON media type, allowed model and stage, embedded raster input and stage payload sizes. Limits concurrent live calls and response error detail. |
-| `benchmarks/`, `fixtures/`, `tests/` | 64 authored reference cases in `dataset.mjs`, Chrome-rendered screenshots, synthetic MIME archives, offline reference verification, error taxonomy, comparison reports and independent browser and engine tests. |
+| `benchmarks/`, `fixtures/`, `tests/` | 64 authored reference cases in `dataset.mjs`, Chrome-rendered screenshots, synthetic MIME archives, offline reference verification, error taxonomy, comparison reports and independent browser, review and engine tests. |
 
 Berry's visual evaluator supplies the precedent for byte-oriented transfer decoding, CID/location resolution, stable image manifests, explicit image parts, the user-role JSON instruction, cancellation, and per-call telemetry. Its adapters and OpenRouter client are inline and coupled to Berry state. OLAF adapts those conventions into independent modules. Its comparison rubric, credential boundary and in-memory lifetime are specific to this application. Berry code and storage remain separate.
 
@@ -70,8 +105,8 @@ The public-domain photograph in the illustration benchmark is the official Grace
 From the repository root, use the existing Playwright installation and the real Chrome channel. For a fresh checkout install the test-only packages with `npm install --no-save --package-lock=false @playwright/test playwright` and install Chrome if needed.
 
 ```sh
-node --test olaf/tests/engine.test.mjs olaf/tests/phase2.test.mjs
-node node_modules/@playwright/test/cli.js test olaf/tests/workspace.spec.cjs
+node --test olaf/tests/engine.test.mjs olaf/tests/phase2.test.mjs olaf/tests/phase21.test.mjs
+node node_modules/@playwright/test/cli.js test olaf/tests/workspace.spec.cjs olaf/tests/review.spec.cjs
 bash .agents/skills/junkdrawer-compliance-audit/scripts/audit.sh olaf.html
 node olaf/fixtures/render.mjs
 node olaf/benchmarks/verify.mjs
@@ -99,8 +134,30 @@ node olaf/benchmarks/compare.mjs /tmp/olaf-dev.jsonl /tmp/olaf-holdout.jsonl
 
 Reference judgments were specified from constructed differences and rubric rules before live inference. The rounded-corner, color-family and layout cases admit reasonable alternatives and are scored as equivalence or subjective cases instead of forcing a side. The hierarchy preference remains a provisional design judgment. The holdout split was not used during prompt refinement. The suite lacks independent human adjudication and real-task coverage. Measured results, including cases that missed the targets, are recorded in [`docs/phase2-report.md`](docs/phase2-report.md).
 
+## Disputed-case review
+
+Start the local server and open **http://127.0.0.1:4173/olaf-review.html** (also linked from the
+workspace header). Load a detailed benchmark JSONL produced by `run.mjs --details`. Nothing is
+uploaded; the file is read in the browser and matched to the committed synthetic fixtures.
+
+For each run the workspace shows the original request, native-resolution Left and Right images, the
+frozen reference decision and stage, the model decision and stage, both sides' evidence, defects and
+severities, the decision trace, stage telemetry and the reverse-order result. Rows whose reference was
+not constructed or not objective are marked as potentially defensible disagreements.
+
+Independent adjudication is recorded separately from the frozen benchmark and from evaluation history:
+choose a verdict (agree, defensible disagreement, model error or an independent side), add a reviewer
+and notes, and save. Records live in IndexedDB (`olaf-review`) and can be exported as JSON or cleared.
+They never modify `benchmarks/dataset.mjs`, the reference labels or the measured results.
+
 ## First representative archive
 
 No authorized representative Feather archive has been validated. Keep the original outside the repository. Inspect only its MIME inventory, inert HTML text and image relationships locally. Record which generic recovery decisions were correct, missing or ambiguous. Verify each side, the exact prompt, dimensions, capture scope and any missing assets with an authorized reviewer.
+
+1. Open the workspace from the local server and import the archive. Do not commit or publish it.
+2. Expand **Archive intake report**. Confirm archive size, MIME part count, HTML document count and image resources. Each image line reports MIME, byte size, dimensions, CID, Content-Location, part index and current assignment.
+3. Confirm the recovered request text or choose a recovered candidate. If extraction fails, type the request manually and assign images from the pool.
+4. Record every ambiguity and parser warning, then check the full-resolution images with **Inspect / crop**. Crops never modify the source assets.
+5. Evaluate with the **Diagnostic** preset and note whether the decision, stage and evidence match an independent manual review. Save an evaluation-history record if useful; keep raw results outside the repository.
 
 Create a minimal synthetic reproduction of the relevant structure, replacing all content, URLs, identifiers and images. Only then implement a separate `{ extract(parsedArchive) }` adapter and select it from observed, documented signatures. The adapter returns candidate requests, embedded image blobs with labels, proposed assignments, metadata and warnings. Reuse existing normalization, stable identities and explicit confirmation. Test partial archives, missing labels and reversed ordering before enabling the adapter. Leave task claiming, live workflow navigation and submission outside the engine.

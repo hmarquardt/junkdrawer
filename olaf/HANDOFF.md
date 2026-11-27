@@ -9,6 +9,9 @@ Repository: `/Users/hmarquardt/junkdrawer`, branch `main`.
 - `374bff9` — Phase 2 contracts, staged architectures, expanded fixtures/dataset, diagnostic tooling, tests, UI.
 - `8135728` — Deterministic hardening (grounding, applicability, rendering/severity guards), benchmark
   taxonomy fixes, Phase 2 report and this handoff.
+- Phase 2.1 — Presets, result retention, archive intake diagnostics, local history, disputed-case
+  review workspace, tests and operational documentation. The exact commit is the HEAD containing this
+  file (`git log -1 --oneline`).
 
 `8135728` is the Phase 2 code and results commit. A final documentation commit follows it; the exact
 HEAD at handoff is `git log -1 --oneline`. Nothing has been pushed or deployed.
@@ -27,7 +30,30 @@ HEAD at handoff is `git log -1 --oneline`. Nothing has been pushed or deployed.
 | UI | `olaf.html`, `app.mjs` | Architecture selector; collapsible decision trace, compiled requirements and per-stage telemetry. |
 | Server | `server.mjs` | `/olaf/stage` with same-origin, allowlist, size limits; images still resolve only inside the loopback provider. |
 
-## Tests
+## Phase 2.1 operational readiness
+
+Added without changing frozen fixtures, reference labels, measured Phase 2 results or architectures:
+
+- **Presets** (`presets.mjs`, `app.mjs`): Accuracy (`gpt-6.2-sol` + A + reverse), Economy
+  (`gpt-4.1-mini` + D), Diagnostic (current model + D + detailed/reverse) and Custom. Presets disable
+  themselves when the required provider identifier is not configured; manual changes switch to Custom.
+  Active configuration is always visible and repeated in the result summary.
+- **Result retention**: completed results and exports survive request, scope, image and order changes.
+  Only Clear task or a new evaluation replaces them.
+- **Keyboard**: `Ctrl/Cmd+Enter` evaluates after confirmation; `Escape` cancels.
+- **Archive intake report** (`ingestion/diagnose.mjs`): size, MIME/HTML counts, image dimensions,
+  CID/Content-Location, assignments, recovered request, ambiguities and warnings; manual assignment
+  remains available.
+- **Local history** (`history.mjs`): optional IndexedDB summaries with hashes and telemetry, no images
+  or archives; 200-record cap, 180-day prune, export and clear. Registered in `storage-manager.html`.
+- **Disputed-case review** (`olaf-review.html`, `olaf/review.mjs`): imports a detailed benchmark JSONL,
+  shows frozen reference vs model judgment, native-resolution images, evidence, defects/severity,
+  trace, telemetry and reverse order; records independent adjudication separately in IndexedDB.
+
+Tests: 46 Node tests, 16 workspace browser tests, 2 review browser tests, 64 offline references and
+both compliance audits pass. No additional paid inference was used ($0 for Phase 2.1).
+
+Operational procedures are in `README.md`; the completion summary is `docs/phase21-report.md`.
 
 ```sh
 node --test olaf/tests/engine.test.mjs olaf/tests/phase2.test.mjs   # 42 passing

@@ -213,6 +213,85 @@ test('architecture selection exercises structured, staged and verification paths
     await page.locator('#architecture').selectOption('a');
   }
 });
+test('previous results survive input edits until an explicit clear', async ({ page }) => {
+  await load(page);
+  await run(page);
+  await expect(page.locator('#decision')).toHaveText('Left is better');
+  await page.locator('#request').fill('A different request that is not evaluated yet.');
+  await expect(page.locator('#decision')).toHaveText('Left is better');
+  await expect(page.locator('#results')).toBeVisible();
+  await expect(page.locator('#status')).toContainText('previous result remains');
+  await page.locator('#clear').click();
+  await expect(page.locator('#results')).toBeHidden();
+});
+
+test('presets apply measured configurations and manual changes switch to custom', async ({ page }) => {
+  await load(page);
+  await expect(page.locator('#preset option[value="accuracy"]')).toBeDisabled();
+  await expect(page.locator('#preset option[value="economy"]')).toBeEnabled();
+  await page.locator('#preset').selectOption('economy');
+  await expect(page.locator('#provider')).toHaveValue('openai');
+  await expect(page.locator('#model')).toHaveValue('gpt-4.1-mini');
+  await expect(page.locator('#architecture')).toHaveValue('d');
+  await expect(page.locator('#reverse')).not.toBeChecked();
+  await expect(page.locator('#activeConfig')).toContainText('Economy');
+  await page.locator('#preset').selectOption('diagnostic');
+  await expect(page.locator('#architecture')).toHaveValue('d');
+  await expect(page.locator('#reverse')).toBeChecked();
+  await expect(page.locator('#diagnostic')).toBeChecked();
+  await expect(page.locator('#activeConfig')).toContainText('Diagnostic');
+  await page.locator('#architecture').selectOption('a');
+  await expect(page.locator('#preset')).toHaveValue('custom');
+  await expect(page.locator('#activeConfig')).toContainText('Custom');
+});
+
+test('local history saves a summary, survives reload and can be cleared', async ({ page }) => {
+  await load(page);
+  await run(page);
+  await expect(page.locator('#historyBox')).toBeVisible();
+  await page.locator('#historyBox summary').click();
+  await page.locator('#historySave').click();
+  await expect(page.locator('#historyList')).toContainText('fixture-v1');
+  await page.reload();
+  await page.locator('#historyBox summary').click();
+  await expect(page.locator('#historyList')).toContainText('fixture-v1');
+  await page.locator('#historyClear').click();
+  await expect(page.locator('#historyList')).toContainText('No saved evaluations yet');
+  const stored = await page.evaluate(async () => {
+    const open = indexedDB.open('olaf-history');
+    return new Promise((resolve) => {
+      open.onsuccess = () => {
+        const db = open.result;
+        const request = db.transaction('evaluations', 'readonly').objectStore('evaluations').getAll();
+        request.onsuccess = () => resolve(request.result.length);
+      };
+    });
+  });
+  expect(stored).toBe(0);
+});
+
+test('archive intake report lists parts, images, associations and manual fallback', async ({ page }) => {
+  await load(page);
+  await picker(page, page.locator('#browse'), fixture('nested.mhtml'));
+  await expect(page.locator('#intakeBox')).toBeVisible();
+  await expect(page.locator('#intake')).toContainText('Archive size');
+  await expect(page.locator('#intake')).toContainText('MIME parts');
+  await expect(page.locator('#intake')).toContainText('HTML documents');
+  await expect(page.locator('#intake')).toContainText('Image 1');
+  await expect(page.locator('#intake')).toContainText('CID');
+  await expect(page.locator('#intake')).toContainText('Location');
+  await expect(page.locator('#intake')).toContainText('Assignments');
+  await expect(page.locator('#intake')).toContainText('Manual assignment');
+});
+
+test('keyboard shortcut evaluates after confirmation and preserves the result', async ({ page }) => {
+  await load(page);
+  await page.locator('#confirm').check();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
+  await expect(page.locator('#results')).toBeVisible();
+  await expect(page.locator('#decision')).toHaveText('Left is better');
+});
+
 test('narrow and desktop layouts fit and the confirmation gate is keyboard accessible', async ({ page }) => {
   await load(page);
   for (const width of [360, 768, 1440]) {

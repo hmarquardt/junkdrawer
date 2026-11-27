@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OLAF · Benchmark review</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>"
+    />
+    <link rel="stylesheet" href="olaf/style.css" />
+    <script type="module" src="olaf/review.mjs"></script>
+    <style>
+      .reviewHead {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .reviewGrid {
+        display: grid;
+        grid-template-columns: minmax(220px, 300px) 1fr;
+        gap: 18px;
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .reviewGrid {
+          grid-template-columns: 1fr;
+        }
+      }
+      #caseList {
+        display: grid;
+        gap: 6px;
+        max-height: 60vh;
+        overflow: auto;
+        padding-right: 4px;
+      }
+      #caseList button {
+        text-align: left;
+        width: 100%;
+      }
+      #caseList button[aria-current='true'] {
+        outline: 2px solid #629052;
+        background: #e6f4cf;
+      }
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 760px) {
+        .compare {
+          grid-template-columns: 1fr;
+        }
+      }
+      .candidate {
+        border-top: 1px solid #c9d2c8;
+        padding-top: 8px;
+      }
+      .native {
+        overflow: auto;
+        max-width: 100%;
+        background: #eef1e6;
+        border: 1px solid #c9d2c8;
+      }
+      .native img {
+        display: block;
+        max-width: none;
+        width: auto;
+        height: auto;
+        image-rendering: auto;
+      }
+      .native.fit img {
+        width: 100%;
+        max-width: 100%;
+      }
+      .metaGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 8px;
+        margin: 8px 0;
+        font-size: 0.85rem;
+      }
+      .metaGrid b {
+        display: block;
+      }
+      .verdictBadge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #e6f4cf;
+        font-size: 0.82rem;
+        font-weight: 650;
+      }
+      .defensible {
+        background: #fdf3d8;
+      }
+      .adjudication {
+        border-top: 2px solid #c9d2c8;
+        margin-top: 16px;
+        padding-top: 10px;
+      }
+      .adjudication textarea {
+        width: 100%;
+        min-height: 70px;
+        font: inherit;
+      }
+      .adjudication input[type='text'] {
+        width: 100%;
+        font: inherit;
+      }
+      #disputeTable {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+      }
+      #disputeTable th,
+      #disputeTable td {
+        border-top: 1px solid #c9d2c8;
+        padding: 4px 6px;
+        text-align: left;
+        vertical-align: top;
+      }
+      pre {
+        max-height: 42vh;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="mast">
+      <div class="brand"><i aria-hidden="true"></i> OLAF</div>
+      <span class="mastSub">Benchmark review workspace</span
+      ><a class="rubric" href="olaf.html">← Comparison desk</a>
+    </header>
+    <main>
+      <div class="headline">
+        <div>
+          <h1>Disputed cases<span>.</span></h1>
+          <p>
+            Inspect a local benchmark JSONL against the frozen synthetic references. Original labels are never
+            replaced; independent adjudication is stored separately in this browser.
+          </p>
+        </div>
+        <div>
+          <button id="pickJson">Load benchmark JSONL</button>
+          <input id="jsonl" type="file" accept=".jsonl,.json,text/plain" hidden />
+        </div>
+      </div>
+      <p id="status" class="note" role="status" aria-live="polite">
+        Load a detailed OLAF benchmark run (JSONL with result objects). Nothing is uploaded.
+      </p>
+
+      <section class="sheet" id="loaded" hidden>
+        <div class="reviewHead">
+          <h2>Disputed runs</h2>
+          <div class="actions">
+            <label class="check"><input id="fitImages" type="checkbox" /> Fit images to width</label>
+            <label class="check"
+              ><input id="onlyDisputes" type="checkbox" checked /> Only disagreements with the fixed reference</label
+            >
+          </div>
+        </div>
+        <div id="runSummary" class="metaGrid"></div>
+        <table id="disputeTable" hidden></table>
+        <div class="reviewGrid">
+          <div>
+            <h3>Cases</h3>
+            <div id="caseList" role="listbox" aria-label="Disputed cases"></div>
+          </div>
+          <div id="detail">
+            <p class="note">Choose a case.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="sheet" id="records" hidden>
+        <div class="reviewHead">
+          <h2>Independent adjudication</h2>
+          <div class="actions">
+            <button id="exportRecords">Export adjudications</button
+            ><button id="clearRecords" class="quiet">Clear adjudications</button>
+          </div>
+        </div>
+        <p class="note">
+          These records are separate from the benchmark baseline and from the evaluation history. They are stored in
+          this browser only. Use them to classify a disagreement as a defensible subjective call or a genuine error.
+        </p>
+        <div id="recordList"></div>
+        <p id="recordStatus" class="note" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+    <template id="pageview"
+      ><script
+        src="analytics-lite.js"
+        data-site-id="junkdrawer"
+        data-api="https://lab.aismallbizguru.com/api/analytics/collect"
+        defer
+      ></script
+    ></template>
+    <!-- JUNKDRAWER_DEPLOY_FOOTER version="2026.11.27.1" bump="Update this version whenever this file changes in a commit." -->
+    <footer
+      data-junkdrawer-deploy-footer
+      data-deploy-version="2026.11.27.1"
+      style="margin: 2rem auto 1rem; padding: 1rem; text-align: center; color: #58655e; font: 0.82rem/1.4 system-ui, sans-serif"
+    >
+      &copy; 2026 Hank Marquardt · OLAF benchmark review · version 2026.11.27.1
+    </footer>
+  </body>
+</html>

@@ -1,7 +1,9 @@
 import { parseArchive } from './mime.mjs';
 const raster = /^image\/(png|jpeg|webp)$/;
 export function extractArchive(bytes, adapter = genericAdapter) {
-  return adapter.extract(parseArchive(bytes));
+  const archive = parseArchive(bytes);
+  archive.size = bytes.length;
+  return adapter.extract(archive);
 }
 export const genericAdapter = {
   extract(archive) {
@@ -14,6 +16,11 @@ export const genericAdapter = {
         blob: new Blob([p.bytes], { type: p.mime }),
         label: 'Archive image ' + (p.index + 1),
         side: null,
+        partIndex: p.index,
+        mime: p.mime,
+        bytes: p.bytes.length,
+        cid: p.cid || '',
+        location: p.location || '',
       }));
     const doc = document.implementation.createHTMLDocument('');
     const html = archive.parts.filter((p) => p.mime === 'text/html');
@@ -46,6 +53,11 @@ export const genericAdapter = {
               blob: new Blob([bytes], { type: inline[1] }),
               label: 'Inline image ' + (images.length + 1),
               side: null,
+              partIndex: null,
+              mime: inline[1],
+              bytes: bytes.length,
+              cid: '',
+              location: '',
             };
             images.push(entry);
           } catch {
@@ -99,7 +111,22 @@ export const genericAdapter = {
       images,
       assigned,
       warnings: [...new Set(warnings)],
-      metadata: { htmlParts: html.length, embeddedImages: images.length },
+      metadata: {
+        htmlParts: html.length,
+        embeddedImages: images.length,
+        mimeParts: archive.parts.length,
+        rootLocation: archive.rootLocation || '',
+        archiveBytes: archive.size ?? null,
+        images: images.map((image) => ({
+          label: image.label,
+          side: image.side,
+          partIndex: image.partIndex ?? null,
+          mime: image.mime || image.blob.type,
+          bytes: image.bytes ?? image.blob.size,
+          cid: image.cid || '',
+          location: image.location || '',
+        })),
+      },
     };
   },
 };

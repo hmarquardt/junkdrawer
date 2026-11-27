@@ -2,6 +2,9 @@ import { createTask, assign, swap, sides, validateTask } from './engine/contract
 import { evaluateArchitecture, architectures, architectureNames } from './engine/pipeline.mjs';
 import { extractArchive } from './ingestion/archive.mjs';
 import { normalizeImage, cropImage, imageType, dataURL } from './ingestion/images.mjs';
+import { archiveReport } from './ingestion/diagnose.mjs';
+import { presets, resolvePreset } from './presets.mjs';
+import { historyRecord, listHistory, saveHistory, clearHistory, exportHistory } from './history.mjs';
 import { demoRequest, mockProvider } from './providers/mock.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -23,7 +26,11 @@ let task = createTask(),
   controller = null,
   importing = false,
   inspected = null,
-  models = [];
+  models = [],
+  preset = 'custom',
+  lastConfig = null,
+  lastInputs = null,
+  historyBusy = false;
 const assets = new Map();
 const assetFor = (side) => assets.get(task.images[side]?.id);
 const remember = (a) => {
@@ -49,18 +56,22 @@ function controls() {
     b.disabled = locked;
   $('confirm').disabled = locked || !available();
   $('evaluate').disabled = locked || !available() || !$('confirm').checked;
+  $('historySave').disabled = locked || !result;
   $('cancel').hidden = !controller;
   $('swap').disabled = locked || !sides.some((s) => task.images[s]);
   for (const b of document.querySelectorAll('[data-needs-image]'))
     b.disabled = locked || !task.images[b.dataset.needsImage];
 }
 function invalidate() {
-  result = null;
-  $('results').hidden = true;
+  // Previous results and exports stay visible until an explicit clear or a new evaluation.
   $('confirm').checked = false;
   $('evaluate').firstChild.textContent = 'Evaluate pair ';
   status(
-    available() ? 'Review the request and candidate order, then confirm.' : 'Add a request and two candidates.',
+    available()
+      ? result
+        ? 'Inputs changed. The previous result remains until you evaluate again or clear the task.'
+        : 'Review the request and candidate order, then confirm.'
+      : 'Add a request and two candidates.',
   );
 }
 function updatePreview() {
@@ -76,6 +87,47 @@ function updatePreview() {
       ].join('\n')
     : '';
   controls();
+}
+function renderIntake() {
+  const report = task.metadata?.report,
+    box = $('intake');
+  $('intakeBox').hidden = !report;
+  box.replaceChildren();
+  if (!report) return;
+  line(box, 'Archive size', formatSize(report.archiveBytes || 0));
+  line(box, 'MIME parts', report.mimeParts ?? 'Unavailable');
+  line(box, 'HTML documents', report.htmlDocuments ?? 'Unavailable');
+  line(box, 'Image resources', report.imageResources);
+  for (const image of report.images)
+    line(
+      box,
+      'Image ' + image.order + ' · ' + image.label,
+      [
+        image.mime,
+        image.bytes == null ? '' : formatSize(image.bytes),
+        image.dimensions || 'dimensions unavailable',
+        image.assignedSide ? '→ ' + image.assignedSide : 'unassigned',
+        image.cid ? 'CID ' + image.cid : '',
+        image.location ? 'Location ' + image.location : '',
+        image.partIndex == null ? 'inline' : 'part ' + image.partIndex,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    );
+  line(
+    box,
+    'Assignments',
+    'Left: ' + (report.assignments.Left || 'none') + ' · Right: ' + (report.assignments.Right || 'none'),
+  );
+  line(
+    box,
+    'Recovered request',
+    report.recoveredRequest || (report.requestCandidates.length ? 'Multiple candidates — choose above' : 'Not recovered'),
+  );
+  line(box, 'Ambiguities', report.ambiguities.length ? report.ambiguities.join(' ') : 'None detected');
+  line(box, 'Warnings', report.warnings.length ? report.warnings.join(' ') : 'None');
+  line(box, 'Manual assignment', 'Always available from the image pool and the per-candidate upload controls.');
+  if (report.rootLocation) line(box, 'Archive root', report.rootLocation);
 }
 function render() {
   $('request').value = task.request;
@@ -119,11 +171,15 @@ function render() {
   $('poolBox').hidden = !assets.size;
   $('recovery').hidden = !task.warnings.length;
   $('recovery').textContent = task.warnings.join(' ');
+  renderIntake();
   updatePreview();
 }
 function reset() {
   for (const a of assets.values()) URL.revokeObjectURL(a.url);
   assets.clear();
+  result = null;
+  $('results').hidden = true;
+  $('historySave').disabled = true;
   task = createTask();
   inspected = null;
   $('large').removeAttribute('src');
@@ -215,13 +271,31 @@ async function ingest(files, target, source = 'file') {
           reset();
           task.source = 'archive';
           task.provenance = 'Generic MIME archive adapter';
-          task.metadata = recovery.metadata;
           task.request = recovery.requests.length === 1 ? recovery.requests[0] : '';
           task.warnings = recovery.warnings;
           for (const a of loaded.values()) remember(a);
           for (const s of sides) setCandidate(s, loaded.get(recovery.assigned[s]));
+          task.metadata = {
+            ...recovery.metadata,
+            report: archiveReport({
+              archiveBytes: recovery.metadata?.archiveBytes ?? f.size,
+              metadata: recovery.metadata,
+              recovery,
+              assets: recovery.images.map((entry) => {
+                const a = loaded.get(entry);
+                return a
+                  ? {
+                      width: a.ref.width,
+                      height: a.ref.height,
+                      assignedSide: sides.find((s) => task.images[s]?.id === a.ref.id) || null,
+                    }
+                  : {};
+              }),
+            }),
+          };
           showAlternates(recovery.requests);
           $('poolBox').open = true;
+          $('intakeBox').open = true;
           added += loaded.size;
         }
         changed = true;
@@ -384,13 +458,90 @@ function setArchitectures() {
   );
   $('architecture').value = 'a';
 }
+function configText() {
+  const provider = $('provider').value === 'mock' ? 'Mock' : 'OpenAI';
+  const model = $('model').value || 'no model';
+  const extras = [$('reverse').checked ? 'reverse' : '', $('diagnostic').checked ? 'diagnostic' : ''].filter(Boolean);
+  return [
+    presets[preset]?.label || 'Custom',
+    provider,
+    model,
+    'Architecture ' + $('architecture').value.toUpperCase(),
+    ...extras,
+  ].join(' · ');
+}
+function updateConfig() {
+  const text = configText();
+  $('activeConfig').textContent = text;
+  $('evaluate').title = 'Evaluate pair (' + text + '). Shortcut: Ctrl/Cmd+Enter.';
+}
+function setPresets() {
+  for (const option of $('preset').options) {
+    if (option.value === 'custom' || option.value === 'diagnostic') continue;
+    const resolved = resolvePreset(option.value, models);
+    option.disabled = !resolved.available;
+    option.textContent = presets[option.value].label + (resolved.available ? '' : ' · unavailable');
+  }
+  if (preset !== 'custom' && preset !== 'diagnostic') {
+    const resolved = resolvePreset(preset, models);
+    if (!resolved.available) return markCustom(resolved.reason);
+    if (presets[preset].provider && $('provider').value !== presets[preset].provider)
+      return markCustom('Switch back to the preset provider or choose Custom.');
+  }
+  updateConfig();
+}
+function markCustom(reason = '') {
+  preset = 'custom';
+  $('preset').value = 'custom';
+  $('presetNote').textContent = reason || 'Custom configuration.';
+  updateConfig();
+}
+function applyPreset(name) {
+  const openai = models.length > 0;
+  const resolved = resolvePreset(name, openai ? models : []);
+  if (!resolved.available) {
+    markCustom(resolved.reason);
+    return;
+  }
+  preset = name;
+  $('preset').value = name;
+  $('presetNote').textContent = presets[name].description;
+  if (name === 'custom') {
+    updateConfig();
+    return;
+  }
+  if (presets[name].provider && $('provider').value !== presets[name].provider) {
+    if (!openai) {
+      markCustom('Start the local server with a configured model before using this preset.');
+      return;
+    }
+    $('provider').value = presets[name].provider;
+    setModels();
+  }
+  if (presets[name].model) {
+    if (![...$('model').options].some((option) => option.value === presets[name].model)) {
+      markCustom(presets[name].model + ' is not configured. Select a configured model or add it to OLAF_MODELS.');
+      return;
+    }
+    $('model').value = presets[name].model;
+  }
+  $('architecture').value = presets[name].architecture;
+  $('reverse').checked = presets[name].reverse;
+  $('diagnostic').checked = presets[name].diagnostic;
+  setPresets();
+  invalidate();
+  updatePreview();
+}
+$('preset').onchange = () => applyPreset($('preset').value);
 $('provider').onchange = () => {
   setModels();
+  setPresets();
   invalidate();
   updatePreview();
 };
 for (const id of ['model', 'architecture', 'diagnostic', 'reverse'])
   $(id).onchange = () => {
+    markCustom();
     invalidate();
     updatePreview();
   };
@@ -405,6 +556,7 @@ if (loopback)
         o.disabled = false;
         o.textContent = 'OpenAI · local server';
       }
+      setPresets();
     })
     .catch(() => {});
 function provider() {
@@ -467,16 +619,33 @@ $('evaluate').onclick = async () => {
   controls();
   $('results').hidden = true;
   result = null;
+  $('historySave').disabled = true;
+  const runConfig = {
+    preset,
+    provider: $('provider').value,
+    model: $('model').value,
+    architecture: $('architecture').value,
+    reverse: $('reverse').checked,
+    diagnostic: $('diagnostic').checked,
+  };
+  lastInputs = {
+    request: task.request,
+    Left: task.images.Left?.sha256 || null,
+    Right: task.images.Right?.sha256 || null,
+  };
   try {
     result = await evaluateArchitecture(task, provider(), {
-      architecture: $('architecture').value,
-      model: $('model').value,
+      architecture: runConfig.architecture,
+      model: runConfig.model,
       signal: controller.signal,
-      reverse: $('reverse').checked,
-      diagnostic: $('diagnostic').checked,
+      reverse: runConfig.reverse,
+      diagnostic: runConfig.diagnostic,
       progress: status,
     });
+    lastConfig = runConfig;
     renderResult();
+    $('historySave').disabled = false;
+    if ($('historyAuto').checked) saveCurrentEvaluation(true);
     status(
       result.verification && !result.verification.consistent
         ? 'Reverse-order disagreement. Review the pair.'
@@ -514,6 +683,21 @@ function renderResult() {
   line(summary, 'Confidence', result.confidence);
   for (const s of sides) line(summary, s, result.evidence[s]);
   if (o.limitations.length) line(summary, 'Limitations', o.limitations.join(' '));
+  if (lastConfig)
+    line(
+      summary,
+      'Configuration',
+      [
+        presets[lastConfig.preset]?.label || 'Custom',
+        lastConfig.provider === 'mock' ? 'Mock' : 'OpenAI',
+        lastConfig.model,
+        'Architecture ' + lastConfig.architecture.toUpperCase(),
+        lastConfig.reverse ? 'reverse' : '',
+        lastConfig.diagnostic ? 'diagnostic' : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    );
   line(
     summary,
     'Architecture',
@@ -589,6 +773,120 @@ function renderResult() {
   $('results').scrollIntoView({ block: 'nearest' });
 }
 const json = () => JSON.stringify(result, null, 2);
+const HISTORY_AUTO = 'olaf-history-auto';
+function historyAutoEnabled() {
+  try {
+    return localStorage.getItem(HISTORY_AUTO) === '1';
+  } catch {
+    return false;
+  }
+}
+async function requestHash(text) {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest), (v) => v.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+}
+async function currentHistoryRecord() {
+  if (!result || !lastInputs) throw Error('Evaluate a pair before saving history.');
+  return historyRecord({
+    result,
+    task: {
+      images: {
+        Left: { sha256: lastInputs.Left },
+        Right: { sha256: lastInputs.Right },
+      },
+    },
+    preset: lastConfig?.preset || preset,
+    requestHash: await requestHash(lastInputs.request),
+    reference: $('historyReference').value || null,
+  });
+}
+async function saveCurrentEvaluation(automatic = false) {
+  if (historyBusy) return;
+  historyBusy = true;
+  try {
+    const record = await currentHistoryRecord();
+    await saveHistory(record);
+    $('historyStatus').textContent =
+      (automatic ? 'Saved automatically' : 'Saved') + ' · ' + new Date(record.timestamp).toLocaleString();
+    await renderHistory();
+  } catch (error) {
+    $('historyStatus').textContent = error.message;
+  } finally {
+    historyBusy = false;
+  }
+}
+async function renderHistory() {
+  const list = $('historyList');
+  try {
+    const rows = await listHistory();
+    list.replaceChildren();
+    if (!rows.length) {
+      list.append(el('p', 'No saved evaluations yet.'));
+      return;
+    }
+    for (const row of rows.slice(0, 12)) {
+      const item = el('div');
+      item.className = 'historyRow';
+      item.append(
+        el('b', new Date(row.timestamp).toLocaleString()),
+        el(
+          'span',
+          [
+            presets[row.preset]?.label || row.preset || 'Custom',
+            row.provider,
+            row.model,
+            'Architecture ' + String(row.architecture).toUpperCase(),
+            row.winner + '/' + row.stage,
+            row.estimatedUsd == null ? 'cost unavailable' : '$' + Number(row.estimatedUsd).toFixed(4),
+            row.reverseConsistent == null ? 'no reverse pass' : row.reverseConsistent ? 'reverse consistent' : 'reverse disagreement',
+          ].join(' · '),
+        ),
+      );
+      list.append(item);
+    }
+    if (rows.length > 12) list.append(el('p', 'Showing the 12 most recent of ' + rows.length + ' saved evaluations.'));
+    $('historySave').disabled = !result;
+  } catch (error) {
+    $('historyStatus').textContent = error.message;
+  }
+}
+$('historySave').onclick = () => saveCurrentEvaluation(false);
+$('historyRefresh').onclick = () => renderHistory();
+$('historyClear').onclick = async () => {
+  try {
+    await clearHistory();
+    $('historyStatus').textContent = 'History cleared.';
+    await renderHistory();
+  } catch (error) {
+    $('historyStatus').textContent = error.message;
+  }
+};
+$('historyExport').onclick = async () => {
+  try {
+    const data = await exportHistory();
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    const a = el('a');
+    a.href = url;
+    a.download = 'olaf-history-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $('historyStatus').textContent = 'Exported ' + data.records.length + ' record(s).';
+  } catch (error) {
+    $('historyStatus').textContent = error.message;
+  }
+};
+$('historyAuto').checked = historyAutoEnabled();
+$('historyAuto').onchange = () => {
+  try {
+    localStorage.setItem(HISTORY_AUTO, $('historyAuto').checked ? '1' : '0');
+  } catch {
+    status('Could not save the history preference in this browser.');
+  }
+};
 async function copy(value) {
   try {
     await navigator.clipboard.writeText(value);
@@ -738,4 +1036,20 @@ if (
 }
 setModels();
 setArchitectures();
+setPresets();
 render();
+renderHistory();
+window.addEventListener('keydown', (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    event.preventDefault();
+    if (controller) return;
+    if (!$('confirm').checked) {
+      status('Confirm the request and image order before evaluating.');
+      $('confirm').focus();
+      return;
+    }
+    $('evaluate').click();
+  } else if (event.key === 'Escape' && controller) {
+    controller.abort();
+  }
+});

@@ -2,13 +2,20 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { configuredModels, openAIProvider } from './providers/openai.mjs';
+import manifest from './fixtures/manifest.json' with { type: 'json' };
 const root = new URL('../', import.meta.url);
 const files = new Set([
   'olaf.html',
+  'olaf-review.html',
   'favicon.ico',
   'analytics-lite.js',
+  ...Object.keys(manifest).map((name) => 'olaf/fixtures/images/' + name + '.png'),
   ...[
     'app.mjs',
+    'presets.mjs',
+    'history.mjs',
+    
+    'review.mjs',
     'style.css',
     'engine/contracts.mjs',
     'engine/adjudicate.mjs',
@@ -22,13 +29,16 @@ const files = new Set([
     'ingestion/mime.mjs',
     'ingestion/archive.mjs',
     'ingestion/images.mjs',
+    'ingestion/diagnose.mjs',
     'providers/mock.mjs',
     'schemas/task.v1.json',
     'schemas/result.v1.json',
     'schemas/perception.v1.json',
     'fixtures/manifest.json',
-    'fixtures/images/standard.png',
-    'fixtures/images/red.png',
+    'benchmarks/dataset.mjs',
+    'benchmarks/legacy.mjs',
+    'benchmarks/cases.mjs',
+    'benchmarks/taxonomy.mjs',
   ].map((f) => 'olaf/' + f),
 ]);
 const mime = {
