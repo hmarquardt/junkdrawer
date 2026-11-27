@@ -10,7 +10,8 @@ Repository: `/Users/hmarquardt/junkdrawer`, branch `main`.
 - `8135728` — Deterministic hardening (grounding, applicability, rendering/severity guards), benchmark
   taxonomy fixes, Phase 2 report and this handoff.
 
-`8135728` is the Phase 2 completion commit in this checkout. Nothing has been pushed or deployed.
+`8135728` is the Phase 2 code and results commit. A final documentation commit follows it; the exact
+HEAD at handoff is `git log -1 --oneline`. Nothing has been pushed or deployed.
 
 ## What Phase 2 added
 

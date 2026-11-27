@@ -255,4 +255,4 @@ outside the repository. No paid inference was needed after the budget review.
 ## 12. Local commits
 
 Phase 2 implementation: `374bff9`. Deterministic hardening and benchmark evidence: `8135728`.
-Nothing was pushed or deployed. `8135728` is the local completion commit for Phase 2.
+Nothing was pushed or deployed. The exact HEAD at handoff is `git log -1 --oneline`.
