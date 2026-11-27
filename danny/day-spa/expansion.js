@@ -364,7 +364,8 @@ function bind(profile, spa, pack) {
     return result;
   });
   for (const button of body.querySelectorAll('[data-restock]')) button.onclick = () => run((stateNow) => {
-    const result = business.buySupplies(stateNow, pack, button.dataset.restock, Number(button.dataset.packs));
+    const requestId = (globalThis.crypto?.randomUUID?.() || (Date.now() + '-' + Math.random().toString(36).slice(2)));
+    const result = business.buySupplies(stateNow, pack, button.dataset.restock, Number(button.dataset.packs), requestId);
     api.cue(result.error || 'Restocked: ' + result.packs + ' pack(s) for ' + pb(result.price) + '.');
     return result;
   });

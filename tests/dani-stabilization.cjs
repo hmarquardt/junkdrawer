@@ -92,7 +92,7 @@ async function run() {
       spa.session = {appointmentId:'legacy-a',receiptId:'d1:legacy-a',encounter:'base:review',seed:1,day:1};
       const guardedCash = spa.cash;
       const duplicate = B.completeAppointment(spa, ctx, {quality:'perfect'});
-      const guarded = duplicate.duplicate === true && spa.cash === guardedCash;
+      const guarded = (duplicate.duplicate === true || !!duplicate.error) && spa.cash === guardedCash;
       // Repeated assistance and repeated equipment purchase.
       const broke = B.defaultSpa(5); broke.cash = 10; broke.settled = [];
       const firstGrant = B.acceptAssistance(broke), secondGrant = B.acceptAssistance(broke);
@@ -127,6 +127,60 @@ async function run() {
     assert.equal(finance.closeOnce, true, 'payroll is posted once');
     assert.equal(finance.delegateOnce, true, 'delegation resolves once');
 
+    // B2. Permanent idempotency: settlement must not depend on retained receipts or ledger entries.
+    const permanence = await page.evaluate(async () => {
+      const B = await import('./danny/day-spa/business.js');
+      const pack = await (await fetch('./danny/day-spa/pack.json')).json();
+      const pool = [{encounter:'base:review',name:'Review',namespace:'base',region:'nose',targets:3,hidden:1,tier:1}];
+      const ctx = {pack, pool, legends: [], now: 0};
+      const outcome = {quality:'perfect', precision:900, discovered:1, chambers:3, materials:2, releases:3, volume:300, durationMs:60000, records:[], at:0};
+      const spa = B.defaultSpa(4242); B.ensureDay(spa, ctx);
+      const first = spa.appointments[0];
+      B.startSession(spa, pack, first.id); B.completeAppointment(spa, ctx, outcome);
+      const results = [];
+      for (const count of [100, 1000, 10000]) {
+        for (let index = 0; index < count; index++) B.post(spa, 'noise-' + count + '-' + index, 'noise', 0);
+        // Simulate every advisory window being pruned: neither receipts nor the settled id ring exist.
+        spa.completed = []; spa.settled = [];
+        spa.session = {appointmentId: first.id, receiptId: 'd' + first.day + ':' + first.id, encounter: first.encounter, seed: first.seed, day: first.day};
+        const before = spa.cash;
+        const again = B.completeAppointment(spa, ctx, outcome);
+        results.push({count, rejected: again.duplicate === true || !!again.error, unchanged: spa.cash === before,
+          ledger: spa.transactions.length, maskSet: (spa.settleMask & (1 << 0)) !== 0});
+      }
+      // Out-of-order completion within one day: second appointment first, then the first.
+      const ooo = B.defaultSpa(77); B.ensureDay(ooo, ctx);
+      const [a1, a2] = ooo.appointments;
+      B.startSession(ooo, pack, a2.id); B.completeAppointment(ooo, ctx, outcome);
+      B.startSession(ooo, pack, a1.id); B.completeAppointment(ooo, ctx, outcome);
+      const oooReceipts = ooo.completed.length;
+      ooo.session = {appointmentId: a1.id, receiptId: 'd' + a1.day + ':' + a1.id, encounter: a1.encounter, seed: a1.seed, day: a1.day};
+      const oooDuplicate = B.completeAppointment(ooo, ctx, outcome);
+      // A closed day can never settle, even with a reconstructed session.
+      B.closeDay(ooo, ctx); B.advanceDay(ooo, ctx);
+      const oldCash = ooo.cash;
+      ooo.session = {appointmentId: a1.id, receiptId: 'd' + a1.day + ':' + a1.id, encounter: a1.encounter, seed: a1.seed, day: a1.day};
+      const stale = B.completeAppointment(ooo, ctx, outcome);
+      const archived = (ooo.settleLog || []).length > 0;
+      // Malformed identifier cannot settle either.
+      const bad = B.defaultSpa(88); B.ensureDay(bad, ctx);
+      bad.appointments = [{...bad.appointments[0], id: 'dX-a1'}];
+      bad.session = {appointmentId: 'dX-a1', receiptId: 'd1:dX-a1', encounter: 'base:review', seed: 1, day: 1};
+      const malformed = B.completeAppointment(bad, ctx, outcome);
+      return {results, allRejected: results.every(item => item.rejected && item.unchanged && item.maskSet && item.ledger <= 200),
+        pruned: results.every(item => item.ledger <= 200) && results.find(item => item.count === 10000).ledger === 200, oooReceipts, oooDuplicate: !!oooDuplicate.duplicate || !!oooDuplicate.error,
+        staleRejected: !!stale.error && ooo.cash === oldCash, archived,
+        malformedRejected: !!malformed.error || malformed.duplicate === true, balanced: B.reconcile(ooo).balanced};
+    });
+    assert.equal(permanence.allRejected, true, 'settlement is refused after 100/1,000/10,000 later transactions');
+    assert.equal(permanence.pruned, true, 'the ledger was pruned in every permanence case');
+    assert.equal(permanence.oooReceipts, 2, 'out-of-order settlement records each appointment once');
+    assert.equal(permanence.oooDuplicate, true, 're-settling an out-of-order appointment is refused');
+    assert.equal(permanence.staleRejected, true, 'a closed day cannot be settled again');
+    assert.equal(permanence.archived, true, 'the day mask is archived on advance');
+    assert.equal(permanence.malformedRejected, true, 'a malformed appointment id cannot settle');
+    assert.equal(permanence.balanced, true, 'accounting stays reconciled through the stress test');
+
     // C. Economic audit: 100 seeds across representative strategies.
     const economy = await page.evaluate(async () => {
       const B = await import('./danny/day-spa/business.js');
@@ -142,6 +196,7 @@ async function run() {
         aggressive: {quality:'perfect', buffer:100, pricing:'standard'},
         marketing: {quality:'clean', buffer:900, pricing:'standard', market:true},
         delegation: {quality:'clean', buffer:900, pricing:'standard', delegate:true},
+        mixed: {quality:'perfect', buffer:800, pricing:'standard', market:true, delegate:true},
         midnight: {quality:'perfect', buffer:600, pricing:'specialist', midnight:true},
         low: {quality:'rough', buffer:900, pricing:'standard'}
       };
@@ -153,7 +208,7 @@ async function run() {
           const spa = B.defaultSpa(seed * 7919);
           spa.pricing = config.pricing;
           let tiers = {}; let stalled = 0, lastTier = 1, lastChange = 1, grants = 0;
-          for (let dayIndex = 0; dayIndex < 60; dayIndex++) {
+          for (let dayIndex = 0; dayIndex < 120; dayIndex++) {
             B.ensureDay(spa, ctx);
             if (config.delegate && spa.tier >= 3 && !spa.staff.some(m => m.role === 'technician')) B.hireStaff(spa, pack, 'disgusting-day-spa:role-technician');
             for (const appointment of [...spa.appointments]) {
@@ -177,9 +232,15 @@ async function run() {
           runs.push({tier: spa.tier, cash: spa.cash, profit: spa.stats.profitTotal, reputation: spa.reputation,
             appointments: spa.stats.appointments, delegated: spa.stats.delegated, grants, stalled: stalled > 0,
             firstTier2: tiers[2] || null, firstTier4: tiers[4] || null, firstTier7: tiers[7] || null,
-            balanced: B.reconcile(spa).balanced});
+            firstTier5: tiers[5] || null, firstTier6: tiers[6] || null, balanced: B.reconcile(spa).balanced});
         }
+        const daysFor = tier => runs.filter(r => r['firstTier' + tier]).map(r => r['firstTier' + tier]);
         results[name] = {medianTier: percentile(runs.map(r => r.tier), 0.5), medianCash: percentile(runs.map(r => r.cash), 0.5),
+          pctTier5: Math.round(daysFor(5).length), pctTier6: Math.round(daysFor(6).length), pctTier7: Math.round(daysFor(7).length),
+          medianDaysTier5: daysFor(5).length ? percentile(daysFor(5), 0.5) : null,
+          medianDaysTier6: daysFor(6).length ? percentile(daysFor(6), 0.5) : null,
+          medianDaysTier7: daysFor(7).length ? percentile(daysFor(7), 0.5) : null,
+          medianAppointments: percentile(runs.map(r => r.appointments), 0.5), medianDelegated: percentile(runs.map(r => r.delegated), 0.5),
           p10Cash: percentile(runs.map(r => r.cash), 0.1), p90Cash: percentile(runs.map(r => r.cash), 0.9),
           medianProfit: percentile(runs.map(r => r.profit), 0.5), medianReputation: percentile(runs.map(r => r.reputation), 0.5),
           tier7: runs.filter(r => r.tier === 7).length, stalled: runs.filter(r => r.stalled).length,
@@ -188,8 +249,8 @@ async function run() {
       }
       return results;
     });
-    console.log('Economic audit (100 seeds, 60 business days):');
-    for (const [name, result] of Object.entries(economy)) console.log('  ' + name.padEnd(13) + ' medianTier=' + result.medianTier + ' tier7=' + result.tier7 + '/100 stalled=' + result.stalled + '/100 medianCash=' + result.medianCash + ' p10=' + result.p10Cash + ' p90=' + result.p90Cash + ' grants=' + result.grants + ' balanced=' + result.balanced);
+    console.log('Economic audit (100 seeds, 120 business days):');
+    for (const [name, result] of Object.entries(economy)) console.log('  ' + name.padEnd(13) + ' tier7=' + result.tier7 + '/100 pctT5/6/7=' + result.pctTier5 + '/' + result.pctTier6 + '/' + result.pctTier7 + ' daysT5/6/7=' + result.medianDaysTier5 + '/' + result.medianDaysTier6 + '/' + result.medianDaysTier7 + ' medianTier=' + result.medianTier + ' cash=' + result.medianCash + ' [p10 ' + result.p10Cash + ', p90 ' + result.p90Cash + '] apps=' + result.medianAppointments + ' delegated=' + result.medianDelegated + ' grants=' + result.grants + ' balanced=' + result.balanced);
     for (const [name, result] of Object.entries(economy)) {
       assert.equal(result.balanced, true, name + ' reconciles across 100 seeds');
       assert.equal(result.medianTier >= 1 && result.medianTier <= 7, true);

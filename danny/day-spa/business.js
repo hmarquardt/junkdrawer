@@ -28,7 +28,7 @@ export function defaultSpa(seed = 0) {
     inventory: {pads: 20, cartridges: 6, gel: 4, cleaning: 10, maintenance: 2, spectral: 0, environment: 0},
     staff: [], appointments: [], completed: [], transactions: [], reviews: [], marketing: [],
     events: [], pendingEvent: null, session: null, history: [], recovery: 0, andi: 0,
-    ledgerSeq: 0, closedDay: 0, eventDay: 0, assistDay: 0,
+    ledgerSeq: 0, closedDay: 0, eventDay: 0, assistDay: 0, settleDay: 0, settleMask: 0, settleLog: [],
     // Cumulative accounting survives ledger pruning: opening + inflow - outflow must always equal
     // cash. Deferred amounts are tracked separately and are never counted as paid expenses.
     accounting: {opening: 2500, inflow: 0, outflow: 0, grants: 0, deferred: 0},
@@ -75,6 +75,20 @@ export function normalizeSpa(spa) {
     grants: int(prior.grants), deferred: int(prior.deferred)}
     : {opening: Math.max(0, out.cash - inflow + outflow), inflow, outflow, grants: 0, deferred: 0};
   out.settled = Array.isArray(spa.settled) ? spa.settled.filter(id => typeof id === 'string').slice(-80) : [];
+  // Permanent settlement guard: a per-day bitmask whose bits are set once per appointment slot. The
+  // guard does not depend on retained receipts or ledger entries, so pruning cannot re-open a settled
+  // appointment. Only the current business day is eligible for settlement at all.
+  out.settleDay = int(out.settleDay);
+  out.settleMask = clamp(int(out.settleMask), 0, 16383);
+  out.settleLog = Array.isArray(out.settleLog) ? out.settleLog.filter(item => item && int(item.day) > 0)
+    .map(item => ({day: int(item.day), mask: clamp(int(item.mask), 0, 16383)})).slice(-30) : [];
+  if (!out.settleDay && out.settled.length) {
+    out.settleDay = out.day;
+    for (const id of out.settled) {
+      const match = /^d(\d+):(.+)$/.exec(id);
+      if (match && parseInt(match[1], 10) === out.day) out.settleMask |= (1 << slotOf(match[2]));
+    }
+  }
   out.closedDay = int(out.closedDay); out.eventDay = int(out.eventDay); out.assistDay = int(out.assistDay);
   out.stats = {...base.stats, ...(out.stats && typeof out.stats === 'object' ? out.stats : {})};
   for (const key of Object.keys(base.stats)) out.stats[key] = clamp(int(out.stats[key]), 0, 999999999);
@@ -291,11 +305,36 @@ export function reputationDelta(score, records = 0) {
   return base + Math.min(4, records * 2);
 }
 
+// Appointment slots are stable within a business day: a1..a12, L for a legendary referral, E for an
+// event referral. 14 bits fit in one integer and survive every pruning policy.
+const slotOf = id => {
+  const normal = /-a(\d+)$/.exec(String(id));
+  if (normal) return clamp(parseInt(normal[1], 10) - 1, 0, 11);
+  if (/-L$/.test(String(id))) return 12;
+  return 13;
+};
 // --- settlement -------------------------------------------------------------------------------
 // A receipt is written once per appointment. Re-entering with the same receipt id returns the stored
 // receipt and moves no money, which is what makes interrupted appointments and replays safe.
 function settle(spa, ctx, appointment, outcome, options = {}) {
   const pack = ctx.pack, receiptId = options.receiptId || ('d' + spa.day + ':' + appointment.id);
+  // Rule 1: only today's business can settle. An appointment object from a closed day is refused even
+  // if every receipt and ledger entry has been pruned.
+  if (int(appointment.day) !== spa.day || (spa.settleDay && spa.settleDay !== spa.day)) {
+    return {error: 'That appointment belongs to a closed business day.'};
+  }
+  // Rule 2: the identifier must belong to today's generation. Malformed historical receipts cannot
+  // collide with a real slot.
+  if (!new RegExp('^d' + spa.day + '-(a\\d+|L|E\\d+)$').test(String(appointment.id))) {
+    return {error: 'That appointment identifier is not valid for today.'};
+  }
+  const slot = slotOf(appointment.id);
+  // Rule 3: one settlement per slot per day, regardless of out-of-order completion.
+  if (spa.settleMask & (1 << slot)) {
+    const stored = spa.completed.find(item => item.id === receiptId);
+    return {receipt: stored || {id: receiptId}, duplicate: true,
+      review: spa.reviews.find(item => item.appointmentId === appointment.id) || null};
+  }
   if ((spa.settled || []).includes(receiptId)) {
     return {receipt: spa.completed.find(item => item.id === receiptId) || {id: receiptId}, duplicate: true,
       review: spa.reviews.find(item => item.appointmentId === appointment.id) || null};
@@ -332,6 +371,8 @@ function settle(spa, ctx, appointment, outcome, options = {}) {
     factors: satisfaction.factors, reputation, at: int(options.at)}
   spa.completed.unshift(receipt); spa.completed = spa.completed.slice(0, COMPLETED_LIMIT);
   spa.settled = [...(spa.settled || []), receiptId].slice(-80);
+  spa.settleDay = spa.day;
+  spa.settleMask = (spa.settleMask || 0) | (1 << slot);
   const review = reviewFor(spa, pack, receipt, satisfaction);
   spa.reviews.unshift(review); spa.reviews = spa.reviews.slice(0, REVIEW_LIMIT);
   appointment.status = 'complete';
@@ -352,7 +393,11 @@ export function completeAppointment(spa, ctx, outcome = {}) {
   if (!spa.session) return {error: 'No appointment is in progress.'};
   const appointment = spa.appointments.find(item => item.id === spa.session.appointmentId);
   if (!appointment) { spa.session = null; return {error: 'The appointment disappeared.'}; }
-  return settle(spa, ctx, appointment, {...outcome, delegated: false}, {receiptId: spa.session.receiptId, at: outcome.at});
+  const result = settle(spa, ctx, appointment, {...outcome, delegated: false}, {receiptId: spa.session.receiptId, at: outcome.at});
+  // A duplicate or rejected settlement must still end the session, otherwise the day cannot close.
+  if (result.duplicate) appointment.status = 'complete';
+  if (result.duplicate || result.error) spa.session = null;
+  return result;
 }
 export function delegateAppointment(spa, ctx, appointmentId) {
   if (spa.session) return {error: 'Finish the current appointment first.'};
@@ -422,7 +467,9 @@ export function advanceDay(spa, ctx) {
   if (spa.session) return {error: 'An appointment is in progress.'};
   const closed = closeDay(spa, ctx);
   if (closed.error) return closed;
+  if (spa.settleMask) spa.settleLog = [...(spa.settleLog || []), {day: spa.day, mask: spa.settleMask}].slice(-30);
   spa.day++;
+  spa.settleDay = spa.day; spa.settleMask = 0;
   // The recovery discount applies to the queue generated for the new day, then expires.
   generateDay(spa, ctx);
   spa.recovery = 0;
@@ -471,7 +518,7 @@ export function buyEquipment(spa, pack, id) {
   spa.stats.equipmentVariety = spa.equipment.length;
   return {id, name: item.name};
 }
-export function buySupplies(spa, pack, id, packs = 1) {
+export function buySupplies(spa, pack, id, packs = 1, requestId = null) {
   const item = pack.supplies.find(entry => entry.id === id || entry.use === id);
   if (!item) return {error: 'Unknown supply.'};
   if (item.tier > spa.tier) return {error: 'Requires facility tier ' + item.tier + '.'};
@@ -479,7 +526,7 @@ export function buySupplies(spa, pack, id, packs = 1) {
   const bulk = quantity >= 3;
   const price = Math.round(item.price * quantity * (bulk ? 0.9 : 1));
   if (spa.cash < price) return {error: 'Not enough Pore Bucks.'};
-  post(spa, 'supplies-' + item.use + '-' + spa.day + '-' + spa.ledgerSeq, 'supplies-purchase', -price, item.name + ' x' + quantity);
+  post(spa, 'supplies-' + (requestId || (item.use + '-' + spa.day + '-' + spa.ledgerSeq)), 'supplies-purchase', -price, item.name + ' x' + quantity);
   spa.inventory[item.use] = clamp((spa.inventory[item.use] || 0) + item.pack * quantity, 0, 9999);
   if (bulk) spa.stats.bulkBuys++;
   return {id: item.id, packs: quantity, price, bulk};

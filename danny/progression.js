@@ -86,6 +86,8 @@ function validSpa(spa){
     && bounded(spa.reviews,30,item=>item&&typeof item==='object')
     && bounded(spa.marketing,8,item=>item&&typeof item==='object')
     && bounded(spa.history,30,item=>item&&typeof item==='object')
+    && (spa.settleDay===undefined||money(spa.settleDay??0))&&(spa.settleMask===undefined||money(spa.settleMask??0))
+    && (spa.settleLog===undefined||(Array.isArray(spa.settleLog)&&spa.settleLog.length<=30&&spa.settleLog.every(entry=>entry&&Number.isSafeInteger(entry.mask))))
     && (spa.session===undefined||spa.session===null||typeof spa.session==='object')
     && (spa.pendingEvent===undefined||spa.pendingEvent===null||typeof spa.pendingEvent==='object')
     && (spa.stats===undefined||(spa.stats&&typeof spa.stats==='object'));

@@ -1,9 +1,16 @@
 const { test, expect } = require("@playwright/test");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
 
 test.use({ channel: "chrome" });
 
-const FIXTURE_URL = "file:///var/folders/c3/ldm9f34x49gbzf_2mx_4ws3r0000gn/T/opencode/jd-storage-fixture.html";
+// The fixture is generated in the platform temp directory instead of depending on an undocumented
+// absolute path. A real file:// page is required because about:blank denies localStorage.
+const FIXTURE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jd-storage-fixture-"));
+const FIXTURE_PATH = path.join(FIXTURE_DIR, "fixture.html");
+fs.writeFileSync(FIXTURE_PATH, '<!doctype html><meta charset="utf-8"><title>jd-storage fixture</title>');
+const FIXTURE_URL = "file://" + FIXTURE_PATH;
 
 async function freshPage(page) {
   // about:blank denies localStorage; a real file:// page has a usable origin.
