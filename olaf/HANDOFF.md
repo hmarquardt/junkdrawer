@@ -7,9 +7,10 @@ Repository: `/Users/hmarquardt/junkdrawer`, branch `main`.
 
 - `a41a053` — Phase 1 implementation (received from Codex).
 - `374bff9` — Phase 2 contracts, staged architectures, expanded fixtures/dataset, diagnostic tooling, tests, UI.
+- `8135728` — Deterministic hardening (grounding, applicability, rendering/severity guards), benchmark
+  taxonomy fixes, Phase 2 report and this handoff.
 
-Later commits in this phase add deterministic guards, benchmark results, this handoff and the report.
-Check `git log --oneline` for the current head; do not assume it is published.
+`8135728` is the Phase 2 completion commit in this checkout. Nothing has been pushed or deployed.
 
 ## What Phase 2 added
 

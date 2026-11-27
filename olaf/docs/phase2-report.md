@@ -254,5 +254,5 @@ outside the repository. No paid inference was needed after the budget review.
 
 ## 12. Local commits
 
-Phase 2 implementation: `374bff9`. Follow-up deterministic guards, benchmark evidence, this report and
-the handoff are committed separately; nothing was pushed or deployed.
+Phase 2 implementation: `374bff9`. Deterministic hardening and benchmark evidence: `8135728`.
+Nothing was pushed or deployed. `8135728` is the local completion commit for Phase 2.
