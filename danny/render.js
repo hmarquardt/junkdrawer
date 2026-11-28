@@ -207,18 +207,64 @@ function drawStream(c,stream,pos,r,l){
   }
   c.restore();
 }
+function drawOpticalHud(c,s,w,h) {
+  if(!s.contact) return;
+  const l=s.field[s.active]; if(!l) return;
+  const pos=position(s,l), px=pos.x*w, py=pos.y*h;
+  const baseR=Math.max(24,l.size*Math.min(w,h)*s.zoom*1.32);
+  const pct=Math.max(0,Math.min(1,s.applied??s.force));
+  c.save();
+  // Subtle recessed ring + live phosphor arc right on the active target
+  c.strokeStyle='rgba(14,19,16,.55)';
+  c.lineWidth=Math.max(3,baseR*.09);
+  c.beginPath();c.arc(px,py,baseR,0,Math.PI*2);c.stroke();
+  c.strokeStyle=s.inBand?'#cefa80':'rgba(232,244,218,.78)';
+  c.lineWidth=Math.max(2.5,baseR*(s.inBand?.105:.075));
+  c.lineCap='round';
+  if(s.inBand){c.shadowColor='#cefa80';c.shadowBlur=12;}
+  c.beginPath();c.arc(px,py,baseR,-Math.PI/2,-Math.PI/2+pct*Math.PI*2);c.stroke();
+  c.restore();
+}
 function drawBurst(c,s,w,h) {
+  drawOpticalHud(c,s,w,h);
   contactTool(c,s,w,h);
   if(!s.burst)return;
   const b=s.burst, l=s.field[b.id], pos=position(s,l);
   const r=l.size*Math.min(w,h)*s.zoom;
+  const px=pos.x*w, py=pos.y*h;
+  // Brief expanding optical release ring + crisp micro-callout
+  if(b.t<.55 && !s.reducedMotion){
+    const u=b.t/.55;
+    c.save();
+    c.strokeStyle=b.perfect?`rgba(206,250,128,${(1-u)*.82})`:`rgba(220,242,216,${(1-u)*.62})`;
+    c.lineWidth=Math.max(1.5,(1-u)*3.5);
+    c.beginPath();c.arc(px,py,r*(.9+u*1.75),0,Math.PI*2);c.stroke();
+    c.restore();
+  }
   // A reservoir can open several outlets in one release. Each stream keeps its own material.
   const streams=b.streams||[b];
   for(const stream of streams){
-    c.save();c.translate(pos.x*w,pos.y*h);c.scale(r,r);
+    c.save();c.translate(px,py);c.scale(r,r);
     c.globalAlpha=Math.max(0,Math.min(1,(1-b.t)*4));
     c.lineCap='round';c.lineJoin='round';
     drawStream(c,stream,{x:0,y:0},r,l);
+    c.restore();
+  }
+  if(b.callout && b.t<.82){
+    const fade=Math.min(1,(0.82-b.t)*3.2), rise=s.reducedMotion?0:b.t*26;
+    c.save();
+    c.globalAlpha=fade;
+    c.font='700 '+Math.max(12,Math.round(Math.min(w,h)*.024))+'px ui-monospace, SFMono-Regular, Menlo, monospace';
+    c.textAlign='center';
+    c.fillStyle='rgba(17,22,19,.86)';
+    const label=b.callout, tw=c.measureText(label).width+14, th=22;
+    const tx=Math.max(tw/2+8,Math.min(w-tw/2-8,px));
+    const ty=Math.max(30,py-r*1.15-rise);
+    c.beginPath();c.roundRect(tx-tw/2,ty-th/2,tw,th,4);c.fill();
+    c.strokeStyle=b.perfect?'#cefa80':'#9db89c';
+    c.lineWidth=1;c.stroke();
+    c.fillStyle=b.perfect?'#cefa80':'#eff4e8';
+    c.fillText(label,tx,ty+4);
     c.restore();
   }
 }

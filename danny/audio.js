@@ -78,6 +78,9 @@ export function soundEngine(){
       if(cue==='release'){
         tone(450+v*25,43,.14,.25,'sine',0,pan);tone(820,115,.059,.09,'triangle',0,pan);
         tone(190+v*8,82,.08,.065,'sine',.069,pan);
+      }else if(cue==='perfect'){
+        tone(470+v*25,48,.14,.24,'sine',0,pan);tone(880,140,.06,.09,'triangle',0,pan);
+        tone(740,1110,.11,.065,'sine',.045,pan);tone(1110,1480,.12,.045,'triangle',.09,pan);
       }else if(cue==='miss')tone(154,82,.12,.10,'triangle',0,pan);
       else if(cue==='boss'||cue==='win'){
         [330,416,494,660].forEach((n,i)=>tone(n,n*1.02,.18,.10,'triangle',i*.08,pan));

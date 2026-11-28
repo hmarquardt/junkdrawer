@@ -13,7 +13,7 @@ let profile,visit,field,tool,active=0,zoom=1,draw,ready=false;
 // The Pore Explorer is fetched only when a player opens it or resumes its checkpoint.
 let expansion=null,expansionLoading=null,clinic=null,clinicLoading=null,world=null,worldLoading=null,spa=null,spaLoading=null;
 let database,writesPending=0,saveBroken=false,markerListeners;
-let started=null,source=null,force=0,velocity=0,dx=0,dy=0,burst=null,lastStamp=0,frameMs=0,pending=0,inside=false;
+let started=null,source=null,force=0,appliedNow=0,velocity=0,dx=0,dy=0,burst=null,lastStamp=0,frameMs=0,pending=0,inside=false;
 const current=()=>field[active], run=()=>visit.run, complete=()=>run().cleared.length===field.length;
 const locked=l=>l.boss && run().cleared.length<field.length-1;
 const layer=()=>run().layers[active]||0;
@@ -40,9 +40,15 @@ function save(eraseHistory=false){
 function view(){
   const t=current();
   return {index:visit.patient.grain,field,active,cleared:run().cleared,layers:run().layers,
-    force,dx,dy,burst,zoom,region:visit.region,patient:visit.patient,frameMs,
+    force,applied:appliedNow,inBand:inside,reducedMotion:!!profile?.settings?.reducedMotion,
+    dx,dy,burst,zoom,region:visit.region,patient:visit.patient,frameMs,
     cx:zoom===1?.5:Math.max(.5/zoom,Math.min(1-.5/zoom,t.x)),
     cy:zoom===1?.5:Math.max(.5/zoom,Math.min(1-.5/zoom,t.y)),contact:started!==null,toolId:tool.art};
+}
+function pulseStage(cls){
+  if(profile?.settings?.reducedMotion)return;
+  const el=$('stage');el.classList.remove('pop-flash','miss-flash');
+  void el.offsetWidth;el.classList.add(cls);
 }
 function schedule(){if(!pending)pending=requestAnimationFrame(frame);}
 function updateBand(zone){
@@ -54,6 +60,7 @@ function frame(stamp){
   frameMs=lastStamp?Math.max(0,stamp-lastStamp):16;lastStamp=stamp;
   const dt=Math.min(.05,frameMs/1000),seconds=started===null?0:Math.max(0,stamp-started)/1000;
   const applied=started===null?0:pressure(seconds,current(),tool,layer());
+  appliedNow=applied;
   // Damped surface recovery; short substeps also bound the response after a suspended frame.
   for(let i=0;i<4;i++){
     const step=dt/4;velocity+=((applied-force)*260-velocity*23)*step;force+=velocity*step;
@@ -65,6 +72,8 @@ function frame(stamp){
   inside=inBand;
   if(started!==null && profile.settings.sound)audio.pressure(applied,inside);
   $('meter').classList.toggle('inside',inside);
+  $('extract').classList.toggle('in-band',inside);
+  $('percent').classList.toggle('hot',inside);
   const val=Math.round(applied*100);
   $('percent').textContent=val+'%';$('meter').setAttribute('aria-valuenow',val);
   $('needle').style.left='calc('+val+'% - 1px)';
@@ -112,6 +121,8 @@ function refreshMarkers(){
 }
 function syncControls(){
   $('extract').disabled=!ready;$('extract').hidden=complete();$('review').hidden=!complete();
+  $('extract').classList.toggle('holding',started!==null);
+  $('extract').classList.toggle('in-band',started!==null&&inside);
   $('extract').classList.toggle('latched',started!==null&&profile.settings.toggle);
   $('extract').lastElementChild.textContent=profile.settings.toggle?(started!==null?'Release pressure':'Start pressure'):'Hold to extract';
   $('targetCount').textContent=run().cleared.length+' / '+field.length;
@@ -191,12 +202,13 @@ function release(){
   started=source=null;audio.stop();inside=false;syncControls();
   if(!result.success && !visit.zen){
     if(run().streak){run().streak=0;save();}
+    pulseStage('miss-flash');
     cue(value<zone.center?'A little early. Release when the band lights up.':'Too much pressure. Try the next pass through green.');play('miss');schedule();return;
   }
   // A reservoir target hands its release to the expansion; base targets are unchanged.
   const deep=expansion?.active()?expansion.flow({profile,visit,run:run(),target:l,tool,value,perfect:result.perfect,dx,dy}):null;
-  if(deep?.refused || deep?.blocked){cue(deep.message);play(deep.cue||'miss');schedule();return;}
-  play(deep?.cue||'release',l.phase,deep?.pan||0);buzz(l.boss?38:20);
+  if(deep?.refused || deep?.blocked){pulseStage('miss-flash');cue(deep.message);play(deep.cue||'miss');schedule();return;}
+  play(deep?.cue||(result.perfect && !visit.zen?'perfect':'release'),l.phase,deep?.pan||0);buzz(l.boss?38:20);
   if(tool.audio && profile.settings.sound)audio.asset(content.get('assets',tool.audio).url);
   if(deep?.diagnostic){save();renderUI();cue(deep.message);schedule();return;}
   // The vortex can advance two flow units in one release; reward() still commits one layer.
@@ -205,6 +217,9 @@ function release(){
   if(profile.settings.reducedMotion){stepMaterial(burst,.08);burst.life=.22;}
   lastStamp=now;
   const before=availableUpgrades(profile).length,prize=reward(profile,visit,l,result.perfect);
+  burst.perfect=!!result.perfect && !visit.zen;
+  burst.callout=prize.partial?'SEAL RELEASED':visit.zen?'CLEAN':result.perfect?'★ PERFECT':'CLEAN';
+  pulseStage('pop-flash');
   if(!prize.partial){active=field.find(x=>!run().cleared.includes(x.id))?.id??active;force=velocity=0;zoom=1;}
   save();renderUI();
   if(focusMarker)(complete()?$('review'):$('markers').querySelector('.current'))?.focus({preventScroll:true});

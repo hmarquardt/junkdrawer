@@ -1,8 +1,8 @@
 // The file-scoped registration controls only the game document on the shared Pages origin.
-const cacheName = 'junkdrawer-danny-shell-2026.11.25.11';
+const cacheName = 'junkdrawer-danny-shell-2026.11.28.1';
 // Expansion media and modules are cached on first use, so the base install stays small and the
 // expansion remains playable offline after one online visit.
-const expansionCache = 'junkdrawer-danny-expansion-2026.11.25.11';
+const expansionCache = 'junkdrawer-danny-expansion-2026.11.28.1';
 const page = './dani-the-pimple-popper.html';
 const legacy = new URL('./danny-the-pimple-popper.html',self.location.href).href;
 const expansionPrefixes = ['./danny/pore-explorer/','./danny/midnight-clinic/','./danny/world-book/','./danny/day-spa/'].map(path => new URL(path,self.location.href).href);

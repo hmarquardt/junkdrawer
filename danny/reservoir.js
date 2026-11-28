@@ -295,12 +295,12 @@ export function replay(graph, progress = {}, options = {}) {
       changed = false;
       for (const node of nodes) {
         if (openAll || scanned.has(node.key) || spectral) node.revealed = node.revealed || node.hidden || !node.hidden;
-        if (!node.hidden || node.revealed) { node.phasedNow = node.phased ? !phaseOpen(node) : false; continue; }
+        if (!node.hidden || node.revealed) { node.phasedNow = !(env && env.ignorePhase) && node.phased ? !phaseOpen(node) : false; continue; }
         const parents = graph.edges.filter(edge => edge.b === node.key).map(edge => map.get(edge.a));
         if (parents.length && parents.every(parent => parent && parent.empty)) {
           node.revealed = true; node.exposed = true; changed = true;
         }
-        node.phasedNow = node.phased ? !phaseOpen(node) : false;
+        node.phasedNow = !(env && env.ignorePhase) && node.phased ? !phaseOpen(node) : false;
       }
     }
   };
@@ -410,7 +410,7 @@ export function replay(graph, progress = {}, options = {}) {
     gates, migrating, held, env, units, tick,
     dormant: dormantKeys.filter((key, index) => index < dormantActivated),
     pending: dormantKeys.slice(dormantActivated),
-    phaseClosed: nodes.filter(node => node.phased && !phaseOpen(node)).map(node => node.key),
+    phaseClosed: env && env.ignorePhase ? [] : nodes.filter(node => node.phased && !phaseOpen(node)).map(node => node.key),
     outlet: 'n0', pass: visits
   };
 }
