@@ -66,6 +66,7 @@ let s,
   view,
   audio,
   ambient,
+  noiseBuffer,
   last = 0,
   frame = 0,
   dialogPaused = false;
@@ -73,6 +74,28 @@ const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const point = (x, z) => ({ x, z, angle: Math.PI, speed: 0 });
 const target = (x, z) => ({ x, z, used: false });
 const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
+function shake(amount = 0.7) {
+  if (s) s.shake = Math.max(s.shake || 0, amount);
+}
+function noiseBurst(len = 0.22, cutoff = 520, vol = 0.08, delay = 0) {
+  if (!audio || !prefs.sound || !noiseBuffer) return;
+  const src = audio.createBufferSource(),
+    filter = audio.createBiquadFilter(),
+    g = audio.createGain(),
+    t = audio.currentTime + delay;
+  src.buffer = noiseBuffer;
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(cutoff, t);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(80, cutoff * 0.28), t + len);
+  g.gain.setValueAtTime(0.001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  src.connect(filter);
+  filter.connect(g);
+  g.connect(audio.destination);
+  src.start(t);
+  src.stop(t + len + 0.02);
+}
 function tone(freq, len = 0.1, delay = 0, wave = "triangle", vol = 0.06) {
   if (!audio || !prefs.sound) return;
   const o = audio.createOscillator(),
@@ -103,8 +126,11 @@ function unlockSound() {
       low = (low + 0.05 * (Math.random() * 2 - 1)) / 1.05;
       data[i] = low;
     }
+    noiseBuffer = audio.createBuffer(1, audio.sampleRate * 0.6, audio.sampleRate);
+    const nd = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
     ambient = audio.createGain();
-    ambient.gain.value = 0.07;
+    ambient.gain.value = 0.065;
     const road = audio.createBufferSource();
     road.buffer = buffer;
     road.loop = true;
@@ -153,6 +179,8 @@ function resetStage(stage) {
     receiptUntil: 0,
     impactUntil: 0,
     lastNear: 0,
+    shake: 0,
+    fxBursts: [],
   };
   if (stage === 0) s.rat = point(-5, 5);
   if (stage === 1 || stage === 4) {
@@ -221,6 +249,7 @@ function play() {
 function syncHud() {
   $("health").value = s.hp;
   $("bhealth").value = s.boss;
+  $("health").classList.toggle("low", s.hp <= Math.max(1, Math.floor(s.maxHp * 0.35)));
 }
 function say(lines, force = false) {
   if (!force && s.time - s.lastLine < 5) return;
@@ -231,8 +260,10 @@ function say(lines, force = false) {
 }
 function strike() {
   s.boss--;
+  shake(0.85);
   tone(187, 0.23);
   tone(281, 0.28, 0.12);
+  noiseBurst(0.18, 420, 0.065);
   if (!s.boss) {
     completeCheckpoint();
     keys.clear();
@@ -255,6 +286,9 @@ function strike() {
 function victoryCard() {
   s.mode = "won";
   $("finish").hidden = true;
+  [392, 493.88, 587.33, 783.99].forEach((freq, i) =>
+    tone(freq, 0.28, i * 0.085, "triangle", 0.055),
+  );
   const end = s.stage === 8,
     chapterEnd = s.stage === 4;
   showCard(
@@ -290,11 +324,13 @@ function hurt() {
   }
   s.hp--;
   s.inv = 1.9;
+  shake(0.92);
   tone(72, 0.26, 0, "sawtooth");
+  noiseBurst(0.22, 320, 0.09);
   const v = document.createElement("div");
   v.className = "hit";
   $("view").append(v);
-  setTimeout(() => v.remove(), 240);
+  setTimeout(() => v.remove(), 260);
   if (s.hp <= 0) {
     s.mode = "lost";
     showCard(
@@ -313,8 +349,11 @@ function dodge() {
   s.dash = 0.65;
   s.dodgeWait = 1.2;
   tone(248, 0.08);
-  if (s.attack && distance(s.andi, s.attack) < s.attack.radius + 0.65)
+  noiseBurst(0.11, 1600, 0.035);
+  if (s.attack && distance(s.andi, s.attack) < s.attack.radius + 0.65) {
     say(["Absolutely not.", "I'm putting in for a personal day."]);
+    if (s.fork) forkBurst(s.andi, "CLOSE CALL!", "dodge");
+  }
 }
 function action() {
   if (s?.mode !== "play" || s.actionWait > 0) return;
@@ -577,7 +616,9 @@ function enemies(dt) {
     a.delay -= dt;
     if (a.delay <= 0 && !a.landed) {
       a.landed = true;
+      shake(s.stage === 2 ? 1.05 : 0.55);
       tone(56, 0.36);
+      noiseBurst(0.28, 280, 0.09);
       if (distance(p, a) < a.radius) hurt();
       if (s.stage === 2 || (s.stage === 4 && s.step === 2)) {
         r.x = a.x;
@@ -668,6 +709,7 @@ function loop(now) {
   view.performance?.(now - last);
   const dt = clamp((now - last) / 1000 || 0, 0, 0.05);
   last = now;
+  if (s.shake > 0) s.shake = Math.max(0, s.shake - dt * 2.8);
   if (s.mode === "intro" && !$("dialog").open) {
     s.time += dt;
     s.intro += dt;
@@ -697,8 +739,10 @@ function loop(now) {
     if (s.roll.time <= 0 && !s.roll.hit) {
       s.roll.hit = true;
       s.impactUntil = s.time + 0.85;
+      shake(0.95);
       tone(67, 0.24, 0, "sawtooth", 0.045);
       tone(108, 0.16, 0.08);
+      noiseBurst(0.26, 360, 0.09);
       if (s.mode === "play") {
         const { byFork } = s.roll;
         s.roll = null;
@@ -773,6 +817,7 @@ function home() {
   audio?.close().catch(() => {});
   audio = null;
   ambient = null;
+  noiseBuffer = null;
   $("start").focus();
 }
 function modal(title, html) {
@@ -832,31 +877,100 @@ $("sound").onclick = () => {
   $("sound").textContent = "♫　 SOUND " + (prefs.sound ? "ON" : "OFF");
   $("sound").setAttribute("aria-pressed", prefs.sound);
 };
-cases.forEach((c, i) => {
-  const b = document.createElement("button");
-  b.innerHTML =
-    "<small>ACT 0" +
-    (i + 1) +
-    "</small><strong>" +
-    c.name +
-    "</strong><span>" +
-    c.type +
-    " ↗</span>";
-  b.onclick = () =>
-    modal(
-      c.name,
-      '<p class="intel">ACT 0' +
-        (i + 1) +
-        " / " +
-        c.type.toUpperCase() +
-        "</p><p>" +
-        c.sub +
-        "</p><p>“" +
-        c.line +
-        "”</p>",
-    );
-  $("files").append(b);
-});
+function renderBossLineup() {
+  const host = $("files");
+  if (!host) return;
+  host.innerHTML = "";
+  const chapters = [
+    {
+      label: "CHAPTER 01 · FIRST BELL",
+      sub: "Acts 01–05 · Morning Rush",
+      start: 0,
+      end: 5,
+      cols: "ch1",
+    },
+    {
+      label: "CHAPTER 02 · CHICAGO AFTER DARK",
+      sub: "Acts 06–09 · Nocturnal Wildlife",
+      start: 5,
+      end: 9,
+      cols: "ch2",
+    },
+  ];
+  for (const ch of chapters) {
+    const band = document.createElement("div");
+    band.className = "chapterBand";
+    band.innerHTML =
+      '<div class="chapterHead"><b>' +
+      ch.label +
+      "</b><span>" +
+      ch.sub +
+      "</span></div>";
+    const grid = document.createElement("div");
+    grid.className = "bossGrid " + ch.cols;
+    for (let i = ch.start; i < ch.end; i++) {
+      const c = cases[i],
+        level = i + 1,
+        unlocked = level <= campaign.unlocked,
+        best = campaign.best[level],
+        isNext = campaign.started && level === campaign.checkpoint;
+      const b = document.createElement("button");
+      b.className =
+        "bossCard" +
+        (best ? " cleared" : "") +
+        (isNext ? " current" : "") +
+        (!unlocked ? " locked" : "");
+      const badge = best
+        ? "✓ " + best + "s"
+        : isNext
+          ? "NEXT"
+          : unlocked
+            ? "OPEN"
+            : "LOCKED";
+      b.innerHTML =
+        '<div class="bossCardTop"><small>ACT 0' +
+        level +
+        '</small><i class="badge">' +
+        badge +
+        "</i></div><strong>" +
+        c.name +
+        "</strong><span>" +
+        c.type +
+        " ↗</span>";
+      b.onclick = () => {
+        modal(
+          c.name,
+          '<p class="intel">ACT 0' +
+            level +
+            " / " +
+            c.type.toUpperCase() +
+            (best ? " · BEST " + best + " s" : "") +
+            "</p><p>" +
+            c.sub +
+            '</p><p class="intelQuote">“' +
+            c.line +
+            "”</p>" +
+            (unlocked
+              ? '<button class="primary" id="playFromIntel">▶ &nbsp; Play Act 0' +
+                level +
+                "</button>"
+              : '<p class="intelLock">Clear earlier acts (or use Played before saves? for Chapter 2) to unlock.</p>'),
+        );
+        const launch = $("playFromIntel");
+        if (launch) {
+          launch.onclick = () => {
+            $("dialog").close();
+            start(i, level < campaign.unlocked);
+          };
+        }
+      };
+      grid.append(b);
+    }
+    band.append(grid);
+    host.append(band);
+  }
+}
+renderBossLineup();
 $("finish").onclick = victoryCard;
 $("start").onclick = () => start(0, campaign.unlocked > 1);
 bindCampaignMenu();

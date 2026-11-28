@@ -99,6 +99,22 @@ function paintFilm() {
   bg.addColorStop(1, "#151a18");
   g.fillStyle = bg;
   g.fillRect(0, 0, w, h);
+  // Subtle rotating cinema light rays behind the utensil
+  g.save();
+  g.translate(w * 0.54, h * 0.53);
+  g.rotate(t * 0.28);
+  g.fillStyle =
+    stage === 3 ? "rgba(110,224,255,0.09)" : "rgba(255,216,130,0.09)";
+  for (let i = 0; i < 8; i++) {
+    g.rotate(Math.PI / 4);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(w * 0.6, -24);
+    g.lineTo(w * 0.6, 24);
+    g.closePath();
+    g.fill();
+  }
+  g.restore();
   const u = clamp((t - (end ? 0 : 1.65)) / (stage === 4 ? 1.35 : 0.42), 0, 1);
   if (!end && stage === 1 && t > 1.65 && !s.fork.introChime) {
     s.fork.introChime = true;
@@ -120,6 +136,16 @@ function paintFilm() {
     stage === 4 ? 86 : 65,
     stage === 3 ? "#63dbff" : stage === 4 ? "#ffcc62" : null,
   );
+  // Specular glint sweeping down the metallic shaft
+  const glintX = ((t * 1.35) % 1.4) * len;
+  if (glintX < len) {
+    const glint = g.createLinearGradient(glintX - 24, 0, glintX + 24, 0);
+    glint.addColorStop(0, "rgba(255,255,255,0)");
+    glint.addColorStop(0.5, "rgba(255,255,255,0.65)");
+    glint.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = glint;
+    g.fillRect(glintX - 24, -18, 48, 36);
+  }
   g.restore();
   if ((u > 0 && u < 1) || stage === 3) {
     g.strokeStyle = stage === 3 ? "#9ce8ff" : "#ffebad";
@@ -147,9 +173,15 @@ let fxDirty = false;
 function drawForkEffects() {
   if (!$("sceneCard").hidden && !$("utensilFilm").hidden && s.fork) paintFilm();
   const c = $("forkFx"),
-    f = s.fork,
-    age = f?.burst ? s.time - f.burst.start : 2;
-  if (age > 1.05 || !f?.burst) {
+    f = s.fork;
+  const activeBursts = (s.fxBursts || (f?.burst ? [f.burst] : [])).filter(
+    (b) => s.time - b.start <= 1.05 && s.time >= b.start,
+  );
+  if (s.fxBursts) s.fxBursts = activeBursts;
+  const charging =
+    s.mode === "play" && f && f.phase === "holding" && !s.stolen;
+  const dashing = s.mode === "play" && s.dash > 0.25;
+  if (!activeBursts.length && !charging && !dashing) {
     if (fxDirty) {
       c.getContext("2d").clearRect(0, 0, c.width, c.height);
       fxDirty = false;
@@ -162,50 +194,120 @@ function drawForkEffects() {
     c.width = w;
     c.height = h;
   }
-  const g = c.getContext("2d"),
-    b = f.burst,
-    p = view.project(b.x, b.z, 0.95);
+  const g = c.getContext("2d");
   g.clearRect(0, 0, w, h);
   fxDirty = true;
-  g.save();
-  g.translate(p.x, p.y);
-  g.globalAlpha = Math.min(1, (1.05 - age) * 2);
-  const count = s.economy ? 8 : b.kind === "confetti" ? 32 : 16;
-  for (let i = 0; i < count; i++) {
-    const a = i * 2.4,
-      r = (12 + (i % 5) * 7) * Math.sin((Math.min(1, age * 1.8) * Math.PI) / 2);
-    const x = Math.sin(a) * r,
-      y = Math.cos(a) * r - age * 24;
-    g.fillStyle =
-      b.kind === "arc"
-        ? ["#8ee7ff", "#fff"][i % 2]
-        : ["#ffd06c", "#fff6d6", "#fc9978", "#b9d7df"][i % 4];
-    if (i % 5 === 0) {
-      g.globalAlpha *= 0.48;
-      g.beginPath();
-      g.arc(x, y, 3 + age * 6, 0, Math.PI * 2);
-      g.fill();
-      g.globalAlpha = Math.min(1, (1.05 - age) * 2);
-    } else if (b.kind === "arc") {
-      g.strokeStyle = g.fillStyle;
-      g.beginPath();
-      g.moveTo(x * 0.5, y * 0.5);
-      g.lineTo(x + 4, y + 6);
-      g.lineTo(x - 3, y - 6);
-      g.stroke();
-    } else {
-      g.font = "bold 15px system-ui";
-      g.fillText(i % 2 ? "✦" : "✶", x, y);
-    }
+  if (dashing) {
+    const dp = view.project(s.andi.x, s.andi.z, 0.3);
+    const u = clamp((0.65 - s.dash) / 0.4, 0, 1);
+    g.save();
+    g.strokeStyle = `rgba(255, 226, 138, ${(1 - u) * 0.72})`;
+    g.lineWidth = 3;
+    g.beginPath();
+    g.arc(dp.x, dp.y, 16 + u * 26, 0, Math.PI * 2);
+    g.stroke();
+    g.restore();
   }
-  g.font = "bold 16px system-ui";
-  g.textAlign = "center";
-  g.strokeStyle = "#20221c";
-  g.lineWidth = 4;
-  g.strokeText(b.label, 0, -24 - age * 20);
-  g.fillStyle = "#fff5bb";
-  g.fillText(b.label, 0, -24 - age * 20);
-  g.restore();
+  if (charging) {
+    const cp = view.project(s.andi.x, s.andi.z, 1.3);
+    const pct = Math.min(1, f.elapsed / chargeTime);
+    const r = 24;
+    g.save();
+    g.translate(cp.x, cp.y);
+    g.strokeStyle = "rgba(18, 22, 18, 0.72)";
+    g.lineWidth = 5;
+    g.beginPath();
+    g.arc(0, 0, r, 0, Math.PI * 2);
+    g.stroke();
+    g.strokeStyle = f.charged ? "#ffe074" : "#ff944d";
+    g.lineWidth = f.charged ? 4 : 3.2;
+    g.lineCap = "round";
+    g.beginPath();
+    g.arc(0, 0, r, -Math.PI / 2, -Math.PI / 2 + pct * Math.PI * 2);
+    g.stroke();
+    if (f.charged) {
+      const pulse = 0.5 + 0.5 * Math.sin(s.time * 18);
+      g.strokeStyle = `rgba(255, 232, 140, ${0.35 + pulse * 0.4})`;
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(0, 0, r + 4 + pulse * 4, 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.restore();
+  }
+  for (const b of activeBursts) {
+    const age = s.time - b.start,
+      p = view.project(b.x, b.z, 0.95);
+    g.save();
+    g.translate(p.x, p.y);
+    const fade = Math.min(1, (1.05 - age) * 2);
+    g.globalAlpha = fade;
+    // Crisp radial shockwave ring on impact
+    if (age < 0.45) {
+      const su = age / 0.45;
+      g.strokeStyle =
+        b.kind === "arc"
+          ? `rgba(142, 231, 255, ${(1 - su) * 0.85})`
+          : `rgba(255, 214, 118, ${(1 - su) * 0.85})`;
+      g.lineWidth = 3 * (1 - su) + 0.5;
+      g.beginPath();
+      g.arc(0, 0, 10 + su * 44, 0, Math.PI * 2);
+      g.stroke();
+    }
+    const count = s.economy ? 8 : b.kind === "confetti" ? 32 : 16;
+    for (let i = 0; i < count; i++) {
+      const a = i * 2.4,
+        r =
+          (14 + (i % 5) * 8) *
+          Math.sin((Math.min(1, age * 1.8) * Math.PI) / 2);
+      const x = Math.sin(a) * r,
+        y = Math.cos(a) * r - age * 26;
+      g.fillStyle =
+        b.kind === "arc"
+          ? ["#8ee7ff", "#fff"][i % 2]
+          : ["#ffd06c", "#fff6d6", "#fc9978", "#b9d7df"][i % 4];
+      if (i % 5 === 0) {
+        g.globalAlpha = fade * 0.48;
+        g.beginPath();
+        g.arc(x, y, 3 + age * 6, 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = fade;
+      } else if (b.kind === "arc") {
+        g.strokeStyle = g.fillStyle;
+        g.lineWidth = 1.8;
+        g.beginPath();
+        g.moveTo(x * 0.5, y * 0.5);
+        g.lineTo(x + 4, y + 6);
+        g.lineTo(x - 3, y - 6);
+        g.stroke();
+      } else if (b.kind === "confetti") {
+        g.save();
+        g.translate(x, y);
+        g.rotate(age * 6 + i);
+        g.fillRect(-4, -2.5, 8, 5);
+        g.restore();
+      } else {
+        g.font = "bold 15px system-ui";
+        g.fillText(i % 2 ? "✦" : "✶", x, y);
+      }
+    }
+    if (b.label) {
+      const pop = age < 0.14 ? 0.72 + (age / 0.14) * 0.4 : 1.12 - Math.min(0.12, (age - 0.14) * 0.6);
+      g.save();
+      g.translate(0, -26 - age * 22);
+      g.scale(pop, pop);
+      g.font = "900 18px Barlow, Impact, system-ui";
+      g.textAlign = "center";
+      g.strokeStyle = "#171914";
+      g.lineWidth = 5;
+      g.lineJoin = "round";
+      g.strokeText(b.label, 0, 0);
+      g.fillStyle = b.kind === "arc" ? "#a6f0ff" : "#fff2ad";
+      g.fillText(b.label, 0, 0);
+      g.restore();
+    }
+    g.restore();
+  }
 }
 
 // Original three-quarter sprite for Canvas fallback. The same cardigan, book

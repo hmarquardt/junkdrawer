@@ -147,6 +147,21 @@ function refreshCampaignMenu() {
       ? "Checkpoint · Level " + campaign.checkpoint + " · "
       : "") + "Progress saves on this browser and device only.";
   $("saveAlert").textContent = saveWarning;
+  const pills = $("campaignPills");
+  if (pills) {
+    const items = [];
+    const cleared = Object.keys(campaign.best).length;
+    if (cleared || campaign.started)
+      items.push("Acts cleared · " + cleared + " / " + lastLevel);
+    if (campaign.achievements.includes("fork"))
+      items.push("★ Fork Around & Find Out");
+    if (campaign.achievements.includes("council"))
+      items.push("★ Council Adjourned");
+    if (campaign.treats > 0)
+      items.push("🐾 Treats · " + campaign.treats);
+    pills.innerHTML = items.map((t) => '<span class="pill">' + t + "</span>").join("");
+  }
+  if (typeof renderBossLineup === "function") renderBossLineup();
 }
 function bindCampaignMenu() {
   $("continue").onclick = () => start(campaign.checkpoint - 1);

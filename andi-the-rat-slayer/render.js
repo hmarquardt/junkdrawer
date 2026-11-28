@@ -8,6 +8,8 @@ function createAlleyView(host, quality) {
   if (!gl || !window.THREE) return createMapView(host);
   const T = THREE,
     renderer = new T.WebGLRenderer({ canvas, context: gl });
+  renderer.toneMapping = T.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.06;
   function onLost(event) {
     event.preventDefault();
     dispose(false);
@@ -17,9 +19,9 @@ function createAlleyView(host, quality) {
   host.replaceChildren(canvas);
   const scene = new T.Scene(),
     camera = new T.PerspectiveCamera(42, 1, 0.1, 150);
-  scene.background = new T.Color(0x9daaa5);
-  scene.fog = new T.FogExp2(0x9daaa5, 0.016);
-  const light = new T.DirectionalLight(0xffdda6, 3);
+  scene.background = new T.Color(0x888f8e);
+  scene.fog = new T.FogExp2(0x888f8e, 0.0155);
+  const light = new T.DirectionalLight(0xffd28f, 2.85);
   light.position.set(-12, 24, 9);
   light.castShadow = true;
   Object.assign(light.shadow.camera, {
@@ -31,11 +33,17 @@ function createAlleyView(host, quality) {
   });
   light.shadow.mapSize.set(1024, 1024);
   light.shadow.bias = -0.0005;
-  const skylight = new T.HemisphereLight(0xe9f2fb, 0x8d7662, 2);
-  scene.add(light, skylight);
+  const skylight = new T.HemisphereLight(0xdce9f7, 0x705d4e, 1.75);
+  const alleyLamps = [-8, 6].map((z) => {
+    const p = new T.PointLight(0xffb45c, 18, 22, 1.6);
+    p.position.set(5.1, 7.3, z);
+    return p;
+  });
+  scene.add(light, skylight, ...alleyLamps);
   const cube = new T.BoxGeometry(1, 1, 1),
     ball = new T.SphereGeometry(1, 18, 12),
-    lowBall = new T.SphereGeometry(1, 8, 6);
+    lowBall = new T.SphereGeometry(1, 10, 8),
+    reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const materials = new Map(),
     batches = new Map();
   let seed = 9723;
@@ -47,27 +55,99 @@ function createAlleyView(host, quality) {
     const c = document.createElement("canvas");
     c.width = c.height = 1024;
     const g = c.getContext("2d");
-    g.fillStyle = brick ? "#9b8a78" : "#525656";
+    g.fillStyle = brick ? "#6e5f53" : "#444849";
     g.fillRect(0, 0, 1024, 1024);
-    if (brick)
+    if (brick) {
       for (let y = 0; y < 32; y++)
         for (let x = -1; x < 12; x++) {
+          const soot = y > 24 ? (y - 24) * 1.1 : 0;
           g.fillStyle =
-            "hsl(" + (10 + rand() * 12) + " 24% " + (31 + rand() * 18) + "%)";
-          g.fillRect(x * 96 + (y % 2) * 48, y * 32, 93, 29);
+            "hsl(" +
+            (9 + rand() * 14) +
+            " " +
+            (26 + rand() * 14) +
+            "% " +
+            Math.max(18, 29 + rand() * 17 - soot) +
+            "%)";
+          g.fillRect(x * 96 + (y % 2) * 48, y * 32, 92, 28);
         }
-    for (let i = 0; i < 55000; i++) {
-      g.fillStyle = rand() < 0.5 ? "#1b181623" : "#eee1cb20";
+    } else {
+      // Subtle wheel tracks and center alley drainage darkening
+      const grad = g.createLinearGradient(0, 0, 1024, 0);
+      grad.addColorStop(0, "#2f333488");
+      grad.addColorStop(0.24, "#50545400");
+      grad.addColorStop(0.5, "#33383966");
+      grad.addColorStop(0.76, "#50545400");
+      grad.addColorStop(1, "#2f333488");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 1024, 1024);
+      // Faint asphalt cracks
+      g.strokeStyle = "#22252655";
+      g.lineWidth = 2;
+      for (let k = 0; k < 14; k++) {
+        let cx = rand() * 1024,
+          cy = rand() * 1024;
+        g.beginPath();
+        g.moveTo(cx, cy);
+        for (let s = 0; s < 6; s++) {
+          cx += (rand() - 0.5) * 60;
+          cy += (rand() - 0.5) * 75;
+          g.lineTo(cx, cy);
+        }
+        g.stroke();
+      }
+    }
+    for (let i = 0; i < 60000; i++) {
+      g.fillStyle = rand() < 0.5 ? "#17141226" : "#efe2cc1d";
       g.fillRect(rand() * 1024, rand() * 1024, rand() * 5 + 1, 2);
     }
     const tex = new T.CanvasTexture(c);
     tex.colorSpace = T.SRGBColorSpace;
     tex.wrapS = tex.wrapT = T.RepeatWrapping;
     tex.repeat.set(brick ? 2 : 4, brick ? 1 : 5);
+    tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy?.() || 1);
     return tex;
   }
+  const litWindowMat = new T.MeshStandardMaterial({
+    color: 0xffd594,
+    emissive: 0xffa640,
+    emissiveIntensity: 0.45,
+    roughness: 0.35,
+    metalness: 0.08,
+  });
+  const lampBulbMat = new T.MeshStandardMaterial({
+    color: 0xfff0c8,
+    emissive: 0xffba5a,
+    emissiveIntensity: 1.5,
+    roughness: 0.2,
+  });
+  const puddleMat = new T.MeshStandardMaterial({
+    color: 0x3b4952,
+    roughness: 0.07,
+    metalness: 0.78,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+  });
   function material(color) {
-    if (!materials.has(color))
+    if (color === "litWindow") return litWindowMat;
+    if (color === "lampBulb") return lampBulbMat;
+    if (!materials.has(color)) {
+      const shiny =
+        color === "#789397" ||
+        color === "#7699a6" ||
+        color === "#d8b04c" ||
+        color === "#c5ccd1";
+      const emissiveColor =
+        color === "#ffe6a6"
+          ? 0xffd478
+          : color === "#a76147"
+            ? 0xba3820
+            : color === "#57cfc2"
+              ? 0x38e8d8
+              : color === "#ffa347"
+                ? 0xff8a24
+                : 0x000000;
       materials.set(
         color,
         new T.MeshStandardMaterial({
@@ -76,10 +156,24 @@ function createAlleyView(host, quality) {
             color === "brick" || color === "road"
               ? surface(color === "brick")
               : null,
-          roughness: color === "#789397" ? 0.19 : 0.83,
-          metalness: color === "#789397" ? 0.48 : 0.08,
+          roughness:
+            color === "road" ? 0.72 : shiny ? 0.22 : color === "#527b87" ? 0.36 : 0.82,
+          metalness:
+            shiny ? 0.55 : color === "#527b87" ? 0.32 : color === "#34554b" ? 0.18 : 0.08,
+          emissive: emissiveColor,
+          emissiveIntensity:
+            color === "#ffe6a6"
+              ? 0.9
+              : color === "#57cfc2"
+                ? 0.85
+                : color === "#a76147"
+                  ? 0.55
+                  : color === "#ffa347"
+                    ? 0.28
+                    : 0,
         }),
       );
+    }
     return materials.get(color);
   }
   function shape(group, geo, color, x, y, z, w, h, d) {
@@ -110,7 +204,7 @@ function createAlleyView(host, quality) {
         for (const y of [3.8, 6.3]) {
           box("#b29a7e", side * 8.45, y, z + dz, 0.25, 1.8, 1.3);
           box(
-            rand() < 0.4 ? "#c3af84" : "#586462",
+            rand() < 0.42 ? "litWindow" : "#445054",
             side * 8.28,
             y,
             z + dz,
@@ -140,22 +234,34 @@ function createAlleyView(host, quality) {
       box("#423e39", side * 7.52, 4.02, z, 0.08, 0.09, 5);
     }
   for (const z of [-18, -2, 14]) {
-    box("#66513c", 8, 4.6, z, 0.24, 9.2, 0.24);
+    box("#5d4a37", 8, 4.6, z, 0.26, 9.2, 0.26);
     box("#574632", 8, 8.6, z, 2, 0.16, 0.16);
+    // Overhanging Chicago alley cobra-head lamp fixture
+    box("#484c4c", 6.65, 8.15, z, 2.6, 0.1, 0.1);
+    box("#383d3e", 5.35, 8.05, z, 0.65, 0.18, 0.36);
+    box("lampBulb", 5.35, 7.92, z, 0.48, 0.09, 0.26);
   }
   for (const x of [7.3, 8, 8.7]) box("#363938", x, 8.6, -2, 0.035, 0.04, 48);
-  for (let i = 0; i < 18; i++)
-    shape(
-      scene,
-      lowBall,
-      "#69787b",
-      (rand() - 0.5) * 13,
-      -0.023,
-      (rand() - 0.5) * 32,
-      0.3 + rand() * 0.9,
-      0.037,
-      0.4 + rand() * 1.4,
-    );
+  const puddleGeo = new T.CircleGeometry(1, 20);
+  for (let i = 0; i < 16; i++) {
+    const pm = new T.Mesh(puddleGeo, puddleMat);
+    pm.rotation.x = -Math.PI / 2;
+    pm.rotation.z = rand() * Math.PI;
+    pm.position.set((rand() - 0.5) * 12.6, 0.008, (rand() - 0.5) * 30);
+    pm.scale.set(0.45 + rand() * 0.95, 0.6 + rand() * 1.35, 1);
+    scene.add(pm);
+  }
+  // Clustered alley trash bags near building walls for environmental depth
+  for (const [tx, tz] of [
+    [-7.35, -8.5],
+    [-7.1, -8.1],
+    [7.25, -4.4],
+    [7.35, 7.4],
+    [-7.2, 5.4],
+  ]) {
+    const bag = shape(scene, lowBall, "#232829", tx, 0.26, tz, 0.34, 0.28, 0.31);
+    bag.rotation.y = rand() * Math.PI;
+  }
   for (let i = 0; i < 4; i++)
     for (let k = 0; k < 8; k++)
       box("#393a35", 7.1, 0.014, i * 7 - 12 + k * 0.11, 0.7, 0.024, 0.04);
@@ -315,9 +421,38 @@ function createAlleyView(host, quality) {
   }
   for (const s of [-1, 1]) {
     shape(car, cube, "#ffe6a6", s * 0.51, 0.64, 1.59, 0.37, 0.18, 0.05);
-    for (const z of [-0.96, 0.98])
-      oval(car, "#262929", s * 0.72, 0.34, z, 0.2, 0.34, 0.34);
+    for (const z of [-0.96, 0.98]) {
+      oval(car, "#222526", s * 0.72, 0.34, z, 0.2, 0.34, 0.34);
+      oval(car, "#c5ccd1", s * 0.81, 0.34, z, 0.04, 0.17, 0.17);
+    }
   }
+  // Subtle headlight beam cones on the asphalt ahead of the car
+  const beamGeo = new T.PlaneGeometry(1.75, 3.6);
+  const beamCanvas = document.createElement("canvas");
+  beamCanvas.width = 64;
+  beamCanvas.height = 128;
+  const bgCtx = beamCanvas.getContext("2d");
+  const beamGrad = bgCtx.createLinearGradient(0, 128, 0, 0);
+  beamGrad.addColorStop(0, "rgba(255,232,168,0.42)");
+  beamGrad.addColorStop(1, "rgba(255,232,168,0)");
+  bgCtx.fillStyle = beamGrad;
+  bgCtx.beginPath();
+  bgCtx.moveTo(16, 128);
+  bgCtx.lineTo(48, 128);
+  bgCtx.lineTo(64, 0);
+  bgCtx.lineTo(0, 0);
+  bgCtx.closePath();
+  bgCtx.fill();
+  const carBeamMat = new T.MeshBasicMaterial({
+    map: new T.CanvasTexture(beamCanvas),
+    transparent: true,
+    depthWrite: false,
+    opacity: 0.4,
+  });
+  const carBeams = new T.Mesh(beamGeo, carBeamMat);
+  carBeams.rotation.x = -Math.PI / 2;
+  carBeams.position.set(0, 0.025, 3.35);
+  car.add(carBeams);
   function ratModel(simple = false) {
     const g = new T.Group(),
       geo = simple ? lowBall : ball;
@@ -416,11 +551,66 @@ function createAlleyView(host, quality) {
     tine.position.set((i - 1.5) * 0.132, 0.018, 0.24);
   }
   const forearm = shape(andi, cube, "#b85c39", 0.31, 0.91, 0, 0.16, 0.17, 0.3);
-  const crown = shape(boss.g, cube, "#bd994d", 0, 0.69, 0.06, 0.42, 0.18, 0.32);
-  const hat = shape(boss.g, cube, "#252a29", 0, 0.76, 0.32, 0.58, 0.18, 0.48);
-  const visor = shape(boss.g, cube, "#57cfc2", 0, 0.52, 0.64, 0.44, 0.1, 0.08);
+  // Sculpted royal crown for the Dumpster King
+  const crown = new T.Group();
+  boss.g.add(crown);
+  crown.position.set(0, 0.64, 0.44);
+  shape(crown, cube, "#d8b04c", 0, 0.05, 0, 0.36, 0.11, 0.32);
+  shape(crown, lowBall, "#96282a", 0, 0.11, 0, 0.14, 0.08, 0.12);
+  for (const [cx, cz] of [
+    [-0.14, 0.12],
+    [0, 0.14],
+    [0.14, 0.12],
+    [-0.14, -0.12],
+    [0.14, -0.12],
+  ]) {
+    const spike = new T.Mesh(new T.ConeGeometry(0.05, 0.16, 5), material("#d8b04c"));
+    spike.position.set(cx, 0.17, cz);
+    crown.add(spike);
+  }
+  // Wide-brimmed noir fedora for the Ratfather
+  const hat = new T.Group();
+  boss.g.add(hat);
+  hat.position.set(0, 0.68, 0.42);
+  shape(hat, new T.CylinderGeometry(0.36, 0.38, 0.045, 16), "#212426", 0, 0, 0, 1, 1, 1);
+  shape(hat, new T.CylinderGeometry(0.19, 0.22, 0.21, 14), "#282c2f", 0, 0.11, 0, 1, 1, 1);
+  shape(hat, new T.CylinderGeometry(0.222, 0.225, 0.055, 14), "#9e3328", 0, 0.045, 0, 1, 1, 1);
+  // Glowing lab visor + antenna for Professor Ratington
+  const visor = new T.Group();
+  boss.g.add(visor);
+  shape(visor, cube, "#253035", 0, 0.52, 0.61, 0.48, 0.14, 0.1);
+  shape(visor, cube, "#57cfc2", 0, 0.52, 0.66, 0.42, 0.085, 0.04);
+  shape(visor, cube, "#c5ccd1", 0.18, 0.68, 0.54, 0.028, 0.24, 0.028);
+  shape(visor, lowBall, "#57cfc2", 0.18, 0.81, 0.54, 0.045, 0.045, 0.045);
+  // Kaiju dorsal spines for Ratzilla
+  const spines = new T.Group();
+  boss.g.add(spines);
+  for (let i = 0; i < 4; i++) {
+    const sp = new T.Mesh(new T.ConeGeometry(0.075, 0.24 - i * 0.025, 5), material("#b9985a"));
+    sp.position.set(0, 0.66 - i * 0.03, 0.26 - i * 0.22);
+    sp.rotation.x = -0.35;
+    spines.add(sp);
+  }
   const rolling = shape(scene, cube, "#476356", 0, 1, 0, 1.38, 1.55, 1.5);
-  const claw = shape(scene, ball, "#e5a738", 0, 0, 0, 0.28, 0.28, 0.28);
+  // Faceted spinning gold weak-point star
+  const claw = new T.Group();
+  scene.add(claw);
+  const clawCore = new T.Mesh(
+    new T.OctahedronGeometry(0.36, 0),
+    new T.MeshStandardMaterial({
+      color: 0xffdd6b,
+      emissive: 0xffa020,
+      emissiveIntensity: 0.9,
+      roughness: 0.2,
+      metalness: 0.6,
+    }),
+  );
+  const clawHalo = new T.Mesh(
+    new T.TorusGeometry(0.56, 0.045, 8, 24),
+    new T.MeshBasicMaterial({ color: 0xffe896 }),
+  );
+  clawHalo.rotation.x = Math.PI / 2;
+  claw.add(clawCore, clawHalo);
   const bolts = [0, 1, 2].map(() =>
     shape(scene, lowBall, "#a5f3ea", 0, 0, 0, 0.15, 0.19, 0.15),
   );
@@ -479,11 +669,22 @@ function createAlleyView(host, quality) {
     return m;
   });
   const ring = new T.Mesh(
-    new T.RingGeometry(0.91, 1, 64),
+    new T.RingGeometry(0.9, 1, 64),
     new T.MeshBasicMaterial({ color: 0xff6737, side: T.DoubleSide }),
   );
   ring.rotation.x = -Math.PI / 2;
-  scene.add(ring);
+  const ringFill = new T.Mesh(
+    new T.CircleGeometry(1, 48),
+    new T.MeshBasicMaterial({
+      color: 0xff8a3d,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      side: T.DoubleSide,
+    }),
+  );
+  ringFill.rotation.x = -Math.PI / 2;
+  scene.add(ring, ringFill);
   const outline = new T.Mesh(
     new T.RingGeometry(0.8, 1, 32),
     new T.MeshBasicMaterial({ color: 0x8be3d2 }),
@@ -554,9 +755,12 @@ function createAlleyView(host, quality) {
       renderer.setSize(w, h, false);
     const p = s.andi,
       r = s.rat;
-    andi.visible = !s.driving;
-    andi.position.set(p.x, s.dash > 0 ? 0.12 : 0, p.z);
+    const flicker =
+      s.inv > 0 && s.inv < 2.2 && Math.sin(s.time * 36) > 0.35;
+    andi.visible = !s.driving && !flicker;
+    andi.position.set(p.x, s.dash > 0 ? 0.16 : 0, p.z);
     andi.rotation.y = p.angle;
+    andi.rotation.x = s.dash > 0 ? 0.24 : 0;
     const turn = Math.atan2(
       Math.sin(p.angle - priorHeading),
       Math.cos(p.angle - priorHeading),
@@ -606,15 +810,30 @@ function createAlleyView(host, quality) {
         (l.rotation.x =
           Math.sin(s.time * 13 + i * Math.PI) * (p.speed > 0.1 ? 0.48 : 0)),
     );
-    car.position.set(s.car.x, 0, s.car.z);
+    car.position.set(
+      s.car.x,
+      s.driving && p.speed > 0.1 ? Math.abs(Math.sin(s.time * 24)) * 0.035 : 0,
+      s.car.z,
+    );
     car.rotation.y = s.car.angle;
+    carBeamMat.opacity = s.stage >= 5 ? 0.58 : s.driving ? 0.36 : 0.18;
     pose(boss, r, s.scale, s.time);
     boss.g.visible = s.stage < 5;
-    scene.background.setHex(s.stage >= 5 ? 0x28344d : 0x9daaa5);
+    const night = s.stage >= 5;
+    scene.background.setHex(night ? 0x17223a : 0x878d8a);
     scene.fog.color.copy(scene.background);
-    light.color.setHex(s.stage >= 5 ? 0xb6d7ff : 0xffdda6);
-    skylight.color.setHex(s.stage >= 5 ? 0xafbcf4 : 0xe9f2fb);
-    skylight.intensity = s.stage >= 5 ? 1.15 : 2;
+    scene.fog.density = night ? 0.0185 : 0.0145;
+    light.color.setHex(night ? 0xa5cbff : 0xffd28f);
+    light.intensity = night ? 2.15 : 2.85;
+    skylight.color.setHex(night ? 0x7c95d6 : 0xdce9f7);
+    skylight.groundColor.setHex(night ? 0x2a2538 : 0x705d4e);
+    skylight.intensity = night ? 0.95 : 1.75;
+    litWindowMat.emissiveIntensity = night ? 1.15 : 0.42;
+    lampBulbMat.emissiveIntensity = night ? 2.1 : 0.75;
+    puddleMat.color.setHex(night ? 0x1f2d42 : 0x45535c);
+    alleyLamps.forEach((lp) => {
+      lp.intensity = quality === "low" ? 0 : night ? 28 : 9;
+    });
     drawNight(s);
     if (s.attack && (s.stage === 2 || (s.stage === 4 && s.step === 2))) {
       const u = clamp(
@@ -643,6 +862,7 @@ function createAlleyView(host, quality) {
     if (s.stage === 2 && s.stun > 0)
       boss.g.rotation.z = -0.38 + Math.sin(s.time * 5) * 0.06;
     crown.visible = s.stage === 1;
+    spines.visible = s.stage === 2;
     hat.visible = s.stage === 4;
     visor.visible = s.stage === 3;
     mob.forEach((m, i) => {
@@ -697,12 +917,16 @@ function createAlleyView(host, quality) {
       rolling.rotation.x = u * 7;
     }
     claw.visible = s.stun > 0 && s.targets.length > 0;
-    if (claw.visible)
+    if (claw.visible) {
       claw.position.set(
         s.targets[0].x,
-        0.57 + 0.1 * Math.sin(s.time * 7),
+        0.68 + 0.14 * Math.sin(s.time * 7),
         s.targets[0].z,
       );
+      clawCore.rotation.y = s.time * 3.4;
+      clawCore.rotation.x = Math.sin(s.time * 2.2) * 0.4;
+      clawHalo.scale.setScalar(0.92 + 0.16 * Math.sin(s.time * 9));
+    }
     bolts.forEach((b, i) => {
       b.visible = s.stage === 3 && !!s.attack;
       if (b.visible) {
@@ -725,21 +949,35 @@ function createAlleyView(host, quality) {
         );
       }
     });
-    ring.visible = !!s.attack;
+    ring.visible = ringFill.visible = !!s.attack;
     if (s.attack) {
+      const warnTotal =
+        levels[prefs.difficulty].warning + (s.stage >= 5 ? 0.45 : 0);
+      const fillRatio = clamp(1 - Math.max(0, s.attack.delay) / warnTotal, 0.08, 1);
+      const urgentRing = s.attack.delay <= 0.65;
       ring.position.set(s.attack.x, 0.2, s.attack.z);
       ring.scale.setScalar(s.attack.radius);
       ring.material.color.set(
-        s.attack.delay > 0.65
-          ? 0xffbd62
-          : Math.sin(s.time * 30) > 0
+        urgentRing
+          ? Math.sin(s.time * 30) > 0
             ? 0xff4829
-            : 0xfff3b0,
+            : 0xfff3b0
+          : s.stage === 5 || (s.stage === 8 && s.step === 0)
+            ? 0x9ce05a
+            : 0xffbd62,
       );
+      ringFill.position.set(s.attack.x, 0.16, s.attack.z);
+      ringFill.scale.setScalar(s.attack.radius * fillRatio);
+      ringFill.material.color.copy(ring.material.color);
+      ringFill.material.opacity = urgentRing ? 0.34 : 0.2;
     }
     outline.position.set(p.x, 0.19, p.z);
-    outline.scale.setScalar(s.driving ? 1.65 : 0.55);
-    outline.material.color.set(s.inv > 0 ? 0xff9965 : 0x8be3d2);
+    outline.scale.setScalar(
+      (s.driving ? 1.65 : 0.55) * (s.dash > 0 ? 1.28 : 1),
+    );
+    outline.material.color.set(
+      s.dash > 0 ? 0xffe48e : s.inv > 2.2 ? 0xffd166 : s.inv > 0 ? 0xff9965 : 0x8be3d2,
+    );
     const intro = s.mode === "intro" ? Math.min(1, s.intro / 2.8) : 0,
       fx = p.x * 0.48 * (1 - intro) + r.x * intro,
       fz = p.z * 0.55 * (1 - intro) + r.z * intro;
@@ -776,6 +1014,11 @@ function createAlleyView(host, quality) {
       const a = Math.min(2, s.time - s.fork.finaleStart);
       camera.position.set(p.x + Math.sin(a) * 4, 4, p.z + 5);
       camera.lookAt((r.x + p.x) / 2, 1, (r.z + p.z) / 2);
+    }
+    if (s.shake > 0 && !reducedMotion.matches) {
+      const amp = Math.min(0.45, s.shake * 0.38);
+      camera.position.x += Math.sin(s.time * 67) * amp;
+      camera.position.y += Math.cos(s.time * 53) * amp * 0.7;
     }
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
@@ -855,8 +1098,19 @@ function createMapView(host) {
       h / 2 - focus.z * k * 0.14,
     );
     floorTransform = g.getTransform();
-    g.fillStyle = s.stage >= 5 ? "#45495b" : "#68685c";
+    g.fillStyle = s.stage >= 5 ? "#30384e" : "#5d6057";
     g.fillRect(-8, -13, 16, 26);
+    // Subtle alley lane lines and curbs on 2D fallback map
+    g.strokeStyle = s.stage >= 5 ? "#4a5670" : "#787a6c";
+    g.lineWidth = 0.14;
+    g.strokeRect(-7.8, -12.8, 15.6, 25.6);
+    g.setLineDash([0.7, 0.8]);
+    g.strokeStyle = "#d1c1a133";
+    g.beginPath();
+    g.moveTo(0, -12);
+    g.lineTo(0, 12);
+    g.stroke();
+    g.setLineDash([]);
     function label(x, z, symbol, color, size = 1) {
       g.fillStyle = color;
       g.font = "bold " + size + "px system-ui";
@@ -864,14 +1118,27 @@ function createMapView(host) {
       g.fillText(symbol, x, z + 0.35);
     }
     alleyBins.forEach(([x, z], i) => {
-      g.fillStyle = s.crushed.includes(i) ? "#927966" : "#2b493d";
+      g.fillStyle = s.crushed.includes(i) ? "#8c7461" : "#27473c";
       g.fillRect(x - 0.82, z - 1, 1.64, 2);
+      g.strokeStyle = "#162922";
+      g.lineWidth = 0.08;
+      g.strokeRect(x - 0.82, z - 1, 1.64, 2);
     });
     if (s.attack) {
-      g.strokeStyle =
+      const warnTotal =
+        levels[prefs.difficulty].warning + (s.stage >= 5 ? 0.45 : 0);
+      const fillRatio = clamp(1 - Math.max(0, s.attack.delay) / warnTotal, 0.08, 1);
+      const ringColor =
         s.attack.delay < 0.65 && Math.sin(s.time * 30) > 0
           ? "#ff5540"
-          : "#ffc466";
+          : s.stage === 5 || (s.stage === 8 && s.step === 0)
+            ? "#9ce05a"
+            : "#ffc466";
+      g.fillStyle = ringColor + "33";
+      g.beginPath();
+      g.arc(s.attack.x, s.attack.z, s.attack.radius * fillRatio, 0, 2 * Math.PI);
+      g.fill();
+      g.strokeStyle = ringColor;
       g.lineWidth = 0.16;
       g.beginPath();
       g.arc(s.attack.x, s.attack.z, s.attack.radius, 0, 2 * Math.PI);

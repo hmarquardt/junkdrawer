@@ -405,7 +405,8 @@ function threeNight(T, scene, shape, cube, ball) {
   const pool = [],
     materials = new Map(),
     clouds = [],
-    stands = [];
+    stands = [],
+    cloudGeo = new T.SphereGeometry(1, 20, 12);
   function material(kind) {
     if (!materials.has(kind)) {
       const map = new T.CanvasTexture(wildlifeTile(kind));
@@ -452,17 +453,33 @@ function threeNight(T, scene, shape, cube, ball) {
     }
     const zones = active ? s.clouds : [];
     for (let i = 0; i < Math.max(clouds.length, zones.length); i++) {
-      if (!clouds[i])
-        clouds[i] = shape(scene, ball, "#93b451", 0, 0.35, 0, 1, 1, 1);
+      if (!clouds[i]) {
+        const cm = new T.Mesh(
+          cloudGeo,
+          new T.MeshStandardMaterial({
+            color: 0x93cc52,
+            emissive: 0x4d7a22,
+            emissiveIntensity: 0.45,
+            roughness: 0.9,
+            transparent: true,
+            opacity: 0.48,
+            depthWrite: false,
+          }),
+        );
+        scene.add(cm);
+        clouds[i] = cm;
+      }
       const m = clouds[i],
         c = zones[i];
       m.visible = !!c;
       if (!c) continue;
-      m.position.set(c.x, 0.25, c.z);
-      m.scale.set(c.radius, 0.37 + Math.sin(s.time * 4) * 0.12, c.radius);
+      m.position.set(c.x, 0.34, c.z);
+      m.scale.set(c.radius, 0.42 + Math.sin(s.time * 4 + i) * 0.12, c.radius);
+      m.material.opacity = Math.min(0.52, c.life * 0.25);
     }
   }
   drawNight.dispose = () => {
+    cloudGeo.dispose();
     for (const m of materials.values()) {
       m.map.dispose();
       m.dispose();
@@ -479,43 +496,83 @@ function paintInterlude() {
   const w = canvas.width,
     h = canvas.height;
   const bg = g.createLinearGradient(0, 0, w, h);
-  bg.addColorStop(0, "#1b2e42");
-  bg.addColorStop(1, "#543b43");
+  bg.addColorStop(0, "#152336");
+  bg.addColorStop(0.55, "#2b2a3b");
+  bg.addColorStop(1, "#4e353d");
   g.fillStyle = bg;
   g.fillRect(0, 0, w, h);
-  g.fillStyle = "#172031";
+  // Warm apartment lamp glow on the left
+  const lamp = g.createRadialGradient(54, 90, 4, 54, 90, 110);
+  lamp.addColorStop(0, "rgba(255,196,112,0.28)");
+  lamp.addColorStop(1, "rgba(255,196,112,0)");
+  g.fillStyle = lamp;
+  g.fillRect(0, 0, w, h);
+  // Night window with stars and crescent glow
+  g.fillStyle = "#101829";
   g.fillRect(32, 12, 118, 76);
-  g.fillStyle = "#8396a0";
-  g.fillRect(87, 12, 3, 76);
-  g.fillRect(32, 45, 118, 2);
-  g.fillStyle = "#f5d5a1";
+  g.strokeStyle = "#6c7f8a";
+  g.lineWidth = 2;
+  g.strokeRect(32, 12, 118, 76);
+  g.fillStyle = "rgba(255,235,185,0.22)";
+  g.beginPath();
+  g.arc(62, 28, 16, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#f7dcab";
   g.beginPath();
   g.arc(62, 28, 8, 0, Math.PI * 2);
   g.fill();
-  g.fillStyle = "#43605e";
-  g.fillRect(60, 84, 145, 42);
-  g.fillStyle = "#91a09a";
-  g.fillRect(61, 104, 143, 8);
+  g.fillStyle = "#d9e8ff";
+  for (const [sx, sy] of [
+    [102, 24],
+    [128, 34],
+    [116, 56],
+    [47, 54],
+  ])
+    g.fillRect(sx, sy, 2, 2);
+  g.fillStyle = "#7a8d96";
+  g.fillRect(89, 12, 3, 76);
+  g.fillRect(32, 47, 118, 2);
+  // Couch + cushions
+  g.fillStyle = "#36504f";
+  g.fillRect(58, 82, 148, 46);
+  g.fillStyle = "#486865";
+  g.fillRect(62, 86, 66, 20);
+  g.fillRect(132, 86, 68, 20);
+  g.fillStyle = "#90a29a";
+  g.fillRect(60, 105, 144, 8);
   g.save();
   g.translate(106, 101 + Math.min(t, 1) * 4);
   g.rotate(0.28 * Math.min(t, 1));
   g.scale(34, 34);
   paintAndi(g, 0.4, t, 0);
   g.restore();
-  g.fillStyle = "#ae774d";
-  g.fillRect(48, 113, 16, 18);
-  g.fillStyle = "#d6b994";
-  g.fillRect(48, 108, 3, 9);
-  g.fillRect(60, 108, 3, 9);
-  g.fillStyle = "#141c26";
-  g.fillRect(230 + Math.sin(t * 32) * 1.4, 24, 128, 96);
-  g.fillStyle = "#91e3c8";
-  g.font = "bold 12px system-ui";
-  g.fillText("ALLEY WATCH", 241, 50);
-  g.fillStyle = "#fff0d4";
-  g.font = "12px system-ui";
-  g.fillText("Wildlife activity", 241, 75);
-  g.fillText("reported nearby.", 241, 92);
+  // Dropped teacher tote
+  g.fillStyle = "#b57c50";
+  g.fillRect(46, 112, 18, 19);
+  g.fillStyle = "#d9be98";
+  g.fillRect(47, 107, 3, 9);
+  g.fillRect(60, 107, 3, 9);
+  // Buzzing smartphone with glowing alert screen
+  const buzz = Math.sin(t * 34) * 1.6;
+  const phoneGlow = g.createRadialGradient(294, 72, 10, 294, 72, 92);
+  phoneGlow.addColorStop(0, "rgba(120,235,204,0.28)");
+  phoneGlow.addColorStop(1, "rgba(120,235,204,0)");
+  g.fillStyle = phoneGlow;
+  g.fillRect(190, 0, 200, h);
+  g.fillStyle = "#0e141d";
+  g.strokeStyle = "#5c7585";
+  g.lineWidth = 2;
+  g.fillRect(228 + buzz, 22, 134, 98);
+  g.strokeRect(228 + buzz, 22, 134, 98);
+  g.fillStyle = "#ff7547";
+  g.fillRect(229 + buzz, 23, 132, 4);
+  g.fillStyle = "#91e8cc";
+  g.font = "bold 11px monospace";
+  g.fillText("● ALLEY WATCH", 239 + buzz, 48);
+  g.fillStyle = "#fff1d6";
+  g.font = "600 12px system-ui";
+  g.fillText("Wildlife activity", 239 + buzz, 73);
+  g.fillText("reported nearby.", 239 + buzz, 91);
 }
 
 // A short illustrated insert shares the wildlife portraits with both play views.
@@ -524,25 +581,53 @@ function paintNightCard(canvas) {
     w = canvas.width,
     h = canvas.height;
   const gradient = g.createLinearGradient(0, 0, w, h);
-  gradient.addColorStop(0, "#283c57");
-  gradient.addColorStop(0.58, "#4e4558");
-  gradient.addColorStop(1, "#917054");
+  gradient.addColorStop(0, "#15233a");
+  gradient.addColorStop(0.54, "#33344c");
+  gradient.addColorStop(1, "#7a5b48");
   g.fillStyle = gradient;
   g.fillRect(0, 0, w, h);
-  g.fillStyle = "#ead9ae";
+  // Stars
+  g.fillStyle = "rgba(255,244,218,0.65)";
+  for (let i = 0; i < 18; i++) {
+    const sx = (i * 53 + 17) % w,
+      sy = (i * 19 + 9) % 58;
+    g.fillRect(sx, sy, i % 3 === 0 ? 2 : 1.3, i % 3 === 0 ? 2 : 1.3);
+  }
+  // Soft moon halo + disc
+  const moonHalo = g.createRadialGradient(313, 26, 8, 313, 26, 48);
+  moonHalo.addColorStop(0, "rgba(255,232,175,0.45)");
+  moonHalo.addColorStop(1, "rgba(255,232,175,0)");
+  g.fillStyle = moonHalo;
+  g.fillRect(255, 0, 120, 80);
+  g.fillStyle = "#f2e1b8";
   g.beginPath();
   g.arc(313, 26, 11, 0, Math.PI * 2);
   g.fill();
+  // Distant Chicago skyline with Willis Tower & Hancock silhouettes
+  g.fillStyle = "#1c2434";
+  g.fillRect(88, 22, 18, 90);
+  g.fillRect(92, 10, 2, 14);
+  g.fillRect(101, 10, 2, 14);
+  g.beginPath();
+  g.moveTo(252, 110);
+  g.lineTo(258, 26);
+  g.lineTo(270, 26);
+  g.lineTo(276, 110);
+  g.closePath();
+  g.fill();
+  g.fillRect(260, 14, 1.5, 13);
+  g.fillRect(267, 14, 1.5, 13);
   for (let i = 0; i < 9; i++) {
     const x = i * 50 - 15,
-      y = 30 + ((i * 29) % 53);
-    g.fillStyle = i % 2 ? "#293442" : "#353943";
+      y = 34 + ((i * 29) % 50);
+    g.fillStyle = i % 2 ? "#212b3a" : "#2c3240";
     g.fillRect(x, y, 43, 111 - y);
-    g.fillStyle = "#b39970";
+    g.fillStyle = i % 3 === 0 ? "#ffd082" : "#b89c6f";
     g.fillRect(x + 6, y + 9, 5, 8);
     g.fillRect(x + 24, y + 9, 5, 8);
+    if (y < 64) g.fillRect(x + 15, y + 25, 5, 8);
   }
-  g.strokeStyle = "#222c36";
+  g.strokeStyle = "#18202b";
   g.lineWidth = 2;
   for (let i = 0; i < 2; i++) {
     g.beginPath();
@@ -550,8 +635,10 @@ function paintNightCard(canvas) {
     g.quadraticCurveTo(176, 73 + i * 3, w, 13 + i * 5);
     g.stroke();
   }
-  g.fillStyle = "#2c333a";
+  g.fillStyle = "#242b33";
   g.fillRect(0, 109, w, h - 109);
+  g.fillStyle = "rgba(255,212,140,0.12)";
+  g.fillRect(0, 109, w, 2);
   const won = s.mode === "won";
   const cast =
     s.stage === 8
@@ -559,6 +646,10 @@ function paintNightCard(canvas) {
         ? ["cat0yawn", "cat1", "cat2"]
         : ["skunk", "raccoon", "possum"]
       : [["skunk"], ["raccoon"], ["possum"]][s.stage - 5];
+  g.save();
+  g.shadowColor = "rgba(0,0,0,0.55)";
+  g.shadowBlur = 10;
+  g.shadowOffsetY = 4;
   cast.forEach((kind, i) => {
     const width = cast.length > 1 ? 110 : 157,
       x = cast.length > 1 ? 27 + i * 112 : 116;
@@ -567,4 +658,5 @@ function paintNightCard(canvas) {
   if (s.stage === 6 && !won) g.drawImage(wildlifeTile("loot"), 204, 72, 38, 31);
   if (s.stage === 7 && won)
     g.drawImage(wildlifeTile("coffin"), 213, 78, 60, 48);
+  g.restore();
 }

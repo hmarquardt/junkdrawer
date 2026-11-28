@@ -363,6 +363,18 @@ function updateMission() {
     idle >= 30 || s.time < s.locateUntil,
   );
   setCopy($("receipt"), s.time < s.receiptUntil ? s.receipt : "");
+  const buffEl = $("buffBar");
+  if (buffEl) {
+    const buffs = [];
+    if (s.inv > 2.2) buffs.push("🛡 " + Math.ceil(s.inv) + "s");
+    if (s.reachUntil > s.time)
+      buffs.push("🍴 +2m " + Math.ceil(s.reachUntil - s.time) + "s");
+    if (s.stage >= 5 && campaign.treats > 0)
+      buffs.push("★ " + campaign.treats + (campaign.treats === 1 ? " treat" : " treats"));
+    const txt = buffs.join(" · ");
+    buffEl.hidden = !txt;
+    setCopy(buffEl, txt);
+  }
   drawMissionMarkers(objects, next);
 }
 const markerPool = [];

@@ -108,9 +108,15 @@ function forkLunge() {
   }
 }
 function forkBurst(at, label, kind = "spark") {
-  s.fork.burst = { x: at.x, z: at.z, start: s.time, label, kind };
+  const burst = { x: at.x, z: at.z, start: s.time, label, kind };
+  if (s.fork) s.fork.burst = burst;
+  if (!s.fxBursts) s.fxBursts = [];
+  s.fxBursts.push(burst);
+  if (s.fxBursts.length > 6) s.fxBursts.shift();
   tone(kind === "arc" ? 720 : 215, 0.15);
   tone(kind === "arc" ? 1040 : 400, 0.19, 0.055);
+  if (typeof shake === "function" && kind !== "dodge")
+    shake(kind === "confetti" ? 0.65 : 0.42);
 }
 function forkContact(at, radius, reach, angle = s.andi.angle) {
   const p = s.andi,
